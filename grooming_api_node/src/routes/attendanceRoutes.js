@@ -1,0 +1,453 @@
+import { Router } from "express";
+import { rateLimit } from "express-rate-limit";
+import multer from "multer";
+import { withMongoTransaction } from "../config/db.js";
+import { runtimeConfig } from "../config/env.js";
+import { idMatch, instructorScope, ROLES } from "../middleware/auth.js";
+import { validateImageUpload } from "../imageValidation.js";
+import { normalizeInstructorImage } from "../imageProcessor.js";
+import { enqueueEvaluation } from "../services/evaluationWorker.js";
+import { enqueueNotification } from "../services/notificationWorker.js";
+import {
+  asyncRoute,
+  createDocument,
+  dateBoundsInTimeZone,
+  parsePagination,
+  serializeDocument,
+} from "../utils.js";
+import { checkoutSchema, parseCoordinates, validate } from "../validation.js";
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 1, fields: 4 },
+  fileFilter: (_req, file, callback) => {
+    const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+    if (!allowedTypes.has(file.mimetype)) {
+      return callback(new Error("Only JPEG, PNG, and WebP image uploads are allowed"));
+    }
+    return callback(null, true);
+  },
+});
+
+const checkInLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.currentUser?.email || "unauthenticated"),
+  message: { detail: "Too many check-in attempts. Please try again later." },
+});
+
+let activeCheckIns = 0;
+export function checkInConcurrencyGate(_req, res, next) {
+  if (activeCheckIns >= 2) {
+    res.set("Retry-After", "5");
+    return res.status(503).json({
+      detail: "Image processing is busy. Please retry in a few seconds.",
+    });
+  }
+  activeCheckIns += 1;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    activeCheckIns = Math.max(0, activeCheckIns - 1);
+    res.off("finish", release);
+    res.off("close", release);
+  };
+  res.once("finish", release);
+  res.once("close", release);
+  return next();
+}
+
+const OUTBOX_DEADLINE_MS = 24 * 60 * 60 * 1000;
+const INSTRUCTOR_ATTENDANCE_GUARD = "_private_attendance_guard_version";
+const INTERNAL_ATTENDANCE_FIELDS = new Set([
+  "_private_evaluation_outbox",
+  "_private_checkin_outbox",
+  "_private_checkout_outbox",
+]);
+
+export const attendanceRouter = Router();
+
+function activeInstructorFilter(currentUser, instructorId) {
+  return {
+    $and: [
+      { _id: idMatch(instructorId) },
+      instructorScope(currentUser),
+      { $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] },
+    ],
+  };
+}
+
+function attendanceScope(currentUser) {
+  return currentUser.role === ROLES.SUPER_ADMIN
+    ? {}
+    : { college_id: idMatch(String(currentUser.collegeId)) };
+}
+
+function isValidEmail(value) {
+  return typeof value === "string"
+    && value.length <= 254
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function lookupIdVariants(ids) {
+  const variants = [];
+  const seen = new Set();
+  for (const id of ids) {
+    for (const variant of idMatch(String(id)).$in) {
+      const key = `${variant?._bsontype || typeof variant}:${String(variant)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        variants.push(variant);
+      }
+    }
+  }
+  return variants;
+}
+
+/**
+ * Revalidates and commits check-in after image processing. Updating the same
+ * instructor document that profile mutations update gives MongoDB transactions
+ * a shared write-conflict boundary: either the profile change wins and this
+ * transaction retries with the new profile, or check-in wins and the profile
+ * mutation retries and observes the open attendance.
+ */
+export async function commitGuardedCheckIn(
+  db,
+  { currentUser, instructorId, coordinates, normalizedImage },
+  runTransaction = withMongoTransaction
+) {
+  return runTransaction(async (session) => {
+    const instructor = await db.collection("instructors").findOne(
+      activeInstructorFilter(currentUser, instructorId),
+      { session }
+    );
+    if (!instructor) return { outcome: "instructor_not_found" };
+    if (!isValidEmail(instructor.email)) return { outcome: "invalid_email" };
+
+    const activeAttendance = await db.collection("attendance").findOne(
+      {
+        instructor_id: idMatch(String(instructor._id)),
+        check_out_time: null,
+      },
+      { session }
+    );
+    if (activeAttendance) return { outcome: "already_active" };
+
+    const guard = await db.collection("instructors").updateOne(
+      activeInstructorFilter(currentUser, instructorId),
+      { $inc: { [INSTRUCTOR_ATTENDANCE_GUARD]: 1 } },
+      { session }
+    );
+    if (!guard.matchedCount) return { outcome: "instructor_not_found" };
+
+    const now = new Date();
+    const evaluationDeadline = new Date(now.getTime() + OUTBOX_DEADLINE_MS);
+    const evaluationPayload = {
+      instructor: {
+        id: String(instructor._id),
+        name: instructor.name,
+        email: instructor.email,
+        gender: instructor.gender,
+        collegeId: String(instructor.college_id),
+      },
+      image: normalizedImage.buffer,
+      mime_type: normalizedImage.mimeType,
+      check_in_time: now,
+      deadline_at: evaluationDeadline,
+      created_at: now,
+    };
+    const attendance = createDocument({
+      instructor_id: String(instructor._id),
+      instructor_name: instructor.name,
+      instructor_role: instructor.role,
+      college_id: String(instructor.college_id),
+      boa_id: currentUser.referenceId ? String(currentUser.referenceId) : "super-admin",
+      date: now,
+      check_in_time: now,
+      check_out_time: null,
+      location_coordinates: coordinates,
+      status: "pending",
+      compliance_status: null,
+      remarks: "AI analysis is in progress.",
+      evaluation_queue_status: "outbox_pending",
+      checkin_email_status: "waiting_for_analysis",
+      checkout_email_status: "not_requested",
+      _private_evaluation_outbox: evaluationPayload,
+      created_at: now,
+      updated_at: now,
+    });
+    await db.collection("attendance").insertOne(attendance, { session });
+    return { outcome: "created", attendance, evaluationPayload };
+  });
+}
+
+export function serializeAttendance(attendance) {
+  const publicAttendance = Object.fromEntries(
+    Object.entries(attendance).filter(([key]) => (
+      !key.startsWith("_private_") && !INTERNAL_ATTENDANCE_FIELDS.has(key)
+    ))
+  );
+  return serializeDocument(publicAttendance);
+}
+
+attendanceRouter.post(
+  "/check-in",
+  checkInLimiter,
+  checkInConcurrencyGate,
+  upload.single("file"),
+  asyncRoute(async (req, res) => {
+    const validation = validateImageUpload(req.file);
+    if (!validation.valid) return res.status(400).json({ detail: validation.detail });
+
+    const instructorId = String(req.body.instructor_id || "").trim();
+    if (!instructorId || instructorId.length > 100) {
+      return res.status(422).json({ detail: "A valid instructor_id is required" });
+    }
+    const coordinates = parseCoordinates(req.body.location_coordinates);
+    if (req.body.location_coordinates && !coordinates) {
+      return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
+    }
+
+    const db = req.app.locals.db;
+    const instructor = await db.collection("instructors").findOne(
+      activeInstructorFilter(req.currentUser, instructorId)
+    );
+    if (!instructor) return res.status(404).json({ detail: "Instructor not found" });
+    if (!isValidEmail(instructor.email)) {
+      return res.status(422).json({
+        detail: "This instructor needs a valid email address before check-in reports can be sent.",
+      });
+    }
+
+    if (await db.collection("attendance").findOne({
+      instructor_id: idMatch(String(instructor._id)),
+      check_out_time: null,
+    })) {
+      return res.status(409).json({ detail: "This instructor already has an active check-in" });
+    }
+
+    let normalizedImage;
+    try {
+      normalizedImage = await normalizeInstructorImage(req.file.buffer);
+    } catch {
+      return res.status(400).json({
+        detail: "Image could not be decoded; upload a clear JPEG, PNG, or WebP",
+      });
+    }
+
+    let committed;
+    try {
+      committed = await commitGuardedCheckIn(db, {
+        currentUser: req.currentUser,
+        instructorId,
+        coordinates,
+        normalizedImage,
+      });
+    } catch (error) {
+      if (error.code === 11000) {
+        return res.status(409).json({ detail: "This instructor already has an active check-in" });
+      }
+      throw error;
+    }
+    if (committed.outcome === "instructor_not_found") {
+      return res.status(404).json({ detail: "Instructor not found" });
+    }
+    if (committed.outcome === "invalid_email") {
+      return res.status(422).json({
+        detail: "This instructor needs a valid email address before check-in reports can be sent.",
+      });
+    }
+    if (committed.outcome === "already_active") {
+      return res.status(409).json({ detail: "This instructor already has an active check-in" });
+    }
+    const { attendance, evaluationPayload } = committed;
+    try {
+      await enqueueEvaluation(db, {
+        attendanceId: attendance._id,
+        instructor: evaluationPayload.instructor,
+        imageBuffer: evaluationPayload.image,
+        mimeType: evaluationPayload.mime_type,
+        checkInTime: evaluationPayload.check_in_time,
+        deadlineAt: evaluationPayload.deadline_at,
+      });
+    } catch (error) {
+      console.error(`Evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
+    }
+
+    return res.status(202).json({
+      message: "Check-in successful. AI analysis is queued.",
+      attendance_id: attendance._id,
+    });
+  })
+);
+
+attendanceRouter.post(
+  "/check-out",
+  validate(checkoutSchema),
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const checkOutTime = new Date();
+    const scope = attendanceScope(req.currentUser);
+    const candidate = await db.collection("attendance").findOne(
+      {
+        instructor_id: idMatch(req.validatedBody.instructor_id),
+        check_out_time: null,
+        ...scope,
+      },
+      { sort: { check_in_time: -1 } }
+    );
+    if (!candidate) {
+      return res.status(400).json({ detail: "No active check-in found to check out" });
+    }
+
+    const instructor = await db.collection("instructors").findOne({
+      _id: idMatch(String(candidate.instructor_id)),
+    });
+    const recipient = isValidEmail(instructor?.email) ? instructor.email : null;
+    const notificationDeadline = new Date(checkOutTime.getTime() + OUTBOX_DEADLINE_MS);
+    const checkoutPayload = {
+      to_email: recipient,
+      report: {
+        instructorName: candidate.instructor_name || instructor?.name || "Instructor",
+        checkInTime: candidate.check_in_time,
+        checkOutTime,
+        status: candidate.status,
+        remarks: candidate.remarks,
+      },
+      deadline_at: notificationDeadline,
+      created_at: checkOutTime,
+    };
+    const checkoutSet = {
+      check_out_time: checkOutTime,
+      updated_at: checkOutTime,
+      checkout_email_status: recipient ? "outbox_pending" : "skipped_no_email",
+      ...(recipient ? { _private_checkout_outbox: checkoutPayload } : {}),
+    };
+    const result = await db.collection("attendance").findOneAndUpdate(
+      {
+        _id: candidate._id,
+        check_out_time: null,
+        ...scope,
+      },
+      {
+        $set: checkoutSet,
+        ...(!recipient ? { $unset: { _private_checkout_outbox: "" } } : {}),
+      },
+      { returnDocument: "after" }
+    );
+    const attendance = result?.value || result;
+    if (!attendance) {
+      return res.status(409).json({ detail: "This attendance was already checked out" });
+    }
+
+    try {
+      await enqueueNotification(db, {
+        attendanceId: attendance._id,
+        type: "checkout",
+        toEmail: checkoutPayload.to_email,
+        report: checkoutPayload.report,
+        deadlineAt: checkoutPayload.deadline_at,
+      });
+    } catch (error) {
+      console.error(`Checkout outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
+    }
+    return res.json({
+      message: recipient
+        ? "Check-out successful. Email confirmation is queued."
+        : "Check-out successful, but no email was sent because the instructor email is missing or invalid.",
+    });
+  })
+);
+
+attendanceRouter.get(
+  "/today",
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    let bounds;
+    let pagination;
+    try {
+      bounds = dateBoundsInTimeZone(
+        req.query.date,
+        runtimeConfig().appTimeZone
+      );
+      pagination = parsePagination(req.query, {
+        defaultLimit: 200,
+        maxLimit: 1000,
+      });
+    } catch (error) {
+      if (error instanceof RangeError) {
+        return res.status(422).json({ detail: error.message });
+      }
+      throw error;
+    }
+    const { start, end } = bounds;
+    const attendances = await db.collection("attendance")
+      .find({ date: { $gte: start, $lt: end }, ...attendanceScope(req.currentUser) })
+      .project({
+        _private_evaluation_outbox: 0,
+        _private_checkin_outbox: 0,
+        _private_checkout_outbox: 0,
+      })
+      .sort({ check_in_time: -1, _id: -1 })
+      .skip(pagination.offset)
+      .limit(pagination.limit)
+      .toArray();
+
+    const missingSnapshots = attendances.filter((row) => !row.instructor_name);
+    const missingIds = [...new Set(missingSnapshots.map((row) => String(row.instructor_id)))];
+    const legacyInstructors = missingIds.length
+      ? await db.collection("instructors").find({
+          _id: { $in: lookupIdVariants(missingIds) },
+        }).toArray()
+      : [];
+    const instructorMap = new Map(legacyInstructors.map((row) => [String(row._id), row]));
+    const collegeIds = [...new Set(attendances
+      .map((attendance) => (
+        attendance.college_id
+        || instructorMap.get(String(attendance.instructor_id))?.college_id
+      ))
+      .filter(Boolean)
+      .map(String))];
+    const colleges = collegeIds.length
+      ? await db.collection("colleges").find({
+          _id: { $in: lookupIdVariants(collegeIds) },
+        }).toArray()
+      : [];
+    const collegeMap = new Map(colleges.map((row) => [String(row._id), row.name]));
+    return res.json(attendances.map((attendance) => {
+      const instructor = instructorMap.get(String(attendance.instructor_id));
+      const collegeId = attendance.college_id || instructor?.college_id || null;
+      return {
+        ...serializeAttendance(attendance),
+        instructor_name: attendance.instructor_name || instructor?.name || "Unknown",
+        instructor_role: attendance.instructor_role || instructor?.role || "Unknown",
+        college_name: collegeId
+          ? (collegeMap.get(String(collegeId)) || "Unknown College")
+          : "No College",
+      };
+    }));
+  })
+);
+
+attendanceRouter.get(
+  "/:attendanceId/evaluation",
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const attendance = await db.collection("attendance").findOne({
+      _id: idMatch(req.params.attendanceId),
+      ...attendanceScope(req.currentUser),
+    });
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+
+    const evaluation = await db.collection("evaluations").findOne({
+      attendance_id: String(attendance._id),
+    });
+    if (!evaluation) {
+      return res.status(404).json({ detail: "Evaluation is still pending or unavailable" });
+    }
+    return res.json(serializeDocument(evaluation));
+  })
+);

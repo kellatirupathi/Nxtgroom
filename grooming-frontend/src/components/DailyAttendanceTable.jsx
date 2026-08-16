@@ -1,0 +1,241 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, CircleAlert } from 'lucide-react';
+import { apiFetchAllPages } from '../api';
+import {
+  attendancePath,
+  filterAttendanceRecords,
+  localDateValue,
+  uniqueRecordValues,
+} from '../attendanceFilters';
+import { formatCoordinates, hasEvaluation, normalizeAttendanceStatus } from '../status';
+
+function StatusBadge({ status }) {
+  switch (normalizeAttendanceStatus(status)) {
+    case 'compliant':
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-200"><CheckCircle2 size={12} aria-hidden="true" /> Compliant</span>;
+    case 'non_compliant':
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-600 border border-rose-200"><XCircle size={12} aria-hidden="true" /> Non-compliant</span>;
+    case 'review_required':
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200"><CircleAlert size={12} aria-hidden="true" /> Review required</span>;
+    case 'error':
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200"><TriangleAlert size={12} aria-hidden="true" /> Analysis error</span>;
+    default:
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-600 border border-amber-200"><Clock size={12} aria-hidden="true" /> Pending AI</span>;
+  }
+}
+
+function formatTime(isoString) {
+  if (!isoString) return '--';
+  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDate(isoString) {
+  if (!isoString) return '--';
+  return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export default function DailyAttendanceTable({ onRowClick }) {
+  const today = useMemo(() => localDateValue(), []);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [dateFilter, setDateFilter] = useState(today);
+  const [roleFilter, setRoleFilter] = useState('');
+  const [collegeFilter, setCollegeFilter] = useState('');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    let disposed = false;
+    let timer = null;
+    let activeController = null;
+    const endpoint = attendancePath(dateFilter);
+    setRecords([]);
+    setLoading(true);
+
+    // Poll quickly while AI evaluations are still running so finished results
+    // surface within seconds, then fall back to a slow idle cadence.
+    const schedule = (hasPendingWork) => {
+      clearTimeout(timer);
+      if (!disposed && document.visibilityState === 'visible') {
+        timer = setTimeout(() => run(false), hasPendingWork ? 3_000 : 30_000);
+      }
+    };
+
+    const run = async (showLoading) => {
+      if (disposed || activeController) return;
+      if (document.visibilityState !== 'visible') {
+        if (showLoading) setLoading(false);
+        return;
+      }
+      const controller = new AbortController();
+      activeController = controller;
+      if (showLoading) setLoading(true);
+      let pendingWork = false;
+      try {
+        const data = await apiFetchAllPages(endpoint, {
+          pageSize: 1_000,
+          signal: controller.signal,
+        });
+        const rows = Array.isArray(data) ? data : [];
+        pendingWork = rows.some(
+          (row) => normalizeAttendanceStatus(row.status) === 'pending'
+        );
+        if (!disposed) {
+          setRecords(rows);
+          setError('');
+        }
+      } catch (requestError) {
+        if (!disposed && !controller.signal.aborted && requestError.status !== 401) {
+          setError(requestError.message);
+        }
+      } finally {
+        if (!disposed && showLoading) setLoading(false);
+        activeController = null;
+        schedule(pendingWork);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      clearTimeout(timer);
+      if (document.visibilityState === 'hidden') {
+        activeController?.abort();
+      } else if (!activeController) {
+        run(true);
+      }
+    };
+
+    run(true);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      activeController?.abort();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [dateFilter]);
+
+  const roles = useMemo(
+    () => uniqueRecordValues(records, 'instructor_role', roleFilter),
+    [records, roleFilter],
+  );
+  const colleges = useMemo(
+    () => uniqueRecordValues(records, 'college_name', collegeFilter),
+    [records, collegeFilter],
+  );
+  const filteredRecords = useMemo(
+    () => filterAttendanceRecords(records, {
+      search,
+      role: roleFilter,
+      college: collegeFilter,
+    }),
+    [records, search, roleFilter, collegeFilter],
+  );
+
+  const openRecord = (record) => {
+    if (hasEvaluation(record.status)) onRowClick(record);
+  };
+
+  const handleDateChange = (event) => {
+    setRecords([]);
+    setLoading(true);
+    setDateFilter(event.target.value);
+  };
+
+  return (
+    <section className="w-full flex flex-col h-full" aria-labelledby="daily-records-title" aria-busy={loading}>
+      <div className="mb-5">
+        <h2 id="daily-records-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
+          <History size={24} className="text-indigo-600" aria-hidden="true" />
+          Daily Attendance Records
+        </h2>
+        <p className="text-sm text-slate-500 mt-1">Check-ins, check-outs, and grooming audits for the selected date.</p>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[170px_180px_190px_minmax(240px,1fr)] gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Date
+          <input type="date" value={dateFilter} max={today} onChange={handleDateChange} className="mt-1.5 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+        </label>
+        <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          College
+          <select value={collegeFilter} onChange={(event) => setCollegeFilter(event.target.value)} className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            <option value="">All colleges</option>
+            {colleges.map((college) => <option key={college} value={college}>{college}</option>)}
+          </select>
+        </label>
+        <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Instructor role
+          <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+            <option value="">All roles</option>
+            {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+          </select>
+        </label>
+        <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
+          Search
+          <span className="relative mt-1.5 block">
+            <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+            <input type="search" maxLength="120" placeholder="Name, college, coordinates, or remarks…" value={search} onChange={(event) => setSearch(event.target.value)} className="block w-full rounded-xl border border-slate-200 py-2 pl-10 pr-3 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+          </span>
+        </label>
+      </div>
+
+      {error && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+        <div className="overflow-x-auto flex-1">
+          <table className="w-full text-left border-collapse min-w-[1080px]">
+            <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
+              <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                <th className="p-4">Instructor Name</th><th className="p-4">Role</th><th className="p-4">College</th><th className="p-4">Date</th>
+                <th className="p-4">Check-In</th><th className="p-4">Check-Out</th><th className="p-4">Coordinates</th>
+                <th className="p-4">Status</th><th className="p-4 w-1/4">Remark</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {loading && records.length === 0 ? (
+                <tr><td colSpan="9" className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+              ) : records.length === 0 ? (
+                <tr><td colSpan="9" className="p-8 text-center text-slate-400">No attendance records found for this date.</td></tr>
+              ) : filteredRecords.length === 0 ? (
+                <tr><td colSpan="9" className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+              ) : filteredRecords.map((record) => {
+                const canOpen = hasEvaluation(record.status);
+                return (
+                  <tr
+                    key={record._id}
+                    onClick={() => openRecord(record)}
+                    onKeyDown={(event) => {
+                      if (canOpen && (event.key === 'Enter' || event.key === ' ')) {
+                        event.preventDefault();
+                        openRecord(record);
+                      }
+                    }}
+                    tabIndex={canOpen ? 0 : undefined}
+                    aria-label={canOpen ? `Open evaluation for ${record.instructor_name}` : undefined}
+                    className={`transition-colors ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
+                  >
+                    <td className="p-4 font-bold text-slate-800">{record.instructor_name}</td>
+                    <td className="p-4 text-sm font-medium text-slate-500">{record.instructor_role}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600">{record.college_name || 'Unknown'}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600">{formatDate(record.date)}</td>
+                    <td className="p-4 text-sm font-bold text-slate-700">{formatTime(record.check_in_time)}</td>
+                    <td className="p-4 text-sm font-bold text-slate-700">{formatTime(record.check_out_time)}</td>
+                    <td className="p-4 text-sm text-slate-500">
+                      {record.location_coordinates ? (
+                        <span className="flex items-center gap-1.5 text-indigo-600 font-medium whitespace-nowrap" title="Latitude, longitude">
+                          <MapPin size={14} aria-hidden="true" /> {formatCoordinates(record.location_coordinates)}
+                        </span>
+                      ) : '--'}
+                    </td>
+                    <td className="p-4"><StatusBadge status={record.status} /></td>
+                    <td className="p-4 text-sm text-slate-500 max-w-xs truncate" title={record.remarks || ''}>{record.remarks}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}

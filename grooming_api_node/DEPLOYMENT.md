@@ -1,0 +1,338 @@
+# Production deployment: Northflank + Vercel
+
+This guide deploys the Express API as a Northflank container and the Vite
+frontend as a Vercel project. It assumes the repository has been committed and
+pushed to a Git provider visible to both platforms.
+
+## 1. Rotate credentials before deploying
+
+Treat any credential previously pasted into chat, source code, screenshots,
+issue trackers, or build logs as compromised. Before the first production
+deployment, revoke and replace the MongoDB password, OpenAI API key, AWS access
+key, JWT secret, and administrator password. Do not reuse development values.
+
+Store runtime secrets in Northflank's secret manager. Do not put them in Git,
+the Dockerfile, build arguments, Vercel frontend variables, or container image
+layers. Only `VITE_API_BASE` belongs in Vercel; Vite variables are embedded in
+the browser bundle and are public.
+
+Generate a JWT secret locally if needed:
+
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+```
+
+### Release blocker: purge committed check-in photos
+
+Uploaded check-in photos are present in the public Git history under
+`grooming_api_v2/temp_uploads/`; `grooming_api_v2/fake_photo.jpg` must be
+purged with them. A normal deletion commit removes these files only from the
+latest checkout, not from earlier commits. Do not deploy until the repository
+has been made private, pushes have been paused, and this history cleanup has
+been completed.
+
+Do not rewrite the current working copy: it contains uncommitted release work
+and its local `main` is behind the remote. Preserve that work separately, then
+perform the purge in a fresh mirror. The backup bundle below also contains the
+photos, so keep it encrypted and access-restricted and destroy it after the
+incident is closed.
+
+```powershell
+git clone --mirror https://github.com/kunal031/Nxtgroom.git Nxtgroom-rewrite.git
+Set-Location Nxtgroom-rewrite.git
+$oldMain = git rev-parse refs/heads/main
+git bundle create ../Nxtgroom-pre-rewrite.bundle --all
+git bundle verify ../Nxtgroom-pre-rewrite.bundle
+
+# Requires git-filter-repo 2.47 or newer.
+git filter-repo --sensitive-data-removal --invert-paths `
+  --path grooming_api_v2/temp_uploads/ `
+  --path grooming_api_v2/fake_photo.jpg
+
+# Both commands must produce no matching paths.
+git log --all --name-status -- grooming_api_v2/temp_uploads/ grooming_api_v2/fake_photo.jpg
+git rev-list --objects --all | Select-String 'grooming_api_v2/(temp_uploads/|fake_photo\.jpg)'
+
+# git-filter-repo removes origin as a safety measure.
+git remote add origin https://github.com/kunal031/Nxtgroom.git
+git push --force-with-lease="refs/heads/main:$oldMain" origin refs/heads/main:refs/heads/main
+```
+
+The explicit lease prevents silently overwriting a concurrent update. At the
+time of this audit the remote had only `main`; if branches or tags are added,
+stop and clean every affected ref instead of pushing only `main`. Temporarily
+disable branch protection only if it blocks the reviewed force-push, then
+restore it immediately. All collaborators must discard/reclone or carefully
+rebase their old clones; merging an old branch can restore the purged blobs.
+
+After the push, contact GitHub Support with the `git-filter-repo` first-changed
+commit report so cached views can be removed. Delete earlier Vercel deployments
+created from affected commits and rebuild without the old cache. On Northflank,
+leave **Include Git folder** and **Full Git clone** disabled, delete any build
+created from an affected commit, and rebuild only from the cleaned commit.
+
+## 2. Prepare external services
+
+### MongoDB Atlas
+
+1. Create a dedicated production database user with `readWrite` access only to
+   the `grooming_standards` database.
+2. Use a TLS `mongodb+srv://` connection string with retryable writes enabled.
+3. Add Northflank's static egress IP address to Atlas as a single `/32` network
+   entry. Do not leave `0.0.0.0/0` enabled.
+4. Run the database preflight before starting a production revision. Its
+   default mode is read-only and reports document IDs without printing email
+   addresses:
+
+```powershell
+cd grooming_api_node
+npm run db:preflight
+```
+
+The audit blocks on non-canonical, duplicate, or case-colliding user emails;
+invalid or duplicate BOA/instructor employee IDs; duplicate case-insensitive
+college name/location keys; active BOAs or instructors assigned to a missing or
+archived college; missing or invalid active-instructor emails; invalid or
+duplicate active attendances; duplicate or invalid evaluation attendance IDs;
+and conflicting index definitions. Resolve those records manually using the
+listed document IDs. In particular, preserve attendance history: choose the
+authoritative active record and give the other records an accurate
+`check_out_time`; do not delete them blindly.
+
+After the read-only report says `safe_to_apply_indexes`, run the index step in a
+one-off Northflank job or a trusted administrative environment using the same
+database settings:
+
+```powershell
+$env:DATABASE_PREFLIGHT_APPLY="CREATE_INDEXES"
+npm run db:preflight:apply
+Remove-Item Env:DATABASE_PREFLIGHT_APPLY
+npm run db:preflight
+```
+
+The apply command is deliberately narrow and idempotent: it creates only
+missing indexes. It never edits, merges, closes, or deletes application
+documents, and it refuses to replace a conflicting index. Index construction
+can consume database CPU, memory, I/O, and storage, so schedule the one-off job
+for an appropriate maintenance window and monitor Atlas while it runs.
+
+Production API startup is verify-only. It repeats the read-only data audit and
+index verification, then fails closed with an actionable preflight error if
+data blockers, missing indexes, or conflicting indexes remain. Development
+startup may create missing indexes automatically after the same audit passes.
+
+### Amazon SES
+
+1. Verify `SES_FROM_EMAIL` or its domain in the same AWS region configured in
+   `AWS_REGION`.
+2. If the SES account is still in the sandbox, either verify every recipient or
+   request production access before launch.
+3. Create a dedicated IAM principal and grant only the SES send permission it
+   needs. Create a new access key specifically for this service and rotate it
+   regularly.
+4. Optionally attach an SES configuration set for delivery, bounce, and
+   complaint telemetry.
+
+The API queues check-in mail after AI analysis completes and queues checkout
+mail after checkout is recorded. Sending is retried from MongoDB, so the
+Northflank service must keep at least one replica running.
+
+SES `SendEmail` does not provide an idempotency key. The worker is durable and
+records an explicit `delivery_unknown` state after an ambiguous final attempt,
+but a container crash immediately after SES accepts a message can still cause a
+rare duplicate on retry. Treat these notifications as at-least-once delivery;
+the administrative attendance record remains the source of truth.
+
+### OpenAI
+
+Create a project-scoped API key with an appropriate spend limit. The default
+model is the pinned `gpt-4o-2024-11-20` snapshot so behavior does not silently
+change between deployments. Validate the model is enabled for the OpenAI
+project before launch.
+
+## 3. Deploy the API on Northflank
+
+Create a combined service from the Git repository with these settings:
+
+| Setting | Value |
+| --- | --- |
+| Region | Asia South Delhi (`asia-south-delhi`) |
+| Build type | Dockerfile |
+| Build context | `grooming_api_node` |
+| Dockerfile path | `grooming_api_node/Dockerfile` |
+| Public port | HTTP `8000` |
+| Minimum replicas | `1` (do not scale to zero) |
+| Memory | At least `1 GiB` |
+| Start command | Leave empty; use the image `CMD` |
+
+For repositories where Northflank interprets the Dockerfile path relative to
+the selected build context, enter `Dockerfile` instead. Keep the context set to
+`grooming_api_node`.
+
+Configure health checks after the first deployment:
+
+| Check | Path | Suggested settings |
+| --- | --- | --- |
+| Liveness | `/health/live` | 30-second interval, 5-second timeout, 3 failures |
+| Readiness | `/health/ready` | 15-second interval, 5-second timeout, 3 failures |
+
+Use a startup grace period of at least 30 seconds. Publish port 8000 and copy
+the resulting HTTPS service URL; Northflank commonly provides a `code.run`
+hostname. Do not append `/api/v2` to the origin used by the frontend.
+
+Readiness covers MongoDB connectivity, both durable-worker progress markers,
+and the age of evaluation/email queues and private attendance outboxes. A queue
+at least 15 minutes old is reported as a warning; readiness fails at 23 hours,
+before the 24-hour terminal privacy deadline. Alert on warnings rather than
+waiting for Northflank to remove a replica from traffic. Run at least one
+replica continuously so another healthy replica or an operator can drain old
+work if one replica becomes unready.
+
+### Northflank environment contract
+
+Set these in a runtime secret group and link it to the service. Set every row
+marked required. Once `NODE_ENV=production`, the API also validates the
+security-sensitive required values at startup and exits instead of starting
+with an insecure fallback.
+
+| Variable | Requirement | Production value or purpose |
+| --- | --- | --- |
+| `NODE_ENV` | Required | `production` |
+| `PORT` | Optional | `8000` (container default) |
+| `MONGODB_URI` | Required, secret | Rotated Atlas connection URI |
+| `DB_NAME` | Required | `grooming_standards` |
+| `DATABASE_PREFLIGHT_APPLY` | One-off only | Leave unset on the API service. Set to `CREATE_INDEXES` only for the confirmed migration job, then remove it. |
+| `SECRET_KEY` | Required, secret | Unique random value, at least 32 characters |
+| `JWT_EXPIRE_MINUTES` | Required | `480`; permitted range is 5–10080 |
+| `JWT_ISSUER` | Required | `facultytrack-api` |
+| `JWT_AUDIENCE` | Required | `facultytrack-web` |
+| `ADMIN_EMAIL` | Required | Production superadmin email |
+| `ADMIN_PASSWORD` | Required, secret | Unique password of at least 12 characters |
+| `ADMIN_PASSWORD_VERSION` | Required | Start at `1`; change whenever the password rotates |
+| `CORS_ORIGINS` | Required | Exact comma-separated HTTPS Vercel origins, no `*` |
+| `OPENAI_API_KEY` | Required, secret | Rotated project-scoped API key |
+| `OPENAI_MODEL` | Required | `gpt-4o-2024-11-20` |
+| `OPENAI_TIMEOUT_MS` | Required | `120000`; permitted range is 10000–600000 |
+| `OPENAI_MAX_RETRIES` | Required | `2`; permitted range is 0–2 |
+| `EVALUATION_POLL_MS` | Required | `2000`; permitted range is 250–60000 |
+| `EVALUATION_LEASE_MS` | Required | `600000`; range 60000–3600000 and must cover all OpenAI attempts plus 60000 |
+| `EVALUATION_MAX_ATTEMPTS` | Required | `3`; permitted range is 1–10 |
+| `AWS_REGION` | Required | SES region, for example `ap-south-1` |
+| `AWS_ACCESS_KEY_ID` | Required, secret | Rotated dedicated IAM access key |
+| `AWS_SECRET_ACCESS_KEY` | Required, secret | Matching IAM secret key |
+| `AWS_SESSION_TOKEN` | Conditional, secret | Required only when using temporary AWS credentials |
+| `SES_FROM_EMAIL` | Required | Verified sender address |
+| `SES_CONFIGURATION_SET` | Optional | SES configuration set name |
+| `SES_TIMEOUT_MS` | Required | `30000`; aborts a hung SES request |
+| `SES_MAX_ATTEMPTS` | Required | `2`; SDK attempts per delivery try |
+| `NOTIFICATION_LEASE_MS` | Required | `300000`; must exceed the SES timeout by at least 60000 |
+| `NOTIFICATION_MAX_ATTEMPTS` | Required | `5`; durable worker delivery attempts |
+| `APP_TIME_ZONE` | Required | IANA zone for email timestamps, such as `Asia/Kolkata` |
+| `TIMEZONE_OFFSET_MINUTES` | Required | Attendance-day offset; use `330` for IST |
+
+Example non-secret values (replace both origins with real domains):
+
+```dotenv
+NODE_ENV=production
+PORT=8000
+DB_NAME=grooming_standards
+# DATABASE_PREFLIGHT_APPLY is intentionally unset on the API service.
+JWT_EXPIRE_MINUTES=480
+JWT_ISSUER=facultytrack-api
+JWT_AUDIENCE=facultytrack-web
+ADMIN_PASSWORD_VERSION=1
+CORS_ORIGINS=https://facultytrack.example.com,https://facultytrack.vercel.app
+OPENAI_MODEL=gpt-4o-2024-11-20
+OPENAI_TIMEOUT_MS=120000
+OPENAI_MAX_RETRIES=2
+EVALUATION_POLL_MS=2000
+EVALUATION_LEASE_MS=600000
+EVALUATION_MAX_ATTEMPTS=3
+AWS_REGION=ap-south-1
+SES_TIMEOUT_MS=30000
+SES_MAX_ATTEMPTS=2
+NOTIFICATION_LEASE_MS=300000
+NOTIFICATION_MAX_ATTEMPTS=5
+APP_TIME_ZONE=Asia/Kolkata
+TIMEZONE_OFFSET_MINUTES=330
+```
+
+Do not copy placeholders or secrets from `.env.example` into source control.
+
+## 4. Deploy the frontend on Vercel
+
+Import the same repository as a separate Vercel project:
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | `grooming-frontend` |
+| Framework Preset | Vite |
+| Node.js version | 24.x |
+| Install command | `npm ci` |
+| Build command | `npm run build` |
+| Output directory | `dist` |
+
+Create one Vercel environment variable:
+
+```dotenv
+VITE_API_BASE=https://YOUR_NORTHFLANK_API_HOST
+```
+
+Use the HTTPS origin only, with no trailing slash and no `/api/v2` suffix.
+Apply it to Production. If Preview deployments must call the production API,
+add each exact preview/custom-domain origin to `CORS_ORIGINS`; dynamic wildcard
+origins are intentionally rejected. A stable preview domain or a separate
+staging API is safer than broad production CORS.
+
+Deploy the frontend, note its final production domain, update the Northflank
+`CORS_ORIGINS` value to that exact origin, and redeploy/restart the API. If the
+Vercel domain later changes, repeat this step.
+
+## 5. Release verification
+
+Run these checks without sending a real instructor email or OpenAI request:
+
+```powershell
+cd grooming_api_node
+npm ci
+npm run db:preflight
+npm run check
+npm audit --omit=dev
+
+cd ..\grooming-frontend
+npm ci
+npm run lint
+npm test
+$env:VITE_API_BASE="https://YOUR_NORTHFLANK_API_HOST"
+npm run build
+Remove-Item Env:VITE_API_BASE
+npm audit
+```
+
+Then verify the deployed services:
+
+1. `/health/live` and `/health/ready` both return HTTP 200.
+2. An unauthenticated `/api/v2` protected request is rejected.
+3. The production frontend can log in and the browser has no CORS or mixed
+   content errors.
+4. A test instructor with a verified/allowed SES address can check in, receive
+   the completed AI report, check out, and receive the checkout report.
+5. A BOA cannot read or modify instructors belonging to another college.
+6. MongoDB contains one evaluation and the expected email delivery status for
+   the test attendance record.
+7. `/health/ready` reports both workers as `ok`, no critical queue ages, and no
+   `QUEUE_METRICS_UNAVAILABLE` reason.
+8. Northflank logs contain request/job identifiers but no credentials or photo
+   data.
+
+After verification, remove test data according to the organization's retention
+policy and monitor SES bounces/complaints, OpenAI errors and spend, MongoDB
+capacity, HTTP error rate, and worker queue age.
+
+## 6. Rollback
+
+Keep the previous Northflank image revision and Vercel deployment available.
+If a release fails, roll back both services as a pair when their API contract
+changed. Do not roll back database data blindly. The confirmed preflight job
+creates indexes but does not include destructive down-migrations; inspect the
+database before any manual schema cleanup.

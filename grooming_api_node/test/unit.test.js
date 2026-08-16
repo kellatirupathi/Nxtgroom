@@ -1,0 +1,207 @@
+import assert from "node:assert/strict";
+import { afterEach, test } from "node:test";
+import jwt from "jsonwebtoken";
+import sharp from "sharp";
+import { runtimeConfig, validateEnvironment } from "../src/config/env.js";
+import { createAccessToken } from "../src/middleware/auth.js";
+import { detectImageMimeType, validateImageUpload } from "../src/imageValidation.js";
+import { normalizeInstructorImage } from "../src/imageProcessor.js";
+import { SYSTEM_PROMPT } from "../src/prompts.js";
+import { buildCheckoutEmail, buildEvaluationEmail } from "../src/services/emailService.js";
+import { dateBoundsInTimeZone, parsePagination } from "../src/utils.js";
+import { parseCoordinates } from "../src/validation.js";
+
+const originalEnvironment = { ...process.env };
+
+afterEach(() => {
+  for (const name of Object.keys(process.env)) {
+    if (!(name in originalEnvironment)) delete process.env[name];
+  }
+  Object.assign(process.env, originalEnvironment);
+});
+
+test("production configuration fails closed when secrets are missing", () => {
+  process.env.NODE_ENV = "production";
+  for (const name of [
+    "MONGODB_URI", "DB_NAME", "OPENAI_API_KEY", "OPENAI_MODEL", "SECRET_KEY",
+    "JWT_EXPIRE_MINUTES", "JWT_ISSUER", "JWT_AUDIENCE", "ADMIN_EMAIL",
+    "ADMIN_PASSWORD", "ADMIN_PASSWORD_VERSION", "CORS_ORIGINS", "AWS_REGION",
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SES_FROM_EMAIL", "APP_TIME_ZONE",
+    "TIMEZONE_OFFSET_MINUTES", "OPENAI_TIMEOUT_MS", "EVALUATION_POLL_MS",
+    "EVALUATION_LEASE_MS", "EVALUATION_MAX_ATTEMPTS", "OPENAI_MAX_RETRIES",
+    "SES_TIMEOUT_MS", "SES_MAX_ATTEMPTS", "NOTIFICATION_LEASE_MS",
+    "NOTIFICATION_MAX_ATTEMPTS",
+  ]) delete process.env[name];
+  assert.throws(() => validateEnvironment(), /Invalid production environment/);
+});
+
+test("production configuration accepts an exact secure contract", () => {
+  Object.assign(process.env, {
+    NODE_ENV: "production",
+    MONGODB_URI: "mongodb+srv://db.example.invalid/grooming_standards",
+    DB_NAME: "grooming_standards",
+    OPENAI_API_KEY: "test-only-openai-key",
+    OPENAI_MODEL: "gpt-4o-2024-11-20",
+    OPENAI_TIMEOUT_MS: "120000",
+    OPENAI_MAX_RETRIES: "2",
+    EVALUATION_POLL_MS: "2000",
+    EVALUATION_LEASE_MS: "600000",
+    EVALUATION_MAX_ATTEMPTS: "3",
+    SECRET_KEY: "x".repeat(64),
+    JWT_EXPIRE_MINUTES: "480",
+    JWT_ISSUER: "facultytrack-api",
+    JWT_AUDIENCE: "facultytrack-web",
+    ADMIN_EMAIL: "admin@example.com",
+    ADMIN_PASSWORD: "test-only-password-123",
+    ADMIN_PASSWORD_VERSION: "test-v1",
+    CORS_ORIGINS: "https://facultytrack.example.com",
+    AWS_REGION: "ap-south-1",
+    AWS_ACCESS_KEY_ID: "test-only-access-key",
+    AWS_SECRET_ACCESS_KEY: "test-only-secret-key",
+    SES_FROM_EMAIL: "reports@example.com",
+    SES_TIMEOUT_MS: "30000",
+    SES_MAX_ATTEMPTS: "2",
+    NOTIFICATION_LEASE_MS: "300000",
+    NOTIFICATION_MAX_ATTEMPTS: "5",
+    APP_TIME_ZONE: "Asia/Kolkata",
+    TIMEZONE_OFFSET_MINUTES: "330",
+  });
+  assert.equal(validateEnvironment().nodeEnv, "production");
+  process.env.EVALUATION_LEASE_MS = "300000";
+  assert.throws(() => validateEnvironment(), /EVALUATION_LEASE_MS must be at least/);
+  process.env.EVALUATION_LEASE_MS = "600000";
+  process.env.NOTIFICATION_LEASE_MS = "60000";
+  assert.throws(() => validateEnvironment(), /NOTIFICATION_LEASE_MS must be at least/);
+  process.env.NOTIFICATION_LEASE_MS = "300000";
+  process.env.PORT = "8000oops";
+  assert.throws(() => validateEnvironment(), /PORT must be a whole integer/);
+  process.env.PORT = "8000";
+  process.env.CORS_ORIGINS = ",,,";
+  assert.throws(() => validateEnvironment(), /at least one exact HTTPS origin/);
+  process.env.CORS_ORIGINS = "https://facultytrack.example.com";
+  process.env.MONGODB_URI = "mongodb://db.example.invalid:27017/grooming_standards";
+  assert.throws(() => validateEnvironment(), /must explicitly set tls=true/);
+  process.env.MONGODB_URI = "mongodb+srv://db.example.invalid/grooming_standards?tls=false";
+  assert.throws(() => validateEnvironment(), /cannot disable TLS/);
+  process.env.MONGODB_URI = "mongodb+srv://db.example.invalid/grooming_standards";
+  process.env.SECRET_KEY = "replace-with-at-least-32-random-characters";
+  assert.throws(() => validateEnvironment(), /SECRET_KEY must be a unique secret/);
+  process.env.SECRET_KEY = "x".repeat(64);
+  process.env.ADMIN_PASSWORD = "replace-with-a-unique-password-of-at-least-12-characters";
+  assert.throws(() => validateEnvironment(), /ADMIN_PASSWORD must be at least 12 characters/);
+});
+
+test("access tokens carry the configured issuer, audience, and algorithm", () => {
+  process.env.SECRET_KEY = "local-test-secret";
+  process.env.JWT_ISSUER = "test-issuer";
+  process.env.JWT_AUDIENCE = "test-audience";
+  const token = createAccessToken({
+    sub: "user@example.com",
+    role: "SUPER_ADMIN",
+    sessionVersion: 7,
+  }, 5);
+  const decoded = jwt.verify(token, runtimeConfig().jwtSecret, {
+    algorithms: ["HS256"],
+    issuer: "test-issuer",
+    audience: "test-audience",
+  });
+  assert.equal(decoded.sub, "user@example.com");
+  assert.equal(decoded.sv, 7);
+  assert.throws(
+    () => createAccessToken({ sub: "user@example.com", role: "SUPER_ADMIN", sessionVersion: -1 }),
+    /non-negative safe integer/
+  );
+});
+
+test("image validation checks file signatures instead of trusting MIME headers", () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(detectImageMimeType(jpeg), "image/jpeg");
+  assert.deepEqual(validateImageUpload({ buffer: jpeg, mimetype: "image/jpeg" }), {
+    valid: true,
+    mimeType: "image/jpeg",
+  });
+  assert.equal(validateImageUpload({ buffer: jpeg, mimetype: "image/png" }).valid, false);
+  assert.equal(validateImageUpload({ buffer: Buffer.alloc(12), mimetype: "image/jpeg" }).valid, false);
+});
+
+test("image normalization decodes content, bounds size, and strips metadata", async () => {
+  const input = await sharp({
+    create: {
+      width: 640,
+      height: 800,
+      channels: 3,
+      background: { r: 20, g: 40, b: 60 },
+    },
+  }).withMetadata({ orientation: 6 }).png().toBuffer();
+  const normalized = await normalizeInstructorImage(input);
+  const metadata = await sharp(normalized.buffer).metadata();
+  assert.equal(normalized.mimeType, "image/jpeg");
+  assert.equal(metadata.format, "jpeg");
+  assert.equal(metadata.exif, undefined);
+  assert.ok(metadata.width <= 2048 && metadata.height <= 2048);
+});
+
+test("coordinates are normalized and constrained to valid ranges", () => {
+  assert.equal(parseCoordinates(" 17.45, 78.38 "), "17.45,78.38");
+  assert.equal(parseCoordinates("91,0"), null);
+  assert.equal(parseCoordinates("not coordinates"), null);
+});
+
+test("calendar date bounds are strict and use the configured IANA time zone", () => {
+  const india = dateBoundsInTimeZone("2026-08-14", "Asia/Kolkata");
+  assert.equal(india.start.toISOString(), "2026-08-13T18:30:00.000Z");
+  assert.equal(india.end.toISOString(), "2026-08-14T18:30:00.000Z");
+
+  const dst = dateBoundsInTimeZone("2026-03-08", "America/New_York");
+  assert.equal((dst.end.getTime() - dst.start.getTime()) / 3_600_000, 23);
+  assert.throws(
+    () => dateBoundsInTimeZone("2026-02-30", "Asia/Kolkata"),
+    /real calendar date/
+  );
+  assert.throws(
+    () => dateBoundsInTimeZone(["2026-08-14", "2026-08-15"], "Asia/Kolkata"),
+    /provided only once/
+  );
+});
+
+test("pagination accepts only canonical values within configured boundaries", () => {
+  const options = { defaultLimit: 25, maxLimit: 100, maxOffset: 1_000_000 };
+  assert.deepEqual(parsePagination({}, options), { limit: 25, offset: 0 });
+  assert.deepEqual(parsePagination({ limit: "1", offset: "0" }, options), {
+    limit: 1,
+    offset: 0,
+  });
+  assert.deepEqual(
+    parsePagination({ limit: "100", offset: "1000000" }, options),
+    { limit: 100, offset: 1_000_000 }
+  );
+
+  for (const query of [
+    { limit: "0" },
+    { limit: "101" },
+    { limit: "01" },
+    { limit: "1.5" },
+    { limit: ["1", "2"] },
+    { offset: "-1" },
+    { offset: "1000001" },
+    { offset: "01" },
+    { offset: ["0", "1"] },
+  ]) {
+    assert.throws(() => parsePagination(query, options), RangeError);
+  }
+});
+
+test("technical analysis errors are never described as non-compliance", () => {
+  const email = buildCheckoutEmail({ status: "error" });
+  assert.match(email.text, /ANALYSIS UNAVAILABLE/);
+  assert.doesNotMatch(email.text, /NON-COMPLIANT/);
+  const checkinEmail = buildEvaluationEmail({ overallStatus: "error" });
+  assert.match(checkinEmail.text, /could not be analysed/);
+  assert.doesNotMatch(checkinEmail.text, /has been analysed/);
+});
+
+test("AI instructions request concise evidence instead of hidden reasoning", () => {
+  assert.doesNotMatch(SYSTEM_PROMPT, /Chain of Thought/i);
+  assert.match(SYSTEM_PROMPT, /requires_human_review/);
+  assert.match(SYSTEM_PROMPT, /checkpoint_name/);
+});

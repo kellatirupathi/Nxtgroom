@@ -1,0 +1,640 @@
+import { randomUUID } from "node:crypto";
+import { runtimeConfig } from "../config/env.js";
+import { PROMPT_VERSION } from "../prompts.js";
+import { evaluateImage } from "./visionEngine.js";
+import { enqueueNotification } from "./notificationWorker.js";
+import { createWorkerMonitor } from "./workerHealth.js";
+
+const WORKER_ID = randomUUID();
+const EVALUATION_OUTBOX_FIELD = "_private_evaluation_outbox";
+const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const EVALUATION_DEADLINE_MS = 24 * 60 * 60 * 1000;
+
+function asBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value?.buffer) return Buffer.from(value.buffer);
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  throw new Error("Evaluation job image is unavailable");
+}
+
+function updated(result) {
+  return Boolean(result && (result.matchedCount > 0 || result.modifiedCount > 0));
+}
+
+function evaluationJobId(attendanceId) {
+  return `${attendanceId}:evaluation`;
+}
+
+function errorCode(error, fallback = "EVALUATION_ERROR") {
+  const value = String(error?.code || error?.name || fallback).toUpperCase();
+  return /^[A-Z][A-Z0-9_]{0,79}$/.test(value) ? value : fallback;
+}
+
+function publicEvaluation(report, job, now) {
+  const imageQuality = report.image_quality || "RETAKE_RECOMMENDED";
+  return {
+    attendance_id: job.attendance_id,
+    photo_evidence_url: null,
+    overall_status: report.overall_status,
+    ai_summary: report.ai_summary || "",
+    general_idcard_check: report.general_idcard_check || [],
+    grooming_check: report.grooming_check || [],
+    attire_check: report.attire_check || [],
+    accessories_check: report.accessories_check || [],
+    footwear_check: report.footwear_check || [],
+    requires_human_review: Boolean(report.requires_human_review)
+      || imageQuality === "RETAKE_RECOMMENDED",
+    image_quality: imageQuality,
+    model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
+    prompt_version: PROMPT_VERSION,
+    processed_at: now,
+    attempts: job.attempts,
+  };
+}
+
+/**
+ * The attendance document is the durable source outbox. The deterministic job id
+ * makes a crash between this upsert and clearing the embedded payload harmless.
+ */
+export async function enqueueEvaluation(db, payload) {
+  const now = new Date();
+  const deadlineAt = payload.deadlineAt || new Date(now.getTime() + EVALUATION_DEADLINE_MS);
+  const jobId = evaluationJobId(payload.attendanceId);
+  await db.collection("evaluation_jobs").updateOne(
+    { _id: jobId },
+    {
+      $setOnInsert: {
+        _id: jobId,
+        attendance_id: payload.attendanceId,
+        instructor: payload.instructor,
+        image: payload.imageBuffer,
+        mime_type: payload.mimeType,
+        check_in_time: payload.checkInTime,
+        status: "queued",
+        attempts: 0,
+        available_at: now,
+        deadline_at: deadlineAt,
+        created_at: now,
+      },
+    },
+    { upsert: true }
+  );
+  const storedJob = await db.collection("evaluation_jobs").findOne(
+    { _id: jobId },
+    { projection: { status: 1 } }
+  );
+  await db.collection("attendance").updateOne(
+    { _id: payload.attendanceId },
+    {
+      $set: {
+        evaluation_queue_status: storedJob?.status || "queued",
+        updated_at: now,
+      },
+      $unset: { [EVALUATION_OUTBOX_FIELD]: "" },
+    }
+  );
+  return jobId;
+}
+
+export async function reconcileEvaluationOutbox(db) {
+  const attendance = await db.collection("attendance").findOne(
+    { [EVALUATION_OUTBOX_FIELD]: { $exists: true } },
+    { sort: { [`${EVALUATION_OUTBOX_FIELD}.created_at`]: 1 } }
+  );
+  if (!attendance) return false;
+
+  const payload = attendance[EVALUATION_OUTBOX_FIELD];
+  const now = new Date();
+  const inferredDeadline = payload?.deadline_at
+    ? new Date(payload.deadline_at)
+    : new Date(new Date(attendance.created_at || attendance.check_in_time).getTime()
+      + EVALUATION_DEADLINE_MS);
+  if (Number.isNaN(inferredDeadline.getTime())) {
+    await terminalizeEvaluationOutbox(db, attendance, payload, "INVALID_EVALUATION_OUTBOX");
+    return true;
+  }
+  if (inferredDeadline <= now) {
+    await terminalizeEvaluationOutbox(db, attendance, payload, "EVALUATION_DEADLINE_EXCEEDED");
+    return true;
+  }
+  if (!payload?.image || !payload?.mime_type || !payload?.instructor) {
+    await terminalizeEvaluationOutbox(db, attendance, payload, "INVALID_EVALUATION_OUTBOX");
+    return true;
+  }
+
+  await enqueueEvaluation(db, {
+    attendanceId: attendance._id,
+    instructor: payload.instructor,
+    imageBuffer: payload.image,
+    mimeType: payload.mime_type,
+    checkInTime: payload.check_in_time || attendance.check_in_time,
+    deadlineAt: payload.deadline_at,
+  });
+  return true;
+}
+
+async function claimEvaluation(db) {
+  const now = new Date();
+  const config = runtimeConfig();
+  const legacyCutoff = new Date(now.getTime() - EVALUATION_DEADLINE_MS);
+  const result = await db.collection("evaluation_jobs").findOneAndUpdate(
+    {
+      attempts: { $lt: config.evaluationMaxAttempts },
+      $and: [
+        {
+          $or: [
+            { deadline_at: { $gt: now } },
+            { deadline_at: { $exists: false }, created_at: { $gt: legacyCutoff } },
+          ],
+        },
+        { $or: [
+          { status: "queued", available_at: { $lte: now } },
+          { status: "processing", lease_until: { $lte: now } },
+        ] },
+      ],
+    },
+    {
+      $set: {
+        status: "processing",
+        worker_id: WORKER_ID,
+        lease_until: new Date(now.getTime() + config.evaluationLeaseMs),
+        updated_at: now,
+      },
+      $inc: { attempts: 1 },
+    },
+    { sort: { created_at: 1 }, returnDocument: "after" }
+  );
+  return result?.value || result;
+}
+
+async function renewEvaluationLease(db, job) {
+  const now = new Date();
+  const result = await db.collection("evaluation_jobs").updateOne(
+    {
+      _id: job._id,
+      status: "processing",
+      worker_id: WORKER_ID,
+      lease_until: { $gt: now },
+    },
+    {
+      $set: {
+        commit_started_at: now,
+        lease_until: new Date(now.getTime() + runtimeConfig().evaluationLeaseMs),
+        updated_at: now,
+      },
+    }
+  );
+  return updated(result);
+}
+
+async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
+  const now = new Date();
+  const overallStatus = evaluation.overall_status;
+  const imageQuality = evaluation.image_quality || "RETAKE_RECOMMENDED";
+  const requiresHumanReview = Boolean(evaluation.requires_human_review)
+    || imageQuality === "RETAKE_RECOMMENDED";
+  const attendanceStatus = overallStatus === "COMPLIANT"
+    ? (requiresHumanReview ? "review_required" : "compliant")
+    : "non_compliant";
+  await db.collection("attendance").updateOne(
+    { _id: job.attendance_id },
+    {
+      $set: {
+        status: attendanceStatus,
+        compliance_status: overallStatus,
+        remarks: evaluation.ai_summary || "",
+        analysis_completed_at: evaluation.processed_at || now,
+        evaluation_queue_status: "completed",
+        requires_human_review: requiresHumanReview,
+        image_quality: imageQuality,
+        updated_at: now,
+      },
+      $unset: {
+        analysis_error_code: "",
+        [EVALUATION_OUTBOX_FIELD]: "",
+      },
+    }
+  );
+  await enqueueNotification(db, {
+    attendanceId: job.attendance_id,
+    type: "checkin",
+    toEmail: job.instructor?.email,
+    report: {
+      instructorName: job.instructor?.name || "Instructor",
+      overallStatus,
+      aiSummary: evaluation.ai_summary || "",
+      checkInTime: job.check_in_time,
+      requiresHumanReview,
+      imageQuality,
+    },
+  });
+  await db.collection("evaluation_jobs").deleteOne({
+    _id: job._id,
+    worker_id: WORKER_ID,
+    status: ownedStatus,
+  });
+}
+
+async function completeEvaluation(db, job, report) {
+  if (!(await renewEvaluationLease(db, job))) return false;
+
+  const now = new Date();
+  const evaluation = publicEvaluation(report, job, now);
+  await db.collection("evaluations").updateOne(
+    { attendance_id: job.attendance_id },
+    { $set: evaluation, $setOnInsert: { _id: randomUUID(), created_at: now } },
+    { upsert: true }
+  );
+  await syncStoredEvaluation(db, job, evaluation, "processing");
+  return true;
+}
+
+export async function recoverClaimedEvaluation(db, job) {
+  const storedEvaluation = await db.collection("evaluations").findOne({
+    attendance_id: job.attendance_id,
+  });
+  if (!storedEvaluation) return null;
+  if (!(await renewEvaluationLease(db, job))) return false;
+  await syncStoredEvaluation(db, job, storedEvaluation, "processing");
+  return true;
+}
+
+function buildFailureNotification(job, now) {
+  const recipient = typeof job.instructor?.email === "string"
+    && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(job.instructor.email)
+    ? job.instructor.email
+    : null;
+  if (!recipient) return null;
+  return {
+    to_email: recipient,
+    report: {
+      instructorName: job.instructor?.name || "Instructor",
+      overallStatus: "error",
+      aiSummary: "AI analysis could not be completed. Check out this attendance, then check in again with a new photo.",
+      checkInTime: job.check_in_time,
+    },
+    deadline_at: new Date(now.getTime() + EVALUATION_DEADLINE_MS),
+    created_at: now,
+  };
+}
+
+async function terminalizeEvaluationOutbox(db, attendance, payload, code) {
+  const now = new Date();
+  const jobId = evaluationJobId(attendance._id);
+  const sourceJob = {
+    attendance_id: attendance._id,
+    instructor: payload?.instructor,
+    check_in_time: payload?.check_in_time || attendance.check_in_time,
+  };
+  const failureNotification = buildFailureNotification(sourceJob, now);
+  await db.collection("evaluation_jobs").updateOne(
+    { _id: jobId },
+    {
+      $setOnInsert: {
+        _id: jobId,
+        attendance_id: attendance._id,
+        check_in_time: sourceJob.check_in_time,
+        status: "failed",
+        attempts: 0,
+        last_error: code,
+        error_code: code,
+        failed_at: now,
+        created_at: attendance.created_at || now,
+        ...(failureNotification ? { failure_notification: failureNotification } : {}),
+      },
+    },
+    { upsert: true }
+  );
+  const storedJob = await db.collection("evaluation_jobs").findOne({ _id: jobId });
+  if (storedJob?.status === "failed" && !storedJob.failure_synced_at) {
+    await syncFailedEvaluationOutcome(db, storedJob);
+    return;
+  }
+  await db.collection("attendance").updateOne(
+    { _id: attendance._id },
+    {
+      $set: { evaluation_queue_status: storedJob?.status || "queued", updated_at: now },
+      $unset: { [EVALUATION_OUTBOX_FIELD]: "" },
+    }
+  );
+}
+
+export async function syncFailedEvaluationOutcome(db, job) {
+  const now = new Date();
+  const notification = job.failure_notification || null;
+  const terminalErrorCode = errorCode(
+    { code: job.error_code || job.last_error },
+    "ANALYSIS_ERROR"
+  );
+
+  await db.collection("attendance").updateOne(
+    { _id: job.attendance_id, analysis_completed_at: { $exists: false } },
+    {
+      $set: {
+        status: "error",
+        compliance_status: null,
+        evaluation_queue_status: "failed",
+        remarks: "AI analysis could not be completed. Check out this attendance, then check in again with a new photo.",
+        analysis_error_code: terminalErrorCode,
+        requires_human_review: true,
+        image_quality: null,
+        checkin_email_status: notification ? "outbox_pending" : "skipped_no_email",
+        ...(notification ? { _private_checkin_outbox: notification } : {}),
+        updated_at: now,
+      },
+      $unset: {
+        [EVALUATION_OUTBOX_FIELD]: "",
+        ...(!notification ? { _private_checkin_outbox: "" } : {}),
+      },
+    }
+  );
+
+  await db.collection("evaluation_jobs").updateOne(
+    { _id: job._id, status: "failed", failure_synced_at: { $exists: false } },
+    {
+      $set: {
+        failure_synced_at: now,
+        expires_at: new Date(now.getTime() + TERMINAL_RETENTION_MS),
+        last_error: terminalErrorCode,
+        error_code: terminalErrorCode,
+      },
+      $unset: { failure_notification: "", instructor: "" },
+    }
+  );
+
+  if (notification) {
+    try {
+      await enqueueNotification(db, {
+        attendanceId: job.attendance_id,
+        type: "checkin",
+        toEmail: notification.to_email,
+        report: notification.report,
+        deadlineAt: notification.deadline_at,
+      });
+    } catch (notificationError) {
+      console.error(
+        `Failure notification outbox ${job.attendance_id} remains pending `
+        + `(${errorCode(notificationError, "NOTIFICATION_ERROR")})`
+      );
+    }
+  }
+  return true;
+}
+
+async function markEvaluationFailed(db, job, error, ownedStatus = "processing") {
+  const now = new Date();
+  const failureNotification = buildFailureNotification(job, now);
+  const result = await db.collection("evaluation_jobs").findOneAndUpdate(
+    { _id: job._id, worker_id: WORKER_ID, status: ownedStatus },
+    {
+      $set: {
+        status: "failed",
+        last_error: errorCode(error),
+        error_code: errorCode(error, "ANALYSIS_ERROR"),
+        failed_at: now,
+        ...(failureNotification ? { failure_notification: failureNotification } : {}),
+      },
+      $unset: {
+        image: "",
+        instructor: "",
+        lease_until: "",
+        worker_id: "",
+        commit_started_at: "",
+        ...(!failureNotification ? { failure_notification: "" } : {}),
+      },
+    },
+    { returnDocument: "after" }
+  );
+  const terminalJob = result?.value || result;
+  if (!terminalJob) return false;
+  await syncFailedEvaluationOutcome(db, terminalJob);
+  return true;
+}
+
+export async function reconcileFailedEvaluationOutcomes(db) {
+  const job = await db.collection("evaluation_jobs").findOne(
+    { status: "failed", failure_synced_at: { $exists: false } },
+    { sort: { failed_at: 1 } }
+  );
+  if (!job) return false;
+  await syncFailedEvaluationOutcome(db, job);
+  return true;
+}
+
+async function retryEvaluation(db, job, error) {
+  const storedEvaluation = await db.collection("evaluations").findOne({
+    attendance_id: job.attendance_id,
+  });
+  if (storedEvaluation) {
+    if (await renewEvaluationLease(db, job)) {
+      await syncStoredEvaluation(db, job, storedEvaluation, "processing");
+    }
+    return;
+  }
+
+  const config = runtimeConfig();
+  if (job.attempts >= config.evaluationMaxAttempts) {
+    await markEvaluationFailed(db, job, error);
+    return;
+  }
+  await db.collection("evaluation_jobs").updateOne(
+    { _id: job._id, worker_id: WORKER_ID, status: "processing" },
+    {
+      $set: {
+        status: "queued",
+        last_error: errorCode(error),
+        available_at: new Date(Date.now() + Math.min(60000, 2000 * 2 ** job.attempts)),
+      },
+      $unset: { lease_until: "", worker_id: "", commit_started_at: "" },
+    }
+  );
+}
+
+/**
+ * Claims expired last-attempt work so it can no longer remain unclaimable. If
+ * the evaluation was persisted before the crash, the remaining idempotent side
+ * effects are completed; otherwise the job is terminally failed.
+ */
+export async function reconcileExpiredEvaluationJobs(db, now = new Date()) {
+  const config = runtimeConfig();
+  const result = await db.collection("evaluation_jobs").findOneAndUpdate(
+    {
+      status: { $in: ["processing", "recovering"] },
+      attempts: { $gte: config.evaluationMaxAttempts },
+      lease_until: { $lte: now },
+    },
+    {
+      $set: {
+        status: "recovering",
+        worker_id: WORKER_ID,
+        lease_until: new Date(now.getTime() + config.evaluationLeaseMs),
+        recovery_started_at: now,
+        updated_at: now,
+      },
+    },
+    { sort: { created_at: 1 }, returnDocument: "after" }
+  );
+  const job = result?.value || result;
+  if (!job) return false;
+
+  try {
+    const storedEvaluation = await db.collection("evaluations").findOne({
+      attendance_id: job.attendance_id,
+    });
+    if (storedEvaluation) {
+      await syncStoredEvaluation(db, job, storedEvaluation, "recovering");
+    } else {
+      const error = new Error("Evaluation worker lease expired on the final attempt");
+      error.name = "EVALUATION_LEASE_EXPIRED";
+      await markEvaluationFailed(db, job, error, "recovering");
+    }
+    return true;
+  } catch (error) {
+    await db.collection("evaluation_jobs").updateOne(
+      { _id: job._id, worker_id: WORKER_ID, status: "recovering" },
+      {
+        $set: {
+          status: "processing",
+          lease_until: new Date(Date.now() + Math.max(1000, config.evaluationPollMs)),
+          last_error: errorCode(error),
+        },
+        $unset: { worker_id: "" },
+      }
+    );
+    throw error;
+  }
+}
+
+/** Terminally clears photos which could not be processed within the retention deadline. */
+export async function reconcileOverdueEvaluationJobs(db, now = new Date()) {
+  const config = runtimeConfig();
+  const legacyCutoff = new Date(now.getTime() - EVALUATION_DEADLINE_MS);
+  const result = await db.collection("evaluation_jobs").findOneAndUpdate(
+    {
+      $and: [
+        {
+          $or: [
+            { deadline_at: { $lte: now } },
+            { deadline_at: { $exists: false }, created_at: { $lte: legacyCutoff } },
+          ],
+        },
+        { $or: [
+          { status: "queued" },
+          { status: "processing", lease_until: { $lte: now } },
+          { status: "recovering", lease_until: { $lte: now } },
+        ] },
+      ],
+    },
+    {
+      $set: {
+        status: "recovering",
+        worker_id: WORKER_ID,
+        lease_until: new Date(now.getTime() + config.evaluationLeaseMs),
+        recovery_started_at: now,
+        updated_at: now,
+      },
+    },
+    { sort: { deadline_at: 1 }, returnDocument: "after" }
+  );
+  const job = result?.value || result;
+  if (!job) return false;
+
+  try {
+    const storedEvaluation = await db.collection("evaluations").findOne({
+      attendance_id: job.attendance_id,
+    });
+    if (storedEvaluation) {
+      await syncStoredEvaluation(db, job, storedEvaluation, "recovering");
+    } else {
+      const error = new Error("Evaluation deadline exceeded");
+      error.name = "EVALUATION_DEADLINE_EXCEEDED";
+      await markEvaluationFailed(db, job, error, "recovering");
+    }
+    return true;
+  } catch (error) {
+    await db.collection("evaluation_jobs").updateOne(
+      { _id: job._id, worker_id: WORKER_ID, status: "recovering" },
+      {
+        $set: {
+          status: "processing",
+          lease_until: new Date(Date.now() + Math.max(1000, config.evaluationPollMs)),
+          last_error: errorCode(error),
+        },
+        $unset: { worker_id: "" },
+      }
+    );
+    throw error;
+  }
+}
+
+export function startEvaluationWorker(db) {
+  let stopped = false;
+  let timer = null;
+  let inFlight = Promise.resolve();
+  const config = runtimeConfig();
+  const interval = config.evaluationPollMs;
+  const monitor = createWorkerMonitor("evaluation", {
+    busyStaleAfterMs: config.evaluationLeaseMs + 60000,
+  });
+
+  const schedule = (delay = interval) => {
+    if (!stopped) timer = setTimeout(tick, delay);
+  };
+  const tick = () => {
+    monitor.cycleStarted();
+    let loopErrorCode = null;
+    inFlight = (async () => {
+      try {
+        await reconcileEvaluationOutbox(db);
+        monitor.progress("evaluation_outbox_reconciled");
+        await reconcileOverdueEvaluationJobs(db);
+        monitor.progress("overdue_jobs_reconciled");
+        await reconcileExpiredEvaluationJobs(db);
+        monitor.progress("expired_leases_reconciled");
+        await reconcileFailedEvaluationOutcomes(db);
+        monitor.progress("failed_outcomes_reconciled");
+        const job = await claimEvaluation(db);
+        monitor.progress(job ? "job_claimed" : "queue_idle");
+        if (job) {
+          try {
+            const recovered = await recoverClaimedEvaluation(db, job);
+            if (recovered === null) {
+              monitor.progress("vision_request_started");
+              const report = await evaluateImage(
+                asBuffer(job.image),
+                job.mime_type,
+                job.instructor.gender
+              );
+              monitor.progress("vision_request_completed");
+              await completeEvaluation(db, job, report);
+              monitor.progress("evaluation_completed");
+            } else {
+              monitor.progress("stored_evaluation_recovered");
+            }
+          } catch (error) {
+            monitor.recordJobError(errorCode(error));
+            console.error(
+              `Evaluation job ${job._id} attempt ${job.attempts} failed (${errorCode(error)})`
+            );
+            await retryEvaluation(db, job, error);
+          }
+        }
+      } catch (error) {
+        loopErrorCode = errorCode(error);
+        console.error(`Evaluation worker error (${loopErrorCode})`);
+      } finally {
+        monitor.cycleCompleted(loopErrorCode);
+        schedule();
+      }
+    })();
+  };
+  schedule(0);
+  return {
+    async stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      await inFlight;
+      monitor.stop();
+    },
+  };
+}

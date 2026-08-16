@@ -1,0 +1,20 @@
+# Local secrets (keep the checked-in templates)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependencies and generated output
+**/node_modules/
+**/dist/
+**/coverage/
+**/temp_uploads/
+*.log
+
+# Retired backend (kept out after the Node.js migration)
+grooming_api_v2/
+
+# Local editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
