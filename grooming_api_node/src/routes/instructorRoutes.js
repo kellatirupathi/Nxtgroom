@@ -67,10 +67,14 @@ export async function loadRecentInstructorFeedbacks(db, instructorIds) {
       },
     },
     { $match: { [normalizedDateField]: { $ne: null } } },
+    // $documentNumber requires a single-key sortBy, so the _id tiebreaker is
+    // applied here instead; $setWindowFields preserves this incoming order
+    // for rows that share a date.
+    { $sort: { [normalizedIdField]: 1, [normalizedDateField]: -1, _id: -1 } },
     {
       $setWindowFields: {
         partitionBy: `$${normalizedIdField}`,
-        sortBy: { [normalizedDateField]: -1, _id: -1 },
+        sortBy: { [normalizedDateField]: -1 },
         output: { [rankField]: { $documentNumber: {} } },
       },
     },

@@ -95,11 +95,18 @@ test("instructor pages are deterministic and feedback is capped per returned ins
   assert.equal(instructorLimit, 2);
   assert.equal(feedbackOptions.allowDiskUse, true);
 
+  // $documentNumber only accepts a single-key sortBy; the _id tiebreaker moves
+  // to a preceding $sort, whose order $setWindowFields preserves.
   const windowStage = feedbackPipeline.find((stage) => stage.$setWindowFields);
   assert.deepEqual(windowStage.$setWindowFields.sortBy, {
     _private_paging_feedback_date: -1,
-    _id: -1,
   });
+  const windowIndex = feedbackPipeline.indexOf(windowStage);
+  const presortIndex = feedbackPipeline.findIndex(
+    (stage) => stage.$sort && "_id" in stage.$sort
+  );
+  assert.ok(presortIndex >= 0 && presortIndex < windowIndex,
+    "a deterministic $sort with an _id tiebreaker must precede $setWindowFields");
   assert.equal(
     feedbackPipeline.find((stage) => stage.$match?._private_paging_feedback_rank)
       .$match._private_paging_feedback_rank.$lte,
