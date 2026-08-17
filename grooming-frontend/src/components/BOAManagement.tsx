@@ -130,7 +130,7 @@ export default function BOAManagement() {
 
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[760px]">
+          <table className="w-full text-left border-collapse min-w-0 md:min-w-[760px]">
             <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">Name</th><th className="p-4">Employee ID</th><th className="p-4">College</th><th className="p-4">Registered Date</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (

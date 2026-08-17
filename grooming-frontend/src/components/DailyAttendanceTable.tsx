@@ -206,12 +206,12 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
 
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto flex-1">
-          <table className="w-full text-left border-collapse min-w-[1080px]">
+          <table className="w-full text-left border-collapse min-w-0 lg:min-w-[1080px]">
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">Instructor Name</th><th className="p-4">Role</th><th className="p-4">College</th><th className="p-4">Date</th>
-                <th className="p-4">Check-In</th><th className="p-4">Check-Out</th><th className="p-4">Coordinates</th>
-                <th className="p-4">Status</th><th className="p-4 w-1/4">Remark</th>
+                <th className="p-4">Instructor Name</th><th className="p-4 hidden xl:table-cell">Role</th><th className="p-4 hidden md:table-cell">College</th><th className="p-4 hidden lg:table-cell">Date</th>
+                <th className="p-4">Check-In</th><th className="p-4 hidden sm:table-cell">Check-Out</th><th className="p-4 hidden xl:table-cell">Coordinates</th>
+                <th className="p-4">Status</th><th className="p-4 w-1/4 hidden lg:table-cell">Remark</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -238,12 +238,12 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                     className={`transition-colors ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
                   >
                     <td className="p-4 font-bold text-slate-800">{record.instructor_name}</td>
-                    <td className="p-4 text-sm font-medium text-slate-500">{record.instructor_role}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600">{record.college_name || 'Unknown'}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600">{formatDate(record.date)}</td>
+                    <td className="p-4 text-sm font-medium text-slate-500 hidden xl:table-cell">{record.instructor_role}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600 hidden md:table-cell">{record.college_name || 'Unknown'}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600 hidden lg:table-cell">{formatDate(record.date)}</td>
                     <td className="p-4 text-sm font-bold text-slate-700">{formatTime(record.check_in_time)}</td>
-                    <td className="p-4 text-sm font-bold text-slate-700">{formatTime(record.check_out_time)}</td>
-                    <td className="p-4 text-sm text-slate-500">
+                    <td className="p-4 text-sm font-bold text-slate-700 hidden sm:table-cell">{formatTime(record.check_out_time)}</td>
+                    <td className="p-4 text-sm text-slate-500 hidden xl:table-cell">
                       {record.location_coordinates ? (
                         <span className="flex items-center gap-1.5 text-indigo-600 font-medium whitespace-nowrap" title="Latitude, longitude">
                           <MapPin size={14} aria-hidden="true" /> {formatCoordinates(record.location_coordinates)}
@@ -251,7 +251,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                       ) : '--'}
                     </td>
                     <td className="p-4"><StatusBadge status={record.status} /></td>
-                    <td className="p-4 text-sm text-slate-500 max-w-xs truncate" title={record.remarks || ''}>{record.remarks}</td>
+                    <td className="p-4 text-sm text-slate-500 max-w-xs truncate hidden lg:table-cell" title={record.remarks || ''}>{record.remarks}</td>
                   </tr>
                 );
               })}

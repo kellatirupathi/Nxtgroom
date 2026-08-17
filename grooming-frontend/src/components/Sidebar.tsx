@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   LayoutGrid,
   Users,
-  X,
   History,
   UserCog,
   Settings,
@@ -14,8 +13,6 @@ import {
 import type { Role } from '../types';
 
 interface SidebarProps {
-  isSidebarOpen: boolean;
-  setIsSidebarOpen: (open: boolean) => void;
   activeTab: string;
   navigate: (tab: string) => void;
   role: Role | null;
@@ -43,8 +40,6 @@ function roleLabel(role: Role | null) {
 }
 
 export default function Sidebar({
-  isSidebarOpen,
-  setIsSidebarOpen,
   activeTab,
   navigate,
   role,
@@ -83,19 +78,9 @@ export default function Sidebar({
 
   return (
     <aside
-      className={`fixed lg:static inset-y-0 left-0 w-64 bg-sky-50 border-r border-sky-100 flex flex-col z-50 shrink-0 transform transition-transform duration-300 ease-in-out ${
-        isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      }`}
+      className="hidden lg:flex lg:static inset-y-0 left-0 w-64 bg-sky-50 border-r border-sky-100 flex-col z-50 shrink-0"
     >
       <div className="p-6 pt-8 mb-2 relative">
-        <button
-          type="button"
-          aria-label="Close navigation menu"
-          className="lg:hidden absolute top-6 right-4 text-slate-400 hover:text-slate-600 bg-white p-1 rounded-md"
-          onClick={() => setIsSidebarOpen(false)}
-        >
-          <X size={20} />
-        </button>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 flex items-center justify-center shrink-0">
             <img src="/logo.png" alt="FacultyTrack Logo" className="w-full h-full object-contain" />

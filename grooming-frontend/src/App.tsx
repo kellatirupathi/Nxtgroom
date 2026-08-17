@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
+import BottomNav from './components/BottomNav';
 import EvaluateCard from './components/EvaluateCard';
 import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
@@ -46,7 +46,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [selectedAttendanceRecord, setSelectedAttendanceRecord] = useState<AttendanceRecord | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [sessionCheckError, setSessionCheckError] = useState('');
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
@@ -120,7 +119,6 @@ export default function App() {
       return;
     }
     setActiveTab(tab);
-    setIsSidebarOpen(false);
   };
 
   if (!session.token) {
@@ -150,18 +148,9 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
-      {isSidebarOpen && (
-        <button
-          type="button"
-          aria-label="Close navigation menu"
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 lg:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
+      {/* Desktop keeps the full sidebar; below lg it is hidden entirely in
+          favour of the app-style bottom navigation bar. */}
       <Sidebar
-        isSidebarOpen={isSidebarOpen}
-        setIsSidebarOpen={setIsSidebarOpen}
         activeTab={activeTab}
         navigate={navigate}
         role={session.role}
@@ -171,20 +160,9 @@ export default function App() {
         onOpenChangePassword={() => setAccountModal('password')}
       />
 
-      <main className="flex-1 h-full overflow-auto p-4 md:p-6 flex flex-col w-full">
-        {/* Mobile-only trigger: the shared page header was removed, but small
-            screens still need a way to reveal the off-canvas sidebar. */}
-        <div className="lg:hidden mb-4 shrink-0">
-          <button
-            type="button"
-            aria-label="Open navigation menu"
-            className="text-slate-600 hover:text-slate-900 bg-white p-2 rounded-md border border-slate-200"
-            onClick={() => setIsSidebarOpen(true)}
-          >
-            <Menu size={20} aria-hidden="true" />
-          </button>
-        </div>
-
+      {/* pb clears the fixed bottom bar (and the iOS home indicator) so the
+          last row of any list stays reachable on touch devices. */}
+      <main className="flex-1 h-full overflow-auto p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5rem)] lg:pb-6 flex flex-col w-full">
         {loadError && (
           <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             {loadError}
@@ -228,6 +206,16 @@ export default function App() {
           )}
         </div>
       </main>
+
+      <BottomNav
+        activeTab={activeTab}
+        navigate={navigate}
+        role={session.role}
+        email={session.email}
+        onLogout={handleLogout}
+        onOpenProfile={() => setAccountModal('profile')}
+        onOpenChangePassword={() => setAccountModal('password')}
+      />
 
       {accountModal === 'profile' && (
         <ProfileModal

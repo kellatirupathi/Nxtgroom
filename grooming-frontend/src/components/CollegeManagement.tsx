@@ -110,7 +110,7 @@ export default function CollegeManagement() {
 
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[700px]">
+          <table className="w-full text-left border-collapse min-w-0 md:min-w-[700px]">
             <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">College ID</th><th className="p-4">Name</th><th className="p-4">Location</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
@@ -137,7 +137,7 @@ export default function CollegeManagement() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="college-dialog-title">
-          <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+          <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h2 id="college-dialog-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2"><Building2 size={20} className="text-indigo-600" aria-hidden="true" />{isEditMode ? 'Edit College' : 'Add New College'}</h2>
               <button type="button" aria-label="Close college dialog" onClick={closeModal} disabled={submitting} className="text-slate-400 hover:text-slate-600 transition-colors bg-white px-2 py-1 rounded-full border border-slate-200 shadow-sm disabled:opacity-50">×</button>

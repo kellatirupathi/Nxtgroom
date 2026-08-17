@@ -37,7 +37,7 @@ function ModalShell({ title, icon, onClose, children, labelledBy }: ModalShellPr
       aria-modal="true"
       aria-labelledby={labelledBy}
     >
-      <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+      <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-5 border-b border-slate-200 flex justify-between items-center">
           <h2 id={labelledBy} className="text-lg font-bold text-slate-800 flex items-center gap-2">
             {icon}

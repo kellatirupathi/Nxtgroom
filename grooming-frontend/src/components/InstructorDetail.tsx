@@ -69,7 +69,7 @@ function ReportSection({ title, items }: { title: string; items?: CheckItem[] | 
     <section className="mb-8" aria-labelledby={`report-${title.replace(/\s+/g, '-').toLowerCase()}`}>
       <h4 id={`report-${title.replace(/\s+/g, '-').toLowerCase()}`} className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-100 pb-2">{title}</h4>
       <div className="bg-white rounded-md border border-slate-200 overflow-x-auto shadow-sm">
-        <table className="w-full text-left text-sm min-w-[560px]">
+        <table className="w-full text-left text-sm min-w-0 md:min-w-[560px]">
           <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
             <tr><th className="p-3">Checkpoint</th><th className="p-3">Result</th><th className="p-3">Observation</th><th className="p-3">Evidence</th></tr>
           </thead>
