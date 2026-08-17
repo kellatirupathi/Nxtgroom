@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { runtimeConfig } from "../config/env.js";
+import { appUrl, runtimeConfig } from "../config/env.js";
 import {
   createAccessToken,
   getCurrentUser,
@@ -14,6 +14,13 @@ import {
   isGoogleLoginEnabled,
   verifyGoogleIdToken,
 } from "../services/googleAuth.js";
+import {
+  consumeResetToken,
+  issueResetToken,
+  peekResetToken,
+  RESET_TTL_MS,
+} from "../services/passwordResetService.js";
+import { sendPasswordResetEmail } from "../services/emailService.js";
 import rateLimit from "express-rate-limit";
 
 // Credential verification is a network call to Google; rate limit it so a
@@ -25,6 +32,33 @@ const googleLoginLimiter = rateLimit({
   legacyHeaders: false,
   message: { detail: "Too many sign-in attempts. Please try again later." },
 });
+
+// Anonymous endpoints that send mail or test tokens. Tighter than the Google
+// limiter because each accepted request costs an outbound email.
+const passwordResetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { detail: "Too many password reset attempts. Please try again later." },
+});
+
+/**
+ * Greeting name for an account. Admin records carry their own name; a BOA's
+ * lives on the linked boas document, so fall back to the email local part
+ * rather than address the person as "there".
+ */
+async function displayNameForUser(db, user) {
+  if (user.name) return user.name;
+  if (user.role === ROLES.BOA && user.reference_id) {
+    const boa = await db.collection("boas").findOne(
+      { _id: user.reference_id },
+      { projection: { name: 1 } }
+    );
+    if (boa?.name) return boa.name;
+  }
+  return String(user.email || "").split("@")[0] || "there";
+}
 
 export const authRouter = Router();
 
@@ -107,6 +141,112 @@ authRouter.post(
     );
 
     return res.json({ message: "Password changed successfully. Please sign in again." });
+  })
+);
+
+/**
+ * Starts a self-service reset. Always answers 200 with the same body: a
+ * different response for a known versus unknown address would let anyone
+ * enumerate which emails hold accounts.
+ */
+authRouter.post(
+  "/forgot-password",
+  passwordResetLimiter,
+  asyncRoute(async (req, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const genericResponse = {
+      message: "If that email has an account, a reset link is on its way.",
+    };
+    if (!email || email.length > 254) return res.json(genericResponse);
+
+    const db = req.app.locals.db;
+    const user = await db.collection("users").findOne({ email });
+
+    // Disabled accounts get no link; re-enabling is an administrator action.
+    if (user && !user.disabled_at && Object.values(ROLES).includes(user.role)) {
+      const token = await issueResetToken(db, { email, kind: "reset", ttlMs: RESET_TTL_MS });
+      const name = await displayNameForUser(db, user);
+      const result = await sendPasswordResetEmail(email, {
+        name,
+        appUrl: appUrl(),
+        token,
+        expiresInMinutes: Math.round(RESET_TTL_MS / 60000),
+      });
+      if (!result.sent) {
+        // Surfaced in logs only: the caller still gets the generic message.
+        console.error(`Password reset email not sent (${result.reason}) for ${email}`);
+      }
+    }
+
+    return res.json(genericResponse);
+  })
+);
+
+/** Lets the reset page show "this link expired" before asking for a password. */
+authRouter.get(
+  "/reset-password/:token",
+  passwordResetLimiter,
+  asyncRoute(async (req, res) => {
+    const outcome = await peekResetToken(req.app.locals.db, req.params.token);
+    if (outcome.error) {
+      return res.status(400).json({
+        detail: outcome.error === "expired"
+          ? "This link has expired. Request a new one."
+          : "This link is not valid. Request a new one.",
+        reason: outcome.error,
+      });
+    }
+    return res.json({ valid: true, email: outcome.email, kind: outcome.kind });
+  })
+);
+
+/** Redeems a token and sets the password. Used by both invites and resets. */
+authRouter.post(
+  "/reset-password",
+  passwordResetLimiter,
+  asyncRoute(async (req, res) => {
+    const token = String(req.body?.token || "");
+    const newPassword = String(req.body?.new_password || "");
+    const confirmPassword = String(req.body?.confirm_password ?? newPassword);
+
+    if (newPassword.length < 12 || newPassword.length > 128) {
+      return res.status(422).json({ detail: "Password must be between 12 and 128 characters" });
+    }
+    if (newPassword !== confirmPassword) {
+      return res.status(422).json({ detail: "Passwords do not match" });
+    }
+
+    const db = req.app.locals.db;
+    // Consuming first makes the token single-use even if the update below
+    // fails, so a leaked link cannot be retried.
+    const outcome = await consumeResetToken(db, token);
+    if (outcome.error) {
+      return res.status(400).json({
+        detail: outcome.error === "expired"
+          ? "This link has expired. Request a new one."
+          : "This link is not valid. Request a new one.",
+      });
+    }
+
+    const user = await db.collection("users").findOne({ email: outcome.email });
+    if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role)) {
+      return res.status(400).json({ detail: "This account can no longer be activated." });
+    }
+
+    await db.collection("users").updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          password_hash: await getPasswordHash(newPassword),
+          password_changed_at: new Date(),
+          updated_at: new Date(),
+        },
+        // Invalidate any session that existed before the reset.
+        $inc: { session_version: 1 },
+      }
+    );
+
+    return res.json({ message: "Password set successfully. You can sign in now." });
   })
 );
 

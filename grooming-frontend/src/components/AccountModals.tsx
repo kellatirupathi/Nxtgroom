@@ -21,6 +21,8 @@ interface ProfileModalProps {
 interface ChangePasswordModalProps {
   onClose: () => void;
   onPasswordChanged: () => void;
+  /** Opens the email-a-reset-link flow for users who forgot their password. */
+  onForgotPassword: () => void;
 }
 
 function roleLabel(role: Role | null) {
@@ -95,7 +97,7 @@ export function ProfileModal({ email, role, collegeId, onClose }: ProfileModalPr
   );
 }
 
-export function ChangePasswordModal({ onClose, onPasswordChanged }: ChangePasswordModalProps) {
+export function ChangePasswordModal({ onClose, onPasswordChanged, onForgotPassword }: ChangePasswordModalProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -190,6 +192,16 @@ export function ChangePasswordModal({ onClose, onPasswordChanged }: ChangePasswo
         <p className="text-xs text-slate-500">
           Changing your password signs you out of all devices, including this one.
         </p>
+        {/* An escape hatch for someone who is signed in on a remembered
+            session but no longer knows the current password. */}
+        <button
+          type="button"
+          onClick={onForgotPassword}
+          disabled={submitting}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline disabled:opacity-50"
+        >
+          Forgot your current password? Email yourself a reset link.
+        </button>
         <div className="pt-1 flex gap-3">
           <button
             type="button"

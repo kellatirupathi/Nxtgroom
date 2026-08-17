@@ -6,6 +6,13 @@ import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './useToast';
 import type { AdminUser, Boa, College, Role } from '../types';
 
+/** Creation response: `invited` means a set-password link was emailed. */
+interface CreatedUser {
+  id: string;
+  invited?: boolean;
+  emailed?: boolean;
+}
+
 const ADMINS_PATH = '/api/v2/admins';
 const BOAS_PATH = '/api/v2/boas';
 
@@ -183,6 +190,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    // Set on create so the confirmation can say whether an invitation went out.
+    let delivery: CreatedUser | null = null;
     try {
       // Apply the change to local state from the server's response instead of
       // refetching every list, so the table updates without a loading blank.
@@ -197,10 +206,10 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
               : admin
           )));
         } else {
-          const created = await apiJson<{ id: string }>(ADMINS_PATH, {
-            method: 'POST',
-            body: { ...body, password: form.password },
-          });
+          // body already carries password only when one was typed; spreading
+          // form.password here again would send "" and defeat the invite path.
+          const created = await apiJson<CreatedUser>(ADMINS_PATH, { method: 'POST', body });
+          delivery = created;
           setAdmins((current) => [
             ...current,
             { _id: created.id, name: form.name, email: form.email, role: 'ADMIN' },
@@ -229,10 +238,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
               : boa
           )));
         } else {
-          const created = await apiJson<{ id: string }>(BOAS_PATH, {
-            method: 'POST',
-            body: { ...body, password: form.password },
-          });
+          const created = await apiJson<CreatedUser>(BOAS_PATH, { method: 'POST', body });
+          delivery = created;
           setBoas((current) => [
             ...current,
             {
@@ -249,7 +256,23 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       }
       setShowForm(false);
       setEditing(null);
-      toast.success(editing ? 'User updated' : 'User created', { detail: form.email });
+      if (editing) {
+        toast.success('User updated', { detail: form.email });
+      } else if (delivery && delivery.emailed === false) {
+        // The account exists but the email did not go out, so say so rather
+        // than let an administrator assume the person was contacted.
+        toast.warning('User created, but the email could not be sent', {
+          detail: delivery.invited
+            ? `Use "Set new password" to give ${form.email} access.`
+            : `Tell ${form.email} their password another way.`,
+        });
+      } else {
+        toast.success('User created', {
+          detail: delivery?.invited
+            ? `An invitation to set a password was emailed to ${form.email}.`
+            : `Sign-in details were emailed to ${form.email}.`,
+        });
+      }
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : String(requestError);
       setError(message);
@@ -479,10 +502,17 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
 
               <div>
                 <label htmlFor="user-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  {editing ? 'New password (optional)' : 'Password'}
+                  {editing ? 'New password (optional)' : 'Password (optional)'}
                 </label>
-                <input id="user-password" required={!editing} type="password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
-                <p className="mt-1 text-xs text-slate-400">{editing ? 'Leave blank to keep the current password.' : 'Minimum 12 characters.'}</p>
+                {/* Blank on create is a deliberate choice, not an omission: the
+                    server emails an invitation link instead of storing a
+                    password the account holder never picked. */}
+                <input id="user-password" type="password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+                <p className="mt-1 text-xs text-slate-400">
+                  {editing
+                    ? 'Leave blank to keep the current password.'
+                    : 'Leave blank to email them a link to set their own. Minimum 12 characters.'}
+                </p>
               </div>
 
               <div className="pt-1 flex gap-3">

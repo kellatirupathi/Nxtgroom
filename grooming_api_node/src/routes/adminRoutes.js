@@ -22,10 +22,51 @@ import {
   saveNotificationSettings,
   validateNotificationSettings,
 } from "../services/notificationSettings.js";
+import {
+  sendAccountCreatedEmail,
+  sendAccountInviteEmail,
+} from "../services/emailService.js";
+import { INVITE_TTL_MS, issueResetToken } from "../services/passwordResetService.js";
+import { appUrl } from "../config/env.js";
 
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
 
 export const adminRouter = Router();
+
+/**
+ * Tells a newly created administrator or BOA how to get in: an invitation
+ * link when no password was set, otherwise a notice that one already exists.
+ *
+ * Never throws. The account is already committed by the time this runs, so a
+ * mail failure must not turn a successful creation into an error; the caller
+ * reports delivery through the `invited` / `emailed` flags instead.
+ */
+async function sendAccountSetupEmail(db, { email, name, role, hasPassword }) {
+  try {
+    if (hasPassword) {
+      const result = await sendAccountCreatedEmail(email, {
+        name,
+        email,
+        role,
+        appUrl: appUrl(),
+      });
+      return { emailed: result.sent, invited: false, reason: result.reason };
+    }
+
+    const token = await issueResetToken(db, { email, kind: "invite", ttlMs: INVITE_TTL_MS });
+    const result = await sendAccountInviteEmail(email, {
+      name,
+      role,
+      appUrl: appUrl(),
+      token,
+      expiresInDays: Math.round(INVITE_TTL_MS / 86400000),
+    });
+    return { emailed: result.sent, invited: true, reason: result.reason };
+  } catch (error) {
+    console.error(`Account setup email failed for ${email}: ${error?.name || "Error"}`);
+    return { emailed: false, invited: !hasPassword, reason: "send_failed" };
+  }
+}
 
 function activeFilter(extra = {}) {
   return {
@@ -328,7 +369,12 @@ adminRouter.post(
   requireSuperAdmin,
   validate(boaSchema),
   asyncRoute(async (req, res) => {
-    const passwordHash = await getPasswordHash(req.validatedBody.password);
+    // No password means the BOA is invited to choose their own; the account is
+    // stored without a hash, which verifyPassword() already refuses to match.
+    const hasPassword = Boolean(req.validatedBody.password);
+    const passwordHash = hasPassword
+      ? await getPasswordHash(req.validatedBody.password)
+      : null;
     let result;
     try {
       result = await createBoaGuarded(
@@ -349,7 +395,17 @@ adminRouter.post(
     if (result.outcome === "duplicate_employee_id") {
       return res.status(400).json({ detail: "Employee ID already exists" });
     }
-    return res.status(201).json({ message: "BOA created successfully", id: result.boa._id });
+    const delivery = await sendAccountSetupEmail(req.app.locals.db, {
+      email: req.validatedBody.email,
+      name: req.validatedBody.name,
+      role: ROLES.BOA,
+      hasPassword,
+    });
+    return res.status(201).json({
+      message: "BOA created successfully",
+      id: result.boa._id,
+      ...delivery,
+    });
   })
 );
 
@@ -556,11 +612,14 @@ adminRouter.post(
       return res.status(400).json({ detail: "Email already registered" });
     }
 
+    // A blank password creates a pending account that can only be opened via
+    // the emailed invitation link.
+    const hasPassword = Boolean(password);
     const now = new Date();
     const user = createDocument({
       name,
       email,
-      password_hash: await getPasswordHash(password),
+      password_hash: hasPassword ? await getPasswordHash(password) : null,
       role: ROLES.ADMIN,
       reference_id: null,
       session_version: 0,
@@ -574,7 +633,17 @@ adminRouter.post(
       if (duplicateErrorResponse(error, res, "Email already registered")) return;
       throw error;
     }
-    return res.status(201).json({ message: "Administrator created successfully", id: user._id });
+    const delivery = await sendAccountSetupEmail(db, {
+      email,
+      name,
+      role: ROLES.ADMIN,
+      hasPassword,
+    });
+    return res.status(201).json({
+      message: "Administrator created successfully",
+      id: user._id,
+      ...delivery,
+    });
   })
 );
 

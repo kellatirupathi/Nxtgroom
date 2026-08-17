@@ -26,6 +26,23 @@ export function corsOrigins() {
     .filter(Boolean);
 }
 
+/**
+ * Base URL used to build password links in emails. Falls back to the first
+ * HTTPS entry in the CORS allowlist, which is already the deployed frontend,
+ * so links work without configuring a second copy of the same value. Only an
+ * allowlisted origin can ever be used, so this cannot be pointed at an
+ * attacker's host by a stray header.
+ */
+export function appUrl() {
+  const configured = (process.env.APP_URL || "").trim().replace(/\/$/, "");
+  const allowed = corsOrigins();
+  if (configured) {
+    if (allowed.includes(configured)) return configured;
+    console.warn("APP_URL is not present in CORS_ORIGINS; falling back to the allowlist.");
+  }
+  return allowed.find((origin) => origin.startsWith("https://")) || allowed[0] || "";
+}
+
 export function runtimeConfig() {
   return {
     nodeEnv: process.env.NODE_ENV || "development",

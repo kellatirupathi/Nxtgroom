@@ -206,3 +206,128 @@ export function sendEvaluationEmail(toEmail, report) {
 export function sendCheckoutEmail(toEmail, report) {
   return sendEmail(toEmail, buildCheckoutEmail(report));
 }
+
+const ROLE_LABELS = {
+  SUPER_ADMIN: "Super Administrator",
+  ADMIN: "Administrator",
+  BOA: "BOA",
+};
+
+function roleLabel(role) {
+  return ROLE_LABELS[role] || "user";
+}
+
+/**
+ * Invitation for an account created without a password. The link is the only
+ * way in, so it is stated plainly along with when it stops working.
+ */
+export function buildAccountInviteEmail({ name, role, appUrl, token, expiresInDays = 7 }) {
+  const person = name || "there";
+  const link = `${appUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  const expiry = `This link expires in ${expiresInDays} days and can be used once.`;
+
+  return {
+    subject: "Your FacultyTrack account - set your password",
+    text: [
+      `Hello ${person},`,
+      "",
+      `A FacultyTrack account has been created for you as a ${roleLabel(role)}.`,
+      "",
+      "Choose your password to activate the account:",
+      link,
+      "",
+      expiry,
+      "If you were not expecting this email, you can ignore it.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello ${escapeHtml(person)},</p>
+      <p>A FacultyTrack account has been created for you as a <strong>${escapeHtml(roleLabel(role))}</strong>.</p>
+      <p><a href="${escapeHtml(link)}">Choose your password to activate the account</a></p>
+      <p style="color:#475569;font-size:13px">${escapeHtml(expiry)}<br>If you were not expecting this email, you can ignore it.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+/**
+ * Sent when an administrator sets the password themselves. The password is
+ * deliberately not included: it was chosen by someone else, and email is not
+ * a safe channel for it.
+ */
+export function buildAccountCreatedEmail({ name, email, role, appUrl }) {
+  const person = name || "there";
+  const signIn = `${appUrl}/`;
+
+  return {
+    subject: "Your FacultyTrack account is ready",
+    text: [
+      `Hello ${person},`,
+      "",
+      `A FacultyTrack account has been created for you as a ${roleLabel(role)}.`,
+      `Sign in with your email: ${email}`,
+      "",
+      `An administrator has set your initial password. ${signIn}`,
+      "",
+      "If you do not have it, use \"Forgot password\" on the sign-in page to set your own.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello ${escapeHtml(person)},</p>
+      <p>A FacultyTrack account has been created for you as a <strong>${escapeHtml(roleLabel(role))}</strong>.</p>
+      <p><strong>Email:</strong> ${escapeHtml(email)}<br>
+      An administrator has set your initial password.</p>
+      <p><a href="${escapeHtml(signIn)}">Sign in to FacultyTrack</a></p>
+      <p style="color:#475569;font-size:13px">If you do not have your password, use &quot;Forgot password&quot; on the sign-in page to set your own.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+/** Self-service reset. Short-lived because it is triggered by an anonymous request. */
+export function buildPasswordResetEmail({ name, appUrl, token, expiresInMinutes = 60 }) {
+  const person = name || "there";
+  const link = `${appUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  const expiry = `This link expires in ${expiresInMinutes} minutes and can be used once.`;
+
+  return {
+    subject: "Reset your FacultyTrack password",
+    text: [
+      `Hello ${person},`,
+      "",
+      "We received a request to reset your FacultyTrack password.",
+      "",
+      "Choose a new password:",
+      link,
+      "",
+      expiry,
+      "If you did not request this, ignore this email. Your password will not change.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello ${escapeHtml(person)},</p>
+      <p>We received a request to reset your FacultyTrack password.</p>
+      <p><a href="${escapeHtml(link)}">Choose a new password</a></p>
+      <p style="color:#475569;font-size:13px">${escapeHtml(expiry)}<br>If you did not request this, ignore this email. Your password will not change.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+export function sendAccountInviteEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildAccountInviteEmail(payload));
+}
+
+export function sendAccountCreatedEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildAccountCreatedEmail(payload));
+}
+
+export function sendPasswordResetEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildPasswordResetEmail(payload));
+}

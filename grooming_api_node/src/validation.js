@@ -9,7 +9,12 @@ export const boaSchema = z.object({
   employee_id: z.string().trim().min(1).max(50),
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-  password: z.string().min(12).max(128),
+  // Omitted means "invite them to choose their own"; the route then emails a
+  // one-time link instead of storing a password nobody selected.
+  password: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().min(12).max(128).optional()
+  ),
   college_id: z.string().trim().min(1).max(100),
 });
 
@@ -71,7 +76,12 @@ export function validate(schema) {
 export const adminSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-  password: z.string().min(12).max(128),
+  // Optional for the same reason as boaSchema: a blank password means the new
+  // administrator receives an invitation link instead.
+  password: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().min(12).max(128).optional()
+  ),
 });
 
 export const adminUpdateSchema = z.object({

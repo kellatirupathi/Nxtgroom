@@ -4,10 +4,12 @@ import BottomNav from './components/BottomNav';
 import EvaluateCard from './components/EvaluateCard';
 import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
+import ResetPassword from './components/ResetPassword';
 import DailyAttendanceTable from './components/DailyAttendanceTable';
 import UserManagement from './components/UserManagement';
 import SettingsPage from './components/SettingsPage';
 import { ChangePasswordModal, ProfileModal } from './components/AccountModals';
+import ForgotPasswordDialog from './components/ForgotPasswordDialog';
 import InstructorManagement from './components/InstructorManagement';
 import {
   apiFetch,
@@ -30,7 +32,7 @@ interface SessionState {
   validated: boolean;
 }
 
-type AccountModal = 'profile' | 'password' | null;
+type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
 const ADMIN_TABS = new Set(['boa-management', 'settings', 'instructor-management']);
 
@@ -43,8 +45,24 @@ function initialSession(): SessionState {
   return { token, role: token ? getSessionRole() : null, email: null, collegeId: null, validated: !token };
 }
 
+/**
+ * Reads a password link token from the URL. The app is served as a single
+ * page, so /reset-password?token=... arrives here rather than at a router.
+ */
+function initialResetToken(): string | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    if (window.location.pathname !== '/reset-password') return null;
+    const token = new URLSearchParams(window.location.search).get('token');
+    return token && token.length <= 512 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const [session, setSession] = useState(initialSession);
+  const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
   const [activeTab, setActiveTab] = useState('overview');
   const [instructors, setInstructors] = useState<Instructor[]>(() => {
     // Render the attendance list from the last session's data on first paint.
@@ -128,6 +146,23 @@ export default function App() {
     }
     setActiveTab(tab);
   };
+
+  // Checked before the auth gate: the link arrives by email and may be opened
+  // in a browser that still holds an old session, which must not hide the form.
+  if (resetToken) {
+    return (
+      <ResetPassword
+        token={resetToken}
+        onDone={() => {
+          // Drop the token from the URL so a refresh or a shared link does not
+          // reopen a form whose token is now spent.
+          window.history.replaceState(null, '', '/');
+          setResetToken(null);
+          handleLogout();
+        }}
+      />
+    );
+  }
 
   if (!session.token) {
     return <Login onLogin={handleLogin} />;
@@ -241,6 +276,15 @@ export default function App() {
             setAccountModal(null);
             handleLogout();
           }}
+          onForgotPassword={() => setAccountModal('forgot')}
+        />
+      )}
+
+      {accountModal === 'forgot' && (
+        <ForgotPasswordDialog
+          open
+          initialEmail={session.email || ''}
+          onClose={() => setAccountModal(null)}
         />
       )}
     </div>

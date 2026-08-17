@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { apiFetch, saveSession } from '../api';
 import GoogleSignInButton from './GoogleSignInButton';
+import ForgotPasswordDialog from './ForgotPasswordDialog';
 import { useToast } from './useToast';
 import type { LoginResponse, Role } from '../types';
 
@@ -14,6 +15,7 @@ export default function Login({ onLogin }: LoginProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showForgot, setShowForgot] = useState(false);
   const toast = useToast();
 
   /**
@@ -91,7 +93,16 @@ export default function Login({ onLogin }: LoginProps) {
           </div>
 
           <div>
-            <label htmlFor="login-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Password</label>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <label htmlFor="login-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Password</label>
+              <button
+                type="button"
+                onClick={() => setShowForgot(true)}
+                className="text-xs font-semibold text-indigo-600 hover:text-indigo-700 hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
             <input
               id="login-password"
               required
@@ -122,6 +133,12 @@ export default function Login({ onLogin }: LoginProps) {
           disabled={loading}
         />
       </div>
+
+      <ForgotPasswordDialog
+        open={showForgot}
+        initialEmail={username}
+        onClose={() => setShowForgot(false)}
+      />
     </main>
   );
 }
