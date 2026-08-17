@@ -8,11 +8,14 @@ import ResetPassword from './components/ResetPassword';
 import BrandedLoader from './components/BrandedLoader';
 import {
   currentTabFromLocation,
+  publicReportFromLocation,
   pushTabPath,
   recordIdFromLocation,
   replaceTabPath,
   RESET_PASSWORD_PATH,
+  type PublicReportRoute,
 } from './routes';
+import PublicReportPage from './components/PublicReportPage';
 import DailyAttendanceTable from './components/DailyAttendanceTable';
 import UserManagement from './components/UserManagement';
 import SettingsPage from './components/SettingsPage';
@@ -69,6 +72,9 @@ function initialResetToken(): string | null {
 }
 
 export default function App() {
+  // Resolved once: the report route is decided by the URL alone and never
+  // changes without a full navigation.
+  const [publicReport] = useState<PublicReportRoute | null>(publicReportFromLocation);
   const [session, setSession] = useState(initialSession);
   const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
   // Seed from the URL so a refresh or a shared link opens the right screen.
@@ -215,6 +221,19 @@ export default function App() {
     // it and the detail page would lose the record it was asked for.
     replaceTabPath(allowed, recordIdFromLocation() || undefined);
   }, [session.validated, session.token, session.role]);
+
+  // Checked before everything else, including the session validation gate: the
+  // recipient has no account, and an administrator opening the link from their
+  // own browser must see the report rather than the dashboard.
+  if (publicReport) {
+    return (
+      <PublicReportPage
+        token={publicReport.token}
+        kind={publicReport.kind}
+        date={publicReport.date}
+      />
+    );
+  }
 
   // Checked before the auth gate: the link arrives by email and may be opened
   // in a browser that still holds an old session, which must not hide the form.

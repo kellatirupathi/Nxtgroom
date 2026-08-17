@@ -38,6 +38,26 @@ const PATH_TO_TAB = new Map<string, Tab>(
 /** Paths owned by the shell rather than by a tab. */
 export const RESET_PASSWORD_PATH = '/reset-password';
 
+export interface PublicReportRoute {
+  token: string;
+  kind: 'day' | 'week';
+  date: string;
+}
+
+/**
+ * Matches /reports/<token>/day|week/<YYYY-MM-DD>, the links sent by email.
+ * These are opened by instructors who have no account, so they are recognised
+ * before the auth gate rather than by a tab.
+ */
+export function publicReportFromLocation(): PublicReportRoute | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(
+    /^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/,
+  );
+  if (!match) return null;
+  return { token: match[1], kind: match[2] as 'day' | 'week', date: match[3] };
+}
+
 export function pathForTab(tab: string, recordId?: string): string {
   const base = TAB_TO_PATH[tab as Tab] ?? TAB_TO_PATH[TABS.OVERVIEW];
   // The detail view addresses one record, so its id belongs in the URL:

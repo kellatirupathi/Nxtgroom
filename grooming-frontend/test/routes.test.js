@@ -73,3 +73,26 @@ test('record ids are encoded so an unusual id cannot break the path', () => {
     '/daily-records/record/a%2Fb%20c',
   );
 });
+
+test('emailed report links are recognised before the auth gate', () => {
+  // These are opened by instructors with no account. Falling through to the
+  // tab map sent them to the dashboard instead of their report.
+  const path = '/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/day/2026-08-17';
+  const match = path.match(/^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/);
+  assert.ok(match, 'the real emailed link must match');
+  assert.equal(match[1], 'LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs');
+  assert.equal(match[2], 'day');
+  assert.equal(match[3], '2026-08-17');
+});
+
+test('malformed report links are not treated as reports', () => {
+  const re = /^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/;
+  for (const bad of [
+    '/reports/short/day/2026-08-17',
+    '/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/day/17-08-2026',
+    '/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/month/2026-08-17',
+    '/daily-records',
+  ]) {
+    assert.equal(re.test(bad), false, `${bad} must not match`);
+  }
+});
