@@ -124,6 +124,26 @@ export async function getPhotoUrl(key, { expiresIn = 900 } = {}) {
   }
 }
 
+/**
+ * Downloads a photo as a Buffer for analysis. R2 is the only copy of the
+ * image, so the worker reads from here rather than from MongoDB.
+ */
+export async function downloadPhoto(key) {
+  if (!isPhotoStorageConfigured()) throw new Error("Photo storage is not configured");
+  if (!key) throw new Error("Photo key is required");
+  const response = await getClient().send(
+    new GetObjectCommand({ Bucket: config().bucket, Key: key })
+  );
+  if (!response.Body) throw new Error(`Photo ${key} has no content`);
+  // transformToByteArray buffers the whole object, which is correct here:
+  // photos are capped at a few hundred KB after normalization.
+  const bytes = await response.Body.transformToByteArray();
+  return {
+    buffer: Buffer.from(bytes),
+    mimeType: response.ContentType || "image/jpeg",
+  };
+}
+
 /** Removes a photo, used when its retention window closes. */
 export async function deletePhoto(key) {
   if (!isPhotoStorageConfigured() || !key) return { deleted: false };

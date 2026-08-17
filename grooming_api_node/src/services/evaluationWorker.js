@@ -4,6 +4,7 @@ import { PROMPT_VERSION } from "../prompts.js";
 import { evaluateImage } from "./visionEngine.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { downloadPhoto } from "./photoStorage.js";
 
 const WORKER_ID = randomUUID();
 const EVALUATION_OUTBOX_FIELD = "_private_evaluation_outbox";
@@ -67,7 +68,11 @@ export async function enqueueEvaluation(db, payload) {
         _id: jobId,
         attendance_id: payload.attendanceId,
         instructor: payload.instructor,
-        image: payload.imageBuffer,
+        // The job carries a pointer, not the image. Bytes live only in R2.
+        // imageBuffer is still honoured so jobs queued before the move to
+        // object storage continue to run instead of failing on retry.
+        photo_key: payload.photoKey || null,
+        ...(payload.imageBuffer ? { image: payload.imageBuffer } : {}),
         mime_type: payload.mimeType,
         check_in_time: payload.checkInTime,
         status: "queued",
@@ -117,7 +122,10 @@ export async function reconcileEvaluationOutbox(db) {
     await terminalizeEvaluationOutbox(db, attendance, payload, "EVALUATION_DEADLINE_EXCEEDED");
     return true;
   }
-  if (!payload?.image || !payload?.mime_type || !payload?.instructor) {
+  // A recovered outbox must name its image: either an R2 key (current) or
+  // inline bytes (queued before photos moved to object storage).
+  const hasPhotoSource = Boolean(payload?.photo_key || payload?.image);
+  if (!hasPhotoSource || !payload?.mime_type || !payload?.instructor) {
     await terminalizeEvaluationOutbox(db, attendance, payload, "INVALID_EVALUATION_OUTBOX");
     return true;
   }
@@ -125,6 +133,7 @@ export async function reconcileEvaluationOutbox(db) {
   await enqueueEvaluation(db, {
     attendanceId: attendance._id,
     instructor: payload.instructor,
+    photoKey: payload.photo_key || null,
     imageBuffer: payload.image,
     mimeType: payload.mime_type,
     checkInTime: payload.check_in_time || attendance.check_in_time,
@@ -600,9 +609,14 @@ export function startEvaluationWorker(db) {
             const recovered = await recoverClaimedEvaluation(db, job);
             if (recovered === null) {
               monitor.progress("vision_request_started");
+              // Fetch from R2 at analysis time. Older jobs queued before this
+              // change still carry inline bytes, so honour those too.
+              const source = job.photo_key
+                ? await downloadPhoto(job.photo_key)
+                : { buffer: asBuffer(job.image), mimeType: job.mime_type };
               const report = await evaluateImage(
-                asBuffer(job.image),
-                job.mime_type,
+                source.buffer,
+                source.mimeType || job.mime_type,
                 job.instructor.gender
               );
               monitor.progress("vision_request_completed");

@@ -8,6 +8,7 @@ import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation } from "../services/evaluationWorker.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
+import { buildPhotoKey, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
 import {
   asyncRoute,
   createDocument,
@@ -116,7 +117,15 @@ function lookupIdVariants(ids) {
  */
 export async function commitGuardedCheckIn(
   db,
-  { currentUser, instructorId, coordinates, normalizedImage },
+  {
+    currentUser,
+    instructorId,
+    coordinates,
+    normalizedImage,
+    photoKey = null,
+    locationAccuracyM = null,
+    capturedAt = null,
+  },
   runTransaction = withMongoTransaction
 ) {
   return runTransaction(async (session) => {
@@ -153,7 +162,9 @@ export async function commitGuardedCheckIn(
         gender: instructor.gender,
         collegeId: String(instructor.college_id),
       },
-      image: normalizedImage.buffer,
+      // Only the R2 key travels through the queue. The worker downloads the
+      // image when it runs, so no image bytes are ever written to MongoDB.
+      photo_key: photoKey,
       mime_type: normalizedImage.mimeType,
       check_in_time: now,
       deadline_at: evaluationDeadline,
@@ -169,6 +180,12 @@ export async function commitGuardedCheckIn(
       check_in_time: now,
       check_out_time: null,
       location_coordinates: coordinates,
+      // Accuracy is kept next to the coordinates so a reading from a coarse
+      // IP lookup is distinguishable from a real GPS fix.
+      location_accuracy_m: locationAccuracyM,
+      check_in_photo_key: photoKey,
+      check_in_photo_captured_at: capturedAt || now,
+      check_out_photo_key: null,
       status: "pending",
       compliance_status: null,
       remarks: "AI analysis is in progress.",
@@ -238,6 +255,34 @@ attendanceRouter.post(
       });
     }
 
+    // The photo goes to R2 and only its key is stored, so MongoDB never holds
+    // image bytes. Upload before the transaction: a failure here should stop
+    // the check-in rather than leave a record pointing at a missing object.
+    const now = new Date();
+    const photoKey = buildPhotoKey({
+      instructorId: String(instructor._id),
+      kind: "checkin",
+      mimeType: normalizedImage.mimeType,
+      now,
+    });
+    const upload = await uploadPhoto({
+      key: photoKey,
+      body: normalizedImage.buffer,
+      mimeType: normalizedImage.mimeType,
+      metadata: {
+        instructor_id: String(instructor._id),
+        kind: "checkin",
+        captured_at: now.toISOString(),
+        coordinates: coordinates || "",
+        accuracy_m: req.body.location_accuracy_m || "",
+      },
+    });
+    if (!upload.stored) {
+      return res.status(503).json({
+        detail: "Photo storage is unavailable right now. Please try again in a moment.",
+      });
+    }
+
     let committed;
     try {
       committed = await commitGuardedCheckIn(db, {
@@ -245,6 +290,9 @@ attendanceRouter.post(
         instructorId,
         coordinates,
         normalizedImage,
+        photoKey,
+        locationAccuracyM: Number.parseInt(req.body.location_accuracy_m, 10) || null,
+        capturedAt: now,
       });
     } catch (error) {
       if (error.code === 11000) {
@@ -268,7 +316,7 @@ attendanceRouter.post(
       await enqueueEvaluation(db, {
         attendanceId: attendance._id,
         instructor: evaluationPayload.instructor,
-        imageBuffer: evaluationPayload.image,
+        photoKey: evaluationPayload.photo_key,
         mimeType: evaluationPayload.mime_type,
         checkInTime: evaluationPayload.check_in_time,
         deadlineAt: evaluationPayload.deadline_at,
@@ -286,6 +334,9 @@ attendanceRouter.post(
 
 attendanceRouter.post(
   "/check-out",
+  // Accepts multipart so a check-out photo can be attached. The photo is
+  // optional: check-out must still work when a camera is unavailable.
+  upload.single("file"),
   validate(checkoutSchema),
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
@@ -320,8 +371,43 @@ attendanceRouter.post(
       deadline_at: notificationDeadline,
       created_at: checkOutTime,
     };
+    // Store the check-out photo when one was supplied. A failure here is
+    // logged and skipped rather than blocking the check-out itself, which is
+    // the record that actually matters for attendance.
+    let checkOutPhotoKey = null;
+    if (req.file) {
+      const validation = validateImageUpload(req.file);
+      if (!validation.valid) return res.status(400).json({ detail: validation.detail });
+      try {
+        const normalized = await normalizeInstructorImage(req.file.buffer);
+        const key = buildPhotoKey({
+          instructorId: String(candidate.instructor_id),
+          kind: "checkout",
+          mimeType: normalized.mimeType,
+          now: checkOutTime,
+        });
+        const upload = await uploadPhoto({
+          key,
+          body: normalized.buffer,
+          mimeType: normalized.mimeType,
+          metadata: {
+            instructor_id: String(candidate.instructor_id),
+            kind: "checkout",
+            captured_at: checkOutTime.toISOString(),
+            coordinates: parseCoordinates(req.body?.location_coordinates) || "",
+          },
+        });
+        if (upload.stored) checkOutPhotoKey = key;
+      } catch (error) {
+        console.error(`Check-out photo not stored: ${error?.name || "Error"}`);
+      }
+    }
+
+    const checkoutCoordinates = parseCoordinates(req.body?.location_coordinates);
     const checkoutSet = {
       check_out_time: checkOutTime,
+      ...(checkOutPhotoKey ? { check_out_photo_key: checkOutPhotoKey } : {}),
+      ...(checkoutCoordinates ? { check_out_coordinates: checkoutCoordinates } : {}),
       updated_at: checkOutTime,
       checkout_email_status: recipient ? "outbox_pending" : "skipped_no_email",
       ...(recipient ? { _private_checkout_outbox: checkoutPayload } : {}),
@@ -449,5 +535,69 @@ attendanceRouter.get(
       return res.status(404).json({ detail: "Evaluation is still pending or unavailable" });
     }
     return res.json(serializeDocument(evaluation));
+  })
+);
+
+/**
+ * Lightweight status for the check-in screen to poll while analysis runs.
+ * Deliberately small: it is requested every few seconds and must not carry
+ * the full evaluation payload.
+ */
+attendanceRouter.get(
+  "/:attendanceId/status",
+  asyncRoute(async (req, res) => {
+    const attendance = await req.app.locals.db.collection("attendance").findOne(
+      { _id: idMatch(req.params.attendanceId), ...attendanceScope(req.currentUser) },
+      {
+        projection: {
+          status: 1,
+          compliance_status: 1,
+          remarks: 1,
+          evaluation_queue_status: 1,
+          requires_human_review: 1,
+          updated_at: 1,
+        },
+      }
+    );
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+
+    return res.json({
+      attendance_id: String(attendance._id),
+      status: attendance.status || "pending",
+      compliance_status: attendance.compliance_status || null,
+      remarks: attendance.remarks || null,
+      queue_status: attendance.evaluation_queue_status || null,
+      requires_human_review: Boolean(attendance.requires_human_review),
+      // Lets the client stop polling instead of guessing from the status text.
+      settled: attendance.status !== "pending",
+      updated_at: attendance.updated_at || null,
+    });
+  })
+);
+
+/**
+ * Time-limited link to a stored photo. The bucket is private, so this is the
+ * only way to view one; the URL is generated per request and expires, rather
+ * than being stored anywhere it could leak.
+ */
+attendanceRouter.get(
+  "/:attendanceId/photo/:kind",
+  asyncRoute(async (req, res) => {
+    const kind = req.params.kind === "checkout" ? "checkout" : "checkin";
+    const attendance = await req.app.locals.db.collection("attendance").findOne(
+      { _id: idMatch(req.params.attendanceId), ...attendanceScope(req.currentUser) },
+      { projection: { check_in_photo_key: 1, check_out_photo_key: 1 } }
+    );
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+
+    const key = kind === "checkout"
+      ? attendance.check_out_photo_key
+      : attendance.check_in_photo_key;
+    if (!key) return res.status(404).json({ detail: "No photo was stored for this record" });
+
+    const url = await getPhotoUrl(key, { expiresIn: 900 });
+    if (!url) return res.status(503).json({ detail: "Photo storage is unavailable right now" });
+
+    return res.json({ url, expires_in: 900 });
   })
 );

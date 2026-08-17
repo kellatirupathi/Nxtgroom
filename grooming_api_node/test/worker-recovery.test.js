@@ -49,7 +49,8 @@ test("evaluation outbox reconciliation creates one deterministic job and clears 
     check_in_time: checkInTime,
     _private_evaluation_outbox: {
       instructor: { name: "Instructor", email: "instructor@example.com", gender: "MALE" },
-      image: Buffer.from("normalized-image"),
+      // Photos live in R2; the outbox carries only the object key.
+      photo_key: "attendance/2026/08/17/instructor-1-checkin-abc123.jpg",
       mime_type: "image/jpeg",
       check_in_time: checkInTime,
       deadline_at: deadlineAt,
@@ -76,7 +77,7 @@ test("evaluation outbox reconciliation creates one deterministic job and clears 
   await enqueueEvaluation(db, {
     attendanceId: attendance._id,
     instructor: attendance._private_evaluation_outbox.instructor,
-    imageBuffer: attendance._private_evaluation_outbox.image,
+    photoKey: attendance._private_evaluation_outbox.photo_key,
     mimeType: "image/jpeg",
     checkInTime: attendance.check_in_time,
   });
@@ -86,7 +87,13 @@ test("evaluation outbox reconciliation creates one deterministic job and clears 
     { _id: "attendance-1:evaluation" },
     { _id: "attendance-1:evaluation" },
   ]);
-  assert.ok(jobWrites[0][1].$setOnInsert.image.equals(Buffer.from("normalized-image")));
+  const queued = jobWrites[0][1].$setOnInsert;
+  assert.equal(queued.photo_key, "attendance/2026/08/17/instructor-1-checkin-abc123.jpg");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(queued, "image"),
+    false,
+    "image bytes must never be written to MongoDB",
+  );
   assert.equal(attendanceWrites[0][1].$unset._private_evaluation_outbox, "");
 });
 

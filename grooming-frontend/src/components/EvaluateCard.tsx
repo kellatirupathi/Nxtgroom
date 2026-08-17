@@ -1,7 +1,16 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Camera, UploadCloud, RefreshCw, LogOut, MapPin } from 'lucide-react';
-import { apiFetch, apiJson } from '../api';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
+import { apiFetch } from '../api';
 import { validatePhoto } from '../imageValidation';
+import { preparePhoto } from '../lib/imageCapture';
+import {
+  describeAccuracy,
+  formatCoordinates,
+  getCachedFix,
+  requestFix,
+  type Fix,
+} from '../lib/location';
+import { useToast } from './useToast';
 import type { Instructor } from '../types';
 
 interface EvaluateCardProps {
@@ -9,33 +18,18 @@ interface EvaluateCardProps {
   fetchInstructors: () => Promise<void> | void;
 }
 
-interface CoordinatesResult {
-  coordinates: string | null;
-  error: string;
-}
+/** Poll cadence while an analysis is running. */
+const STATUS_POLL_MS = 3000;
+/** Stop polling after this long so a stuck job cannot poll forever. */
+const STATUS_POLL_TIMEOUT_MS = 3 * 60_000;
 
-function getCoordinates(): Promise<CoordinatesResult> {
-  return new Promise<CoordinatesResult>((resolve) => {
-    if (!navigator.geolocation) {
-      resolve({ coordinates: null, error: 'Location is not supported by this device.' });
-      return;
-    }
-    try {
-      navigator.geolocation.getCurrentPosition(
-        (position) => resolve({
-          coordinates: `${position.coords.latitude},${position.coords.longitude}`,
-          error: '',
-        }),
-        () => resolve({
-          coordinates: null,
-          error: 'Location was unavailable. Check-in will continue without coordinates.',
-        }),
-        { enableHighAccuracy: true, timeout: 8_000, maximumAge: 60_000 },
-      );
-    } catch {
-      resolve({ coordinates: null, error: 'Location could not be accessed. Check-in will continue without coordinates.' });
-    }
-  });
+interface AnalysisStatus {
+  attendance_id: string;
+  status: string;
+  compliance_status: string | null;
+  remarks: string | null;
+  settled: boolean;
+  requires_human_review: boolean;
 }
 
 export default function EvaluateCard({ instructors, fetchInstructors }: EvaluateCardProps) {
@@ -46,11 +40,75 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
+  const [facing, setFacing] = useState<'user' | 'environment'>('user');
+  const [analysis, setAnalysis] = useState<AnalysisStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const toast = useToast();
 
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
   }, [preview]);
+
+  /**
+   * Ask for location once when the screen opens, not on every check-in.
+   * Repeated prompts are slow and train people to dismiss the dialog.
+   */
+  useEffect(() => {
+    let disposed = false;
+    if (getCachedFix()) return undefined;
+    setLocationStatus('Getting your location…');
+    requestFix().then((result) => {
+      if (disposed) return;
+      setFix(result);
+      setLocationStatus(
+        result ? '' : 'Location unavailable. Attendance will be recorded without coordinates.',
+      );
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  /**
+   * Follow one analysis to completion so the result appears without a reload.
+   * Polling stops as soon as the record settles, or after a cap so a stuck
+   * job cannot poll indefinitely.
+   */
+  const trackAnalysis = useCallback((attendanceId: string) => {
+    const startedAt = Date.now();
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
+      if (Date.now() - startedAt > STATUS_POLL_TIMEOUT_MS) {
+        setAnalysis((current) => (current ? { ...current, status: 'timeout' } : current));
+        return;
+      }
+      try {
+        const status = await apiFetch<AnalysisStatus>(
+          `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status`,
+        );
+        setAnalysis(status);
+        if (status.settled) {
+          const compliant = status.compliance_status === 'COMPLIANT';
+          if (status.requires_human_review) {
+            toast.warning('Analysis needs a manual review', { detail: status.remarks || undefined });
+          } else if (compliant) {
+            toast.success('Grooming check passed', { detail: status.remarks || undefined });
+          } else {
+            toast.warning('Grooming issues found', { detail: status.remarks || undefined });
+          }
+          return;
+        }
+      } catch {
+        // A dropped poll is not worth surfacing; the next one usually works.
+      }
+      timer = setTimeout(poll, STATUS_POLL_MS);
+    };
+
+    timer = setTimeout(poll, STATUS_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   const resetPhoto = () => {
     setFile(null);
@@ -83,27 +141,51 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
     setLoading(true);
     setMessage({ type: '', text: '' });
-    setLocationStatus('Getting location…');
-    const location = await getCoordinates();
-    setLocationStatus(location.error);
+    setAnalysis(null);
+
+    // Use the fix captured when the screen opened rather than waiting on the
+    // GPS now, so submitting never stalls behind a location lookup.
+    const currentFix = fix ?? getCachedFix();
+    const coordinates = formatCoordinates(currentFix);
 
     const formData = new FormData();
     formData.append('instructor_id', selectedUuid);
-    formData.append('file', file as File);
-    if (location.coordinates) formData.append('location_coordinates', location.coordinates);
+    // Shrink in the browser first: the server resizes to the same bound
+    // anyway, so uploading the full-resolution original wastes the upload.
+    const prepared = await preparePhoto(file as File);
+    formData.append('file', prepared.file);
+    if (coordinates) {
+      formData.append('location_coordinates', coordinates);
+      formData.append('location_accuracy_m', String(currentFix?.accuracyMetres ?? ''));
+    }
 
     try {
-      const result = await apiFetch<{ message?: string }>('/api/v2/attendance/check-in', {
-        method: 'POST',
-        body: formData,
-        timeoutMs: 75_000,
-      });
-      setMessage({ type: 'success', text: result?.message || 'Check-in queued for AI analysis.' });
+      const result = await apiFetch<{ message?: string; attendance_id?: string }>(
+        '/api/v2/attendance/check-in',
+        { method: 'POST', body: formData, timeoutMs: 75_000 },
+      );
+      setMessage({ type: 'success', text: result?.message || 'Check-in recorded. Analysis is running.' });
+      toast.success('Check-in recorded', { detail: 'Grooming analysis is running in the background.' });
       resetPhoto();
       setSelectedUuid('');
+      if (result?.attendance_id) {
+        setAnalysis({
+          attendance_id: result.attendance_id,
+          status: 'pending',
+          compliance_status: null,
+          remarks: null,
+          settled: false,
+          requires_human_review: false,
+        });
+        trackAnalysis(result.attendance_id);
+      }
       void fetchInstructors();
+      // Refresh the fix quietly for the next check-in without blocking this one.
+      void requestFix({ force: true }).then(setFix);
     } catch (error) {
-      setMessage({ type: 'error', text: `Check-in failed: ${error instanceof Error ? error.message : String(error)}` });
+      const text = error instanceof Error ? error.message : String(error);
+      setMessage({ type: 'error', text: `Check-in failed: ${text}` });
+      toast.error('Check-in failed', { detail: text });
     } finally {
       setLoading(false);
     }
@@ -118,15 +200,31 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     setCheckoutLoading(true);
     setMessage({ type: '', text: '' });
     try {
-      const result = await apiJson<{ message?: string }>('/api/v2/attendance/check-out', {
+      // Multipart so an optional check-out photo rides along. Check-out still
+      // succeeds without one.
+      const formData = new FormData();
+      formData.append('instructor_id', selectedUuid);
+      if (file) {
+        const prepared = await preparePhoto(file);
+        formData.append('file', prepared.file);
+      }
+      const currentFix = fix ?? getCachedFix();
+      const coordinates = formatCoordinates(currentFix);
+      if (coordinates) formData.append('location_coordinates', coordinates);
+
+      const result = await apiFetch<{ message?: string }>('/api/v2/attendance/check-out', {
         method: 'POST',
-        body: { instructor_id: selectedUuid },
+        body: formData,
       });
       setMessage({ type: 'success', text: result?.message || 'Check-out completed.' });
+      toast.success('Check-out recorded');
+      resetPhoto();
       setSelectedUuid('');
       void fetchInstructors();
     } catch (error) {
-      setMessage({ type: 'error', text: `Check-out failed: ${error instanceof Error ? error.message : String(error)}` });
+      const text = error instanceof Error ? error.message : String(error);
+      setMessage({ type: 'error', text: `Check-out failed: ${text}` });
+      toast.error('Check-out failed', { detail: text });
     } finally {
       setCheckoutLoading(false);
     }
@@ -170,14 +268,30 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         </div>
 
         <div className="flex-1 flex flex-col mb-6">
-          <label htmlFor="check-in-photo" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Check-In Photo</label>
+          <div className="flex items-center justify-between mb-2">
+            <label htmlFor="check-in-photo" className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Check-In Photo</label>
+            {/* Grooming shots are usually selfies, so the front camera is the
+                default, but the rear camera stays one tap away. */}
+            <button
+              type="button"
+              onClick={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
+              className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <SwitchCamera size={14} aria-hidden="true" />
+              {facing === 'user' ? 'Front camera' : 'Back camera'}
+            </button>
+          </div>
           <div className="flex-1 min-h-[240px] border-3 border-dashed border-slate-200 rounded-md flex flex-col items-center justify-center bg-slate-50/50 relative overflow-hidden transition-all hover:border-indigo-400 hover:bg-indigo-50/30 group/drop">
             <input
+              // Remounting on facing change is required: browsers read the
+              // capture attribute when the picker opens, so mutating it on a
+              // live input has no effect on which camera launches.
+              key={facing}
               ref={fileInputRef}
               id="check-in-photo"
               type="file"
               accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-              capture="environment"
+              capture={facing}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               onChange={handleFileChange}
             />
@@ -195,10 +309,52 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           </div>
         </div>
 
+        {/* Show the accuracy, not just that a location exists: a 3km IP-based
+            reading and a 5m GPS fix look identical without it. */}
+        {fix && !locationStatus && (
+          <p className="text-xs text-slate-500 font-medium mb-3 flex items-center gap-1">
+            <MapPin size={12} aria-hidden="true" />
+            Location ready {describeAccuracy(fix) ? `(${describeAccuracy(fix)})` : ''}
+          </p>
+        )}
+
         {locationStatus && (
           <p role="status" className="text-xs text-indigo-600 font-bold mb-3 flex items-center gap-1">
             <MapPin size={12} aria-hidden="true" /> {locationStatus}
           </p>
+        )}
+
+        {analysis && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={`mb-4 rounded-md border p-3 text-sm ${
+              analysis.settled
+                ? analysis.compliance_status === 'COMPLIANT'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  : 'border-amber-200 bg-amber-50 text-amber-800'
+                : 'border-indigo-200 bg-indigo-50 text-indigo-800'
+            }`}
+          >
+            <div className="flex items-center gap-2 font-semibold">
+              {!analysis.settled && <RefreshCw size={14} className="animate-spin" aria-hidden="true" />}
+              {analysis.status === 'timeout'
+                ? 'Analysis is taking longer than usual'
+                : analysis.settled
+                  ? analysis.requires_human_review
+                    ? 'Needs manual review'
+                    : analysis.compliance_status === 'COMPLIANT'
+                      ? 'Grooming check passed'
+                      : 'Grooming issues found'
+                  : 'Analysing photo…'}
+            </div>
+            {analysis.remarks && <p className="mt-1 text-xs opacity-90">{analysis.remarks}</p>}
+            {analysis.status === 'timeout' && (
+              <p className="mt-1 text-xs opacity-90">
+                It will finish in the background. Check Daily Records shortly.
+              </p>
+            )}
+          </div>
         )}
 
         <div className="flex gap-4">
