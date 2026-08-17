@@ -138,7 +138,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       employeeId: '--',
       role: admin.role,
       collegeId: '',
-      collegeName: 'All colleges',
+      collegeName: 'All institutes',
       createdAt: admin.created_at,
       isSuperAdmin: admin.role === 'SUPER_ADMIN',
     }));
@@ -150,7 +150,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       employeeId: boa.employee_id,
       role: 'BOA',
       collegeId: String(boa.college_id),
-      collegeName: collegeNames.get(String(boa.college_id)) || 'Unknown college',
+      collegeName: collegeNames.get(String(boa.college_id)) || 'Unknown institute',
       createdAt: boa.created_at,
       isSuperAdmin: false,
     }));
@@ -406,7 +406,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
                 <th className="p-4">Role</th>
                 <th className="p-4 hidden md:table-cell">Email</th>
                 <th className="p-4 hidden xl:table-cell">Employee ID</th>
-                <th className="p-4 hidden lg:table-cell">College</th>
+                <th className="p-4 hidden lg:table-cell">Institute</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -491,9 +491,9 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
                     <input id="user-employee" required maxLength={50} className={inputClass} value={form.employee_id} onChange={(event) => setForm({ ...form, employee_id: event.target.value })} />
                   </div>
                   <div>
-                    <label htmlFor="user-college" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">College</label>
+                    <label htmlFor="user-college" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Institute</label>
                     <select id="user-college" required className={inputClass} value={form.college_id} onChange={(event) => setForm({ ...form, college_id: event.target.value })}>
-                      <option value="">Select a college</option>
+                      <option value="">Select an institute</option>
                       {colleges.map((college) => <option key={college._id} value={college._id}>{college.name}</option>)}
                     </select>
                   </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { Building2, Edit2, Plus, Trash2 } from 'lucide-react';
+import { Building2, Edit2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './useToast';
@@ -24,6 +24,7 @@ export default function CollegeManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [confirmTarget, setConfirmTarget] = useState<College | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const toast = useToast();
 
   const isEditMode = Boolean(editingId);
@@ -92,12 +93,12 @@ export default function CollegeManagement() {
       } else if (saved?.id) {
         setColleges((current) => [...current, { _id: saved.id as string, ...formData }]);
       }
-      toast.success(isEditMode ? 'College updated' : 'College added', { detail: formData.name });
+      toast.success(isEditMode ? 'Institute updated' : 'Institute added', { detail: formData.name });
       resetModal();
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : String(requestError);
       setError(message);
-      toast.error(isEditMode ? 'Could not update college' : 'Could not add college', { detail: message });
+      toast.error(isEditMode ? 'Could not update institute' : 'Could not add institute', { detail: message });
     } finally {
       setSubmitting(false);
     }
@@ -111,13 +112,13 @@ export default function CollegeManagement() {
       invalidateCache(COLLEGES_PATH);
       // Remove the row locally once the server confirms; no refetch needed.
       setColleges((current) => current.filter((item) => String(item._id) !== String(college._id)));
-      toast.success('College deleted', { detail: college.name });
+      toast.success('Institute deleted', { detail: college.name });
       setConfirmTarget(null);
     } catch (requestError) {
       if ((requestError as { status?: number })?.status !== 401) {
         const message = requestError instanceof Error ? requestError.message : String(requestError);
         setError(message);
-        toast.error('Could not delete college', { detail: message });
+        toast.error('Could not delete institute', { detail: message });
       }
       setConfirmTarget(null);
     } finally {
@@ -125,14 +126,55 @@ export default function CollegeManagement() {
     }
   };
 
+  /**
+   * Imports the institute list from BigQuery and assigns synced instructors to
+   * theirs. Both happen server-side; the list is reloaded afterwards rather
+   * than patched, because linking changes instructors as well.
+   */
+  const handleSync = async () => {
+    setSyncing(true);
+    setError('');
+    try {
+      const result = await apiJson<{ record_count?: number; upserted?: number; instructors_linked?: number }>(
+        '/api/v2/settings/institute-sync',
+        { method: 'POST', timeoutMs: 120_000 },
+      );
+      invalidateCache(COLLEGES_PATH);
+      invalidateCache('/api/v2/instructors');
+      await fetchColleges();
+      toast.success('Institutes synced', {
+        detail: `${result.record_count ?? 0} institutes · ${result.instructors_linked ?? 0} instructors assigned.`,
+      });
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error('Could not sync institutes', { detail: message });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <section className="w-full flex flex-col h-full animate-in fade-in duration-300" aria-labelledby="college-title">
       <div className="flex justify-between items-center mb-6 shrink-0 gap-4 flex-wrap">
         <div>
-          <h2 id="college-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2"><Building2 size={24} className="text-indigo-600" aria-hidden="true" />College Management</h2>
-          <p className="text-sm text-slate-500 mt-1">Manage partner colleges and campuses.</p>
+          <h2 id="college-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2"><Building2 size={24} className="text-indigo-600" aria-hidden="true" />Institute Management</h2>
+          <p className="text-sm text-slate-500 mt-1">Manage partner institutes and campuses.</p>
         </div>
-        <button type="button" onClick={openCreateModal} className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"><Plus size={18} aria-hidden="true" />Add New College</button>
+        <div className="flex items-center gap-2">
+          {/* Sync sits before Add: importing is the usual action, and adding
+              one by hand is the exception. */}
+          <button
+            type="button"
+            onClick={handleSync}
+            disabled={syncing || loading}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
+          >
+            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} aria-hidden="true" />
+            {syncing ? 'Syncing…' : 'Sync Data'}
+          </button>
+          <button type="button" onClick={openCreateModal} className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"><Plus size={18} aria-hidden="true" />Add New Institute</button>
+        </div>
       </div>
 
       {error && !showModal && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
@@ -140,12 +182,12 @@ export default function CollegeManagement() {
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-0 md:min-w-[700px]">
-            <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4 hidden lg:table-cell">College ID</th><th className="p-4">Name</th><th className="p-4">Location</th><th className="p-4 text-right">Actions</th></tr></thead>
+            <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4 hidden lg:table-cell">Institute ID</th><th className="p-4">Name</th><th className="p-4">Location</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">Loading colleges…</td></tr>
+                <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">Loading institutes…</td></tr>
               ) : colleges.length === 0 ? (
-                <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">No colleges found. Add one to get started.</td></tr>
+                <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">No institutes found. Sync from BigQuery or add one to get started.</td></tr>
               ) : colleges.map((college) => (
                 <tr key={college._id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 text-xs font-mono text-slate-400 hidden lg:table-cell">{college._id}</td>
@@ -168,15 +210,15 @@ export default function CollegeManagement() {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="college-dialog-title">
           <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h2 id="college-dialog-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2"><Building2 size={20} className="text-indigo-600" aria-hidden="true" />{isEditMode ? 'Edit College' : 'Add New College'}</h2>
-              <button type="button" aria-label="Close college dialog" onClick={closeModal} disabled={submitting} className="text-slate-400 hover:text-slate-600 transition-colors bg-white px-2 py-1 rounded-full border border-slate-200 shadow-sm disabled:opacity-50">×</button>
+              <h2 id="college-dialog-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2"><Building2 size={20} className="text-indigo-600" aria-hidden="true" />{isEditMode ? 'Edit Institute' : 'Add New Institute'}</h2>
+              <button type="button" aria-label="Close institute dialog" onClick={closeModal} disabled={submitting} className="text-slate-400 hover:text-slate-600 transition-colors bg-white px-2 py-1 rounded-full border border-slate-200 shadow-sm disabled:opacity-50">×</button>
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
               {error && <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
-              <div><label htmlFor="college-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">College Name</label><input id="college-name" required maxLength={120} placeholder="e.g. NxtWave Campus A" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
+              <div><label htmlFor="college-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Institute Name</label><input id="college-name" required maxLength={120} placeholder="e.g. Training Institute" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
               <div><label htmlFor="college-location" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Location</label><input id="college-location" required maxLength={160} placeholder="e.g. Hyderabad" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.location} onChange={(event) => setFormData({ ...formData, location: event.target.value })} /></div>
-              <div className="pt-4 flex gap-3"><button type="button" onClick={closeModal} disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button><button type="submit" disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 disabled:opacity-50">{submitting ? 'Saving…' : isEditMode ? 'Save Changes' : 'Add College'}</button></div>
+              <div className="pt-4 flex gap-3"><button type="button" onClick={closeModal} disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button><button type="submit" disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 disabled:opacity-50">{submitting ? 'Saving…' : isEditMode ? 'Save Changes' : 'Add Institute'}</button></div>
             </form>
           </div>
         </div>
@@ -186,9 +228,9 @@ export default function CollegeManagement() {
         open={Boolean(confirmTarget)}
         destructive
         busy={Boolean(deletingId)}
-        title="Delete college"
-        message={`Delete ${confirmTarget?.name ?? 'this college'}? This cannot be undone.`}
-        detail="Reassign active BOAs and instructors to another college first, or the delete will be refused."
+        title="Delete institute"
+        message={`Delete ${confirmTarget?.name ?? 'this institute'}? This cannot be undone.`}
+        detail="Reassign active BOAs and instructors to another institute first, or the delete will be refused."
         confirmLabel="Delete"
         onCancel={() => setConfirmTarget(null)}
         onConfirm={() => confirmTarget && handleDelete(confirmTarget)}

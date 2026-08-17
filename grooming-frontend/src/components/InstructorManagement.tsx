@@ -80,7 +80,7 @@ export default function InstructorManagement() {
   const handleCreateOrUpdate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!formData.college_id) {
-      setError('Please select a college.');
+      setError('Please select an institute.');
       return;
     }
 
@@ -354,9 +354,9 @@ export default function InstructorManagement() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign College</label>
+                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Institute</label>
                 <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.college_id} onChange={e => setFormData({...formData, college_id: e.target.value})}>
-                  <option value="" disabled>Select a college...</option>
+                  <option value="" disabled>Select an institute...</option>
                   {colleges.map(c => (
                     <option key={c._id} value={c._id}>{c.name} - {c.location}</option>
                   ))}

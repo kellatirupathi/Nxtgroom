@@ -181,7 +181,7 @@ export default function SettingsPage() {
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
       <div className="mb-5 shrink-0">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications, colleges, data sync and reporting partners.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, institutes, data sync and reporting partners.</p>
       </div>
 
       <div className="border-b border-slate-200 mb-6 shrink-0" role="tablist" aria-label="Settings sections">
@@ -204,7 +204,7 @@ export default function SettingsPage() {
             className={tabClass('colleges')}
           >
             <Building2 size={16} aria-hidden="true" />
-            Colleges
+            Institutes
           </button>
           <button
             type="button"

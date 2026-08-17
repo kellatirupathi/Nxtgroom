@@ -192,12 +192,12 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
           />
           <select
-            aria-label="Filter by college"
+            aria-label="Filter by institute"
             value={collegeFilter}
             onChange={(event) => setCollegeFilter(event.target.value)}
             className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
           >
-            <option value="">All colleges</option>
+            <option value="">All institutes</option>
             {colleges.map((college) => <option key={college} value={college}>{college}</option>)}
           </select>
           <select
@@ -246,7 +246,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                 <th className="p-4 w-[200px]">Instructor Name</th>
                 <th className="p-4 w-[150px]">Role</th>
-                <th className="p-4 w-[160px]">College</th>
+                <th className="p-4 w-[160px]">Institute</th>
                 <th className="p-4 w-[130px]">Date</th>
                 <th className="p-4 w-[110px]">Check-In</th>
                 <th className="p-4 w-[110px]">Check-Out</th>

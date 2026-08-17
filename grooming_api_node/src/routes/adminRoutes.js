@@ -37,6 +37,7 @@ import {
   isSyncConfigured,
   readSyncState,
   runInstructorSync,
+  runInstituteSync,
 } from "../services/instructorSync.js";
 import { appUrl } from "../config/env.js";
 import { rateLimit } from "express-rate-limit";
@@ -602,6 +603,29 @@ adminRouter.put(
       req.currentUser.email
     );
     return res.json(saved);
+  })
+);
+
+/**
+ * Imports the institute list from BigQuery and assigns synced instructors to
+ * theirs by name. The roster names an instructor's institute but carries no
+ * id, so without this every synced instructor stays unassigned.
+ */
+adminRouter.post(
+  "/settings/institute-sync",
+  requireSuperAdmin,
+  instructorSyncLimiter,
+  asyncRoute(async (req, res) => {
+    if (!isSyncConfigured()) {
+      return res.status(503).json({
+        detail: "BigQuery is not configured on the server. Add BIGQUERY_CREDENTIALS_JSON and retry.",
+      });
+    }
+    const result = await runInstituteSync(req.app.locals.db, {
+      triggeredBy: req.currentUser.email,
+    });
+    if (!result.ok) return res.status(502).json({ detail: result.last_sync_error, ...result });
+    return res.json(result);
   })
 );
 

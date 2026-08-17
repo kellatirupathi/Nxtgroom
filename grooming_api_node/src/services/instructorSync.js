@@ -20,6 +20,8 @@ const TABLE = "niat_instructor_managers_and_instructors_details";
  * Combining all six reaches 596, which is not worth six joins.
  */
 const EMAIL_TABLE = "niat_instructor_unit_wise_completion_and_best_attempt_details";
+/** Institutes, which FacultyTrack stores as colleges. */
+const INSTITUTE_TABLE = "niat_institute_details";
 export const SYNC_STATE_ID = "instructor_sync";
 
 /** Guards against a runaway query; the roster is a few thousand rows. */
@@ -267,6 +269,180 @@ export async function runInstructorSync(db, { triggeredBy } = {}) {
       duration_ms: Date.now() - startedAt.getTime(),
     };
     await writeSyncState(db, state);
+    return { ok: false, ...state };
+  }
+}
+
+
+/**
+ * Fetches the institute list. FacultyTrack calls these colleges internally;
+ * the warehouse and the UI both call them institutes.
+ *
+ * Note institue_location: the column is misspelled in the warehouse, so both
+ * spellings are read rather than assuming it will be corrected.
+ */
+export async function fetchInstitutes() {
+  const projectId = process.env.BIGQUERY_PROJECT_ID || credentials()?.project_id;
+  const query = `
+    SELECT
+      institute_id,
+      ANY_VALUE(institute_name)     AS institute_name,
+      ANY_VALUE(institue_location)  AS institute_location
+    FROM \`${projectId}.${DATASET}.${INSTITUTE_TABLE}\`
+    WHERE institute_id IS NOT NULL AND TRIM(institute_id) != ''
+    GROUP BY institute_id
+    LIMIT 5000
+  `;
+  const [rows] = await getClient().query({ query, location: process.env.BIGQUERY_LOCATION || undefined });
+
+  const records = [];
+  let skipped = 0;
+  for (const row of rows) {
+    const id = clean(row.institute_id);
+    const name = clean(row.institute_name);
+    // A nameless institute cannot be displayed or chosen, so it is skipped
+    // rather than stored as a blank option in every dropdown.
+    if (!id || !name) {
+      skipped += 1;
+      continue;
+    }
+    records.push({
+      institute_id: id,
+      name,
+      location: clean(row.institute_location) || "",
+    });
+  }
+  return { records, fetched: rows.length, skipped };
+}
+
+/**
+ * Upserts institutes into the colleges collection, keyed on institute_id.
+ * Additive like the instructor sync: an institute that leaves the warehouse
+ * keeps its record, because instructors and attendance still reference it.
+ */
+export async function saveInstitutes(db, records) {
+  if (!records.length) return { upserted: 0, modified: 0 };
+  const now = new Date();
+  const operations = records.map((record) => ({
+    updateOne: {
+      filter: { institute_id: record.institute_id },
+      update: {
+        $set: {
+          name: record.name,
+          location: record.location,
+          institute_id: record.institute_id,
+          source: "bigquery",
+          synced_at: now,
+          updated_at: now,
+        },
+        $setOnInsert: { _id: record.institute_id, created_at: now, deleted_at: null },
+      },
+      upsert: true,
+    },
+  }));
+
+  let upserted = 0;
+  let modified = 0;
+  for (let index = 0; index < operations.length; index += 500) {
+    const result = await db.collection("colleges").bulkWrite(
+      operations.slice(index, index + 500),
+      { ordered: false }
+    );
+    upserted += result.upsertedCount || 0;
+    modified += result.modifiedCount || 0;
+  }
+  return { upserted, modified };
+}
+
+/**
+ * Assigns synced instructors to their institute by name.
+ *
+ * The roster names an instructor's institute but carries no id, so without
+ * this every synced instructor stays unassigned — which leaves BOA scoping
+ * with nothing to filter on and stores a college of "null" on their check-ins.
+ */
+export async function linkInstructorsToInstitutes(db) {
+  const colleges = await db.collection("colleges")
+    .find({}, { projection: { _id: 1, name: 1 } })
+    .toArray();
+  const byName = new Map(colleges.map((college) => [String(college.name).trim().toLowerCase(), college._id]));
+
+  const unassigned = await db.collection("instructors")
+    .find({
+      source: "bigquery",
+      institute_name: { $type: "string" },
+      $or: [{ college_id: null }, { college_id: { $exists: false } }, { college_id: "" }],
+    })
+    .project({ _id: 1, institute_name: 1 })
+    .toArray();
+
+  const operations = [];
+  let unmatched = 0;
+  for (const instructor of unassigned) {
+    const collegeId = byName.get(String(instructor.institute_name).trim().toLowerCase());
+    if (!collegeId) {
+      unmatched += 1;
+      continue;
+    }
+    operations.push({
+      updateOne: {
+        filter: { _id: instructor._id },
+        update: { $set: { college_id: String(collegeId), updated_at: new Date() } },
+      },
+    });
+  }
+  if (!operations.length) return { linked: 0, unmatched };
+
+  let linked = 0;
+  for (let index = 0; index < operations.length; index += 500) {
+    const result = await db.collection("instructors").bulkWrite(
+      operations.slice(index, index + 500),
+      { ordered: false }
+    );
+    linked += result.modifiedCount || 0;
+  }
+  return { linked, unmatched };
+}
+
+/** Runs the institute sync and the instructor linking together. */
+export async function runInstituteSync(db, { triggeredBy } = {}) {
+  const startedAt = new Date();
+  try {
+    const { records, fetched, skipped } = await fetchInstitutes();
+    const { upserted, modified } = await saveInstitutes(db, records);
+    const { linked, unmatched } = await linkInstructorsToInstitutes(db);
+    const state = {
+      last_sync_at: new Date(),
+      last_sync_status: "success",
+      last_sync_error: null,
+      last_sync_by: triggeredBy || null,
+      record_count: records.length,
+      rows_fetched: fetched,
+      rows_skipped: skipped,
+      upserted,
+      modified,
+      instructors_linked: linked,
+      instructors_unmatched: unmatched,
+      duration_ms: Date.now() - startedAt.getTime(),
+    };
+    await db.collection("app_settings").updateOne(
+      { _id: "institute_sync" },
+      { $set: { ...state, _id: "institute_sync" } },
+      { upsert: true }
+    );
+    return { ok: true, ...state };
+  } catch (error) {
+    const state = {
+      last_sync_at: new Date(),
+      last_sync_status: "failed",
+      last_sync_error: error?.message?.slice(0, 300) || "Sync failed",
+      duration_ms: Date.now() - startedAt.getTime(),
+    };
+    await db.collection("app_settings").updateOne(
+      { _id: "institute_sync" },
+      { $set: { ...state, _id: "institute_sync" } },
+      { upsert: true }
+    );
     return { ok: false, ...state };
   }
 }
