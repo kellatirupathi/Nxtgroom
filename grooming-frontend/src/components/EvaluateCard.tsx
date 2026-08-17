@@ -1,10 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Camera, UploadCloud, RefreshCw, LogOut, MapPin } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import { validatePhoto } from '../imageValidation';
+import type { Instructor } from '../types';
 
-function getCoordinates() {
-  return new Promise((resolve) => {
+interface EvaluateCardProps {
+  instructors: Instructor[];
+  fetchInstructors: () => Promise<void> | void;
+}
+
+interface CoordinatesResult {
+  coordinates: string | null;
+  error: string;
+}
+
+function getCoordinates(): Promise<CoordinatesResult> {
+  return new Promise<CoordinatesResult>((resolve) => {
     if (!navigator.geolocation) {
       resolve({ coordinates: null, error: 'Location is not supported by this device.' });
       return;
@@ -27,15 +38,15 @@ function getCoordinates() {
   });
 }
 
-export default function EvaluateCard({ instructors, fetchInstructors }) {
+export default function EvaluateCard({ instructors, fetchInstructors }: EvaluateCardProps) {
   const [selectedUuid, setSelectedUuid] = useState('');
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [locationStatus, setLocationStatus] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
-  const fileInputRef = useRef(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
@@ -47,7 +58,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleFileChange = (event) => {
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0];
     const validationError = validatePhoto(selected);
     if (validationError) {
@@ -55,8 +66,8 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
       setMessage({ type: 'error', text: validationError });
       return;
     }
-    setFile(selected);
-    setPreview(URL.createObjectURL(selected));
+    setFile(selected as File);
+    setPreview(URL.createObjectURL(selected as File));
     setMessage({ type: '', text: '' });
   };
 
@@ -78,11 +89,11 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
 
     const formData = new FormData();
     formData.append('instructor_id', selectedUuid);
-    formData.append('file', file);
+    formData.append('file', file as File);
     if (location.coordinates) formData.append('location_coordinates', location.coordinates);
 
     try {
-      const result = await apiFetch('/api/v2/attendance/check-in', {
+      const result = await apiFetch<{ message?: string }>('/api/v2/attendance/check-in', {
         method: 'POST',
         body: formData,
         timeoutMs: 75_000,
@@ -92,7 +103,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
       setSelectedUuid('');
       await fetchInstructors();
     } catch (error) {
-      setMessage({ type: 'error', text: `Check-in failed: ${error.message}` });
+      setMessage({ type: 'error', text: `Check-in failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
       setLoading(false);
     }
@@ -107,7 +118,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
     setCheckoutLoading(true);
     setMessage({ type: '', text: '' });
     try {
-      const result = await apiJson('/api/v2/attendance/check-out', {
+      const result = await apiJson<{ message?: string }>('/api/v2/attendance/check-out', {
         method: 'POST',
         body: { instructor_id: selectedUuid },
       });
@@ -115,7 +126,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
       setSelectedUuid('');
       await fetchInstructors();
     } catch (error) {
-      setMessage({ type: 'error', text: `Check-out failed: ${error.message}` });
+      setMessage({ type: 'error', text: `Check-out failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
       setCheckoutLoading(false);
     }
@@ -148,7 +159,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
               onChange={(event) => setSelectedUuid(event.target.value)}
             >
               <option value="">-- Choose Instructor --</option>
-              {instructors.map((instructor) => (
+              {instructors.map((instructor: Instructor) => (
                 <option key={instructor._id} value={instructor._id}>{instructor.name} ({instructor.employee_id})</option>
               ))}
             </select>

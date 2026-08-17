@@ -1,19 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail, Phone, Building2, Edit2, Trash2 } from 'lucide-react';
-import { apiFetch, apiFetchAllPages, apiJson } from '../api';
+import { apiFetch, apiFetchAllPages, apiJson, invalidateCache } from '../api';
+import type { College, Instructor } from '../types';
+
+const INSTRUCTORS_PATH = '/api/v2/instructors';
+
+interface InstructorForm {
+  name: string;
+  employee_id: string;
+  role: string;
+  gender: string;
+  college_id: string;
+  email: string;
+  phone_no: string;
+  [key: string]: string;
+}
 
 export default function InstructorManagement() {
-  const [instructors, setInstructors] = useState([]);
-  const [colleges, setColleges] = useState([]);
+  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  const [colleges, setColleges] = useState<College[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<InstructorForm>({
     name: '',
     employee_id: '',
     role: 'Trainee',
@@ -23,19 +37,19 @@ export default function InstructorManagement() {
     phone_no: ''
   });
 
-  const fetchData = async ({ signal } = {}) => {
+  const fetchData = async ({ signal }: { signal?: AbortSignal } = {}) => {
     setLoading(true);
     try {
       const [instructorData, collegeData] = await Promise.all([
-        apiFetchAllPages('/api/v2/instructors', { pageSize: 100, signal }),
-        apiFetch('/api/v2/colleges', { signal }),
+        apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, { pageSize: 100, signal }),
+        apiFetch<College[]>('/api/v2/colleges', { signal }),
       ]);
       if (signal?.aborted) return;
       setInstructors(Array.isArray(instructorData) ? instructorData : []);
       setColleges(Array.isArray(collegeData) ? collegeData : []);
       setError('');
     } catch (requestError) {
-      if (!signal?.aborted && requestError.status !== 401) setError(requestError.message);
+      if (!signal?.aborted && (requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -47,7 +61,7 @@ export default function InstructorManagement() {
     return () => controller.abort();
   }, []);
 
-  const handleCreateOrUpdate = async (e) => {
+  const handleCreateOrUpdate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!formData.college_id) {
       setError('Please select a college.');
@@ -56,29 +70,31 @@ export default function InstructorManagement() {
 
     setSaving(true);
     try {
-      const path = isEditMode ? `/api/v2/instructors/${encodeURIComponent(editingId)}` : '/api/v2/instructors';
+      const path = isEditMode ? `/api/v2/instructors/${encodeURIComponent(editingId as string)}` : '/api/v2/instructors';
       await apiJson(path, {
         method: isEditMode ? 'PUT' : 'POST',
         body: formData,
       });
       closeModal();
+      invalidateCache(INSTRUCTORS_PATH);
       await fetchData();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: string) => {
     if (!window.confirm("Remove this instructor from active records?")) return;
     try {
       await apiFetch(`/api/v2/instructors/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
+      invalidateCache(INSTRUCTORS_PATH);
       await fetchData();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
     }
   };
 
@@ -89,12 +105,12 @@ export default function InstructorManagement() {
     setShowModal(true);
   };
 
-  const openEditModal = (ins) => {
+  const openEditModal = (ins: Instructor) => {
     setIsEditMode(true);
     setEditingId(ins._id);
     setFormData({
       name: ins.name,
-      employee_id: ins.employee_id,
+      employee_id: ins.employee_id || '',
       role: ins.role || 'Trainee',
       gender: String(ins.gender || 'MALE').toUpperCase(),
       college_id: ins.college_id,
@@ -110,7 +126,7 @@ export default function InstructorManagement() {
     setEditingId(null);
   };
 
-  const getCollegeName = (collegeId) => {
+  const getCollegeName = (collegeId: string) => {
     const col = colleges.find(c => c._id === collegeId);
     return col ? col.name : <span className="text-slate-400 font-mono text-xs">{collegeId}</span>;
   };
@@ -170,11 +186,11 @@ export default function InstructorManagement() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
+                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
                 </tr>
               ) : filteredInstructors.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
+                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
                 </tr>
               ) : (
                 filteredInstructors.map(ins => (
@@ -234,11 +250,11 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Name</label>
-                  <input required maxLength="120" placeholder="John Doe" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                  <input required maxLength={120} placeholder="John Doe" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Employee ID</label>
-                  <input required maxLength="50" placeholder="EMP123" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} />
+                  <input required maxLength={50} placeholder="EMP123" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} />
                 </div>
               </div>
 
@@ -273,11 +289,11 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
-                  <input required type="email" maxLength="254" placeholder="john@example.com" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                  <input required type="email" maxLength={254} placeholder="john@example.com" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Phone (Optional)</label>
-                  <input maxLength="30" placeholder="+1 234 567 8900" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.phone_no} onChange={e => setFormData({...formData, phone_no: e.target.value})} />
+                  <input maxLength={30} placeholder="+1 234 567 8900" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.phone_no} onChange={e => setFormData({...formData, phone_no: e.target.value})} />
                 </div>
               </div>
 

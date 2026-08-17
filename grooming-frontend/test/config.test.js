@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeApiBase } from '../src/config.js';
+import { normalizeApiBase } from '../src/config.ts';
 
 test('production API base requires HTTPS', () => {
   assert.throws(() => normalizeApiBase('http://api.example.com', { production: true }), /HTTPS/);

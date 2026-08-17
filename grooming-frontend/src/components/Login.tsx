@@ -1,21 +1,26 @@
-import React, { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { apiFetch, saveSession } from '../api';
+import type { LoginResponse, Role } from '../types';
 
-export default function Login({ onLogin }) {
+interface LoginProps {
+  onLogin: (token: string, role: Role) => void;
+}
+
+export default function Login({ onLogin }: LoginProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setLoading(true);
     setError('');
 
     try {
       const formData = new URLSearchParams({ username: username.trim(), password });
-      const data = await apiFetch('/api/v2/auth/login', {
+      const data = await apiFetch<LoginResponse>('/api/v2/auth/login', {
         method: 'POST',
         auth: false,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -28,7 +33,7 @@ export default function Login({ onLogin }) {
       saveSession(data.access_token, data.role);
       onLogin(data.access_token, data.role);
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
     }
@@ -58,7 +63,7 @@ export default function Login({ onLogin }) {
               id="login-email"
               required
               type="email"
-              maxLength="254"
+              maxLength={254}
               autoComplete="username"
               className="w-full rounded-md border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
               value={username}
@@ -73,7 +78,7 @@ export default function Login({ onLogin }) {
               id="login-password"
               required
               type="password"
-              maxLength="128"
+              maxLength={128}
               autoComplete="current-password"
               className="w-full rounded-md border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
               value={password}

@@ -1,17 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, Edit2, Plus, Trash2 } from 'lucide-react';
-import { apiFetch, apiJson } from '../api';
+import { apiFetch, apiJson, invalidateCache } from '../api';
+import type { College } from '../types';
+
+const COLLEGES_PATH = '/api/v2/colleges';
 
 const EMPTY_FORM = { name: '', location: '' };
 
 export default function CollegeManagement() {
-  const [colleges, setColleges] = useState([]);
+  const [colleges, setColleges] = useState<College[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
 
   const isEditMode = Boolean(editingId);
@@ -19,11 +22,11 @@ export default function CollegeManagement() {
   const fetchColleges = async () => {
     setLoading(true);
     try {
-      const data = await apiFetch('/api/v2/colleges');
+      const data = await apiFetch<College[]>(COLLEGES_PATH);
       setColleges(Array.isArray(data) ? data : []);
       setError('');
     } catch (requestError) {
-      if (requestError.status !== 401) setError(requestError.message);
+      if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
     }
@@ -52,40 +55,42 @@ export default function CollegeManagement() {
     setShowModal(true);
   };
 
-  const openEditModal = (college) => {
+  const openEditModal = (college: College) => {
     setEditingId(String(college._id));
     setFormData({ name: college.name || '', location: college.location || '' });
     setError('');
     setShowModal(true);
   };
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
     setError('');
     try {
       await apiJson(
-        isEditMode ? `/api/v2/colleges/${encodeURIComponent(editingId)}` : '/api/v2/colleges',
+        isEditMode ? `${COLLEGES_PATH}/${encodeURIComponent(editingId as string)}` : COLLEGES_PATH,
         { method: isEditMode ? 'PUT' : 'POST', body: formData },
       );
+      invalidateCache(COLLEGES_PATH);
       resetModal();
       await fetchColleges();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDelete = async (college) => {
+  const handleDelete = async (college: College) => {
     if (!window.confirm(`Delete college “${college.name}”? Reassign active BOAs and instructors first.`)) return;
     setDeletingId(String(college._id));
     setError('');
     try {
-      await apiFetch(`/api/v2/colleges/${encodeURIComponent(college._id)}`, { method: 'DELETE' });
+      await apiFetch(`${COLLEGES_PATH}/${encodeURIComponent(college._id)}`, { method: 'DELETE' });
+      invalidateCache(COLLEGES_PATH);
       await fetchColleges();
     } catch (requestError) {
-      if (requestError.status !== 401) setError(requestError.message);
+      if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setDeletingId(null);
     }
@@ -109,9 +114,9 @@ export default function CollegeManagement() {
             <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">College ID</th><th className="p-4">Name</th><th className="p-4">Location</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan="4" className="p-8 text-center text-slate-400 font-medium">Loading colleges…</td></tr>
+                <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">Loading colleges…</td></tr>
               ) : colleges.length === 0 ? (
-                <tr><td colSpan="4" className="p-8 text-center text-slate-400 font-medium">No colleges found. Add one to get started.</td></tr>
+                <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">No colleges found. Add one to get started.</td></tr>
               ) : colleges.map((college) => (
                 <tr key={college._id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 text-xs font-mono text-slate-400">{college._id}</td>
@@ -140,8 +145,8 @@ export default function CollegeManagement() {
 
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
               {error && <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
-              <div><label htmlFor="college-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">College Name</label><input id="college-name" required maxLength="120" placeholder="e.g. NxtWave Campus A" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
-              <div><label htmlFor="college-location" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Location</label><input id="college-location" required maxLength="160" placeholder="e.g. Hyderabad" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.location} onChange={(event) => setFormData({ ...formData, location: event.target.value })} /></div>
+              <div><label htmlFor="college-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">College Name</label><input id="college-name" required maxLength={120} placeholder="e.g. NxtWave Campus A" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
+              <div><label htmlFor="college-location" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Location</label><input id="college-location" required maxLength={160} placeholder="e.g. Hyderabad" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.location} onChange={(event) => setFormData({ ...formData, location: event.target.value })} /></div>
               <div className="pt-4 flex gap-3"><button type="button" onClick={closeModal} disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button><button type="submit" disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 disabled:opacity-50">{submitting ? 'Saving…' : isEditMode ? 'Save Changes' : 'Add College'}</button></div>
             </form>
           </div>

@@ -1,9 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, User, MapPin, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert } from 'lucide-react';
 import { apiFetch } from '../api';
 import { formatCoordinates, imageQualityLabel, needsHumanReview, normalizeAttendanceStatus } from '../status';
+import type { AttendanceRecord, CheckItem, Evaluation } from '../types';
 
-function StatusBadge({ status }) {
+interface ReportRow {
+  key: string;
+  name: string;
+  observation?: unknown;
+  status?: string;
+  reasoning?: string;
+}
+
+interface InstructorDetailProps {
+  record: AttendanceRecord | null;
+  onBack: () => void;
+}
+
+function StatusBadge({ status }: { status?: string }) {
   switch (normalizeAttendanceStatus(status)) {
     case 'compliant':
       return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-emerald-50 text-emerald-600 border border-emerald-200"><CheckCircle2 size={16} aria-hidden="true" /> Compliant</span>;
@@ -18,17 +32,17 @@ function StatusBadge({ status }) {
   }
 }
 
-function formatTime(isoString) {
+function formatTime(isoString?: string | null) {
   if (!isoString) return '--';
   return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function formatDate(isoString) {
+function formatDate(isoString?: string | null) {
   if (!isoString) return '--';
   return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function CheckStatus({ status }) {
+function CheckStatus({ status }: { status?: string }) {
   if (!status) return null;
   const normalized = String(status).toUpperCase();
   const style = normalized === 'PASS'
@@ -39,17 +53,17 @@ function CheckStatus({ status }) {
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold ${style}`}>{normalized}</span>;
 }
 
-function ReportSection({ title, items }) {
+function ReportSection({ title, items }: { title: string; items?: CheckItem[] | Record<string, unknown> | null }) {
   if (!items || (Array.isArray(items) && items.length === 0)) return null;
-  const rows = Array.isArray(items)
+  const rows: ReportRow[] = Array.isArray(items)
     ? items.map((item, index) => ({
       key: `${item.checkpoint_name || 'checkpoint'}-${index}`,
       name: item.checkpoint_name,
       observation: item.observation,
       status: item.status,
-      reasoning: item.reason || item.reasoning,
+      reasoning: item.reason || (item as CheckItem & { reasoning?: string }).reasoning,
     }))
-    : Object.entries(items).map(([name, observation]) => ({ key: name, name, observation }));
+    : Object.entries(items as Record<string, unknown>).map(([name, observation]) => ({ key: name, name, observation }));
 
   return (
     <section className="mb-8" aria-labelledby={`report-${title.replace(/\s+/g, '-').toLowerCase()}`}>
@@ -64,7 +78,7 @@ function ReportSection({ title, items }) {
               <tr key={item.key} className="hover:bg-slate-50 transition-colors">
                 <td className="p-4 font-bold text-slate-700">{item.name}</td>
                 <td className="p-4"><CheckStatus status={item.status} /></td>
-                <td className="p-4 text-slate-600">{item.observation || '--'}</td>
+                <td className="p-4 text-slate-600">{String(item.observation ?? '--')}</td>
                 <td className="p-4 text-slate-500">{item.reasoning || '--'}</td>
               </tr>
             ))}
@@ -75,8 +89,8 @@ function ReportSection({ title, items }) {
   );
 }
 
-export default function InstructorDetail({ record, onBack }) {
-  const [evaluation, setEvaluation] = useState(null);
+export default function InstructorDetail({ record, onBack }: InstructorDetailProps) {
+  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [loading, setLoading] = useState(Boolean(record));
   const [error, setError] = useState('');
 
@@ -88,10 +102,10 @@ export default function InstructorDetail({ record, onBack }) {
       setEvaluation(null);
       setError('');
       try {
-        const data = await apiFetch(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation`, { signal: controller.signal });
+        const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation`, { signal: controller.signal });
         setEvaluation(data);
       } catch (requestError) {
-        if (!controller.signal.aborted && requestError.status !== 401) setError(requestError.message);
+        if (!controller.signal.aborted && (requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }

@@ -1,20 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Edit2, Plus, Trash2, Users } from 'lucide-react';
-import { apiFetch, apiJson } from '../api';
-import { buildBoaPayload } from '../managementPayloads';
+import { apiFetch, apiJson, invalidateCache } from '../api';
+import { buildBoaPayload, type BoaFormData } from '../managementPayloads';
+import type { Boa, College } from '../types';
 
-const EMPTY_FORM = { name: '', employee_id: '', email: '', password: '', college_id: '' };
+const BOAS_PATH = '/api/v2/boas';
+
+const EMPTY_FORM: BoaFormData = { name: '', employee_id: '', email: '', password: '', college_id: '' };
 
 export default function BOAManagement() {
-  const [boas, setBoas] = useState([]);
-  const [colleges, setColleges] = useState([]);
+  const [boas, setBoas] = useState<Boa[]>([]);
+  const [colleges, setColleges] = useState<College[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formData, setFormData] = useState<BoaFormData>(EMPTY_FORM);
 
   const isEditMode = Boolean(editingId);
   const collegeNames = useMemo(
@@ -26,14 +29,14 @@ export default function BOAManagement() {
     setLoading(true);
     try {
       const [boaData, collegeData] = await Promise.all([
-        apiFetch('/api/v2/boas'),
-        apiFetch('/api/v2/colleges'),
+        apiFetch<Boa[]>(BOAS_PATH),
+        apiFetch<College[]>('/api/v2/colleges'),
       ]);
       setBoas(Array.isArray(boaData) ? boaData : []);
       setColleges(Array.isArray(collegeData) ? collegeData : []);
       setError('');
     } catch (requestError) {
-      if (requestError.status !== 401) setError(requestError.message);
+      if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
     }
@@ -62,7 +65,7 @@ export default function BOAManagement() {
     setShowModal(true);
   };
 
-  const openEditModal = (boa) => {
+  const openEditModal = (boa: Boa) => {
     setEditingId(String(boa._id));
     setFormData({
       name: boa.name || '',
@@ -75,7 +78,7 @@ export default function BOAManagement() {
     setShowModal(true);
   };
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitting(true);
     setError('');
@@ -83,19 +86,20 @@ export default function BOAManagement() {
 
     try {
       await apiJson(
-        isEditMode ? `/api/v2/boas/${encodeURIComponent(editingId)}` : '/api/v2/boas',
+        isEditMode ? `/api/v2/boas/${encodeURIComponent(editingId as string)}` : '/api/v2/boas',
         { method: isEditMode ? 'PUT' : 'POST', body: payload },
       );
       resetModal();
+      invalidateCache(BOAS_PATH);
       await fetchData();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDelete = async (boa) => {
+  const handleDelete = async (boa: Boa) => {
     if (!window.confirm(`Delete BOA “${boa.name}” and revoke this account’s access?`)) return;
     setDeletingId(String(boa._id));
     setError('');
@@ -103,7 +107,7 @@ export default function BOAManagement() {
       await apiFetch(`/api/v2/boas/${encodeURIComponent(boa._id)}`, { method: 'DELETE' });
       await fetchData();
     } catch (requestError) {
-      if (requestError.status !== 401) setError(requestError.message);
+      if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setDeletingId(null);
     }
@@ -130,9 +134,9 @@ export default function BOAManagement() {
             <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">Name</th><th className="p-4">Employee ID</th><th className="p-4">College</th><th className="p-4">Registered Date</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan="5" className="p-8 text-center text-slate-400">Loading BOAs…</td></tr>
+                <tr><td colSpan={5} className="p-8 text-center text-slate-400">Loading BOAs…</td></tr>
               ) : boas.length === 0 ? (
-                <tr><td colSpan="5" className="p-8 text-center text-slate-400">No BOAs found.</td></tr>
+                <tr><td colSpan={5} className="p-8 text-center text-slate-400">No BOAs found.</td></tr>
               ) : boas.map((boa) => (
                 <tr key={boa._id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 font-bold text-slate-800">{boa.name}</td>
@@ -162,12 +166,12 @@ export default function BOAManagement() {
 
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
               {error && <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
-              <div><label htmlFor="boa-name" className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label><input id="boa-name" required maxLength="120" autoComplete="name" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
-              <div><label htmlFor="boa-employee" className="block text-xs font-bold text-slate-500 uppercase mb-1">Employee ID</label><input id="boa-employee" required maxLength="50" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.employee_id} onChange={(event) => setFormData({ ...formData, employee_id: event.target.value })} /></div>
-              <div><label htmlFor="boa-email" className="block text-xs font-bold text-slate-500 uppercase mb-1">Email</label><input id="boa-email" required type="email" maxLength="254" autoComplete="email" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} /></div>
+              <div><label htmlFor="boa-name" className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label><input id="boa-name" required maxLength={120} autoComplete="name" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
+              <div><label htmlFor="boa-employee" className="block text-xs font-bold text-slate-500 uppercase mb-1">Employee ID</label><input id="boa-employee" required maxLength={50} className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.employee_id} onChange={(event) => setFormData({ ...formData, employee_id: event.target.value })} /></div>
+              <div><label htmlFor="boa-email" className="block text-xs font-bold text-slate-500 uppercase mb-1">Email</label><input id="boa-email" required type="email" maxLength={254} autoComplete="email" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.email} onChange={(event) => setFormData({ ...formData, email: event.target.value })} /></div>
               <div>
                 <label htmlFor="boa-password" className="block text-xs font-bold text-slate-500 uppercase mb-1">{isEditMode ? 'New Password' : 'Temporary Password'}</label>
-                <input id="boa-password" required={!isEditMode} type="password" minLength="12" maxLength="128" autoComplete="new-password" placeholder={isEditMode ? 'Leave blank to keep current password' : ''} className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} />
+                <input id="boa-password" required={!isEditMode} type="password" minLength={12} maxLength={128} autoComplete="new-password" placeholder={isEditMode ? 'Leave blank to keep current password' : ''} className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" value={formData.password} onChange={(event) => setFormData({ ...formData, password: event.target.value })} />
                 <p className="mt-1 text-xs text-slate-400">{isEditMode ? 'Leave blank to keep the current password; new passwords require at least 12 characters.' : 'Use at least 12 characters.'}</p>
               </div>
               <div><label htmlFor="boa-college" className="block text-xs font-bold text-slate-500 uppercase mb-1">College</label><select id="boa-college" required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none bg-white" value={formData.college_id} onChange={(event) => setFormData({ ...formData, college_id: event.target.value })}><option value="">Select a college…</option>{colleges.map((college) => <option key={college._id} value={college._id}>{college.name} — {college.location}</option>)}</select></div>

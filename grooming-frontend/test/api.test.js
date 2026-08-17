@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiFetchAllPages, normalizeApiError } from '../src/api.js';
+import { apiFetchAllPages, normalizeApiError } from '../src/api.ts';
 
 test('normalizes string and structured validation errors', () => {
   assert.equal(normalizeApiError({ detail: 'Not authorized' }), 'Not authorized');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_IMAGE_BYTES, validatePhoto } from '../src/imageValidation.js';
+import { MAX_IMAGE_BYTES, validatePhoto } from '../src/imageValidation.ts';
 
 test('accepts supported photos within the upload limit', () => {
   assert.equal(validatePhoto({ type: 'image/jpeg', size: 1024 }), '');

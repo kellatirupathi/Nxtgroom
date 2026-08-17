@@ -33,7 +33,10 @@ export function runtimeConfig() {
     mongoUri: process.env.MONGODB_URI || "",
     dbName: process.env.DB_NAME || "grooming_standards",
     jwtSecret: process.env.SECRET_KEY || DEV_JWT_SECRET,
-    jwtExpiresMinutes: parseInteger("JWT_EXPIRE_MINUTES", 480, { min: 5, max: 10080 }),
+    // Ceiling raised to 43200 (30 days) so operators can trade re-login
+    // friction for a longer-lived token. session_version still revokes every
+    // token instantly on password change or account disable.
+    jwtExpiresMinutes: parseInteger("JWT_EXPIRE_MINUTES", 480, { min: 5, max: 43200 }),
     jwtIssuer: process.env.JWT_ISSUER || "facultytrack-api",
     jwtAudience: process.env.JWT_AUDIENCE || "facultytrack-web",
     adminEmail: (process.env.ADMIN_EMAIL || "admin@nxtwave.com").trim().toLowerCase(),

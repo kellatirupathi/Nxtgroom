@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LayoutGrid,
   Users,
@@ -11,19 +11,32 @@ import {
   LogOut,
   ChevronUp,
 } from 'lucide-react';
+import type { Role } from '../types';
+
+interface SidebarProps {
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: (open: boolean) => void;
+  activeTab: string;
+  navigate: (tab: string) => void;
+  role: Role | null;
+  email: string | null;
+  onLogout: () => void;
+  onOpenProfile: () => void;
+  onOpenChangePassword: () => void;
+}
 
 const NAV_BUTTON_BASE =
   'w-full flex items-center gap-3 px-4 py-3 rounded-md font-medium transition-colors duration-150';
 
-function navClass(isActive) {
+function navClass(isActive: boolean) {
   return `${NAV_BUTTON_BASE} ${
     isActive
-      ? 'bg-indigo-600 text-white'
-      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+      ? 'bg-indigo-600 text-white shadow-sm'
+      : 'text-slate-600 hover:bg-white hover:text-indigo-700'
   }`;
 }
 
-function roleLabel(role) {
+function roleLabel(role: Role | null) {
   if (role === 'SUPER_ADMIN') return 'Super Admin';
   if (role === 'BOA') return 'BOA';
   return 'Signed in';
@@ -39,17 +52,17 @@ export default function Sidebar({
   onLogout,
   onOpenProfile,
   onOpenChangePassword,
-}) {
+}: SidebarProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close the profile menu on outside click or Escape so it never traps focus.
   useEffect(() => {
     if (!isMenuOpen) return undefined;
-    const handlePointerDown = (event) => {
-      if (menuRef.current && !menuRef.current.contains(event.target)) setIsMenuOpen(false);
+    const handlePointerDown = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setIsMenuOpen(false);
     };
-    const handleKeyDown = (event) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setIsMenuOpen(false);
     };
     document.addEventListener('mousedown', handlePointerDown);
@@ -63,14 +76,14 @@ export default function Sidebar({
   const displayEmail = email || 'Account';
   const initial = (displayEmail[0] || 'A').toUpperCase();
 
-  const runMenuAction = (action) => {
+  const runMenuAction = (action?: () => void) => {
     setIsMenuOpen(false);
     action?.();
   };
 
   return (
     <aside
-      className={`fixed lg:static inset-y-0 left-0 w-64 bg-white border-r border-slate-200 flex flex-col z-50 shrink-0 transform transition-transform duration-300 ease-in-out ${
+      className={`fixed lg:static inset-y-0 left-0 w-64 bg-sky-50 border-r border-sky-100 flex flex-col z-50 shrink-0 transform transition-transform duration-300 ease-in-out ${
         isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       }`}
     >
@@ -78,7 +91,7 @@ export default function Sidebar({
         <button
           type="button"
           aria-label="Close navigation menu"
-          className="lg:hidden absolute top-6 right-4 text-slate-400 hover:text-slate-600 bg-slate-100 p-1 rounded-md"
+          className="lg:hidden absolute top-6 right-4 text-slate-400 hover:text-slate-600 bg-white p-1 rounded-md"
           onClick={() => setIsSidebarOpen(false)}
         >
           <X size={20} />
@@ -132,7 +145,7 @@ export default function Sidebar({
         )}
       </nav>
 
-      <div className="border-t border-slate-200 p-3 relative" ref={menuRef}>
+      <div className="border-t border-sky-100 p-3 relative" ref={menuRef}>
         {isMenuOpen && (
           <div
             role="menu"
@@ -174,7 +187,7 @@ export default function Sidebar({
           onClick={() => setIsMenuOpen((open) => !open)}
           aria-haspopup="menu"
           aria-expanded={isMenuOpen}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-slate-100 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-white transition-colors text-left"
         >
           <span
             aria-hidden="true"

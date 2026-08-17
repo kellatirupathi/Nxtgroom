@@ -5,7 +5,7 @@ import {
   filterAttendanceRecords,
   localDateValue,
   uniqueRecordValues,
-} from '../src/attendanceFilters.js';
+} from '../src/attendanceFilters.ts';
 
 const records = [
   { instructor_name: 'Asha', instructor_role: 'Lead Instructor', college_name: 'Campus B', location_coordinates: '17.1,78.2', remarks: 'Compliant' },

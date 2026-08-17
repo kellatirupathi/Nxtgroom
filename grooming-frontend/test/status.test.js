@@ -6,7 +6,7 @@ import {
   imageQualityLabel,
   needsHumanReview,
   normalizeAttendanceStatus,
-} from '../src/status.js';
+} from '../src/status.ts';
 
 test('maps current and legacy attendance states', () => {
   assert.equal(normalizeAttendanceStatus('compliant'), 'compliant');

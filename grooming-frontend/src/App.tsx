@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import EvaluateCard from './components/EvaluateCard';
@@ -18,10 +18,21 @@ import {
   saveSession,
   SESSION_EXPIRED_EVENT,
 } from './api';
+import type { AttendanceRecord, CurrentUser, Instructor, Role } from './types';
+
+interface SessionState {
+  token: string | null;
+  role: Role | null;
+  email: string | null;
+  collegeId: string | null;
+  validated: boolean;
+}
+
+type AccountModal = 'profile' | 'password' | null;
 
 const ADMIN_TABS = new Set(['boa-management', 'settings', 'instructor-management']);
 
-function initialSession() {
+function initialSession(): SessionState {
   try {
     localStorage.removeItem('nxtwave_token');
     localStorage.removeItem('nxtwave_role');
@@ -33,15 +44,15 @@ function initialSession() {
 export default function App() {
   const [session, setSession] = useState(initialSession);
   const [activeTab, setActiveTab] = useState('overview');
-  const [instructors, setInstructors] = useState([]);
-  const [selectedAttendanceRecord, setSelectedAttendanceRecord] = useState(null);
+  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  const [selectedAttendanceRecord, setSelectedAttendanceRecord] = useState<AttendanceRecord | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [sessionCheckError, setSessionCheckError] = useState('');
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
-  const [accountModal, setAccountModal] = useState(null);
+  const [accountModal, setAccountModal] = useState<AccountModal>(null);
 
-  const handleLogin = (token, role) => {
+  const handleLogin = (token: string, role: Role) => {
     setSession({ token, role, email: null, collegeId: null, validated: true });
     setSessionCheckError('');
     setActiveTab('overview');
@@ -66,29 +77,29 @@ export default function App() {
     const validateSession = async () => {
       setSessionCheckError('');
       try {
-        const currentUser = await apiFetch('/api/v2/auth/me', { signal: controller.signal });
+        const currentUser = await apiFetch<CurrentUser>('/api/v2/auth/me', { signal: controller.signal });
         if (!['SUPER_ADMIN', 'BOA'].includes(currentUser?.role)) {
           throw new Error('The server returned an invalid user role.');
         }
-        saveSession(session.token, currentUser.role);
+        saveSession(session.token as string, currentUser.role);
         setSession({ token: session.token, role: currentUser.role, email: currentUser.email || null, collegeId: currentUser.college_id || null, validated: true });
       } catch (error) {
-        if (!controller.signal.aborted && error.status !== 401) setSessionCheckError(error.message);
+        if (!controller.signal.aborted && (error as { status?: number })?.status !== 401) setSessionCheckError(error instanceof Error ? error.message : String(error));
       }
     };
     validateSession();
     return () => controller.abort();
   }, [session.token, session.validated, sessionCheckAttempt]);
 
-  const fetchInstructors = useCallback(async ({ signal } = {}) => {
+  const fetchInstructors = useCallback(async ({ signal }: { signal?: AbortSignal } = {}) => {
     if (!session.token || !session.validated) return;
     try {
-      const data = await apiFetchAllPages('/api/v2/instructors', { pageSize: 100, signal });
+      const data = await apiFetchAllPages<Instructor>('/api/v2/instructors', { pageSize: 100, signal });
       if (signal?.aborted) return;
       setInstructors(Array.isArray(data) ? data : []);
       setLoadError('');
     } catch (error) {
-      if (!signal?.aborted && error.status !== 401) setLoadError(error.message);
+      if (!signal?.aborted && (error as { status?: number })?.status !== 401) setLoadError(error instanceof Error ? error.message : String(error));
     }
   }, [session.token, session.validated]);
 
@@ -99,7 +110,7 @@ export default function App() {
     return () => controller.abort();
   }, [session.token, session.validated, fetchInstructors]);
 
-  const navigate = (tab) => {
+  const navigate = (tab: string) => {
     if (ADMIN_TABS.has(tab) && session.role !== 'SUPER_ADMIN') {
       setActiveTab('overview');
       return;

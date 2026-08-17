@@ -1,4 +1,6 @@
-export function normalizeAttendanceStatus(status) {
+import type { AttendanceStatus, Evaluation, ImageQuality } from './types.ts';
+
+export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
   switch (String(status || '').toLowerCase()) {
     case 'done':
     case 'compliant':
@@ -16,24 +18,24 @@ export function normalizeAttendanceStatus(status) {
   }
 }
 
-export function hasEvaluation(status) {
+export function hasEvaluation(status: unknown): boolean {
   const normalized = normalizeAttendanceStatus(status);
   return normalized === 'compliant' || normalized === 'non_compliant' || normalized === 'review_required';
 }
 
-export function needsHumanReview(status, evaluation = {}) {
+export function needsHumanReview(status: unknown, evaluation: Evaluation = {}): boolean {
   return normalizeAttendanceStatus(status) === 'review_required'
     || evaluation.requires_human_review === true
     || evaluation.image_quality === 'RETAKE_RECOMMENDED';
 }
 
-export function imageQualityLabel(imageQuality) {
+export function imageQualityLabel(imageQuality: ImageQuality | string | undefined | null): string {
   if (imageQuality === 'RETAKE_RECOMMENDED') return 'Retake recommended';
   if (imageQuality === 'ADEQUATE') return 'Adequate';
   return 'Not reported';
 }
 
-export function formatCoordinates(coordinates) {
+export function formatCoordinates(coordinates: unknown): string {
   if (!coordinates) return '--';
   const [latitude, longitude] = String(coordinates).split(',').map(Number);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return String(coordinates);

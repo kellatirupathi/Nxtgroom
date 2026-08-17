@@ -1,9 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bell, Building2 } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
+import type { NotificationSettings } from '../types';
 
-const TOGGLES = [
+interface ToggleProps {
+  id: string;
+  checked: boolean;
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}
+
+const SETTINGS_PATH = '/api/v2/settings/notifications';
+
+const TOGGLES: { key: keyof NotificationSettings; label: string; description: string }[] = [
   {
     key: 'checkin_email_enabled',
     label: 'Check-in report to instructor',
@@ -26,14 +36,14 @@ const TOGGLES = [
   },
 ];
 
-const DEFAULTS = {
+const DEFAULTS: NotificationSettings = {
   checkin_email_enabled: true,
   checkout_email_enabled: true,
   only_when_non_compliant: false,
   only_when_review_required: false,
 };
 
-function Toggle({ id, checked, disabled, onChange }) {
+function Toggle({ id, checked, disabled, onChange }: ToggleProps) {
   return (
     <button
       type="button"
@@ -57,7 +67,7 @@ function Toggle({ id, checked, disabled, onChange }) {
 }
 
 function NotificationSettings() {
-  const [settings, setSettings] = useState(DEFAULTS);
+  const [settings, setSettings] = useState<NotificationSettings>(DEFAULTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -67,13 +77,13 @@ function NotificationSettings() {
     let disposed = false;
     const load = async () => {
       try {
-        const data = await apiFetch('/api/v2/settings/notifications');
+        const data = await apiFetch<NotificationSettings>(SETTINGS_PATH);
         if (!disposed) {
           setSettings({ ...DEFAULTS, ...(data || {}) });
           setError('');
         }
       } catch (requestError) {
-        if (!disposed && requestError.status !== 401) setError(requestError.message);
+        if (!disposed && (requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -84,7 +94,7 @@ function NotificationSettings() {
     };
   }, []);
 
-  const updateSetting = async (key, value) => {
+  const updateSetting = async (key: keyof NotificationSettings, value: boolean) => {
     const previous = settings;
     const next = { ...settings, [key]: value };
     // Optimistic update keeps the switch responsive; revert if the save fails.
@@ -93,12 +103,12 @@ function NotificationSettings() {
     setError('');
     setStatus('');
     try {
-      const saved = await apiJson('/api/v2/settings/notifications', { method: 'PUT', body: next });
+      const saved = await apiJson<NotificationSettings>(SETTINGS_PATH, { method: 'PUT', body: next });
       setSettings({ ...DEFAULTS, ...(saved || next) });
       setStatus('Saved');
     } catch (requestError) {
       setSettings(previous);
-      if (requestError.status !== 401) setError(requestError.message);
+      if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setSaving(false);
     }
@@ -156,9 +166,9 @@ function NotificationSettings() {
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState('notifications');
+  const [tab, setTab] = useState<'notifications' | 'colleges'>('notifications');
 
-  const tabClass = (value) =>
+  const tabClass = (value: string) =>
     `px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
       tab === value
         ? 'border-indigo-600 text-indigo-700'

@@ -1,14 +1,35 @@
-import React, { useState } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { KeyRound, User } from 'lucide-react';
 import { apiJson } from '../api';
+import type { Role } from '../types';
 
-function roleLabel(role) {
+interface ModalShellProps {
+  title: string;
+  icon: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  labelledBy: string;
+}
+
+interface ProfileModalProps {
+  email: string | null;
+  role: Role | null;
+  collegeId: string | null;
+  onClose: () => void;
+}
+
+interface ChangePasswordModalProps {
+  onClose: () => void;
+  onPasswordChanged: () => void;
+}
+
+function roleLabel(role: Role | null) {
   if (role === 'SUPER_ADMIN') return 'Super Admin';
   if (role === 'BOA') return 'Board of Administration';
   return role || 'Unknown';
 }
 
-function ModalShell({ title, icon, onClose, children, labelledBy }) {
+function ModalShell({ title, icon, onClose, children, labelledBy }: ModalShellProps) {
   return (
     <div
       className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4"
@@ -37,7 +58,7 @@ function ModalShell({ title, icon, onClose, children, labelledBy }) {
   );
 }
 
-export function ProfileModal({ email, role, collegeId, onClose }) {
+export function ProfileModal({ email, role, collegeId, onClose }: ProfileModalProps) {
   return (
     <ModalShell
       title="Profile"
@@ -74,14 +95,14 @@ export function ProfileModal({ email, role, collegeId, onClose }) {
   );
 }
 
-export function ChangePasswordModal({ onClose, onPasswordChanged }) {
+export function ChangePasswordModal({ onClose, onPasswordChanged }: ChangePasswordModalProps) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (event) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (newPassword !== confirmPassword) {
       setError('New password and confirmation do not match.');
@@ -98,7 +119,7 @@ export function ChangePasswordModal({ onClose, onPasswordChanged }) {
       // this one — is now invalid. Sign out rather than leave a dead session.
       onPasswordChanged();
     } catch (requestError) {
-      setError(requestError.message);
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
       setSubmitting(false);
     }
   };

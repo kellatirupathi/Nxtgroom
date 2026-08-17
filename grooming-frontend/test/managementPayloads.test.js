@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBoaPayload } from '../src/managementPayloads.js';
+import { buildBoaPayload } from '../src/managementPayloads.ts';
 
 test('BOA edits omit an unchanged blank password', () => {
   const form = { name: 'Asha', email: 'asha@example.com', password: '', college_id: 'college-1' };

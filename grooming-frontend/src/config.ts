@@ -1,7 +1,14 @@
-const viteEnv = import.meta.env || {};
+const viteEnv = import.meta.env || ({} as ImportMetaEnv);
 const isProduction = Boolean(viteEnv.PROD);
 
-export function normalizeApiBase(value, { production = false } = {}) {
+export interface NormalizeApiBaseOptions {
+  production?: boolean;
+}
+
+export function normalizeApiBase(
+  value: unknown,
+  { production = false }: NormalizeApiBaseOptions = {},
+): string {
   const candidate = String(value || '').trim();
   if (!candidate) {
     if (production) {
@@ -10,7 +17,7 @@ export function normalizeApiBase(value, { production = false } = {}) {
     return '';
   }
 
-  let parsed;
+  let parsed: URL;
   try {
     parsed = new URL(candidate);
   } catch {
