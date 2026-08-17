@@ -101,7 +101,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       setMessage({ type: 'success', text: result?.message || 'Check-in queued for AI analysis.' });
       resetPhoto();
       setSelectedUuid('');
-      await fetchInstructors();
+      void fetchInstructors();
     } catch (error) {
       setMessage({ type: 'error', text: `Check-in failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {
@@ -124,7 +124,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       });
       setMessage({ type: 'success', text: result?.message || 'Check-out completed.' });
       setSelectedUuid('');
-      await fetchInstructors();
+      void fetchInstructors();
     } catch (error) {
       setMessage({ type: 'error', text: `Check-out failed: ${error instanceof Error ? error.message : String(error)}` });
     } finally {

@@ -73,13 +73,24 @@ export default function InstructorManagement() {
     setSaving(true);
     try {
       const path = isEditMode ? `/api/v2/instructors/${encodeURIComponent(editingId as string)}` : '/api/v2/instructors';
-      await apiJson(path, {
+      // Patch local state from the response instead of refetching the whole
+      // list, so the table updates in place with no loading blank.
+      const saved = await apiJson<{ id?: string }>(path, {
         method: isEditMode ? 'PUT' : 'POST',
         body: formData,
       });
-      closeModal();
       invalidateCache(INSTRUCTORS_PATH);
-      await fetchData();
+      if (isEditMode) {
+        setInstructors((current) => current.map((ins) => (
+          String(ins._id) === editingId ? { ...ins, ...formData } : ins
+        )));
+      } else if (saved?.id) {
+        setInstructors((current) => [
+          ...current,
+          { _id: saved.id as string, ...formData, daily_feedbacks: [] },
+        ]);
+      }
+      closeModal();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -93,8 +104,9 @@ export default function InstructorManagement() {
         method: 'DELETE',
       });
       invalidateCache(INSTRUCTORS_PATH);
+      // Drop the row locally once the server confirms; no refetch needed.
+      setInstructors((current) => current.filter((ins) => String(ins._id) !== String(id)));
       setConfirmTarget(null);
-      await fetchData();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     }

@@ -178,13 +178,27 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
     setSubmitting(true);
     setError('');
     try {
+      // Apply the change to local state from the server's response instead of
+      // refetching every list, so the table updates without a loading blank.
       if (form.role === 'ADMIN') {
         const body: Record<string, unknown> = { name: form.name, email: form.email };
         if (form.password) body.password = form.password;
         if (editing) {
           await apiJson(`${ADMINS_PATH}/${encodeURIComponent(editing.id)}`, { method: 'PUT', body });
+          setAdmins((current) => current.map((admin) => (
+            String(admin._id) === editing.id
+              ? { ...admin, name: form.name, email: form.email }
+              : admin
+          )));
         } else {
-          await apiJson(ADMINS_PATH, { method: 'POST', body: { ...body, password: form.password } });
+          const created = await apiJson<{ id: string }>(ADMINS_PATH, {
+            method: 'POST',
+            body: { ...body, password: form.password },
+          });
+          setAdmins((current) => [
+            ...current,
+            { _id: created.id, name: form.name, email: form.email, role: 'ADMIN' },
+          ]);
         }
         invalidateCache(ADMINS_PATH);
       } else {
@@ -197,15 +211,39 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
         if (form.password) body.password = form.password;
         if (editing) {
           await apiJson(`${BOAS_PATH}/${encodeURIComponent(editing.id)}`, { method: 'PUT', body });
+          setBoas((current) => current.map((boa) => (
+            String(boa._id) === editing.id
+              ? {
+                  ...boa,
+                  name: form.name,
+                  employee_id: form.employee_id,
+                  email: form.email,
+                  college_id: form.college_id,
+                }
+              : boa
+          )));
         } else {
-          await apiJson(BOAS_PATH, { method: 'POST', body: { ...body, password: form.password } });
+          const created = await apiJson<{ id: string }>(BOAS_PATH, {
+            method: 'POST',
+            body: { ...body, password: form.password },
+          });
+          setBoas((current) => [
+            ...current,
+            {
+              _id: created.id,
+              name: form.name,
+              employee_id: form.employee_id,
+              email: form.email,
+              college_id: form.college_id,
+              created_at: new Date().toISOString(),
+            },
+          ]);
         }
         invalidateCache(BOAS_PATH);
       }
       setShowForm(false);
       setEditing(null);
       setNotice(editing ? 'User updated successfully.' : 'User created successfully.');
-      await fetchAll();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -246,9 +284,14 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       const base = row.kind === 'admin' ? ADMINS_PATH : BOAS_PATH;
       await apiFetch(`${base}/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
       invalidateCache(base);
+      // Drop the row locally once the server confirms; no refetch needed.
+      if (row.kind === 'admin') {
+        setAdmins((current) => current.filter((admin) => String(admin._id) !== row.id));
+      } else {
+        setBoas((current) => current.filter((boa) => String(boa._id) !== row.id));
+      }
       setNotice(`${row.name} was deleted.`);
       setConfirmDelete(null);
-      await fetchAll();
     } catch (requestError) {
       if ((requestError as { status?: number })?.status !== 401) {
         setError(requestError instanceof Error ? requestError.message : String(requestError));

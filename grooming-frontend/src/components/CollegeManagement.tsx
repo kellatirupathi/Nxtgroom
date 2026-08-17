@@ -69,14 +69,21 @@ export default function CollegeManagement() {
     setSubmitting(true);
     setError('');
     try {
-      await apiJson(
+      // Update local state from the response rather than refetching the list,
+      // so the table never blanks out between edits.
+      const saved = await apiJson<{ id?: string }>(
         isEditMode ? `${COLLEGES_PATH}/${encodeURIComponent(editingId as string)}` : COLLEGES_PATH,
         { method: isEditMode ? 'PUT' : 'POST', body: formData },
       );
       invalidateCache(COLLEGES_PATH);
+      if (isEditMode) {
+        setColleges((current) => current.map((college) => (
+          String(college._id) === editingId ? { ...college, ...formData } : college
+        )));
+      } else if (saved?.id) {
+        setColleges((current) => [...current, { _id: saved.id as string, ...formData }]);
+      }
       resetModal();
-      setConfirmTarget(null);
-      await fetchColleges();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
@@ -90,9 +97,12 @@ export default function CollegeManagement() {
     try {
       await apiFetch(`${COLLEGES_PATH}/${encodeURIComponent(college._id)}`, { method: 'DELETE' });
       invalidateCache(COLLEGES_PATH);
-      await fetchColleges();
+      // Remove the row locally once the server confirms; no refetch needed.
+      setColleges((current) => current.filter((item) => String(item._id) !== String(college._id)));
+      setConfirmTarget(null);
     } catch (requestError) {
       if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
+      setConfirmTarget(null);
     } finally {
       setDeletingId(null);
     }
