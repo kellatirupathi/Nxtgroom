@@ -335,6 +335,10 @@ export default function InstructorManagement() {
                       INSTRUCTOR, which the old hardcoded three did not include,
                       so editing a synced instructor silently changed their role. */}
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
+                    {/* An empty value must match an option, or the browser
+                        shows the first role while the form still holds "",
+                        which the server then rejects. */}
+                    <option value="" disabled>Select a role...</option>
                     {roleOptions.map((role: string) => (
                       <option key={role} value={role}>{role}</option>
                     ))}
