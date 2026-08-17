@@ -11,6 +11,7 @@ import {
   type Fix,
 } from '../lib/location';
 import AuditReportModal from './AuditReportModal';
+import InstructorSearchSelect from './InstructorSearchSelect';
 import { useToast } from './useToast';
 import type { Instructor } from '../types';
 
@@ -283,23 +284,15 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         )}
 
         <div className="mb-6">
-          <label htmlFor="instructor-select" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Select Instructor</label>
-          <div className="relative">
-            <select
-              id="instructor-select"
-              className="w-full rounded-md border-2 border-slate-100 bg-slate-50 p-4 text-sm font-medium text-slate-700 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none appearance-none cursor-pointer transition-all hover:bg-slate-100"
-              value={selectedUuid}
-              onChange={(event) => setSelectedUuid(event.target.value)}
-            >
-              <option value="">-- Choose Instructor --</option>
-              {instructors.map((instructor: Instructor) => (
-                <option key={instructor._id} value={instructor._id}>{instructor.name} ({instructor.employee_id})</option>
-              ))}
-            </select>
-            <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none text-slate-400" aria-hidden="true">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
-            </div>
-          </div>
+          <p className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Search Instructor</p>
+          {/* A native select cannot be searched past first-letter jumping, which
+              is unusable against 599 people. */}
+          <InstructorSearchSelect
+            instructors={instructors}
+            selectedId={selectedUuid}
+            onSelect={setSelectedUuid}
+            disabled={loading || checkoutLoading}
+          />
         </div>
 
         <div className="flex-1 flex flex-col mb-6">
