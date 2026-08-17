@@ -96,3 +96,45 @@ test('malformed report links are not treated as reports', () => {
     assert.equal(re.test(bad), false, `${bad} must not match`);
   }
 });
+
+/**
+ * Every address the application can be opened at, checked in one place.
+ * A page that resolves to the wrong screen rewrites the address bar to match,
+ * so a mistake here silently changes the URL under the user.
+ */
+test('every route resolves to the screen that owns it', () => {
+  const REPORT_RE = /^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/;
+  const resolve = (path) => {
+    if (REPORT_RE.test(path)) return 'report';
+    if (path === RESET_PASSWORD_PATH) return 'reset';
+    return tabForPath(path);
+  };
+
+  const expected = [
+    ['/', TABS.OVERVIEW],
+    ['/attendance', TABS.OVERVIEW],
+    ['/daily-records', TABS.DAILY_RECORDS],
+    ['/daily-records/record/abc-123', TABS.INSTRUCTOR_DETAIL],
+    ['/instructors', TABS.INSTRUCTORS],
+    ['/users', TABS.USERS],
+    ['/settings', TABS.SETTINGS],
+    ['/reset-password', 'reset'],
+    ['/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/day/2026-08-17', 'report'],
+    ['/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/week/2026-08-17', 'report'],
+    ['/nonsense', TABS.OVERVIEW],
+  ];
+  for (const [path, want] of expected) {
+    assert.equal(resolve(path), want, `${path} must resolve to ${want}`);
+  }
+});
+
+test('a report link is never mistaken for a tab', () => {
+  // tabForPath falling back to Attendance is what rewrote the address bar
+  // while the report was on screen.
+  assert.equal(tabForPath('/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/day/2026-08-17'), TABS.OVERVIEW);
+  assert.equal(
+    Object.values(TABS).some((tab) => pathForTab(tab).startsWith('/reports')),
+    false,
+    'no tab may claim a /reports path, so the shell must handle it first',
+  );
+});

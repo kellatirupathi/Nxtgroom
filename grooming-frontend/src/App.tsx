@@ -176,6 +176,7 @@ export default function App() {
    * only the id, and the page previously rendered its empty state.
    */
   useEffect(() => {
+    if (publicReport || resetToken) return undefined;
     if (!session.token || !session.validated) return undefined;
     const recordId = recordIdFromLocation();
     if (!recordId || selectedAttendanceRecord) return undefined;
@@ -195,10 +196,11 @@ export default function App() {
         replaceTabPath('daily-records');
       });
     return () => controller.abort();
-  }, [session.token, session.validated, selectedAttendanceRecord]);
+  }, [session.token, session.validated, selectedAttendanceRecord, publicReport, resetToken]);
 
   // Keep the rendered tab in step with Back and Forward.
   useEffect(() => {
+    if (publicReport || resetToken) return undefined;
     const onPopState = () => {
       const tab = currentTabFromLocation();
       setActiveTab(
@@ -207,12 +209,16 @@ export default function App() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [session.role]);
+  }, [session.role, publicReport, resetToken]);
 
   // Normalise the entry URL once the session is known: "/" becomes
   // "/attendance", and a deep link the role cannot open is rewritten rather
   // than left pointing at a screen that is not being shown.
   useEffect(() => {
+    // A report or password link is not a tab. Without this guard the effect
+    // resolved those paths to Attendance and rewrote the address bar, so the
+    // report rendered under the wrong URL and a refresh lost it entirely.
+    if (publicReport || resetToken) return;
     if (!session.validated || !session.token) return;
     const tab = currentTabFromLocation();
     const allowed = ADMIN_TABS.has(tab) && !isElevatedRole(session.role) ? 'overview' : tab;
@@ -220,7 +226,7 @@ export default function App() {
     // Carry the record id through, or normalising the entry URL would strip
     // it and the detail page would lose the record it was asked for.
     replaceTabPath(allowed, recordIdFromLocation() || undefined);
-  }, [session.validated, session.token, session.role]);
+  }, [session.validated, session.token, session.role, publicReport, resetToken]);
 
   // Checked before everything else, including the session validation gate: the
   // recipient has no account, and an administrator opening the link from their
