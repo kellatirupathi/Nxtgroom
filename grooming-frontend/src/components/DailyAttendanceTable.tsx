@@ -217,7 +217,13 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             width that fits one line, and the table scrolls horizontally rather
             than compressing to fit.
           */}
-          <table className="text-left border-collapse table-fixed w-max min-w-full">
+          {/*
+            An explicit total width, not w-max. w-max sizes the table to its
+            content, which let the Remark column grow to fit a paragraph and
+            scroll the row far off screen instead of truncating at 320px.
+            1610px is the sum of the column widths below.
+          */}
+          <table className="text-left border-collapse table-fixed w-[1610px] max-w-none">
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                 <th className="p-4 w-[200px]">Instructor Name</th>
