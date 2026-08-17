@@ -19,7 +19,26 @@ export const REQUIRED_DATABASE_INDEXES = [
   {
     collection: "instructors",
     key: { employee_id: 1 },
-    options: { unique: true, name: "employee_id_1" },
+    // Partial, because instructors synced from BigQuery have no employee id.
+    // A plain unique index treats every missing value as null and collides on
+    // the second such row, which failed the roster import after one record.
+    // Uniqueness is still enforced for everyone who does have an id.
+    options: {
+      unique: true,
+      name: "employee_id_string_unique",
+      partialFilterExpression: { employee_id: { $type: "string" } },
+    },
+  },
+  {
+    collection: "instructors",
+    key: { instructor_user_id: 1 },
+    // The roster sync upserts on this key, so it must be indexed and unique
+    // for rows that carry one.
+    options: {
+      unique: true,
+      name: "instructor_user_id_unique",
+      partialFilterExpression: { instructor_user_id: { $type: "string" } },
+    },
   },
   {
     collection: "instructors",
@@ -411,8 +430,13 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
     ));
   }
 
+  // Only instructors that carry an employee id are checked. The BigQuery
+  // roster has no such column, so requiring one would flag every synced
+  // instructor and refuse to start.
   const invalidInstructorEmployeeIds = instructors.filter(
-    (instructor) => !validEmployeeId(instructor.employee_id)
+    (instructor) => instructor.employee_id !== null
+      && instructor.employee_id !== undefined
+      && !validEmployeeId(instructor.employee_id)
   );
   if (invalidInstructorEmployeeIds.length) {
     findings.push(finding(
