@@ -3,7 +3,7 @@ import { rateLimit } from "express-rate-limit";
 import multer from "multer";
 import { withMongoTransaction } from "../config/db.js";
 import { runtimeConfig } from "../config/env.js";
-import { idMatch, instructorScope, isElevated, ROLES } from "../middleware/auth.js";
+import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation } from "../services/evaluationWorker.js";
@@ -574,6 +574,78 @@ attendanceRouter.get(
       // Lets the client stop polling instead of guessing from the status text.
       settled: attendance.status !== "pending",
       updated_at: attendance.updated_at || null,
+    });
+  })
+);
+
+/**
+ * Runs the grooming analysis again on the photo already in R2.
+ *
+ * Used when a result looks wrong or the first attempt failed. The photo is
+ * never re-uploaded, so this cannot change what was captured at check-in — it
+ * only re-runs the model over the same image.
+ */
+attendanceRouter.post(
+  "/:attendanceId/reanalyse",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const attendance = await db.collection("attendance").findOne({
+      _id: idMatch(req.params.attendanceId),
+      ...attendanceScope(req.currentUser),
+    });
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+    if (!attendance.check_in_photo_key) {
+      return res.status(422).json({
+        detail: "This check-in has no stored photo, so it cannot be analysed again.",
+      });
+    }
+
+    const instructor = await db.collection("instructors").findOne({
+      _id: idMatch(String(attendance.instructor_id)),
+    });
+
+    const now = new Date();
+    // Clear the finished job so the worker treats this as fresh work; the
+    // upsert in enqueueEvaluation only writes on insert.
+    await db.collection("evaluation_jobs").deleteOne({
+      _id: `${attendance._id}:evaluation`,
+    });
+    await db.collection("evaluations").deleteMany({
+      attendance_id: String(attendance._id),
+    });
+    await db.collection("attendance").updateOne(
+      { _id: attendance._id },
+      {
+        $set: {
+          status: "pending",
+          compliance_status: null,
+          remarks: "AI analysis is in progress.",
+          requires_human_review: false,
+          evaluation_queue_status: "queued",
+          updated_at: now,
+        },
+      }
+    );
+
+    await enqueueEvaluation(db, {
+      attendanceId: attendance._id,
+      instructor: {
+        id: String(attendance.instructor_id),
+        name: attendance.instructor_name || instructor?.name || "Instructor",
+        email: instructor?.email || null,
+        gender: instructor?.gender || null,
+        collegeId: String(attendance.college_id || instructor?.college_id || ""),
+      },
+      photoKey: attendance.check_in_photo_key,
+      mimeType: "image/jpeg",
+      checkInTime: attendance.check_in_time,
+      deadlineAt: new Date(now.getTime() + OUTBOX_DEADLINE_MS),
+    });
+
+    return res.status(202).json({
+      message: "Re-analysis queued.",
+      attendance_id: String(attendance._id),
     });
   })
 );

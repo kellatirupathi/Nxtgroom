@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
+import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera, CheckCircle2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { preparePhoto } from '../lib/imageCapture';
@@ -10,6 +10,7 @@ import {
   requestFix,
   type Fix,
 } from '../lib/location';
+import AuditReportModal from './AuditReportModal';
 import { useToast } from './useToast';
 import type { Instructor } from '../types';
 
@@ -43,6 +44,12 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
+  // Named steps rather than one spinner, so a slow upload is distinguishable
+  // from a slow analysis.
+  const [stage, setStage] = useState<'idle' | 'saving' | 'analysing'>('idle');
+  const [reportTarget, setReportTarget] = useState<
+    { attendanceId: string; instructorName: string } | null
+  >(null);
   const [analysis, setAnalysis] = useState<AnalysisStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
@@ -91,6 +98,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         );
         setAnalysis(status);
         if (status.settled) {
+          setStage('idle');
           const compliant = status.compliance_status === 'COMPLIANT';
           if (status.requires_human_review) {
             toast.warning('Analysis needs a manual review', { detail: status.remarks || undefined });
@@ -164,6 +172,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     setLoading(true);
     setMessage({ type: '', text: '' });
     setAnalysis(null);
+    setStage('saving');
 
     // Use the fix captured when the screen opened rather than waiting on the
     // GPS now, so submitting never stalls behind a location lookup.
@@ -186,9 +195,11 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       );
       setMessage({ type: 'success', text: result?.message || 'Check-in recorded. Analysis is running.' });
       toast.success('Check-in recorded', { detail: 'Grooming analysis is running in the background.' });
+      const submittedName = instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
       resetPhoto();
       setSelectedUuid('');
       if (result?.attendance_id) {
+        setStage('analysing');
         setAnalysis({
           attendance_id: result.attendance_id,
           status: 'pending',
@@ -197,7 +208,12 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           settled: false,
           requires_human_review: false,
         });
+        // Open the report straight away so the operator watches the analysis
+        // finish rather than wondering whether anything is happening.
+        setReportTarget({ attendanceId: result.attendance_id, instructorName: submittedName });
         trackAnalysis(result.attendance_id);
+      } else {
+        setStage('idle');
       }
       void fetchInstructors();
       // Refresh the fix quietly for the next check-in without blocking this one.
@@ -206,6 +222,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       const text = error instanceof Error ? error.message : String(error);
       setMessage({ type: 'error', text: `Check-in failed: ${text}` });
       toast.error('Check-in failed', { detail: text });
+      setStage('idle');
     } finally {
       setLoading(false);
     }
@@ -349,6 +366,37 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           </p>
         )}
 
+        {/* Two named steps: saving the record, then analysing the photo. The
+            first is the only part the user waits on; the second continues
+            whether or not they stay on this screen. */}
+        {stage !== 'idle' && (
+          <div className="mb-4 rounded-md border border-indigo-200 bg-indigo-50 p-3" role="status" aria-live="polite">
+            <ol className="flex flex-col gap-2 text-sm">
+              {([
+                ['saving', 'Saving check-in and photo'],
+                ['analysing', 'Analysing grooming standards'],
+              ] as const).map(([key, label]) => {
+                const done = stage === 'analysing' && key === 'saving';
+                const active = stage === key;
+                return (
+                  <li key={key} className="flex items-center gap-2">
+                    {done ? (
+                      <CheckCircle2 size={16} className="shrink-0 text-emerald-600" aria-hidden="true" />
+                    ) : active ? (
+                      <RefreshCw size={16} className="shrink-0 animate-spin text-indigo-600" aria-hidden="true" />
+                    ) : (
+                      <span className="h-4 w-4 shrink-0 rounded-full border-2 border-slate-300" aria-hidden="true" />
+                    )}
+                    <span className={done ? 'font-medium text-slate-500' : active ? 'font-bold text-indigo-800' : 'text-slate-400'}>
+                      {label}
+                    </span>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        )}
+
         {analysis && (
           <div
             role="status"
@@ -404,6 +452,14 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           </button>
         </div>
       </div>
+
+      {reportTarget && (
+        <AuditReportModal
+          attendanceId={reportTarget.attendanceId}
+          instructorName={reportTarget.instructorName}
+          onClose={() => setReportTarget(null)}
+        />
+      )}
     </section>
   );
 }
