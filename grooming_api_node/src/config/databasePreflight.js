@@ -460,10 +460,16 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
   }
 
   const activeInstructors = instructors.filter(isActive);
+  // An address that is present must be usable, but a missing one is not a
+  // startup problem. Roughly half the BigQuery roster has no email, and
+  // requiring one from all 599 blocked the server from booting at all. The
+  // check-in route already refuses an instructor without a valid address and
+  // says so, which is where that failure belongs: at the point of use, not as
+  // a condition for the API to run.
   const invalidInstructors = activeInstructors.filter((instructor) => {
     const email = instructor.email;
+    if (email === null || email === undefined || email === "") return false;
     return typeof email !== "string"
-      || !email
       || email.length > 254
       || !EMAIL_PATTERN.test(email);
   });
@@ -476,10 +482,17 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
     ));
   }
 
-  const instructorsWithInvalidCollege = activeInstructors.filter((instructor) => (
-    !referenceKey(instructor.college_id)
-    || !activeCollegeIds.has(String(instructor.college_id))
-  ));
+  // Same reasoning for the college: synced instructors arrive unassigned and
+  // are assigned later, so an absent college is expected. A college that is
+  // set but points at a missing or archived record is still a real fault,
+  // because attendance is scoped by it.
+  const instructorsWithInvalidCollege = activeInstructors.filter((instructor) => {
+    if (instructor.college_id === null || instructor.college_id === undefined || instructor.college_id === "") {
+      return false;
+    }
+    return !referenceKey(instructor.college_id)
+      || !activeCollegeIds.has(String(instructor.college_id));
+  });
   if (instructorsWithInvalidCollege.length) {
     findings.push(finding(
       "ACTIVE_INSTRUCTOR_COLLEGE_INVALID",

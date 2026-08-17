@@ -43,3 +43,49 @@ test("an admin without a college is not filtered down to nothing", () => {
   const boa = { role: ROLES.BOA, collegeId: "college-1" };
   assert.deepEqual(scopeFor(boa, "college_id"), { college_id: "college-1" });
 });
+
+/**
+ * Startup must not depend on every instructor being ready to check in.
+ * Importing 599 instructors from BigQuery — half without an email, all
+ * without a college — blocked the server from booting with
+ * INSTRUCTOR_EMAIL_INVALID and ACTIVE_INSTRUCTOR_COLLEGE_INVALID, taking the
+ * whole API down. These mirror the relaxed rules.
+ */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function emailIsFaulty(instructor) {
+  const email = instructor.email;
+  if (email === null || email === undefined || email === "") return false;
+  return typeof email !== "string" || email.length > 254 || !EMAIL_PATTERN.test(email);
+}
+
+function collegeIsFaulty(instructor, activeCollegeIds) {
+  const id = instructor.college_id;
+  if (id === null || id === undefined || id === "") return false;
+  return !activeCollegeIds.has(String(id));
+}
+
+test("an instructor with no email does not block startup", () => {
+  assert.equal(emailIsFaulty({ email: null }), false);
+  assert.equal(emailIsFaulty({ email: undefined }), false);
+  assert.equal(emailIsFaulty({}), false);
+});
+
+test("an address that is present must still be valid", () => {
+  // A typo would silently break the grooming report, so it stays a fault.
+  assert.equal(emailIsFaulty({ email: "not-an-address" }), true);
+  assert.equal(emailIsFaulty({ email: "someone@nxtwave.co.in" }), false);
+});
+
+test("an unassigned college does not block startup", () => {
+  const active = new Set(["college-1"]);
+  assert.equal(collegeIsFaulty({ college_id: null }, active), false);
+  assert.equal(collegeIsFaulty({}, active), false);
+});
+
+test("a college that points at a missing record is still a fault", () => {
+  // Attendance is scoped by college, so a dangling reference is real breakage.
+  const active = new Set(["college-1"]);
+  assert.equal(collegeIsFaulty({ college_id: "deleted-college" }, active), true);
+  assert.equal(collegeIsFaulty({ college_id: "college-1" }, active), false);
+});
