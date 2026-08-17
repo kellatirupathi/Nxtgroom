@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { withMongoTransaction } from "../config/db.js";
-import { idMatch, instructorScope, requireSuperAdmin, ROLES } from "../middleware/auth.js";
+import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { asyncRoute, createDocument, parsePagination, serializeDocument } from "../utils.js";
 import { instructorSchema, validate } from "../validation.js";
 
@@ -274,7 +274,9 @@ instructorRouter.get(
       for (const key of Object.keys(serialized)) {
         if (key.startsWith("_private_")) delete serialized[key];
       }
-      if (req.currentUser.role !== ROLES.SUPER_ADMIN) {
+      // Contact details are visible to both elevated roles; a BOA still only
+      // sees the instructors at their own college, without contact details.
+      if (!isElevated(req.currentUser.role)) {
         delete serialized.email;
         delete serialized.phone_no;
       }

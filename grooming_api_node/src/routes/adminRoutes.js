@@ -3,6 +3,7 @@ import { withMongoTransaction } from "../config/db.js";
 import {
   getPasswordHash,
   idMatch,
+  isElevated,
   requireRootAdmin,
   requireSuperAdmin,
   ROLES,
@@ -117,11 +118,24 @@ export async function listActiveBoasWithAccounts(db) {
       role: ROLES.BOA,
       reference_id: { $in: referenceVariants },
     }))
-    .project({ reference_id: 1 })
+    .project({ reference_id: 1, email: 1 })
     .limit(1000)
     .toArray();
-  const activeReferences = new Set(accounts.map((account) => String(account.reference_id)));
-  return rows.filter((row) => activeReferences.has(String(row._id)));
+  const emailByReference = new Map(
+    accounts.map((account) => [String(account.reference_id), account.email])
+  );
+  return rows
+    .filter((row) => emailByReference.has(String(row._id)))
+    // Records migrated from the previous cluster have no email on the BOA
+    // document, only on the linked account, so the table showed "--". The
+    // account is the authoritative address, so fall back to it.
+    .map((row) => {
+      if (row.email) return row;
+      const accountEmail = emailByReference.get(String(row._id));
+      // Leave the shape untouched when neither source has an address, rather
+      // than introducing an explicit null the callers never had to handle.
+      return accountEmail ? { ...row, email: accountEmail } : row;
+    });
 }
 
 function invariantError(message) {
@@ -493,7 +507,9 @@ adminRouter.post(
 adminRouter.get(
   "/colleges",
   asyncRoute(async (req, res) => {
-    const scope = req.currentUser.role === ROLES.SUPER_ADMIN
+    // Administrators are not tied to a college, so scoping them by collegeId
+    // returned nothing and every table rendered "Unknown college".
+    const scope = isElevated(req.currentUser.role)
       ? {}
       : { _id: idMatch(req.currentUser.collegeId) };
     const rows = await req.app.locals.db.collection("colleges")

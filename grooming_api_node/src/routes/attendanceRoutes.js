@@ -3,7 +3,7 @@ import { rateLimit } from "express-rate-limit";
 import multer from "multer";
 import { withMongoTransaction } from "../config/db.js";
 import { runtimeConfig } from "../config/env.js";
-import { idMatch, instructorScope, ROLES } from "../middleware/auth.js";
+import { idMatch, instructorScope, isElevated, ROLES } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation } from "../services/evaluationWorker.js";
@@ -82,7 +82,10 @@ function activeInstructorFilter(currentUser, instructorId) {
 }
 
 function attendanceScope(currentUser) {
-  return currentUser.role === ROLES.SUPER_ADMIN
+  // Both elevated roles see every college. Testing for SUPER_ADMIN alone left
+  // an ADMIN scoped to currentUser.collegeId, which administrators do not
+  // have, so the filter matched nothing and Daily Records looked empty.
+  return isElevated(currentUser?.role)
     ? {}
     : { college_id: idMatch(String(currentUser.collegeId)) };
 }
