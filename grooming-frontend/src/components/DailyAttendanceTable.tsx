@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
-import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, CircleAlert } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, CircleAlert, Image as ImageIcon, LogOut } from 'lucide-react';
 import { apiFetchAllPages } from '../api';
+import PhotoViewer from './PhotoViewer';
 import {
   attendancePath,
   filterAttendanceRecords,
@@ -42,6 +43,9 @@ function formatDate(isoString?: string | null) {
 export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTableProps) {
   const today = useMemo(() => localDateValue(), []);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [photoTarget, setPhotoTarget] = useState<
+    { record: AttendanceRecord; kind: 'checkin' | 'checkout' } | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dateFilter, setDateFilter] = useState(today);
@@ -211,16 +215,16 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
                 <th className="p-4">Instructor Name</th><th className="p-4 hidden xl:table-cell">Role</th><th className="p-4 hidden md:table-cell">College</th><th className="p-4 hidden lg:table-cell">Date</th>
                 <th className="p-4">Check-In</th><th className="p-4 hidden sm:table-cell">Check-Out</th><th className="p-4 hidden xl:table-cell">Coordinates</th>
-                <th className="p-4">Status</th><th className="p-4 w-1/4 hidden lg:table-cell">Remark</th>
+                <th className="p-4">Status</th><th className="p-4">Photo</th><th className="p-4 w-1/4 hidden lg:table-cell">Remark</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
-                <tr><td colSpan={9} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+                <tr><td colSpan={10} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
               ) : records.length === 0 ? (
-                <tr><td colSpan={9} className="p-8 text-center text-slate-400">No attendance records found for this date.</td></tr>
+                <tr><td colSpan={10} className="p-8 text-center text-slate-400">No attendance records found for this date.</td></tr>
               ) : filteredRecords.length === 0 ? (
-                <tr><td colSpan={9} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+                <tr><td colSpan={10} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {
                 const canOpen = hasEvaluation(record.status);
                 return (
@@ -251,6 +255,36 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                       ) : '--'}
                     </td>
                     <td className="p-4"><StatusBadge status={record.status} /></td>
+                    <td className="p-4">
+                      {/* stopPropagation: the row itself opens the evaluation
+                          detail, and viewing a photo should not also do that. */}
+                      <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+                        {record.check_in_photo_key ? (
+                          <button
+                            type="button"
+                            title="View check-in photo"
+                            aria-label={`View check-in photo for ${record.instructor_name}`}
+                            onClick={() => setPhotoTarget({ record, kind: 'checkin' })}
+                            className="rounded-md border border-indigo-100 bg-indigo-50 p-1.5 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          >
+                            <ImageIcon size={15} aria-hidden="true" />
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-300">--</span>
+                        )}
+                        {record.check_out_photo_key && (
+                          <button
+                            type="button"
+                            title="View check-out photo"
+                            aria-label={`View check-out photo for ${record.instructor_name}`}
+                            onClick={() => setPhotoTarget({ record, kind: 'checkout' })}
+                            className="rounded-md border border-rose-100 bg-rose-50 p-1.5 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                          >
+                            <LogOut size={15} aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                     <td className="p-4 text-sm text-slate-500 max-w-xs truncate hidden lg:table-cell" title={record.remarks || ''}>{record.remarks}</td>
                   </tr>
                 );
@@ -259,6 +293,20 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
           </table>
         </div>
       </div>
+
+      {photoTarget && (
+        <PhotoViewer
+          attendanceId={String(photoTarget.record._id)}
+          kind={photoTarget.kind}
+          title={photoTarget.record.instructor_name || 'Instructor'}
+          subtitle={formatTime(
+            photoTarget.kind === 'checkin'
+              ? photoTarget.record.check_in_time
+              : photoTarget.record.check_out_time,
+          )}
+          onClose={() => setPhotoTarget(null)}
+        />
+      )}
     </section>
   );
 }
