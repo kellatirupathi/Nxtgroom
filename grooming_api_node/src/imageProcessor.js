@@ -1,6 +1,9 @@
 import sharp from "sharp";
 
-const MAX_INPUT_PIXELS = 20_000_000;
+// Raised from 20MP: 48MP and 64MP phone cameras are now common, and the
+// browser normally downscales before upload. This only applies when that
+// downscaling was skipped or failed, so it must not reject an ordinary photo.
+const MAX_INPUT_PIXELS = 80_000_000;
 const MIN_DIMENSION = 320;
 const MAX_DIMENSION = 2048;
 

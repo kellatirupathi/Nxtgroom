@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
 import { apiFetch } from '../api';
-import { validatePhoto } from '../imageValidation';
+import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { preparePhoto } from '../lib/imageCapture';
 import {
   describeAccuracy,
@@ -42,6 +42,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [message, setMessage] = useState({ type: '', text: '' });
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
+  const [preparing, setPreparing] = useState(false);
   const [analysis, setAnalysis] = useState<AnalysisStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
@@ -116,17 +117,38 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0];
-    const validationError = validatePhoto(selected);
-    if (validationError) {
+
+    // Check the camera file loosely, then downscale, then apply the real
+    // limit. Validating the original first rejected ordinary phone photos:
+    // a 12MP capture is around 11 MB and becomes ~400 KB once resized, so the
+    // 8 MB rule was refusing images the system handles fine.
+    const sourceError = validateSourcePhoto(selected);
+    if (sourceError) {
       resetPhoto();
-      setMessage({ type: 'error', text: validationError });
+      setMessage({ type: 'error', text: sourceError });
       return;
     }
-    setFile(selected as File);
-    setPreview(URL.createObjectURL(selected as File));
+
+    setPreparing(true);
     setMessage({ type: '', text: '' });
+    try {
+      const prepared = await preparePhoto(selected as File);
+      const validationError = validatePhoto(prepared.file);
+      if (validationError) {
+        resetPhoto();
+        setMessage({ type: 'error', text: validationError });
+        return;
+      }
+      setFile(prepared.file);
+      setPreview(URL.createObjectURL(prepared.file));
+    } catch {
+      resetPhoto();
+      setMessage({ type: 'error', text: 'That photo could not be read. Try taking it again.' });
+    } finally {
+      setPreparing(false);
+    }
   };
 
   const handleCheckIn = async () => {
@@ -150,10 +172,8 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
     const formData = new FormData();
     formData.append('instructor_id', selectedUuid);
-    // Shrink in the browser first: the server resizes to the same bound
-    // anyway, so uploading the full-resolution original wastes the upload.
-    const prepared = await preparePhoto(file as File);
-    formData.append('file', prepared.file);
+    // Already downscaled when it was selected, so upload as-is.
+    formData.append('file', file as File);
     if (coordinates) {
       formData.append('location_coordinates', coordinates);
       formData.append('location_accuracy_m', String(currentFix?.accuracyMetres ?? ''));
@@ -204,10 +224,8 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       // succeeds without one.
       const formData = new FormData();
       formData.append('instructor_id', selectedUuid);
-      if (file) {
-        const prepared = await preparePhoto(file);
-        formData.append('file', prepared.file);
-      }
+      // Downscaled at selection time, so no further processing is needed.
+      if (file) formData.append('file', file);
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) formData.append('location_coordinates', coordinates);
@@ -290,12 +308,19 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
               ref={fileInputRef}
               id="check-in-photo"
               type="file"
-              accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+              // HEIC is accepted because iPhones produce it by default; it is
+              // re-encoded to JPEG during downscaling before it ever uploads.
+              accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
               capture={facing}
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
               onChange={handleFileChange}
             />
-            {preview ? (
+            {preparing ? (
+              <div className="flex flex-col items-center text-slate-500 p-6 text-center" role="status">
+                <RefreshCw size={28} className="animate-spin mb-3" aria-hidden="true" />
+                <p className="font-bold text-sm">Preparing photo…</p>
+              </div>
+            ) : preview ? (
               <img src={preview} alt="Selected check-in preview" className="absolute inset-0 w-full h-full object-cover object-top" />
             ) : (
               <div className="flex flex-col items-center text-slate-400 group-hover/drop:text-indigo-500 transition-colors p-6 text-center">
@@ -303,7 +328,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
                   <Camera size={32} aria-hidden="true" />
                 </div>
                 <p className="font-bold text-sm text-slate-600 mb-1">Take or upload a photo</p>
-                <p className="text-xs font-medium px-4 leading-relaxed">JPEG, PNG, or WebP, up to 8 MB.</p>
+                <p className="text-xs font-medium px-4 leading-relaxed">JPEG, PNG, HEIC, or WebP.</p>
               </div>
             )}
           </div>
