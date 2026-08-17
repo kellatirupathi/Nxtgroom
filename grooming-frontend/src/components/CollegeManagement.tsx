@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, Edit2, Plus, Trash2 } from 'lucide-react';
 import { apiFetch, apiJson, invalidateCache } from '../api';
+import ConfirmDialog from './ConfirmDialog';
 import type { College } from '../types';
 
 const COLLEGES_PATH = '/api/v2/colleges';
@@ -16,6 +17,7 @@ export default function CollegeManagement() {
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [confirmTarget, setConfirmTarget] = useState<College | null>(null);
 
   const isEditMode = Boolean(editingId);
 
@@ -73,6 +75,7 @@ export default function CollegeManagement() {
       );
       invalidateCache(COLLEGES_PATH);
       resetModal();
+      setConfirmTarget(null);
       await fetchColleges();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -82,7 +85,6 @@ export default function CollegeManagement() {
   };
 
   const handleDelete = async (college: College) => {
-    if (!window.confirm(`Delete college “${college.name}”? Reassign active BOAs and instructors first.`)) return;
     setDeletingId(String(college._id));
     setError('');
     try {
@@ -125,7 +127,7 @@ export default function CollegeManagement() {
                   <td className="p-4">
                     <div className="flex items-center justify-end gap-2">
                       <button type="button" aria-label={`Edit ${college.name}`} title={`Edit ${college.name}`} disabled={Boolean(deletingId)} onClick={() => openEditModal(college)} className="rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"><Edit2 size={16} aria-hidden="true" /></button>
-                      <button type="button" aria-label={`Delete ${college.name}`} title={`Delete ${college.name}`} disabled={Boolean(deletingId)} onClick={() => handleDelete(college)} className="rounded-md border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-50"><Trash2 size={16} aria-hidden="true" /></button>
+                      <button type="button" aria-label={`Delete ${college.name}`} title={`Delete ${college.name}`} disabled={Boolean(deletingId)} onClick={() => setConfirmTarget(college)} className="rounded-md border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500 disabled:opacity-50"><Trash2 size={16} aria-hidden="true" /></button>
                     </div>
                   </td>
                 </tr>
@@ -152,6 +154,18 @@ export default function CollegeManagement() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(confirmTarget)}
+        destructive
+        busy={Boolean(deletingId)}
+        title="Delete college"
+        message={`Delete ${confirmTarget?.name ?? 'this college'}? This cannot be undone.`}
+        detail="Reassign active BOAs and instructors to another college first, or the delete will be refused."
+        confirmLabel="Delete"
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={() => confirmTarget && handleDelete(confirmTarget)}
+      />
     </section>
   );
 }

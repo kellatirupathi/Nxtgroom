@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiJson, invalidateCache } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
+import ConfirmDialog from './ConfirmDialog';
 import type { AdminUser, Boa, College, Role } from '../types';
 
 const ADMINS_PATH = '/api/v2/admins';
@@ -77,6 +78,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
 
+  const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [passwordFor, setPasswordFor] = useState<UserRow | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -237,18 +240,22 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   };
 
   const handleDelete = async (row: UserRow) => {
-    if (!window.confirm(`Delete ${row.name}? This cannot be undone.`)) return;
+    setDeleting(true);
     setError('');
     try {
       const base = row.kind === 'admin' ? ADMINS_PATH : BOAS_PATH;
       await apiFetch(`${base}/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
       invalidateCache(base);
       setNotice(`${row.name} was deleted.`);
+      setConfirmDelete(null);
       await fetchAll();
     } catch (requestError) {
       if ((requestError as { status?: number })?.status !== 401) {
         setError(requestError instanceof Error ? requestError.message : String(requestError));
       }
+      setConfirmDelete(null);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -277,7 +284,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
         icon: 'delete',
         destructive: true,
         disabled: !manageable || row.isSuperAdmin || isSelf,
-        onSelect: () => handleDelete(row),
+        onSelect: () => setConfirmDelete(row),
       },
     ];
   };
@@ -350,6 +357,22 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={Boolean(confirmDelete)}
+        destructive
+        busy={deleting}
+        title={confirmDelete?.role === 'BOA' ? 'Delete BOA account' : 'Delete administrator'}
+        message={`Delete ${confirmDelete?.name ?? 'this user'}? This cannot be undone.`}
+        detail={
+          confirmDelete?.kind === 'boa'
+            ? 'Their sign-in access is removed immediately. Attendance history they recorded is kept.'
+            : 'Their sign-in access is removed immediately.'
+        }
+        confirmLabel="Delete"
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
+      />
 
       {showForm && (
         <div className="fixed inset-0 bg-slate-900/40 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="user-form-title">

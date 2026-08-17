@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail, Phone, Building2, Edit2, Trash2 } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiJson, invalidateCache } from '../api';
+import ConfirmDialog from './ConfirmDialog';
 import type { College, Instructor } from '../types';
 
 const INSTRUCTORS_PATH = '/api/v2/instructors';
@@ -26,6 +27,7 @@ export default function InstructorManagement() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [confirmTarget, setConfirmTarget] = useState<Instructor | null>(null);
   
   const [formData, setFormData] = useState<InstructorForm>({
     name: '',
@@ -86,12 +88,12 @@ export default function InstructorManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("Remove this instructor from active records?")) return;
     try {
       await apiFetch(`/api/v2/instructors/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
       invalidateCache(INSTRUCTORS_PATH);
+      setConfirmTarget(null);
       await fetchData();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -226,7 +228,7 @@ export default function InstructorManagement() {
                         <button type="button" aria-label={`Edit ${ins.name}`} title={`Edit ${ins.name}`} onClick={() => openEditModal(ins)} className="rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                           <Edit2 size={16} aria-hidden="true" />
                         </button>
-                        <button type="button" aria-label={`Remove ${ins.name}`} title={`Remove ${ins.name}`} onClick={() => handleDelete(ins._id)} className="rounded-md border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500">
+                        <button type="button" aria-label={`Remove ${ins.name}`} title={`Remove ${ins.name}`} onClick={() => setConfirmTarget(ins)} className="rounded-md border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500">
                           <Trash2 size={16} aria-hidden="true" />
                         </button>
                       </div>
@@ -313,6 +315,17 @@ export default function InstructorManagement() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(confirmTarget)}
+        destructive
+        title="Remove instructor"
+        message={`Remove ${confirmTarget?.name ?? 'this instructor'} from active records?`}
+        detail="Their past attendance and evaluation history is kept."
+        confirmLabel="Remove"
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={() => confirmTarget && handleDelete(confirmTarget._id)}
+      />
     </div>
   );
 }
