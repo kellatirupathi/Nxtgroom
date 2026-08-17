@@ -25,7 +25,7 @@ export type Tab = (typeof TABS)[keyof typeof TABS];
 const TAB_TO_PATH: Record<Tab, string> = {
   [TABS.OVERVIEW]: '/attendance',
   [TABS.DAILY_RECORDS]: '/daily-records',
-  [TABS.INSTRUCTOR_DETAIL]: '/daily-records/record',
+  [TABS.INSTRUCTOR_DETAIL]: '/daily-records/record',  // suffixed with the record id
   [TABS.INSTRUCTORS]: '/instructors',
   [TABS.USERS]: '/users',
   [TABS.SETTINGS]: '/settings',
@@ -38,8 +38,21 @@ const PATH_TO_TAB = new Map<string, Tab>(
 /** Paths owned by the shell rather than by a tab. */
 export const RESET_PASSWORD_PATH = '/reset-password';
 
-export function pathForTab(tab: string): string {
-  return TAB_TO_PATH[tab as Tab] ?? TAB_TO_PATH[TABS.OVERVIEW];
+export function pathForTab(tab: string, recordId?: string): string {
+  const base = TAB_TO_PATH[tab as Tab] ?? TAB_TO_PATH[TABS.OVERVIEW];
+  // The detail view addresses one record, so its id belongs in the URL:
+  // without it a refresh or a shared link has nothing to render.
+  if (tab === TABS.INSTRUCTOR_DETAIL && recordId) {
+    return `${base}/${encodeURIComponent(recordId)}`;
+  }
+  return base;
+}
+
+/** The record id from /daily-records/record/<id>, or null. */
+export function recordIdFromLocation(): string | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(/^\/daily-records\/record\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 /**
@@ -49,6 +62,8 @@ export function pathForTab(tab: string): string {
 export function tabForPath(pathname: string): Tab {
   const normalized = pathname.replace(/\/+$/, '') || '/';
   if (normalized === '/' || normalized === '') return TABS.OVERVIEW;
+  // A record id follows the detail path, so match the prefix before the map.
+  if (/^\/daily-records\/record(\/|$)/.test(normalized)) return TABS.INSTRUCTOR_DETAIL;
   return PATH_TO_TAB.get(normalized) ?? TABS.OVERVIEW;
 }
 
@@ -61,17 +76,17 @@ export function currentTabFromLocation(): Tab {
  * Pushes a tab's URL without reloading. Replacing rather than pushing when the
  * path is unchanged keeps repeated clicks on the active item out of history.
  */
-export function pushTabPath(tab: string): void {
+export function pushTabPath(tab: string, recordId?: string): void {
   if (typeof window === 'undefined') return;
-  const path = pathForTab(tab);
+  const path = pathForTab(tab, recordId);
   if (window.location.pathname === path) return;
   window.history.pushState({ tab }, '', path);
 }
 
 /** Rewrites the current entry, used to normalise "/" to "/attendance" on load. */
-export function replaceTabPath(tab: string): void {
+export function replaceTabPath(tab: string, recordId?: string): void {
   if (typeof window === 'undefined') return;
-  const path = pathForTab(tab);
+  const path = pathForTab(tab, recordId);
   if (window.location.pathname === path) return;
   window.history.replaceState({ tab }, '', path);
 }

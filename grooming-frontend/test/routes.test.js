@@ -45,3 +45,31 @@ test('the password link path is not claimed by a tab', () => {
     'reset-password is handled by the shell, before the auth gate',
   );
 });
+
+test('the detail path carries the record id', () => {
+  // Without the id, a refresh or a shared link had nothing to render and the
+  // page fell back to "choose a record".
+  assert.equal(
+    pathForTab(TABS.INSTRUCTOR_DETAIL, 'abc-123'),
+    '/daily-records/record/abc-123',
+  );
+  assert.equal(
+    pathForTab(TABS.INSTRUCTOR_DETAIL),
+    '/daily-records/record',
+    'no id still yields a usable path',
+  );
+});
+
+test('a detail path with an id still resolves to the detail tab', () => {
+  assert.equal(tabForPath('/daily-records/record/abc-123'), TABS.INSTRUCTOR_DETAIL);
+  assert.equal(tabForPath('/daily-records/record'), TABS.INSTRUCTOR_DETAIL);
+  // The list itself must not be captured by the detail prefix.
+  assert.equal(tabForPath('/daily-records'), TABS.DAILY_RECORDS);
+});
+
+test('record ids are encoded so an unusual id cannot break the path', () => {
+  assert.equal(
+    pathForTab(TABS.INSTRUCTOR_DETAIL, 'a/b c'),
+    '/daily-records/record/a%2Fb%20c',
+  );
+});

@@ -529,6 +529,23 @@ attendanceRouter.get(
   })
 );
 
+/**
+ * One attendance record by id, so the detail page can be opened directly from
+ * a URL. Without this the page could only render a record handed to it by the
+ * list, and a refresh or a shared link showed an empty screen.
+ */
+attendanceRouter.get(
+  "/:attendanceId",
+  asyncRoute(async (req, res) => {
+    const attendance = await req.app.locals.db.collection("attendance").findOne({
+      _id: idMatch(req.params.attendanceId),
+      ...attendanceScope(req.currentUser),
+    });
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+    return res.json(serializeAttendance(attendance));
+  })
+);
+
 attendanceRouter.get(
   "/:attendanceId/evaluation",
   asyncRoute(async (req, res) => {

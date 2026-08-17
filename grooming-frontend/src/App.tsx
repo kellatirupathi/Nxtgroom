@@ -9,6 +9,7 @@ import BrandedLoader from './components/BrandedLoader';
 import {
   currentTabFromLocation,
   pushTabPath,
+  recordIdFromLocation,
   replaceTabPath,
   RESET_PASSWORD_PATH,
 } from './routes';
@@ -163,6 +164,33 @@ export default function App() {
     else pushTabPath(target);
   }, [session.role, selectedAttendanceRecord]);
 
+  /**
+   * Restores the record named in the URL. Opening the detail view from the
+   * list hands the record over in memory, but a refresh or a pasted link has
+   * only the id, and the page previously rendered its empty state.
+   */
+  useEffect(() => {
+    if (!session.token || !session.validated) return undefined;
+    const recordId = recordIdFromLocation();
+    if (!recordId || selectedAttendanceRecord) return undefined;
+
+    const controller = new AbortController();
+    apiFetch<AttendanceRecord>(`/api/v2/attendance/${encodeURIComponent(recordId)}`, {
+      signal: controller.signal,
+    })
+      .then((record) => {
+        if (!controller.signal.aborted) setSelectedAttendanceRecord(record);
+      })
+      .catch(() => {
+        // A deleted or out-of-scope record falls back to the list rather than
+        // leaving the user on a page that can never fill in.
+        if (controller.signal.aborted) return;
+        setActiveTab('daily-records');
+        replaceTabPath('daily-records');
+      });
+    return () => controller.abort();
+  }, [session.token, session.validated, selectedAttendanceRecord]);
+
   // Keep the rendered tab in step with Back and Forward.
   useEffect(() => {
     const onPopState = () => {
@@ -183,7 +211,9 @@ export default function App() {
     const tab = currentTabFromLocation();
     const allowed = ADMIN_TABS.has(tab) && !isElevatedRole(session.role) ? 'overview' : tab;
     setActiveTab(allowed);
-    replaceTabPath(allowed);
+    // Carry the record id through, or normalising the entry URL would strip
+    // it and the detail page would lose the record it was asked for.
+    replaceTabPath(allowed, recordIdFromLocation() || undefined);
   }, [session.validated, session.token, session.role]);
 
   // Checked before the auth gate: the link arrives by email and may be opened
@@ -265,7 +295,7 @@ export default function App() {
                 // Set the record first: navigate() refuses the detail tab
                 // when nothing is selected and would bounce back to the list.
                 setSelectedAttendanceRecord(record);
-                pushTabPath('instructor-detail');
+                pushTabPath('instructor-detail', String(record._id));
                 setActiveTab('instructor-detail');
               }} />
             </div>
