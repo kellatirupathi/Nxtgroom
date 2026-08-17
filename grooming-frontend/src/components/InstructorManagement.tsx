@@ -1,7 +1,8 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail, Phone, Building2, Edit2, Trash2 } from 'lucide-react';
-import { apiFetch, apiFetchAllPages, apiJson, invalidateCache } from '../api';
+import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './useToast';
 import type { College, Instructor } from '../types';
 
 const INSTRUCTORS_PATH = '/api/v2/instructors';
@@ -18,9 +19,16 @@ interface InstructorForm {
 }
 
 export default function InstructorManagement() {
-  const [instructors, setInstructors] = useState<Instructor[]>([]);
-  const [colleges, setColleges] = useState<College[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Paint from the last known lists, then revalidate in the background.
+  const cachedInstructors = readStale<Instructor[]>(INSTRUCTORS_PATH);
+  const cachedColleges = readStale<College[]>('/api/v2/colleges');
+  const [instructors, setInstructors] = useState<Instructor[]>(
+    Array.isArray(cachedInstructors) ? cachedInstructors : [],
+  );
+  const [colleges, setColleges] = useState<College[]>(
+    Array.isArray(cachedColleges) ? cachedColleges : [],
+  );
+  const [loading, setLoading] = useState(!Array.isArray(cachedInstructors));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -28,7 +36,8 @@ export default function InstructorManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [confirmTarget, setConfirmTarget] = useState<Instructor | null>(null);
-  
+  const toast = useToast();
+
   const [formData, setFormData] = useState<InstructorForm>({
     name: '',
     employee_id: '',
@@ -40,13 +49,17 @@ export default function InstructorManagement() {
   });
 
   const fetchData = async ({ signal }: { signal?: AbortSignal } = {}) => {
-    setLoading(true);
+    // Skip the blank state when cached rows are already rendered.
+    if (instructors.length === 0) setLoading(true);
     try {
       const [instructorData, collegeData] = await Promise.all([
         apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, { pageSize: 100, signal }),
-        apiFetch<College[]>('/api/v2/colleges', { signal }),
+        apiFetchCached<College[]>('/api/v2/colleges', { signal }),
       ]);
       if (signal?.aborted) return;
+      // Pagination assembles the list across requests, so store the finished
+      // array under the base path for the next visit to paint from.
+      if (Array.isArray(instructorData)) primeCache(INSTRUCTORS_PATH, instructorData);
       setInstructors(Array.isArray(instructorData) ? instructorData : []);
       setColleges(Array.isArray(collegeData) ? collegeData : []);
       setError('');
@@ -90,15 +103,20 @@ export default function InstructorManagement() {
           { _id: saved.id as string, ...formData, daily_feedbacks: [] },
         ]);
       }
+      toast.success(isEditMode ? 'Instructor updated' : 'Instructor added', { detail: formData.name });
       closeModal();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error(isEditMode ? 'Could not update instructor' : 'Could not add instructor', { detail: message });
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async (id: string) => {
+    // Read the name before the row leaves state so the toast can name it.
+    const removedName = instructors.find((ins) => String(ins._id) === String(id))?.name;
     try {
       await apiFetch(`/api/v2/instructors/${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -106,9 +124,12 @@ export default function InstructorManagement() {
       invalidateCache(INSTRUCTORS_PATH);
       // Drop the row locally once the server confirms; no refetch needed.
       setInstructors((current) => current.filter((ins) => String(ins._id) !== String(id)));
+      toast.success('Instructor deleted', { detail: removedName });
       setConfirmTarget(null);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error('Could not delete instructor', { detail: message });
     }
   };
 

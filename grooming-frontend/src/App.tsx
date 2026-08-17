@@ -15,6 +15,8 @@ import {
   clearSession,
   getSessionRole,
   getSessionToken,
+  primeCache,
+  readStale,
   saveSession,
   SESSION_EXPIRED_EVENT,
 } from './api';
@@ -44,7 +46,11 @@ function initialSession(): SessionState {
 export default function App() {
   const [session, setSession] = useState(initialSession);
   const [activeTab, setActiveTab] = useState('overview');
-  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  const [instructors, setInstructors] = useState<Instructor[]>(() => {
+    // Render the attendance list from the last session's data on first paint.
+    const cached = readStale<Instructor[]>('/api/v2/instructors');
+    return Array.isArray(cached) ? cached : [];
+  });
   const [selectedAttendanceRecord, setSelectedAttendanceRecord] = useState<AttendanceRecord | null>(null);
   const [loadError, setLoadError] = useState('');
   const [sessionCheckError, setSessionCheckError] = useState('');
@@ -95,6 +101,8 @@ export default function App() {
     try {
       const data = await apiFetchAllPages<Instructor>('/api/v2/instructors', { pageSize: 100, signal });
       if (signal?.aborted) return;
+      // Cache the assembled list so the next load paints without waiting.
+      if (Array.isArray(data)) primeCache('/api/v2/instructors', data);
       setInstructors(Array.isArray(data) ? data : []);
       setLoadError('');
     } catch (error) {

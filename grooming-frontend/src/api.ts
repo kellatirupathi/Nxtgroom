@@ -138,9 +138,69 @@ const responseCache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<unknown>>();
 const DEFAULT_CACHE_MS = 15_000;
 
+/**
+ * Mirror of the GET cache in sessionStorage. The in-memory map dies on reload,
+ * which is exactly when the wait is most visible, so the last response is
+ * replayed from disk to paint immediately while the network revalidates.
+ * sessionStorage (not localStorage) so the copy dies with the tab.
+ */
+const PERSIST_PREFIX = 'ft_cache:';
+/** Anything older than this is treated as too stale to show at all. */
+const PERSIST_MAX_AGE_MS = 10 * 60_000;
+
+function persistKey(path: string): string {
+  return `${PERSIST_PREFIX}${path}`;
+}
+
+function persistCache(path: string, value: unknown): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.setItem(persistKey(path), JSON.stringify({ value, storedAt: Date.now() }));
+  } catch {
+    /* Quota exceeded or storage blocked: the memory cache still works. */
+  }
+}
+
+function readPersisted<T>(path: string): T | undefined {
+  try {
+    if (typeof sessionStorage === 'undefined') return undefined;
+    const raw = sessionStorage.getItem(persistKey(path));
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { value: T; storedAt: number };
+    if (!parsed || typeof parsed.storedAt !== 'number') return undefined;
+    if (Date.now() - parsed.storedAt > PERSIST_MAX_AGE_MS) {
+      sessionStorage.removeItem(persistKey(path));
+      return undefined;
+    }
+    return parsed.value;
+  } catch {
+    return undefined;
+  }
+}
+
+function dropPersisted(prefix: string): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    const target = persistKey(prefix);
+    // Storage keys are not own enumerable properties, so Object.keys() returns
+    // nothing here; the indexed key() API is the only reliable way to list them.
+    // Collect first, then delete, because removing shifts the remaining indices.
+    const doomed: string[] = [];
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
+      if (key && key.startsWith(PERSIST_PREFIX) && key.startsWith(target)) doomed.push(key);
+    }
+    for (const key of doomed) sessionStorage.removeItem(key);
+  } catch {
+    /* Nothing to clean up if storage is unavailable. */
+  }
+}
+
 export function clearRequestCache(): void {
   responseCache.clear();
   inFlight.clear();
+  // Persisted copies hold another user's data after a logout, so they must go.
+  dropPersisted('');
 }
 
 /** Drops cached reads whose path starts with the given prefix after a mutation. */
@@ -148,6 +208,28 @@ export function invalidateCache(prefix: string): void {
   for (const key of [...responseCache.keys()]) {
     if (key.startsWith(prefix)) responseCache.delete(key);
   }
+  // Drop the persisted copy too, or a reload would resurrect pre-mutation data.
+  dropPersisted(prefix);
+}
+
+/**
+ * Last known value for a path, even if expired. Screens use this to paint
+ * immediately on load; the caller still awaits the live request to correct it.
+ */
+export function readStale<T>(path: string): T | undefined {
+  const entry = responseCache.get(path);
+  if (entry) return entry.value as T;
+  return readPersisted<T>(path);
+}
+
+/**
+ * Stores a value assembled by the caller (for example the concatenation of a
+ * paginated fetch) so the next visit can paint from it before the network
+ * responds. Reads back through readStale().
+ */
+export function primeCache(path: string, value: unknown, cacheMs = DEFAULT_CACHE_MS): void {
+  responseCache.set(path, { value, expiresAt: Date.now() + cacheMs });
+  persistCache(path, value);
 }
 
 export function readCache<T>(path: string): T | undefined {
@@ -234,6 +316,7 @@ export async function apiFetchCached<T = unknown>(
   const request = apiFetch<T>(path, requestOptions)
     .then((value) => {
       responseCache.set(path, { value, expiresAt: Date.now() + cacheMs });
+      persistCache(path, value);
       return value;
     })
     .finally(() => {

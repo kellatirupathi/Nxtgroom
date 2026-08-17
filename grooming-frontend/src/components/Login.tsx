@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { apiFetch, saveSession } from '../api';
 import GoogleSignInButton from './GoogleSignInButton';
+import { useToast } from './useToast';
 import type { LoginResponse, Role } from '../types';
 
 interface LoginProps {
@@ -13,6 +14,22 @@ export default function Login({ onLogin }: LoginProps) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const toast = useToast();
+
+  /**
+   * A rejected Google account is the one failure the user cannot fix by
+   * retrying, so it gets an explicit next step rather than the raw message.
+   */
+  const reportSignInError = (message: string) => {
+    setError(message);
+    if (/not authorised|not authorized/i.test(message)) {
+      toast.error('This Google account is not registered', {
+        detail: 'Ask an administrator to add your email under Users, then sign in again.',
+      });
+      return;
+    }
+    toast.error('Sign-in failed', { detail: message });
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -34,7 +51,7 @@ export default function Login({ onLogin }: LoginProps) {
       saveSession(data.access_token, data.role);
       onLogin(data.access_token, data.role);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      reportSignInError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
     }
@@ -101,7 +118,7 @@ export default function Login({ onLogin }: LoginProps) {
         {/* Renders nothing unless the server reports Google sign-in is configured. */}
         <GoogleSignInButton
           onLogin={onLogin}
-          onError={setError}
+          onError={reportSignInError}
           disabled={loading}
         />
       </div>

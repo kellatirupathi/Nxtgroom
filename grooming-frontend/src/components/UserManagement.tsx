@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
-import { apiFetch, apiJson, invalidateCache } from '../api';
+import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
 import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './useToast';
 import type { AdminUser, Boa, College, Role } from '../types';
 
 const ADMINS_PATH = '/api/v2/admins';
@@ -66,13 +67,17 @@ interface UserManagementProps {
 
 export default function UserManagement({ currentRole, currentEmail }: UserManagementProps) {
   const isSuper = currentRole === 'SUPER_ADMIN';
-  const [admins, setAdmins] = useState<AdminUser[]>([]);
-  const [boas, setBoas] = useState<Boa[]>([]);
-  const [colleges, setColleges] = useState<College[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from the previous response so the table is on screen immediately.
+  const cachedBoas = readStale<Boa[]>(BOAS_PATH);
+  const cachedAdmins = readStale<AdminUser[]>(ADMINS_PATH);
+  const cachedColleges = readStale<College[]>('/api/v2/colleges');
+  const [admins, setAdmins] = useState<AdminUser[]>(Array.isArray(cachedAdmins) ? cachedAdmins : []);
+  const [boas, setBoas] = useState<Boa[]>(Array.isArray(cachedBoas) ? cachedBoas : []);
+  const [colleges, setColleges] = useState<College[]>(Array.isArray(cachedColleges) ? cachedColleges : []);
+  const [loading, setLoading] = useState(!Array.isArray(cachedBoas));
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -85,13 +90,14 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const fetchAll = async () => {
-    setLoading(true);
+    // Keep existing rows visible while revalidating; only blank on a cold load.
+    if (boas.length === 0 && admins.length === 0) setLoading(true);
     try {
       // Only the super admin may list administrators; an admin still sees BOAs.
       const [boaData, collegeData, adminData] = await Promise.all([
-        apiFetch<Boa[]>(BOAS_PATH),
-        apiFetch<College[]>('/api/v2/colleges'),
-        isSuper ? apiFetch<AdminUser[]>(ADMINS_PATH) : Promise.resolve([]),
+        apiFetchCached<Boa[]>(BOAS_PATH),
+        apiFetchCached<College[]>('/api/v2/colleges'),
+        isSuper ? apiFetchCached<AdminUser[]>(ADMINS_PATH) : Promise.resolve([]),
       ]);
       setBoas(Array.isArray(boaData) ? boaData : []);
       setColleges(Array.isArray(collegeData) ? collegeData : []);
@@ -243,9 +249,11 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       }
       setShowForm(false);
       setEditing(null);
-      setNotice(editing ? 'User updated successfully.' : 'User created successfully.');
+      toast.success(editing ? 'User updated' : 'User created', { detail: form.email });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error(editing ? 'Could not update user' : 'Could not create user', { detail: message });
     } finally {
       setSubmitting(false);
     }
@@ -269,9 +277,11 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       setPasswordFor(null);
       setNewPassword('');
       setConfirmPassword('');
-      setNotice('Password updated. That user must sign in again.');
+      toast.success('Password updated', { detail: 'That user must sign in again.' });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error('Could not update password', { detail: message });
     } finally {
       setSubmitting(false);
     }
@@ -290,11 +300,13 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       } else {
         setBoas((current) => current.filter((boa) => String(boa._id) !== row.id));
       }
-      setNotice(`${row.name} was deleted.`);
+      toast.success('User deleted', { detail: row.name });
       setConfirmDelete(null);
     } catch (requestError) {
       if ((requestError as { status?: number })?.status !== 401) {
-        setError(requestError instanceof Error ? requestError.message : String(requestError));
+        const message = requestError instanceof Error ? requestError.message : String(requestError);
+        setError(message);
+        toast.error('Could not delete user', { detail: message });
       }
       setConfirmDelete(null);
     } finally {
@@ -362,10 +374,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       {error && !showForm && !passwordFor && (
         <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>
       )}
-      {notice && (
-        <div role="status" className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-700">{notice}</div>
-      )}
-
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">

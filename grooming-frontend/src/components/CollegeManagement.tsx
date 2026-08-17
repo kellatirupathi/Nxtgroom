@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Building2, Edit2, Plus, Trash2 } from 'lucide-react';
-import { apiFetch, apiJson, invalidateCache } from '../api';
+import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './useToast';
 import type { College } from '../types';
 
 const COLLEGES_PATH = '/api/v2/colleges';
@@ -9,8 +10,13 @@ const COLLEGES_PATH = '/api/v2/colleges';
 const EMPTY_FORM = { name: '', location: '' };
 
 export default function CollegeManagement() {
-  const [colleges, setColleges] = useState<College[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Seed from the last known response so the table paints immediately on
+  // revisit; the live fetch below corrects it a moment later.
+  const cachedColleges = readStale<College[]>(COLLEGES_PATH);
+  const [colleges, setColleges] = useState<College[]>(
+    Array.isArray(cachedColleges) ? cachedColleges : [],
+  );
+  const [loading, setLoading] = useState(!Array.isArray(cachedColleges));
   const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -18,13 +24,16 @@ export default function CollegeManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [confirmTarget, setConfirmTarget] = useState<College | null>(null);
+  const toast = useToast();
 
   const isEditMode = Boolean(editingId);
 
   const fetchColleges = async () => {
-    setLoading(true);
+    // Only show the loading state when there is nothing to display; with
+    // cached rows on screen a spinner would be a step backwards.
+    if (colleges.length === 0) setLoading(true);
     try {
-      const data = await apiFetch<College[]>(COLLEGES_PATH);
+      const data = await apiFetchCached<College[]>(COLLEGES_PATH);
       setColleges(Array.isArray(data) ? data : []);
       setError('');
     } catch (requestError) {
@@ -83,9 +92,12 @@ export default function CollegeManagement() {
       } else if (saved?.id) {
         setColleges((current) => [...current, { _id: saved.id as string, ...formData }]);
       }
+      toast.success(isEditMode ? 'College updated' : 'College added', { detail: formData.name });
       resetModal();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error(isEditMode ? 'Could not update college' : 'Could not add college', { detail: message });
     } finally {
       setSubmitting(false);
     }
@@ -99,9 +111,14 @@ export default function CollegeManagement() {
       invalidateCache(COLLEGES_PATH);
       // Remove the row locally once the server confirms; no refetch needed.
       setColleges((current) => current.filter((item) => String(item._id) !== String(college._id)));
+      toast.success('College deleted', { detail: college.name });
       setConfirmTarget(null);
     } catch (requestError) {
-      if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
+      if ((requestError as { status?: number })?.status !== 401) {
+        const message = requestError instanceof Error ? requestError.message : String(requestError);
+        setError(message);
+        toast.error('Could not delete college', { detail: message });
+      }
       setConfirmTarget(null);
     } finally {
       setDeletingId(null);
