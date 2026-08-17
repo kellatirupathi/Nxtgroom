@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, Database } from 'lucide-react';
+import { Bell, Building2, Database, Users } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import InstructorSyncPanel from './InstructorSyncPanel';
+import ReportRecipients from './ReportRecipients';
 import type { NotificationSettings } from '../types';
 
 interface ToggleProps {
@@ -167,7 +168,7 @@ function NotificationSettings() {
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<'notifications' | 'colleges' | 'sync'>('notifications');
+  const [tab, setTab] = useState<'notifications' | 'colleges' | 'sync' | 'rp'>('notifications');
 
   const tabClass = (value: string) =>
     `px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
@@ -180,7 +181,7 @@ export default function SettingsPage() {
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
       <div className="mb-5 shrink-0">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications and partner colleges.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, colleges, data sync and reporting partners.</p>
       </div>
 
       <div className="border-b border-slate-200 mb-6 shrink-0" role="tablist" aria-label="Settings sections">
@@ -215,6 +216,16 @@ export default function SettingsPage() {
             <Database size={16} aria-hidden="true" />
             Sync Data
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'rp'}
+            onClick={() => setTab('rp')}
+            className={tabClass('rp')}
+          >
+            <Users size={16} aria-hidden="true" />
+            RP
+          </button>
         </div>
       </div>
 
@@ -222,6 +233,7 @@ export default function SettingsPage() {
         {tab === 'notifications' && <NotificationSettings />}
         {tab === 'colleges' && <CollegeManagement />}
         {tab === 'sync' && <InstructorSyncPanel />}
+        {tab === 'rp' && <ReportRecipients />}
       </div>
     </section>
   );
