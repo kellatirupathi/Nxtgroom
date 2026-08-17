@@ -108,11 +108,29 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
       }
       setBusy(true);
       try {
-        const data = await apiJson<LoginResponse>('/api/v2/auth/google', {
-          method: 'POST',
-          auth: false,
-          body: { credential: response.credential },
-        });
+        // On phones the Google prompt takes over the tab, and returning can
+        // drop a connection opened while the page was hidden. The credential
+        // is still valid, so retry rather than making the user start over.
+        let data: LoginResponse | undefined;
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            data = await apiJson<LoginResponse>('/api/v2/auth/google', {
+              method: 'POST',
+              auth: false,
+              body: { credential: response.credential },
+            });
+            break;
+          } catch (attemptError) {
+            lastError = attemptError;
+            // A rejected account or expired credential will fail identically
+            // every time; only retry transport-level failures.
+            const status = (attemptError as { status?: number })?.status;
+            if (status !== undefined) throw attemptError;
+            if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+          }
+        }
+        if (!data) throw lastError ?? new Error('Google sign-in could not be completed.');
         if (!data?.access_token || !['SUPER_ADMIN', 'ADMIN', 'BOA'].includes(data.role)) {
           throw new Error('The server returned an invalid login response.');
         }

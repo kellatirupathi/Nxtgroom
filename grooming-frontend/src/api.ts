@@ -263,7 +263,21 @@ export async function apiFetch<T = unknown>(path: string, options: ApiRequestOpt
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs);
+  // Mobile browsers freeze timers in a backgrounded tab. Returning from the
+  // Google sign-in tab can therefore fire a timeout that "elapsed" while the
+  // page was hidden even though no time was spent waiting on the network, so
+  // measure against wall-clock and re-arm instead of aborting blindly.
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = Date.now() + timeoutMs;
+  const armTimeout = () => {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      controller.abort(new Error('Request timed out'));
+      return;
+    }
+    timeout = setTimeout(armTimeout, Math.min(remaining, 1000));
+  };
+  armTimeout();
   const abortFromCaller = () => controller.abort(suppliedSignal?.reason);
   if (suppliedSignal?.aborted) abortFromCaller();
   else suppliedSignal?.addEventListener('abort', abortFromCaller, { once: true });
