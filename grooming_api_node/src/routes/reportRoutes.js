@@ -211,28 +211,29 @@ reportRouter.get(
  * Sends the weekly summary to every instructor who has an address and at
  * least one check-in that week. Triggered by cron on Sunday morning.
  */
-reportRouter.post(
-  "/cron/weekly-reports",
-  requireCronSecret,
-  asyncRoute(async (req, res) => {
-    const db = req.app.locals.db;
-    // Sunday belongs to the week that just ended, so "now" resolves to the
-    // week being reported on without any date arithmetic here.
-    const startKey = weekStartKey(new Date());
-    const dates = workingWeekDates(startKey);
-    const from = new Date(`${dates[0]}T00:00:00.000Z`);
-    from.setUTCDate(from.getUTCDate() - 1);
-    const to = new Date(`${dates[dates.length - 1]}T23:59:59.999Z`);
-    to.setUTCDate(to.getUTCDate() + 1);
+/**
+ * Delivers the weekly summaries. Runs detached from the request because a
+ * scheduler times a call out — cron-jobs.org after 30 seconds — while sending
+ * one email per instructor takes far longer than that at any real roster size.
+ * A timed-out call would be recorded as a failure even though the send was
+ * proceeding normally.
+ */
+async function deliverWeeklyReports(db, startKey) {
+  const dates = workingWeekDates(startKey);
+  const from = new Date(`${dates[0]}T00:00:00.000Z`);
+  from.setUTCDate(from.getUTCDate() - 1);
+  const to = new Date(`${dates[dates.length - 1]}T23:59:59.999Z`);
+  to.setUTCDate(to.getUTCDate() + 1);
 
-    const instructorIds = await db.collection("attendance").distinct("instructor_id", {
-      check_in_time: { $gte: from, $lte: to },
-    });
+  const instructorIds = await db.collection("attendance").distinct("instructor_id", {
+    check_in_time: { $gte: from, $lte: to },
+  });
 
-    let sent = 0;
-    let skipped = 0;
-    const failures = [];
-    for (const instructorId of instructorIds) {
+  let sent = 0;
+  let skipped = 0;
+  const failures = [];
+  for (const instructorId of instructorIds) {
+    try {
       const instructor = await db.collection("instructors").findOne({ _id: instructorId });
       if (!instructor?.email) {
         skipped += 1;
@@ -251,9 +252,58 @@ reportRouter.post(
       });
       if (result.sent) sent += 1;
       else failures.push({ email: instructor.email, reason: result.reason });
+    } catch (error) {
+      // One bad record must not abandon the rest of the roster.
+      failures.push({ instructor: String(instructorId), reason: error?.name || "error" });
+    }
+  }
+
+  await db.collection("app_settings").updateOne(
+    { _id: "weekly_report_run" },
+    {
+      $set: {
+        _id: "weekly_report_run",
+        week_start: startKey,
+        finished_at: new Date(),
+        considered: instructorIds.length,
+        sent,
+        skipped,
+        failures: failures.slice(0, 20),
+      },
+    },
+    { upsert: true }
+  );
+  console.log(`Weekly reports for ${startKey}: ${sent} sent, ${skipped} skipped, ${failures.length} failed`);
+  return { sent, skipped, failures };
+}
+
+reportRouter.post(
+  "/cron/weekly-reports",
+  requireCronSecret,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    // Sunday belongs to the week that just ended, so "now" resolves to the
+    // week being reported on without any date arithmetic here.
+    const startKey = weekStartKey(new Date());
+
+    // Claim the run before answering, so a scheduler retry after a timeout
+    // cannot start a second pass and send everyone two copies.
+    const claim = await db.collection("app_settings").updateOne(
+      { _id: "weekly_report_claim", week_start: { $ne: startKey } },
+      { $set: { _id: "weekly_report_claim", week_start: startKey, claimed_at: new Date() } },
+      { upsert: true }
+    );
+    const alreadyRun = !(claim.upsertedCount || claim.modifiedCount);
+    if (alreadyRun && req.query.force !== "1") {
+      return res.json({ week_start: startKey, status: "already_sent_this_week" });
     }
 
-    return res.json({ week_start: startKey, considered: instructorIds.length, sent, skipped, failures });
+    void deliverWeeklyReports(db, startKey);
+    return res.status(202).json({
+      week_start: startKey,
+      status: "started",
+      note: "Delivery continues in the background; see the weekly_report_run record for the outcome.",
+    });
   })
 );
 
@@ -261,38 +311,34 @@ reportRouter.post(
  * Nudges anyone who checked in without checking out, or checked out with no
  * check-in recorded. Triggered by cron at 20:00 local time.
  */
-reportRouter.post(
-  "/cron/attendance-reminders",
-  requireCronSecret,
-  asyncRoute(async (req, res) => {
-    const db = req.app.locals.db;
-    const timeZone = runtimeConfig().appTimeZone;
-    const today = localDateKey(new Date(), timeZone);
-    const from = new Date(`${today}T00:00:00.000Z`);
-    from.setUTCDate(from.getUTCDate() - 1);
-    const to = new Date(`${today}T23:59:59.999Z`);
-    to.setUTCDate(to.getUTCDate() + 1);
+/**
+ * Sends the missed-check-out nudges. Detached for the same reason as the
+ * weekly run: one email per open check-in outlives a scheduler timeout.
+ */
+async function deliverAttendanceReminders(db) {
+  const timeZone = runtimeConfig().appTimeZone;
+  const today = localDateKey(new Date(), timeZone);
+  const from = new Date(`${today}T00:00:00.000Z`);
+  from.setUTCDate(from.getUTCDate() - 1);
+  const to = new Date(`${today}T23:59:59.999Z`);
+  to.setUTCDate(to.getUTCDate() + 1);
 
-    const records = await db.collection("attendance")
-      .find({ check_in_time: { $gte: from, $lte: to } })
-      .toArray();
-    const todays = records.filter((record) => (
-      localDateKey(new Date(record.check_in_time || record.date), timeZone) === today
-    ));
+  const records = await db.collection("attendance")
+    .find({ check_in_time: { $gte: from, $lte: to }, check_out_time: null })
+    .toArray();
+  const todays = records.filter((record) => (
+    localDateKey(new Date(record.check_in_time || record.date), timeZone) === today
+  ));
 
-    let sent = 0;
-    const failures = [];
-    for (const record of todays) {
-      // Only a missing check-out is detectable here: a check-out without a
-      // check-in cannot exist, because check-out looks up an open record.
-      if (record.check_out_time) continue;
-      const instructor = await db.collection("instructors").findOne({
-        _id: record.instructor_id,
-      });
-      const email = instructor?.email;
-      if (!email) continue;
+  let sent = 0;
+  const failures = [];
+  for (const record of todays) {
+    try {
       // Guard against a repeat run sending the same nudge twice.
       if (record.checkout_reminder_sent_at) continue;
+      const instructor = await db.collection("instructors").findOne({ _id: record.instructor_id });
+      const email = instructor?.email;
+      if (!email) continue;
 
       const result = await sendAttendanceReminderEmail(email, {
         name: record.instructor_name || instructor?.name,
@@ -308,9 +354,31 @@ reportRouter.post(
       } else {
         failures.push({ email, reason: result.reason });
       }
+    } catch (error) {
+      failures.push({ attendance: String(record._id), reason: error?.name || "error" });
     }
+  }
 
-    return res.json({ date: today, checked: todays.length, sent, failures });
+  await db.collection("app_settings").updateOne(
+    { _id: "attendance_reminder_run" },
+    { $set: { _id: "attendance_reminder_run", date: today, finished_at: new Date(), checked: todays.length, sent, failures: failures.slice(0, 20) } },
+    { upsert: true }
+  );
+  console.log(`Attendance reminders for ${today}: ${sent} sent of ${todays.length} open check-ins`);
+  return { sent, failures };
+}
+
+reportRouter.post(
+  "/cron/attendance-reminders",
+  requireCronSecret,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    void deliverAttendanceReminders(db);
+    return res.status(202).json({
+      date: localDateKey(new Date()),
+      status: "started",
+      note: "Delivery continues in the background; see the attendance_reminder_run record for the outcome.",
+    });
   })
 );
 
