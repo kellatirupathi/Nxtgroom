@@ -40,7 +40,12 @@ export function appUrl() {
     if (allowed.includes(configured)) return configured;
     console.warn("APP_URL is not present in CORS_ORIGINS; falling back to the allowlist.");
   }
-  return allowed.find((origin) => origin.startsWith("https://")) || allowed[0] || "";
+  // The mobile app's origin is https://localhost, which is a valid CORS entry
+  // but must never be used to build an emailed link: a recipient opening it
+  // would reach their own machine, not FacultyTrack.
+  const isLocal = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(origin);
+  const external = allowed.filter((origin) => !isLocal(origin));
+  return external.find((origin) => origin.startsWith("https://")) || external[0] || allowed[0] || "";
 }
 
 export function runtimeConfig() {

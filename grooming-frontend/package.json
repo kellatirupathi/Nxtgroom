@@ -15,6 +15,9 @@
     "node": "24.x"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "@tailwindcss/vite": "^4.3.3",
     "lucide-react": "^1.31.0",
     "react": "^19.2.8",
