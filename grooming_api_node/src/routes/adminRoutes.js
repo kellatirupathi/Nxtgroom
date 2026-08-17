@@ -1,8 +1,22 @@
 import { Router } from "express";
 import { withMongoTransaction } from "../config/db.js";
-import { getPasswordHash, idMatch, requireSuperAdmin, ROLES } from "../middleware/auth.js";
+import {
+  getPasswordHash,
+  idMatch,
+  requireRootAdmin,
+  requireSuperAdmin,
+  ROLES,
+} from "../middleware/auth.js";
 import { asyncRoute, createDocument, serializeDocument } from "../utils.js";
-import { boaSchema, boaUpdateSchema, collegeSchema, validate } from "../validation.js";
+import {
+  adminSchema,
+  adminUpdateSchema,
+  boaSchema,
+  boaUpdateSchema,
+  collegeSchema,
+  setPasswordSchema,
+  validate,
+} from "../validation.js";
 import {
   getNotificationSettings,
   saveNotificationSettings,
@@ -495,5 +509,185 @@ adminRouter.put(
       req.currentUser.email
     );
     return res.json(saved);
+  })
+);
+
+/* ---------------------------------------------------------------------------
+ * Administrator accounts
+ *
+ * Only SUPER_ADMIN may reach these routes. ADMIN accounts hold organisation-
+ * wide power everywhere else, but cannot create or remove each other, so the
+ * owner can never be locked out of their own system.
+ * ------------------------------------------------------------------------- */
+
+function serializeUser(user) {
+  return {
+    _id: String(user._id),
+    name: user.name || "",
+    email: user.email,
+    role: user.role,
+    created_at: user.created_at || null,
+    disabled_at: user.disabled_at || null,
+  };
+}
+
+adminRouter.get(
+  "/admins",
+  requireRootAdmin,
+  asyncRoute(async (req, res) => {
+    const users = await req.app.locals.db
+      .collection("users")
+      .find({ role: { $in: [ROLES.SUPER_ADMIN, ROLES.ADMIN] } })
+      .sort({ created_at: 1 })
+      .toArray();
+    return res.json(users.map(serializeUser));
+  })
+);
+
+adminRouter.post(
+  "/admins",
+  requireRootAdmin,
+  validate(adminSchema),
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const { name, email, password } = req.validatedBody;
+
+    if (await db.collection("users").findOne({ email })) {
+      return res.status(400).json({ detail: "Email already registered" });
+    }
+
+    const now = new Date();
+    const user = createDocument({
+      name,
+      email,
+      password_hash: await getPasswordHash(password),
+      role: ROLES.ADMIN,
+      reference_id: null,
+      session_version: 0,
+      created_at: now,
+      updated_at: now,
+    });
+
+    try {
+      await db.collection("users").insertOne(user);
+    } catch (error) {
+      if (duplicateErrorResponse(error, res, "Email already registered")) return;
+      throw error;
+    }
+    return res.status(201).json({ message: "Administrator created successfully", id: user._id });
+  })
+);
+
+adminRouter.put(
+  "/admins/:id",
+  requireRootAdmin,
+  validate(adminUpdateSchema),
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const { name, email, password } = req.validatedBody;
+    const target = await db.collection("users").findOne({ _id: idMatch(String(req.params.id)) });
+
+    if (!target || ![ROLES.SUPER_ADMIN, ROLES.ADMIN].includes(target.role)) {
+      return res.status(404).json({ detail: "Administrator not found" });
+    }
+
+    const clash = await db.collection("users").findOne({ email, _id: { $ne: target._id } });
+    if (clash) return res.status(400).json({ detail: "Email already registered" });
+
+    const update = { name, email, updated_at: new Date() };
+    const inc = {};
+    if (password) {
+      update.password_hash = await getPasswordHash(password);
+      update.password_changed_at = new Date();
+      // Force re-authentication everywhere when a credential changes.
+      inc.session_version = 1;
+    }
+    // Changing the sign-in address must also invalidate existing tokens,
+    // whose `sub` claim still carries the old address.
+    if (email !== target.email) inc.session_version = 1;
+
+    await db.collection("users").updateOne(
+      { _id: target._id },
+      Object.keys(inc).length ? { $set: update, $inc: inc } : { $set: update }
+    );
+    return res.json({ message: "Administrator updated successfully" });
+  })
+);
+
+adminRouter.post(
+  "/admins/:id/password",
+  requireRootAdmin,
+  validate(setPasswordSchema),
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const target = await db.collection("users").findOne({ _id: idMatch(String(req.params.id)) });
+    if (!target || ![ROLES.SUPER_ADMIN, ROLES.ADMIN].includes(target.role)) {
+      return res.status(404).json({ detail: "Administrator not found" });
+    }
+
+    await db.collection("users").updateOne(
+      { _id: target._id },
+      {
+        $set: {
+          password_hash: await getPasswordHash(req.validatedBody.new_password),
+          password_changed_at: new Date(),
+          updated_at: new Date(),
+        },
+        $inc: { session_version: 1 },
+      }
+    );
+    return res.json({ message: "Password updated. The administrator must sign in again." });
+  })
+);
+
+adminRouter.delete(
+  "/admins/:id",
+  requireRootAdmin,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const target = await db.collection("users").findOne({ _id: idMatch(String(req.params.id)) });
+
+    if (!target || ![ROLES.SUPER_ADMIN, ROLES.ADMIN].includes(target.role)) {
+      return res.status(404).json({ detail: "Administrator not found" });
+    }
+    if (target.role === ROLES.SUPER_ADMIN) {
+      return res.status(400).json({ detail: "The super admin account cannot be deleted" });
+    }
+    if (target.email === req.currentUser.email) {
+      return res.status(400).json({ detail: "You cannot delete your own account" });
+    }
+
+    await db.collection("users").deleteOne({ _id: target._id });
+    return res.json({ message: "Administrator deleted successfully" });
+  })
+);
+
+/** Lets an elevated user set a BOA's password without knowing the old one. */
+adminRouter.post(
+  "/boas/:id/password",
+  requireSuperAdmin,
+  validate(setPasswordSchema),
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const boa = await db.collection("boas").findOne(
+      activeFilter({ _id: idMatch(String(req.params.id)) })
+    );
+    if (!boa) return res.status(404).json({ detail: "BOA not found" });
+
+    const result = await db.collection("users").updateOne(
+      activeUserFilter({ reference_id: String(boa._id), role: ROLES.BOA }),
+      {
+        $set: {
+          password_hash: await getPasswordHash(req.validatedBody.new_password),
+          password_changed_at: new Date(),
+          updated_at: new Date(),
+        },
+        $inc: { session_version: 1 },
+      }
+    );
+    if (!result.matchedCount) {
+      return res.status(404).json({ detail: "No active sign-in account for this BOA" });
+    }
+    return res.json({ message: "Password updated. The BOA must sign in again." });
   })
 );

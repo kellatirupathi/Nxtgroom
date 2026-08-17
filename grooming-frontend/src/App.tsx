@@ -5,7 +5,7 @@ import EvaluateCard from './components/EvaluateCard';
 import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
 import DailyAttendanceTable from './components/DailyAttendanceTable';
-import BOAManagement from './components/BOAManagement';
+import UserManagement from './components/UserManagement';
 import SettingsPage from './components/SettingsPage';
 import { ChangePasswordModal, ProfileModal } from './components/AccountModals';
 import InstructorManagement from './components/InstructorManagement';
@@ -18,7 +18,7 @@ import {
   saveSession,
   SESSION_EXPIRED_EVENT,
 } from './api';
-import type { AttendanceRecord, CurrentUser, Instructor, Role } from './types';
+import { isElevatedRole, type AttendanceRecord, type CurrentUser, type Instructor, type Role } from './types';
 
 interface SessionState {
   token: string | null;
@@ -77,7 +77,7 @@ export default function App() {
       setSessionCheckError('');
       try {
         const currentUser = await apiFetch<CurrentUser>('/api/v2/auth/me', { signal: controller.signal });
-        if (!['SUPER_ADMIN', 'BOA'].includes(currentUser?.role)) {
+        if (!['SUPER_ADMIN', 'ADMIN', 'BOA'].includes(currentUser?.role)) {
           throw new Error('The server returned an invalid user role.');
         }
         saveSession(session.token as string, currentUser.role);
@@ -110,7 +110,7 @@ export default function App() {
   }, [session.token, session.validated, fetchInstructors]);
 
   const navigate = (tab: string) => {
-    if (ADMIN_TABS.has(tab) && session.role !== 'SUPER_ADMIN') {
+    if (ADMIN_TABS.has(tab) && !isElevatedRole(session.role)) {
       setActiveTab('overview');
       return;
     }
@@ -193,15 +193,15 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'boa-management' && session.role === 'SUPER_ADMIN' && (
-            <div className="w-full h-full"><BOAManagement /></div>
+          {activeTab === 'boa-management' && isElevatedRole(session.role) && (
+            <div className="w-full h-full"><UserManagement currentRole={session.role} currentEmail={session.email} /></div>
           )}
 
-          {activeTab === 'settings' && session.role === 'SUPER_ADMIN' && (
+          {activeTab === 'settings' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><SettingsPage /></div>
           )}
 
-          {activeTab === 'instructor-management' && session.role === 'SUPER_ADMIN' && (
+          {activeTab === 'instructor-management' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><InstructorManagement /></div>
           )}
         </div>

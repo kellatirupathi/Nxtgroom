@@ -1,6 +1,24 @@
 /** Shared domain types mirroring the API's serialized documents. */
 
-export type Role = 'SUPER_ADMIN' | 'BOA';
+export type Role = 'SUPER_ADMIN' | 'ADMIN' | 'BOA';
+
+/** Roles with organisation-wide reach. */
+export const ELEVATED_ROLES: readonly Role[] = ['SUPER_ADMIN', 'ADMIN'];
+
+export const ALL_ROLES: readonly Role[] = ['SUPER_ADMIN', 'ADMIN', 'BOA'];
+
+export function isElevatedRole(role: Role | null | undefined): boolean {
+  return role === 'SUPER_ADMIN' || role === 'ADMIN';
+}
+
+export interface AdminUser {
+  _id: string;
+  name: string;
+  email: string;
+  role: Role;
+  created_at?: string | null;
+  disabled_at?: string | null;
+}
 
 export type AttendanceStatus =
   | 'compliant'

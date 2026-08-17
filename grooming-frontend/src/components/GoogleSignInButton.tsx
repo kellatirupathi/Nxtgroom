@@ -113,7 +113,7 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
           auth: false,
           body: { credential: response.credential },
         });
-        if (!data?.access_token || !['SUPER_ADMIN', 'BOA'].includes(data.role)) {
+        if (!data?.access_token || !['SUPER_ADMIN', 'ADMIN', 'BOA'].includes(data.role)) {
           throw new Error('The server returned an invalid login response.');
         }
         saveSession(data.access_token, data.role);
@@ -161,8 +161,8 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
   if (!config?.enabled) return null;
 
   return (
-    <div className="mt-6">
-      <div className="flex items-center gap-3 mb-4">
+    <div className="mt-4 sm:mt-6">
+      <div className="flex items-center gap-3 mb-3 sm:mb-4">
         <span className="h-px flex-1 bg-slate-200" />
         <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">or</span>
         <span className="h-px flex-1 bg-slate-200" />

@@ -67,3 +67,23 @@ export function validate(schema) {
     return next();
   };
 }
+
+export const adminSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  password: z.string().min(12).max(128),
+});
+
+export const adminUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
+  // Blank means "leave the existing credential alone".
+  password: z.preprocess(
+    (value) => (value === "" || value === null ? undefined : value),
+    z.string().min(12).max(128).optional()
+  ),
+});
+
+export const setPasswordSchema = z.object({
+  new_password: z.string().min(12).max(128),
+});

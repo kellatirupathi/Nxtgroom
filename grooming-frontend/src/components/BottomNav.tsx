@@ -8,10 +8,9 @@ import {
   User,
   KeyRound,
   LogOut,
-  MoreHorizontal,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Role } from '../types.ts';
+import { isElevatedRole, type Role } from '../types.ts';
 
 interface NavItem {
   tab: string;
@@ -31,7 +30,7 @@ const PRIMARY_ITEMS: NavItem[] = [
 ];
 
 const OVERFLOW_ITEMS: NavItem[] = [
-  { tab: 'boa-management', label: 'BOA Management', icon: Users, adminOnly: true },
+  { tab: 'boa-management', label: 'Users', icon: Users, adminOnly: true },
   { tab: 'settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 
@@ -47,6 +46,7 @@ interface BottomNavProps {
 
 function roleLabel(role: Role | null): string {
   if (role === 'SUPER_ADMIN') return 'Super Admin';
+  if (role === 'ADMIN') return 'Admin';
   if (role === 'BOA') return 'BOA';
   return 'Signed in';
 }
@@ -64,7 +64,7 @@ export default function BottomNav({
   const sheetRef = useRef<HTMLDivElement | null>(null);
 
   const visible = (items: NavItem[]) =>
-    items.filter((item) => !item.adminOnly || role === 'SUPER_ADMIN');
+    items.filter((item) => !item.adminOnly || isElevatedRole(role));
 
   const primary = visible(PRIMARY_ITEMS);
   const overflow = visible(OVERFLOW_ITEMS);
@@ -204,10 +204,18 @@ export default function BottomNav({
           onClick={() => setIsSheetOpen((open) => !open)}
           aria-haspopup="menu"
           aria-expanded={isSheetOpen}
+          aria-label="Open account and more options"
           className={itemClass(isSheetOpen || overflowActive)}
         >
-          <MoreHorizontal size={20} aria-hidden="true" />
-          <span className="text-[11px] font-semibold leading-none">More</span>
+          <span
+            aria-hidden="true"
+            className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
+              isSheetOpen || overflowActive ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'
+            }`}
+          >
+            {initial}
+          </span>
+          <span className="text-[11px] font-semibold leading-none">Profile</span>
         </button>
       </nav>
     </>

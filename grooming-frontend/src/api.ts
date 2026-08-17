@@ -7,7 +7,7 @@ export const SESSION_ROLE_KEY = 'facultytrack_role';
 const DEFAULT_TIMEOUT_MS = 30_000;
 export const MAX_PAGINATED_ITEMS = 50_000;
 const MAX_PAGE_SIZE = 1_000;
-const ROLES: readonly Role[] = ['SUPER_ADMIN', 'BOA'];
+const ROLES: readonly Role[] = ['SUPER_ADMIN', 'ADMIN', 'BOA'];
 
 export interface ApiErrorInit {
   status?: number;

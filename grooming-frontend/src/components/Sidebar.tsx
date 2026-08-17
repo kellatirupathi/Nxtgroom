@@ -10,7 +10,7 @@ import {
   LogOut,
   ChevronUp,
 } from 'lucide-react';
-import type { Role } from '../types';
+import { isElevatedRole, type Role } from '../types';
 
 interface SidebarProps {
   activeTab: string;
@@ -35,6 +35,7 @@ function navClass(isActive: boolean) {
 
 function roleLabel(role: Role | null) {
   if (role === 'SUPER_ADMIN') return 'Super Admin';
+  if (role === 'ADMIN') return 'Admin';
   if (role === 'BOA') return 'BOA';
   return 'Signed in';
 }
@@ -100,7 +101,7 @@ export default function Sidebar({
           Daily Records
         </button>
 
-        {role === 'SUPER_ADMIN' && (
+        {isElevatedRole(role) && (
           <>
             <button
               type="button"
@@ -116,7 +117,7 @@ export default function Sidebar({
               className={navClass(activeTab === 'boa-management')}
             >
               <Users size={20} aria-hidden="true" />
-              BOA Management
+              Users
             </button>
             <button
               type="button"
@@ -135,7 +136,7 @@ export default function Sidebar({
           <div
             role="menu"
             aria-label="Account menu"
-            className="absolute bottom-full left-3 right-3 mb-2 bg-white border border-slate-200 rounded-md shadow-lg overflow-hidden"
+            className="absolute bottom-2 left-full ml-2 w-56 bg-white border border-slate-200 rounded-md shadow-xl overflow-hidden z-50"
           >
             <button
               type="button"

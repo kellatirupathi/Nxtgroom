@@ -7,8 +7,16 @@ const ALGORITHM = "HS256";
 
 export const ROLES = {
   SUPER_ADMIN: "SUPER_ADMIN",
+  ADMIN: "ADMIN",
   BOA: "BOA",
 };
+
+/** Roles with organisation-wide reach (not scoped to a single college). */
+export const ELEVATED_ROLES = [ROLES.SUPER_ADMIN, ROLES.ADMIN];
+
+export function isElevated(role) {
+  return ELEVATED_ROLES.includes(role);
+}
 
 export function userSessionVersion(user) {
   return Number.isSafeInteger(user?.session_version) && user.session_version >= 0
@@ -108,10 +116,22 @@ export async function getCurrentUser(req, res, next) {
   }
 }
 
-/** Guard for routes restricted to SUPER_ADMIN. */
+/** Guard for administrative routes: SUPER_ADMIN and ADMIN both qualify. */
 export function requireSuperAdmin(req, res, next) {
-  if (req.currentUser?.role !== ROLES.SUPER_ADMIN) {
+  if (!isElevated(req.currentUser?.role)) {
     return res.status(403).json({ detail: "Not authorized" });
+  }
+  return next();
+}
+
+/**
+ * Guard for actions only the primary administrator may take. Restricting
+ * ADMIN-account management to SUPER_ADMIN keeps that account un-removable, so
+ * an admin cannot lock the owner out of their own system.
+ */
+export function requireRootAdmin(req, res, next) {
+  if (req.currentUser?.role !== ROLES.SUPER_ADMIN) {
+    return res.status(403).json({ detail: "Only the super admin can manage administrator accounts" });
   }
   return next();
 }
@@ -137,6 +157,6 @@ export function requireDatabase(req, res, next) {
 }
 
 export function instructorScope(currentUser) {
-  if (currentUser?.role === ROLES.SUPER_ADMIN) return {};
+  if (isElevated(currentUser?.role)) return {};
   return { college_id: idMatch(String(currentUser?.collegeId)) };
 }
