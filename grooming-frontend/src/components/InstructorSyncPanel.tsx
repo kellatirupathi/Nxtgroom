@@ -111,6 +111,12 @@ export default function InstructorSyncPanel() {
           <p className="text-sm text-slate-500 mt-1">
             Import the instructor roster from BigQuery into FacultyTrack.
           </p>
+          {/* Stated up front: an administrator should know a sync cannot lose
+              anything before they run one against 4,000+ records. */}
+          <p className="text-xs text-slate-400 mt-1">
+            Adds new instructors and updates changed details. Nothing is ever deleted —
+            instructors no longer in BigQuery keep their records and history.
+          </p>
         </div>
 
         <div className="flex items-center gap-3">

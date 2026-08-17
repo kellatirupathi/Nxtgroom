@@ -130,9 +130,20 @@ export async function fetchInstructorRoster() {
  * instructor_user_id, so synced people appear on the Instructors page and can
  * be selected for attendance like any other record.
  *
- * Upserts rather than replacing so a failed run cannot empty the table, and
- * fields FacultyTrack owns — college assignment, gender, soft deletion — are
- * left untouched on rows that already exist.
+ * The sync is strictly additive. It adds instructors that are new, updates
+ * values that changed, and touches nothing else — there is no delete, drop or
+ * replace anywhere in this path, and every write is addressed to an id present
+ * in the current roster.
+ *
+ * That matters because an instructor who has left the BigQuery roster still
+ * has attendance and grooming history here, and removing the row would orphan
+ * it. Someone who disappears from the warehouse simply keeps their record with
+ * an older synced_at. instructor-sync-additive.test.js asserts this by
+ * inspecting the generated operations, so a destructive change fails there
+ * before it could ever reach a database.
+ *
+ * Fields FacultyTrack owns — college assignment, gender, soft deletion — live
+ * in $setOnInsert so a re-sync cannot reset them.
  */
 export async function saveInstructorRoster(db, records) {
   if (!records.length) return { upserted: 0, modified: 0 };
