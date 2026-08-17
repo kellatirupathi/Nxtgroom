@@ -131,7 +131,7 @@ export default function BOAManagement() {
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-0 md:min-w-[760px]">
-            <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">Name</th><th className="p-4">Employee ID</th><th className="p-4">College</th><th className="p-4">Registered Date</th><th className="p-4 text-right">Actions</th></tr></thead>
+            <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">Name</th><th className="p-4 hidden md:table-cell">Employee ID</th><th className="p-4">College</th><th className="p-4 hidden lg:table-cell">Registered Date</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={5} className="p-8 text-center text-slate-400">Loading BOAs…</td></tr>
@@ -140,9 +140,9 @@ export default function BOAManagement() {
               ) : boas.map((boa) => (
                 <tr key={boa._id} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 font-bold text-slate-800">{boa.name}</td>
-                  <td className="p-4 text-sm font-medium text-slate-600">{boa.employee_id}</td>
+                  <td className="p-4 text-sm font-medium text-slate-600 hidden md:table-cell">{boa.employee_id}</td>
                   <td className="p-4 text-sm font-medium text-slate-600">{collegeNames.get(String(boa.college_id)) || 'Unknown college'}</td>
-                  <td className="p-4 text-sm text-slate-500">{boa.created_at ? new Date(boa.created_at).toLocaleDateString() : '--'}</td>
+                  <td className="p-4 text-sm text-slate-500 hidden lg:table-cell">{boa.created_at ? new Date(boa.created_at).toLocaleDateString() : '--'}</td>
                   <td className="p-4">
                     <div className="flex items-center justify-end gap-2">
                       <button type="button" aria-label={`Edit ${boa.name}`} title={`Edit ${boa.name}`} disabled={Boolean(deletingId)} onClick={() => openEditModal(boa)} className="rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"><Edit2 size={16} aria-hidden="true" /></button>

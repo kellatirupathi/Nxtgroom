@@ -187,7 +187,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             <option value="">All roles</option>
             {roles.map((role) => <option key={role} value={role}>{role}</option>)}
           </select>
-          <span className="relative">
+          <span className="relative flex-1 min-w-[10rem] sm:flex-none">
             <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
             <input
               type="search"
@@ -196,7 +196,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
               placeholder="Search name, college, remarks…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-9 w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              className="h-9 w-full sm:w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
             />
           </span>
         </div>

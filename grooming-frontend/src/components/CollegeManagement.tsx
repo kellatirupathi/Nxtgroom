@@ -111,7 +111,7 @@ export default function CollegeManagement() {
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-0 md:min-w-[700px]">
-            <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4">College ID</th><th className="p-4">Name</th><th className="p-4">Location</th><th className="p-4 text-right">Actions</th></tr></thead>
+            <thead><tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider"><th className="p-4 hidden lg:table-cell">College ID</th><th className="p-4">Name</th><th className="p-4">Location</th><th className="p-4 text-right">Actions</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">Loading colleges…</td></tr>
@@ -119,7 +119,7 @@ export default function CollegeManagement() {
                 <tr><td colSpan={4} className="p-8 text-center text-slate-400 font-medium">No colleges found. Add one to get started.</td></tr>
               ) : colleges.map((college) => (
                 <tr key={college._id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-4 text-xs font-mono text-slate-400">{college._id}</td>
+                  <td className="p-4 text-xs font-mono text-slate-400 hidden lg:table-cell">{college._id}</td>
                   <td className="p-4 font-bold text-slate-800">{college.name}</td>
                   <td className="p-4 text-sm font-medium text-slate-600">{college.location}</td>
                   <td className="p-4">

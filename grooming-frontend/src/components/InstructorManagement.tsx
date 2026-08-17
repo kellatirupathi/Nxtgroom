@@ -146,13 +146,13 @@ export default function InstructorManagement() {
           </h2>
           <p className="text-sm text-slate-500 mt-1">Manage instructor profiles and college assignments.</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="relative">
+        <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
+          <div className="relative flex-1 min-w-[10rem] sm:flex-none">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
               type="text" 
               placeholder="Search instructors..." 
-              className="pl-10 pr-4 py-2.5 rounded-md border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none w-64 shadow-sm transition-all"
+              className="pl-10 pr-4 py-2.5 rounded-md border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none w-full sm:w-64 shadow-sm transition-all"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -177,43 +177,49 @@ export default function InstructorManagement() {
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
                 <th className="p-4">Employee ID</th>
                 <th className="p-4">Instructor Name</th>
+                <th className="p-4 hidden xl:table-cell">Gender</th>
                 <th className="p-4">Role</th>
-                <th className="p-4">College</th>
-                <th className="p-4">Contact</th>
+                <th className="p-4 hidden md:table-cell">College</th>
+                <th className="p-4 hidden lg:table-cell">Email</th>
+                <th className="p-4 hidden xl:table-cell">Phone</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
+                  <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
                 </tr>
               ) : filteredInstructors.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
+                  <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
                 </tr>
               ) : (
                 filteredInstructors.map(ins => (
                   <tr key={ins._id} className="hover:bg-slate-50 transition-colors group">
                     <td className="p-4 text-xs font-mono font-medium text-slate-500">{ins.employee_id}</td>
-                    <td className="p-4 font-bold text-slate-800">
-                      {ins.name}
-                      <div className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mt-0.5">{ins.gender}</div>
-                    </td>
+                    <td className="p-4 font-bold text-slate-800">{ins.name}</td>
+                    <td className="p-4 hidden xl:table-cell text-xs font-medium text-slate-500 uppercase tracking-wider">{ins.gender}</td>
                     <td className="p-4">
-                      <span className="inline-flex px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold text-[11px] rounded-md border border-indigo-100">
+                      <span className="inline-flex px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold text-[11px] rounded-md border border-indigo-100 whitespace-nowrap">
                         {ins.role}
                       </span>
                     </td>
-                    <td className="p-4 text-sm font-semibold text-slate-700 flex items-center gap-1.5 pt-5">
-                      <Building2 size={14} className="text-slate-400" />
-                      {getCollegeName(ins.college_id)}
+                    <td className="p-4 hidden md:table-cell text-sm font-semibold text-slate-700">
+                      <span className="flex items-center gap-1.5">
+                        <Building2 size={14} className="text-slate-400 shrink-0" aria-hidden="true" />
+                        {getCollegeName(ins.college_id)}
+                      </span>
                     </td>
-                    <td className="p-4">
-                      <div className="flex flex-col gap-1.5">
-                        {ins.email ? <span className="text-xs font-medium text-slate-500 flex items-center gap-1.5"><Mail size={12} className="text-slate-400"/> {ins.email}</span> : <span className="text-xs text-slate-300">-</span>}
-                        {ins.phone_no ? <span className="text-xs font-medium text-slate-500 flex items-center gap-1.5"><Phone size={12} className="text-slate-400"/> {ins.phone_no}</span> : null}
-                      </div>
+                    <td className="p-4 hidden lg:table-cell text-xs font-medium text-slate-500">
+                      {ins.email ? (
+                        <span className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400 shrink-0" aria-hidden="true" /> {ins.email}</span>
+                      ) : <span className="text-slate-300">--</span>}
+                    </td>
+                    <td className="p-4 hidden xl:table-cell text-xs font-medium text-slate-500">
+                      {ins.phone_no ? (
+                        <span className="flex items-center gap-1.5"><Phone size={12} className="text-slate-400 shrink-0" aria-hidden="true" /> {ins.phone_no}</span>
+                      ) : <span className="text-slate-300">--</span>}
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2">
