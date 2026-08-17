@@ -3,6 +3,7 @@ import { Plus, UserCog, Search, Mail } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import RowActionsMenu from './RowActionsMenu';
+import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import type { College, Instructor } from '../types';
 
@@ -355,12 +356,13 @@ export default function InstructorManagement() {
 
               <div>
                 <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign Institute</label>
-                <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.college_id} onChange={e => setFormData({...formData, college_id: e.target.value})}>
-                  <option value="" disabled>Select an institute...</option>
-                  {colleges.map(c => (
-                    <option key={c._id} value={c._id}>{c.name} - {c.location}</option>
-                  ))}
-                </select>
+                <SearchableSelect
+                    ariaLabel="Assign institute"
+                    placeholder="Select an institute…"
+                    value={formData.college_id}
+                    onChange={(next) => setFormData({ ...formData, college_id: next })}
+                    options={colleges.map((c) => ({ value: c._id, label: c.name, hint: c.location }))}
+                  />
               </div>
 
               <div className="grid grid-cols-2 gap-4">

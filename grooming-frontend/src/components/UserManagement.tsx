@@ -3,6 +3,7 @@ import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
 import ConfirmDialog from './ConfirmDialog';
+import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import type { AdminUser, Boa, College, Role } from '../types';
 
@@ -492,10 +493,18 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
                   </div>
                   <div>
                     <label htmlFor="user-college" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Institute</label>
-                    <select id="user-college" required className={inputClass} value={form.college_id} onChange={(event) => setForm({ ...form, college_id: event.target.value })}>
-                      <option value="">Select an institute</option>
-                      {colleges.map((college) => <option key={college._id} value={college._id}>{college.name}</option>)}
-                    </select>
+                    <SearchableSelect
+                      id="user-college"
+                      ariaLabel="Institute"
+                      placeholder="Select an institute…"
+                      value={form.college_id}
+                      onChange={(next) => setForm({ ...form, college_id: next })}
+                      options={colleges.map((college) => ({
+                        value: String(college._id),
+                        label: college.name,
+                        hint: college.location,
+                      }))}
+                    />
                   </div>
                 </>
               )}
