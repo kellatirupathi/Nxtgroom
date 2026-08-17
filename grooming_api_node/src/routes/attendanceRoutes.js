@@ -9,6 +9,7 @@ import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation } from "../services/evaluationWorker.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
 import { buildPhotoKey, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
+import { attachAddressToAttendance } from "../services/geocoding.js";
 import {
   asyncRoute,
   createDocument,
@@ -326,6 +327,13 @@ attendanceRouter.post(
       });
     } catch (error) {
       console.error(`Evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
+    }
+
+    // Fire-and-forget: the response has already been decided, so a slow or
+    // failing address lookup cannot delay or fail the check-in. The record
+    // keeps its coordinates either way.
+    if (coordinates) {
+      void attachAddressToAttendance(db, attendance._id, coordinates);
     }
 
     return res.status(202).json({

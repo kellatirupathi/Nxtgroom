@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, User, MapPin, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert } from 'lucide-react';
+import { ArrowLeft, User, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert } from 'lucide-react';
 import { apiFetch } from '../api';
-import { formatCoordinates, imageQualityLabel, needsHumanReview, normalizeAttendanceStatus } from '../status';
+import { imageQualityLabel, needsHumanReview, normalizeAttendanceStatus } from '../status';
 import GroomingReport from './GroomingReport';
+import LocationPanel from './LocationPanel';
 import type { AttendanceRecord, Evaluation } from '../types';
 
 interface InstructorDetailProps {
@@ -92,7 +93,14 @@ export default function InstructorDetail({ record, onBack }: InstructorDetailPro
             <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatDate(record.date)}</p></div></div>
             <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-In Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_in_time)}</p></div></div>
             <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-Out Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_out_time)}</p></div></div>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><MapPin size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Coordinates</p><p className="text-sm font-semibold text-indigo-600">{formatCoordinates(record.location_coordinates)}</p></div></div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Location</p>
+              <LocationPanel
+                coordinates={record.location_coordinates}
+                address={record.location_address}
+                accuracyMetres={record.location_accuracy_m}
+              />
+            </div>
           </div>
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 shrink-0">

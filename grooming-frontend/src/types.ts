@@ -86,6 +86,9 @@ export interface AttendanceRecord {
   location_coordinates?: string | null;
   /** Reported accuracy of the fix in metres; distinguishes GPS from an IP estimate. */
   location_accuracy_m?: number | null;
+  /** Reverse-geocoded once at check-in and stored, not looked up per view. */
+  location_address?: string | null;
+  location_address_full?: string | null;
   /** R2 object keys. Presence is what enables the view-photo buttons. */
   check_in_photo_key?: string | null;
   check_out_photo_key?: string | null;
