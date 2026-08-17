@@ -11,8 +11,15 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 const DATASET = "niat_instructor_automation_data";
 const TABLE = "niat_instructor_managers_and_instructors_details";
-/** Carries instructor_mail; the roster table has no email column. */
-const EMAIL_TABLE = "z_niat_training_instructors_online_demo_details";
+/**
+ * Carries instructor_mail; the roster table has no email column.
+ *
+ * Six tables in this dataset hold an address. This one covers 594 of the 600
+ * rostered instructors, against 309 for the demo-sessions table used before —
+ * that one only contains instructors who ran a demo, which is a subset.
+ * Combining all six reaches 596, which is not worth six joins.
+ */
+const EMAIL_TABLE = "niat_instructor_unit_wise_completion_and_best_attempt_details";
 export const SYNC_STATE_ID = "instructor_sync";
 
 /** Guards against a runaway query; the roster is a few thousand rows. */
