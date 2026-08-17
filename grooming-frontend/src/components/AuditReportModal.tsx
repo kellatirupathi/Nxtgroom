@@ -6,8 +6,11 @@ import { useToast } from './useToast';
 import type { Evaluation } from '../types';
 
 interface AuditReportModalProps {
-  attendanceId: string;
+  /** Null while the check-in is still being saved. */
+  attendanceId: string | null;
   instructorName: string;
+  /** Shown while saving, and again if the save itself failed. */
+  saveError?: string;
   onClose: () => void;
 }
 
@@ -21,6 +24,32 @@ interface StatusPayload {
   remarks: string | null;
   requires_human_review: boolean;
   settled: boolean;
+}
+
+/** One row of the two-step progress list: pending, running, or complete. */
+function ProgressStep({ label, state }: { label: string; state: 'pending' | 'active' | 'done' }) {
+  return (
+    <li className="flex items-center gap-3">
+      {state === 'done' ? (
+        <CheckCircle2 size={20} className="shrink-0 text-emerald-600" aria-hidden="true" />
+      ) : state === 'active' ? (
+        <Loader2 size={20} className="shrink-0 animate-spin text-indigo-600" aria-hidden="true" />
+      ) : (
+        <span className="h-5 w-5 shrink-0 rounded-full border-2 border-slate-200" aria-hidden="true" />
+      )}
+      <span
+        className={
+          state === 'done'
+            ? 'text-sm font-semibold text-emerald-700'
+            : state === 'active'
+              ? 'text-sm font-bold text-slate-800'
+              : 'text-sm text-slate-400'
+        }
+      >
+        {label}
+      </span>
+    </li>
+  );
 }
 
 function Verdict({ status }: { status: StatusPayload }) {
@@ -57,7 +86,7 @@ function Verdict({ status }: { status: StatusPayload }) {
  * screen. Opens while analysis is still running and fills in as the result
  * arrives, so the operator sees progress rather than an empty dialog.
  */
-export default function AuditReportModal({ attendanceId, instructorName, onClose }: AuditReportModalProps) {
+export default function AuditReportModal({ attendanceId, instructorName, saveError, onClose }: AuditReportModalProps) {
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [error, setError] = useState('');
@@ -66,6 +95,7 @@ export default function AuditReportModal({ attendanceId, instructorName, onClose
   const toast = useToast();
 
   const loadEvaluation = useCallback(async () => {
+    if (!attendanceId) return;
     try {
       const data = await apiFetch<Evaluation>(
         `/api/v2/attendance/${encodeURIComponent(attendanceId)}/evaluation`,
@@ -79,6 +109,7 @@ export default function AuditReportModal({ attendanceId, instructorName, onClose
 
   // Follow the record until it settles, then pull the full report.
   useEffect(() => {
+    if (!attendanceId) return undefined;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     const startedAt = Date.now();
@@ -124,6 +155,9 @@ export default function AuditReportModal({ attendanceId, instructorName, onClose
   }, [onClose]);
 
   const handleReanalyse = async () => {
+    // The button is disabled without a record, but the guard keeps the call
+    // site honest rather than relying on the disabled attribute.
+    if (!attendanceId) return;
     setReanalysing(true);
     setError('');
     try {
@@ -149,7 +183,8 @@ export default function AuditReportModal({ attendanceId, instructorName, onClose
     }
   };
 
-  const running = !status?.settled && !timedOut;
+  // Still working while the record is saving, or while analysis runs.
+  const running = !attendanceId || (!status?.settled && !timedOut);
 
   return (
     <div
@@ -180,18 +215,26 @@ export default function AuditReportModal({ attendanceId, instructorName, onClose
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
-          {error && (
+          {(saveError || error) && (
             <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
-              {error}
+              {saveError || error}
             </div>
           )}
 
           {running && (
-            <div className="flex flex-col items-center justify-center py-14 text-center" role="status">
-              <Loader2 size={32} className="animate-spin text-indigo-600" aria-hidden="true" />
-              <p className="mt-4 text-sm font-bold text-slate-700">Analysing the check-in photo…</p>
-              <p className="mt-1 text-xs text-slate-500">
-                This usually takes a few seconds. You can close this and the analysis will continue.
+            <div className="py-8" role="status" aria-live="polite">
+              <ol className="mx-auto flex max-w-sm flex-col gap-4">
+                <ProgressStep
+                  label="Saving check-in and photo"
+                  state={attendanceId ? 'done' : 'active'}
+                />
+                <ProgressStep
+                  label="Analysing grooming standards"
+                  state={attendanceId ? 'active' : 'pending'}
+                />
+              </ol>
+              <p className="mt-6 text-center text-xs text-slate-500">
+                This usually takes a few seconds. You can close this and it will continue.
               </p>
             </div>
           )}
@@ -229,7 +272,7 @@ export default function AuditReportModal({ attendanceId, instructorName, onClose
           <button
             type="button"
             onClick={handleReanalyse}
-            disabled={reanalysing || running}
+            disabled={reanalysing || running || !attendanceId}
             className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <RefreshCw size={15} className={reanalysing ? 'animate-spin' : ''} aria-hidden="true" />

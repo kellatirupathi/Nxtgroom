@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera, CheckCircle2 } from 'lucide-react';
+import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
 import { apiFetch } from '../api';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { preparePhoto } from '../lib/imageCapture';
@@ -20,20 +20,6 @@ interface EvaluateCardProps {
   fetchInstructors: () => Promise<void> | void;
 }
 
-/** Poll cadence while an analysis is running. */
-const STATUS_POLL_MS = 3000;
-/** Stop polling after this long so a stuck job cannot poll forever. */
-const STATUS_POLL_TIMEOUT_MS = 3 * 60_000;
-
-interface AnalysisStatus {
-  attendance_id: string;
-  status: string;
-  compliance_status: string | null;
-  remarks: string | null;
-  settled: boolean;
-  requires_human_review: boolean;
-}
-
 export default function EvaluateCard({ instructors, fetchInstructors }: EvaluateCardProps) {
   const [selectedUuid, setSelectedUuid] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -45,13 +31,11 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
-  // Named steps rather than one spinner, so a slow upload is distinguishable
-  // from a slow analysis.
-  const [stage, setStage] = useState<'idle' | 'saving' | 'analysing'>('idle');
+  // attendanceId is null until the record is saved, so the modal can show the
+  // saving step instead of opening empty.
   const [reportTarget, setReportTarget] = useState<
-    { attendanceId: string; instructorName: string } | null
+    { attendanceId: string | null; instructorName: string; saveError?: string } | null
   >(null);
-  const [analysis, setAnalysis] = useState<AnalysisStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
 
@@ -78,47 +62,6 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       disposed = true;
     };
   }, []);
-
-  /**
-   * Follow one analysis to completion so the result appears without a reload.
-   * Polling stops as soon as the record settles, or after a cap so a stuck
-   * job cannot poll indefinitely.
-   */
-  const trackAnalysis = useCallback((attendanceId: string) => {
-    const startedAt = Date.now();
-    let timer: ReturnType<typeof setTimeout>;
-
-    const poll = async () => {
-      if (Date.now() - startedAt > STATUS_POLL_TIMEOUT_MS) {
-        setAnalysis((current) => (current ? { ...current, status: 'timeout' } : current));
-        return;
-      }
-      try {
-        const status = await apiFetch<AnalysisStatus>(
-          `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status`,
-        );
-        setAnalysis(status);
-        if (status.settled) {
-          setStage('idle');
-          const compliant = status.compliance_status === 'COMPLIANT';
-          if (status.requires_human_review) {
-            toast.warning('Analysis needs a manual review', { detail: status.remarks || undefined });
-          } else if (compliant) {
-            toast.success('Grooming check passed', { detail: status.remarks || undefined });
-          } else {
-            toast.warning('Grooming issues found', { detail: status.remarks || undefined });
-          }
-          return;
-        }
-      } catch {
-        // A dropped poll is not worth surfacing; the next one usually works.
-      }
-      timer = setTimeout(poll, STATUS_POLL_MS);
-    };
-
-    timer = setTimeout(poll, STATUS_POLL_MS);
-    return () => clearTimeout(timer);
-  }, [toast]);
 
   const resetPhoto = () => {
     setFile(null);
@@ -172,8 +115,11 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
     setLoading(true);
     setMessage({ type: '', text: '' });
-    setAnalysis(null);
-    setStage('saving');
+
+    // Open the dialog before the request so the saving step is visible from
+    // the moment the button is pressed, rather than after the upload finishes.
+    const submittedName = instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
+    setReportTarget({ attendanceId: null, instructorName: submittedName });
 
     // Use the fix captured when the screen opened rather than waiting on the
     // GPS now, so submitting never stalls behind a location lookup.
@@ -194,36 +140,26 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         '/api/v2/attendance/check-in',
         { method: 'POST', body: formData, timeoutMs: 75_000 },
       );
-      setMessage({ type: 'success', text: result?.message || 'Check-in recorded. Analysis is running.' });
-      toast.success('Check-in recorded', { detail: 'Grooming analysis is running in the background.' });
-      const submittedName = instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
       resetPhoto();
       setSelectedUuid('');
       if (result?.attendance_id) {
-        setStage('analysing');
-        setAnalysis({
-          attendance_id: result.attendance_id,
-          status: 'pending',
-          compliance_status: null,
-          remarks: null,
-          settled: false,
-          requires_human_review: false,
-        });
-        // Open the report straight away so the operator watches the analysis
-        // finish rather than wondering whether anything is happening.
-        setReportTarget({ attendanceId: result.attendance_id, instructorName: submittedName });
-        trackAnalysis(result.attendance_id);
+        // Hand the id over: the dialog marks saving complete and starts
+        // following the analysis.
+        setReportTarget((current) => (
+          current ? { ...current, attendanceId: result.attendance_id as string } : current
+        ));
       } else {
-        setStage('idle');
+        setReportTarget(null);
       }
       void fetchInstructors();
       // Refresh the fix quietly for the next check-in without blocking this one.
       void requestFix({ force: true }).then(setFix);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      setMessage({ type: 'error', text: `Check-in failed: ${text}` });
+      // Reported inside the dialog that is already open, so the failure
+      // appears where the user is looking.
+      setReportTarget((current) => (current ? { ...current, saveError: text } : current));
       toast.error('Check-in failed', { detail: text });
-      setStage('idle');
     } finally {
       setLoading(false);
     }
@@ -248,12 +184,13 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) formData.append('location_coordinates', coordinates);
 
-      const result = await apiFetch<{ message?: string }>('/api/v2/attendance/check-out', {
+      await apiFetch('/api/v2/attendance/check-out', {
         method: 'POST',
         body: formData,
       });
-      setMessage({ type: 'success', text: result?.message || 'Check-out completed.' });
-      toast.success('Check-out recorded');
+      toast.success('Check-out recorded', {
+        detail: file ? 'Photo saved with the check-out.' : undefined,
+      });
       resetPhoto();
       setSelectedUuid('');
       void fetchInstructors();
@@ -274,11 +211,10 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         <h2 id="attendance-action-title" className="text-xl md:text-2xl font-extrabold text-slate-800 mb-2 tracking-tight">Attendance Action</h2>
         <p className="text-slate-500 text-sm mb-6 font-medium">Select an instructor to check in or check out.</p>
 
-        {message.text && (
-          <div
-            role={message.type === 'error' ? 'alert' : 'status'}
-            className={`mb-5 rounded-md border p-3 text-sm font-medium ${message.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}
-          >
+        {/* Only failures remain on the page. A success message here repeated
+            what the dialog already showed and lingered after it closed. */}
+        {message.text && message.type === 'error' && (
+          <div role="alert" className="mb-5 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             {message.text}
           </div>
         )}
@@ -359,69 +295,6 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           </p>
         )}
 
-        {/* Two named steps: saving the record, then analysing the photo. The
-            first is the only part the user waits on; the second continues
-            whether or not they stay on this screen. */}
-        {stage !== 'idle' && (
-          <div className="mb-4 rounded-md border border-indigo-200 bg-indigo-50 p-3" role="status" aria-live="polite">
-            <ol className="flex flex-col gap-2 text-sm">
-              {([
-                ['saving', 'Saving check-in and photo'],
-                ['analysing', 'Analysing grooming standards'],
-              ] as const).map(([key, label]) => {
-                const done = stage === 'analysing' && key === 'saving';
-                const active = stage === key;
-                return (
-                  <li key={key} className="flex items-center gap-2">
-                    {done ? (
-                      <CheckCircle2 size={16} className="shrink-0 text-emerald-600" aria-hidden="true" />
-                    ) : active ? (
-                      <RefreshCw size={16} className="shrink-0 animate-spin text-indigo-600" aria-hidden="true" />
-                    ) : (
-                      <span className="h-4 w-4 shrink-0 rounded-full border-2 border-slate-300" aria-hidden="true" />
-                    )}
-                    <span className={done ? 'font-medium text-slate-500' : active ? 'font-bold text-indigo-800' : 'text-slate-400'}>
-                      {label}
-                    </span>
-                  </li>
-                );
-              })}
-            </ol>
-          </div>
-        )}
-
-        {analysis && (
-          <div
-            role="status"
-            aria-live="polite"
-            className={`mb-4 rounded-md border p-3 text-sm ${
-              analysis.settled
-                ? analysis.compliance_status === 'COMPLIANT'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                  : 'border-amber-200 bg-amber-50 text-amber-800'
-                : 'border-indigo-200 bg-indigo-50 text-indigo-800'
-            }`}
-          >
-            <div className="flex items-center gap-2 font-semibold">
-              {!analysis.settled && <RefreshCw size={14} className="animate-spin" aria-hidden="true" />}
-              {analysis.status === 'timeout'
-                ? 'Analysis is taking longer than usual'
-                : analysis.settled
-                  ? analysis.requires_human_review
-                    ? 'Needs manual review'
-                    : analysis.compliance_status === 'COMPLIANT'
-                      ? 'Grooming check passed'
-                      : 'Grooming issues found'
-                  : 'Analysing photo…'}
-            </div>
-            {analysis.remarks && <p className="mt-1 text-xs opacity-90">{analysis.remarks}</p>}
-            {analysis.status === 'timeout' && (
-              <p className="mt-1 text-xs opacity-90">
-                It will finish in the background. Check Daily Records shortly.
-              </p>
-            )}
-          </div>
-        )}
 
         <div className="flex gap-4">
           <button
@@ -450,7 +323,13 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         <AuditReportModal
           attendanceId={reportTarget.attendanceId}
           instructorName={reportTarget.instructorName}
-          onClose={() => setReportTarget(null)}
+          saveError={reportTarget.saveError}
+          onClose={() => {
+            // Closing clears everything, so the page returns to a clean state
+            // rather than keeping a stale result behind the dialog.
+            setReportTarget(null);
+            setMessage({ type: '', text: '' });
+          }}
         />
       )}
     </section>
