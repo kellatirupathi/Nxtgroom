@@ -7,8 +7,11 @@ import {
   describeAccuracy,
   formatCoordinates,
   getCachedFix,
-  requestFix,
+  pauseLocationWatch,
+  resumeLocationWatch,
+  subscribeToLocation,
   type Fix,
+  type LocationStatus,
 } from '../lib/location';
 import AuditReportModal from './AuditReportModal';
 import InstructorSearchSelect from './InstructorSearchSelect';
@@ -29,6 +32,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [locationStatus, setLocationStatus] = useState('');
   const [message, setMessage] = useState({ type: '', text: '' });
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
+  const [locationState, setLocationState] = useState<LocationStatus>('idle');
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
   // attendanceId is null until the record is saved, so the modal can show the
@@ -44,22 +48,33 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   }, [preview]);
 
   /**
-   * Ask for location once when the screen opens, not on every check-in.
-   * Repeated prompts are slow and train people to dismiss the dialog.
+   * Follow the device while this screen is open, rather than sampling once.
+   * The position is evidence of where the check-in happened, so a fix from a
+   * previous location must never be submitted. The permission prompt still
+   * appears only on the first visit; subscribing afterwards does not re-ask.
    */
   useEffect(() => {
-    let disposed = false;
-    if (getCachedFix()) return undefined;
-    setLocationStatus('Getting your location…');
-    requestFix().then((result) => {
-      if (disposed) return;
-      setFix(result);
+    const unsubscribe = subscribeToLocation((next, status) => {
+      setFix(next);
+      setLocationState(status);
       setLocationStatus(
-        result ? '' : 'Location unavailable. Attendance will be recorded without coordinates.',
+        status === 'denied'
+          ? 'Location permission is blocked. Enable it in your browser settings to record where check-ins happen.'
+          : status === 'unavailable'
+            ? 'Location unavailable. Attendance will be recorded without coordinates.'
+            : '',
       );
     });
+
+    // Watching costs battery, so it pauses whenever the tab is not visible.
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') pauseLocationWatch();
+      else resumeLocationWatch();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      unsubscribe();
     };
   }, []);
 
@@ -121,8 +136,8 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     const submittedName = instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
     setReportTarget({ attendanceId: null, instructorName: submittedName });
 
-    // Use the fix captured when the screen opened rather than waiting on the
-    // GPS now, so submitting never stalls behind a location lookup.
+    // The watch keeps this current, so submitting never waits on the GPS and
+    // never sends a position from somewhere the instructor has already left.
     const currentFix = fix ?? getCachedFix();
     const coordinates = formatCoordinates(currentFix);
 
@@ -152,8 +167,6 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         setReportTarget(null);
       }
       void fetchInstructors();
-      // Refresh the fix quietly for the next check-in without blocking this one.
-      void requestFix({ force: true }).then(setFix);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       // Reported inside the dialog that is already open, so the failure
@@ -283,9 +296,18 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         {/* Show the accuracy, not just that a location exists: a 3km IP-based
             reading and a 5m GPS fix look identical without it. */}
         {fix && !locationStatus && (
-          <p className="text-xs text-slate-500 font-medium mb-3 flex items-center gap-1">
-            <MapPin size={12} aria-hidden="true" />
-            Location ready {describeAccuracy(fix) ? `(${describeAccuracy(fix)})` : ''}
+          <p className="text-xs font-medium mb-3 flex items-center gap-1.5 text-slate-500">
+            <MapPin size={12} className="text-emerald-600" aria-hidden="true" />
+            {/* "Live" is stated because the position updates as the device
+                moves; a static label would imply a one-off reading. */}
+            Live location {describeAccuracy(fix) ? `(${describeAccuracy(fix)})` : ''}
+            {locationState === 'locating' && <span className="text-slate-400">· refining…</span>}
+          </p>
+        )}
+
+        {!fix && locationState === 'locating' && !locationStatus && (
+          <p role="status" className="text-xs text-indigo-600 font-bold mb-3 flex items-center gap-1">
+            <MapPin size={12} aria-hidden="true" /> Finding your location…
           </p>
         )}
 
