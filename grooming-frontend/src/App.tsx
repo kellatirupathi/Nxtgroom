@@ -6,6 +6,12 @@ import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
 import ResetPassword from './components/ResetPassword';
 import BrandedLoader from './components/BrandedLoader';
+import {
+  currentTabFromLocation,
+  pushTabPath,
+  replaceTabPath,
+  RESET_PASSWORD_PATH,
+} from './routes';
 import DailyAttendanceTable from './components/DailyAttendanceTable';
 import UserManagement from './components/UserManagement';
 import SettingsPage from './components/SettingsPage';
@@ -53,7 +59,7 @@ function initialSession(): SessionState {
 function initialResetToken(): string | null {
   try {
     if (typeof window === 'undefined') return null;
-    if (window.location.pathname !== '/reset-password') return null;
+    if (window.location.pathname !== RESET_PASSWORD_PATH) return null;
     const token = new URLSearchParams(window.location.search).get('token');
     return token && token.length <= 512 ? token : null;
   } catch {
@@ -64,7 +70,8 @@ function initialResetToken(): string | null {
 export default function App() {
   const [session, setSession] = useState(initialSession);
   const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
-  const [activeTab, setActiveTab] = useState('overview');
+  // Seed from the URL so a refresh or a shared link opens the right screen.
+  const [activeTab, setActiveTab] = useState<string>(currentTabFromLocation);
   const [instructors, setInstructors] = useState<Instructor[]>(() => {
     // Render the attendance list from the last session's data on first paint.
     const cached = readStale<Instructor[]>('/api/v2/instructors');
@@ -80,6 +87,7 @@ export default function App() {
     setSession({ token, role, email: null, collegeId: null, validated: true });
     setSessionCheckError('');
     setActiveTab('overview');
+    replaceTabPath('overview');
   };
 
   const handleLogout = useCallback(() => {
@@ -88,6 +96,8 @@ export default function App() {
     setInstructors([]);
     setSelectedAttendanceRecord(null);
     setActiveTab('overview');
+    // Clear any deep link so the next sign-in does not land on a stale screen.
+    replaceTabPath('overview');
   }, []);
 
   useEffect(() => {
@@ -136,17 +146,45 @@ export default function App() {
     return () => controller.abort();
   }, [session.token, session.validated, fetchInstructors]);
 
-  const navigate = (tab: string) => {
-    if (ADMIN_TABS.has(tab) && !isElevatedRole(session.role)) {
-      setActiveTab('overview');
-      return;
-    }
-    if (tab === 'instructor-detail' && !selectedAttendanceRecord) {
-      setActiveTab('daily-records');
-      return;
-    }
-    setActiveTab(tab);
-  };
+  /**
+   * Moves to a tab and puts its URL in the address bar. The permission and
+   * prerequisite redirects below decide the real destination first, so the URL
+   * always reflects what is actually rendered.
+   */
+  const navigate = useCallback((tab: string, { replace = false } = {}) => {
+    let target = tab;
+    if (ADMIN_TABS.has(tab) && !isElevatedRole(session.role)) target = 'overview';
+    // The detail view renders one selected record, so it cannot be opened
+    // cold from a URL; send those visits back to the list.
+    else if (tab === 'instructor-detail' && !selectedAttendanceRecord) target = 'daily-records';
+
+    setActiveTab(target);
+    if (replace || target !== tab) replaceTabPath(target);
+    else pushTabPath(target);
+  }, [session.role, selectedAttendanceRecord]);
+
+  // Keep the rendered tab in step with Back and Forward.
+  useEffect(() => {
+    const onPopState = () => {
+      const tab = currentTabFromLocation();
+      setActiveTab(
+        ADMIN_TABS.has(tab) && !isElevatedRole(session.role) ? 'overview' : tab,
+      );
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [session.role]);
+
+  // Normalise the entry URL once the session is known: "/" becomes
+  // "/attendance", and a deep link the role cannot open is rewritten rather
+  // than left pointing at a screen that is not being shown.
+  useEffect(() => {
+    if (!session.validated || !session.token) return;
+    const tab = currentTabFromLocation();
+    const allowed = ADMIN_TABS.has(tab) && !isElevatedRole(session.role) ? 'overview' : tab;
+    setActiveTab(allowed);
+    replaceTabPath(allowed);
+  }, [session.validated, session.token, session.role]);
 
   // Checked before the auth gate: the link arrives by email and may be opened
   // in a browser that still holds an old session, which must not hide the form.
@@ -224,7 +262,10 @@ export default function App() {
           {activeTab === 'daily-records' && (
             <div className="w-full h-full">
               <DailyAttendanceTable onRowClick={(record) => {
+                // Set the record first: navigate() refuses the detail tab
+                // when nothing is selected and would bounce back to the list.
                 setSelectedAttendanceRecord(record);
+                pushTabPath('instructor-detail');
                 setActiveTab('instructor-detail');
               }} />
             </div>

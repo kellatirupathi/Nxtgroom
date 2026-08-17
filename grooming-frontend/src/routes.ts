@@ -1,0 +1,77 @@
+/**
+ * Maps each screen to a real URL.
+ *
+ * Every page previously rendered at "/", so a refresh always dropped the user
+ * back to Attendance, the browser's back button left the app entirely, and no
+ * screen could be linked to or bookmarked.
+ *
+ * A full router is not warranted for a fixed set of flat screens with no path
+ * parameters, so this is a two-way mapping over the History API. The Vercel
+ * rewrite already serves index.html for these paths, so deep links load.
+ */
+
+export const TABS = {
+  OVERVIEW: 'overview',
+  DAILY_RECORDS: 'daily-records',
+  INSTRUCTOR_DETAIL: 'instructor-detail',
+  INSTRUCTORS: 'instructor-management',
+  USERS: 'boa-management',
+  SETTINGS: 'settings',
+} as const;
+
+export type Tab = (typeof TABS)[keyof typeof TABS];
+
+/** Canonical path for each tab. The order here is the order of resolution. */
+const TAB_TO_PATH: Record<Tab, string> = {
+  [TABS.OVERVIEW]: '/attendance',
+  [TABS.DAILY_RECORDS]: '/daily-records',
+  [TABS.INSTRUCTOR_DETAIL]: '/daily-records/record',
+  [TABS.INSTRUCTORS]: '/instructors',
+  [TABS.USERS]: '/users',
+  [TABS.SETTINGS]: '/settings',
+};
+
+const PATH_TO_TAB = new Map<string, Tab>(
+  Object.entries(TAB_TO_PATH).map(([tab, path]) => [path, tab as Tab]),
+);
+
+/** Paths owned by the shell rather than by a tab. */
+export const RESET_PASSWORD_PATH = '/reset-password';
+
+export function pathForTab(tab: string): string {
+  return TAB_TO_PATH[tab as Tab] ?? TAB_TO_PATH[TABS.OVERVIEW];
+}
+
+/**
+ * Resolves a URL to a tab. Unknown paths fall back to Attendance rather than
+ * rendering nothing, so a stale bookmark still lands somewhere useful.
+ */
+export function tabForPath(pathname: string): Tab {
+  const normalized = pathname.replace(/\/+$/, '') || '/';
+  if (normalized === '/' || normalized === '') return TABS.OVERVIEW;
+  return PATH_TO_TAB.get(normalized) ?? TABS.OVERVIEW;
+}
+
+export function currentTabFromLocation(): Tab {
+  if (typeof window === 'undefined') return TABS.OVERVIEW;
+  return tabForPath(window.location.pathname);
+}
+
+/**
+ * Pushes a tab's URL without reloading. Replacing rather than pushing when the
+ * path is unchanged keeps repeated clicks on the active item out of history.
+ */
+export function pushTabPath(tab: string): void {
+  if (typeof window === 'undefined') return;
+  const path = pathForTab(tab);
+  if (window.location.pathname === path) return;
+  window.history.pushState({ tab }, '', path);
+}
+
+/** Rewrites the current entry, used to normalise "/" to "/attendance" on load. */
+export function replaceTabPath(tab: string): void {
+  if (typeof window === 'undefined') return;
+  const path = pathForTab(tab);
+  if (window.location.pathname === path) return;
+  window.history.replaceState({ tab }, '', path);
+}
