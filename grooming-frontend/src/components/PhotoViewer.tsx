@@ -3,8 +3,13 @@ import { ImageOff, Loader2, X } from 'lucide-react';
 import { apiFetch } from '../api';
 
 interface PhotoViewerProps {
-  attendanceId: string;
+  /** Omit when `path` is supplied directly. */
+  attendanceId?: string;
   kind: 'checkin' | 'checkout';
+  /** Explicit endpoint, used by the public report page. */
+  path?: string;
+  /** False for the public page, whose token in the path is the credential. */
+  auth?: boolean;
   /** Shown in the header so it is clear whose photo this is. */
   title: string;
   subtitle?: string;
@@ -18,7 +23,7 @@ interface PhotoViewerProps {
  * fetched when the dialog opens rather than embedded in the table, which
  * keeps signed links out of any list payload that might be cached or logged.
  */
-export default function PhotoViewer({ attendanceId, kind, title, subtitle, onClose }: PhotoViewerProps) {
+export default function PhotoViewer({ attendanceId, kind, path, auth = true, title, subtitle, onClose }: PhotoViewerProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -27,9 +32,9 @@ export default function PhotoViewer({ attendanceId, kind, title, subtitle, onClo
     let disposed = false;
     setLoading(true);
     setError('');
-    apiFetch<{ url: string }>(
-      `/api/v2/attendance/${encodeURIComponent(attendanceId)}/photo/${kind}`,
-    )
+    const endpoint = path
+      || `/api/v2/attendance/${encodeURIComponent(String(attendanceId))}/photo/${kind}`;
+    apiFetch<{ url: string }>(endpoint, { auth })
       .then((data) => {
         if (disposed) return;
         setUrl(data.url);
@@ -44,7 +49,7 @@ export default function PhotoViewer({ attendanceId, kind, title, subtitle, onClo
     return () => {
       disposed = true;
     };
-  }, [attendanceId, kind]);
+  }, [attendanceId, kind, path, auth]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

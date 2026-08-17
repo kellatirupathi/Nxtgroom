@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, CircleAlert, Clock, TriangleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Clock, Image as ImageIcon, TriangleAlert, XCircle } from 'lucide-react';
 import { apiFetch } from '../api';
 import GroomingReport from './GroomingReport';
 import BrandedLoader from './BrandedLoader';
+import PhotoViewer from './PhotoViewer';
 import type { Evaluation } from '../types';
 
 interface PublicReportPageProps {
@@ -21,6 +22,8 @@ interface DayResponse {
     attire_type: string | null;
     remarks: string | null;
     location_address: string | null;
+    has_checkin_photo?: boolean;
+    has_checkout_photo?: boolean;
   };
   evaluation: Evaluation | null;
 }
@@ -125,6 +128,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
   const [week, setWeek] = useState<WeekResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [photoDate, setPhotoDate] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -182,7 +186,20 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
         </header>
 
         <section className="mb-6 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-          <h1 className="text-xl font-extrabold text-slate-800">{instructor?.name}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <h1 className="text-xl font-extrabold text-slate-800">{instructor?.name}</h1>
+            {kind === 'day' && day?.attendance.has_checkin_photo && (
+              <button
+                type="button"
+                onClick={() => setPhotoDate(date)}
+                aria-label="View the check-in photo"
+                title="View the check-in photo"
+                className="shrink-0 rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <ImageIcon size={18} aria-hidden="true" />
+              </button>
+            )}
+          </div>
           <p className="mt-0.5 text-sm text-slate-500">
             {[instructor?.role, instructor?.institute].filter(Boolean).join(' · ') || '--'}
           </p>
@@ -266,6 +283,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
                       <th className="p-3">Check-out</th>
                       <th className="p-3">Result</th>
                       <th className="p-3">Attire</th>
+                      <th className="p-3">Photo</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -279,6 +297,21 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
                         </td>
                         <td className="whitespace-nowrap p-3 text-slate-600">
                           {row.attire_type ? (ATTIRE_LABELS[row.attire_type] || '--') : '--'}
+                        </td>
+                        <td className="p-3">
+                          {row.present ? (
+                            <button
+                              type="button"
+                              onClick={() => setPhotoDate(row.date)}
+                              aria-label={`View the photo from ${formatDay(row.date)}`}
+                              title="View photo"
+                              className="rounded-md border border-indigo-100 bg-indigo-50 p-1.5 text-indigo-700 transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                              <ImageIcon size={14} aria-hidden="true" />
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-300">--</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -303,6 +336,19 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
               </div>
             </section>
           </>
+        )}
+
+        {photoDate && (
+          <PhotoViewer
+            // The token in the path is the credential here, so no bearer token
+            // is sent: the recipient has no account to authenticate with.
+            path={`/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(photoDate)}/photo/checkin`}
+            auth={false}
+            kind="checkin"
+            title={instructor?.name ?? 'Instructor'}
+            subtitle={formatDay(photoDate)}
+            onClose={() => setPhotoDate(null)}
+          />
         )}
 
         <p className="mt-8 text-center text-xs text-slate-400">

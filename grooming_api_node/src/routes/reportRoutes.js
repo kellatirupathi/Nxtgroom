@@ -13,6 +13,7 @@ import {
   ensureReportToken,
 } from "../services/instructorReports.js";
 import { getReportRecipients } from "../services/reportRecipients.js";
+import { getPhotoUrl } from "../services/photoStorage.js";
 import {
   sendAttendanceReminderEmail,
   sendWeeklyReportEmail,
@@ -187,6 +188,10 @@ reportRouter.get(
         attire_type: record.attire_type || null,
         remarks: record.remarks || null,
         location_address: record.location_address || null,
+        // Presence only. The key itself is withheld: it would let a recipient
+        // construct requests for objects this endpoint never offered them.
+        has_checkin_photo: Boolean(record.check_in_photo_key),
+        has_checkout_photo: Boolean(record.check_out_photo_key),
       },
       // Null rather than 404 when analysis has not finished, so the page can
       // say so instead of looking like a broken link.
@@ -211,6 +216,48 @@ reportRouter.get(
  * Sends the weekly summary to every instructor who has an address and at
  * least one check-in that week. Triggered by cron on Sunday morning.
  */
+/**
+ * A time-limited link to a photo from one day's check-in.
+ *
+ * Authenticated by the report token in the path, exactly as the page is: the
+ * recipient has no account, and this must expose nothing the page they were
+ * sent does not already cover. The date is required so a token cannot be used
+ * to walk through every photo the instructor has.
+ */
+reportRouter.get(
+  "/:token/day/:date/photo/:kind",
+  publicReportLimiter,
+  asyncRoute(async (req, res) => {
+    const { token, date } = req.params;
+    const kind = req.params.kind === "checkout" ? "checkout" : "checkin";
+    if (!isValidDateKey(date)) return res.status(400).json({ detail: "Invalid date" });
+
+    const db = req.app.locals.db;
+    const instructor = await findInstructorByReportToken(db, token);
+    if (!instructor) return res.status(404).json({ detail: "Report not found" });
+
+    const from = new Date(`${date}T00:00:00.000Z`);
+    from.setUTCDate(from.getUTCDate() - 1);
+    const to = new Date(`${date}T23:59:59.999Z`);
+    to.setUTCDate(to.getUTCDate() + 1);
+    const candidates = await db.collection("attendance")
+      .find({ instructor_id: String(instructor._id), check_in_time: { $gte: from, $lte: to } })
+      .sort({ check_in_time: 1 })
+      .toArray();
+    const record = candidates.find((item) => (
+      localDateKey(new Date(item.check_in_time || item.date)) === date
+    ));
+    if (!record) return res.status(404).json({ detail: "No check-in was recorded that day" });
+
+    const key = kind === "checkout" ? record.check_out_photo_key : record.check_in_photo_key;
+    if (!key) return res.status(404).json({ detail: "No photo was stored for this check-in" });
+
+    const url = await getPhotoUrl(key, { expiresIn: 900 });
+    if (!url) return res.status(503).json({ detail: "Photo storage is unavailable right now" });
+    return res.json({ url, expires_in: 900 });
+  })
+);
+
 /**
  * Delivers the weekly summaries. Runs detached from the request because a
  * scheduler times a call out — cron-jobs.org after 30 seconds — while sending
