@@ -170,19 +170,17 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
 
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="daily-records-title" aria-busy={loading}>
-      {/* Title and filters share one row: the separate filter card cost a full
-          band of vertical space above the table on every visit. Labels move to
-          aria-label so the controls stay accessible without stacked text. */}
+      {/* One band: the title on the left, the filters on the right. The
+          subtitle is gone and the heading no longer wraps, so the filters stay
+          on the same line instead of pushing the table down a row. Labels live
+          in aria-label, since the controls read clearly without visible ones. */}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0">
-          <h2 id="daily-records-title" className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <History size={22} className="text-indigo-600" aria-hidden="true" />
-            Daily Attendance Records
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">Check-ins, check-outs, and appearance reports for the selected date.</p>
-        </div>
+        <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-xl font-bold text-slate-800">
+          <History size={22} className="text-indigo-600" aria-hidden="true" />
+          Daily Attendance Records
+        </h2>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
           <input
             type="date"
             aria-label="Filter by date"
@@ -215,7 +213,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
               type="search"
               aria-label="Search attendance records"
               maxLength={120}
-              placeholder="Search name, college, remarks…"
+              placeholder="Search name, institute, remarks…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               className="h-9 w-full sm:w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
