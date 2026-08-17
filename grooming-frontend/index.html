@@ -11,9 +11,53 @@
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <meta name="theme-color" content="#4f46e5" />
     <title>FacultyTrack | Instructor Attendance</title>
+    <!-- Painted before the bundle parses, so the first frame is the brand
+         rather than a white page. React replaces #root and takes this with it. -->
+    <style>
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #f8f9fc;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #boot-splash img { width: 56px; height: 56px; object-fit: contain; }
+      #boot-splash .name {
+        margin-top: 20px; font-size: 20px; font-weight: 800; color: #1e293b; letter-spacing: -0.02em;
+      }
+      #boot-splash .sub {
+        margin-top: 4px; font-size: 11px; font-weight: 500; color: #94a3b8;
+        text-transform: uppercase; letter-spacing: 0.2em;
+      }
+      #boot-splash .bar {
+        margin-top: 24px; width: 160px; height: 4px; border-radius: 999px;
+        background: #e2e8f0; overflow: hidden;
+      }
+      #boot-splash .bar span {
+        display: block; width: 33%; height: 100%; border-radius: 999px; background: #6366f1;
+        animation: boot-sweep 1.2s ease-in-out infinite;
+      }
+      @keyframes boot-sweep {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(320%); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .bar span { animation: none; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="boot-splash">
+        <img src="/logo.png" alt="" />
+        <div class="name">FacultyTrack</div>
+        <div class="sub">Management Suite</div>
+        <div class="bar"><span></span></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

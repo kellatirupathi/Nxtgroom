@@ -9,6 +9,26 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Indeterminate progress sweep used by the startup loader. */
+@keyframes loader-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+
+.loader-sweep {
+  animation: loader-sweep 1.2s ease-in-out infinite;
+}
+
+/* Respect a system-level request for reduced motion: the looping pulse and
+   sweep are decorative, and for some users continuous motion causes nausea. */
+@media (prefers-reduced-motion: reduce) {
+  .loader-sweep,
+  .loader-ring,
+  .loader-mark {
+    animation: none !important;
+  }
+}
+
 .glass-panel {
   background-color: rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(12px);

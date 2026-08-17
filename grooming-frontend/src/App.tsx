@@ -5,6 +5,7 @@ import EvaluateCard from './components/EvaluateCard';
 import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
 import ResetPassword from './components/ResetPassword';
+import BrandedLoader from './components/BrandedLoader';
 import DailyAttendanceTable from './components/DailyAttendanceTable';
 import UserManagement from './components/UserManagement';
 import SettingsPage from './components/SettingsPage';
@@ -169,24 +170,23 @@ export default function App() {
   }
 
   if (!session.validated) {
-    return (
-      <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="rounded-md border border-slate-200 bg-white p-8 text-center shadow-sm max-w-md">
-          {sessionCheckError ? (
-            <>
-              <h1 className="text-lg font-extrabold text-slate-800">Could not verify your session</h1>
-              <p role="alert" className="mt-2 text-sm text-rose-600">{sessionCheckError}</p>
-              <div className="mt-5 flex justify-center gap-3">
-                <button type="button" onClick={handleLogout} className="rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">Sign out</button>
-                <button type="button" onClick={() => setSessionCheckAttempt((value) => value + 1)} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Retry</button>
-              </div>
-            </>
-          ) : (
-            <div role="status" className="text-sm font-medium text-slate-500">Verifying your session…</div>
-          )}
-        </div>
-      </main>
-    );
+    // A failure still needs its explanation and the two recovery actions; only
+    // the ordinary wait becomes the branded splash.
+    if (sessionCheckError) {
+      return (
+        <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+          <div className="rounded-md border border-slate-200 bg-white p-8 text-center shadow-sm max-w-md">
+            <h1 className="text-lg font-extrabold text-slate-800">Could not verify your session</h1>
+            <p role="alert" className="mt-2 text-sm text-rose-600">{sessionCheckError}</p>
+            <div className="mt-5 flex justify-center gap-3">
+              <button type="button" onClick={handleLogout} className="rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">Sign out</button>
+              <button type="button" onClick={() => setSessionCheckAttempt((value) => value + 1)} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Retry</button>
+            </div>
+          </div>
+        </main>
+      );
+    }
+    return <BrandedLoader label="Verifying your session" />;
   }
 
   return (
