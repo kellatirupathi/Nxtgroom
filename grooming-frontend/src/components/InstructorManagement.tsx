@@ -1,7 +1,8 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import { Plus, UserCog, Search, Mail, Phone, Building2, Edit2, Trash2 } from 'lucide-react';
+import { Plus, UserCog, Search, Mail, Building2 } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
+import RowActionsMenu from './RowActionsMenu';
 import { useToast } from './useToast';
 import type { College, Instructor } from '../types';
 
@@ -166,10 +167,22 @@ export default function InstructorManagement() {
     return col ? col.name : <span className="text-slate-400 font-mono text-xs">{collegeId}</span>;
   };
 
-  const filteredInstructors = instructors.filter(ins => 
-    (ins.name || '').toLowerCase().includes(search.toLowerCase()) || 
-    (ins.employee_id || '').toLowerCase().includes(search.toLowerCase())
-  );
+  // Search covers the synced columns too, since employee_id is often absent
+  // on roster rows and the user id is what identifies them.
+  const filteredInstructors = instructors.filter((ins) => {
+    const term = search.trim().toLowerCase();
+    if (!term) return true;
+    return [
+      ins.name,
+      ins.employee_id,
+      ins.instructor_user_id,
+      ins.instructor_role,
+      ins.role,
+      ins.institute_name,
+      ins.instructor_category,
+      ins.email,
+    ].some((value) => String(value ?? '').toLowerCase().includes(term));
+  });
 
   return (
     <div className="w-full flex flex-col h-full animate-in fade-in duration-300">
@@ -210,13 +223,13 @@ export default function InstructorManagement() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">Employee ID</th>
+                <th className="p-4 hidden xl:table-cell">Instructor User ID</th>
                 <th className="p-4">Instructor Name</th>
-                <th className="p-4 hidden xl:table-cell">Gender</th>
                 <th className="p-4">Role</th>
+                <th className="p-4 hidden lg:table-cell">Institute</th>
+                <th className="p-4 hidden lg:table-cell">Category</th>
                 <th className="p-4 hidden md:table-cell">College</th>
-                <th className="p-4 hidden lg:table-cell">Email</th>
-                <th className="p-4 hidden xl:table-cell">Phone</th>
+                <th className="p-4 hidden xl:table-cell">Email</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -232,38 +245,43 @@ export default function InstructorManagement() {
               ) : (
                 filteredInstructors.map(ins => (
                   <tr key={ins._id} className="hover:bg-slate-50 transition-colors group">
-                    <td className="p-4 text-xs font-mono font-medium text-slate-500">{ins.employee_id}</td>
+                    {/* Employee ID is optional on synced rows, so the stable
+                        identifier is the instructor_user_id from BigQuery. */}
+                    <td className="p-4 hidden xl:table-cell text-xs font-mono font-medium text-slate-500">
+                      {ins.instructor_user_id || ins.employee_id || <span className="text-slate-300">--</span>}
+                    </td>
                     <td className="p-4 font-bold text-slate-800">{ins.name}</td>
-                    <td className="p-4 hidden xl:table-cell text-xs font-medium text-slate-500 uppercase tracking-wider">{ins.gender}</td>
                     <td className="p-4">
                       <span className="inline-flex px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold text-[11px] rounded-md border border-indigo-100 whitespace-nowrap">
-                        {ins.role}
+                        {ins.instructor_role || ins.role || '--'}
                       </span>
+                    </td>
+                    <td className="p-4 hidden lg:table-cell text-sm text-slate-600">
+                      {ins.institute_name || <span className="text-slate-300">--</span>}
+                    </td>
+                    <td className="p-4 hidden lg:table-cell text-sm text-slate-600">
+                      {ins.instructor_category || <span className="text-slate-300">--</span>}
                     </td>
                     <td className="p-4 hidden md:table-cell text-sm font-semibold text-slate-700">
                       <span className="flex items-center gap-1.5">
                         <Building2 size={14} className="text-slate-400 shrink-0" aria-hidden="true" />
-                        {getCollegeName(ins.college_id)}
+                        {ins.college_id ? getCollegeName(ins.college_id) : <span className="font-normal text-slate-300">Unassigned</span>}
                       </span>
                     </td>
-                    <td className="p-4 hidden lg:table-cell text-xs font-medium text-slate-500">
+                    <td className="p-4 hidden xl:table-cell text-xs font-medium text-slate-500">
                       {ins.email ? (
                         <span className="flex items-center gap-1.5"><Mail size={12} className="text-slate-400 shrink-0" aria-hidden="true" /> {ins.email}</span>
                       ) : <span className="text-slate-300">--</span>}
                     </td>
-                    <td className="p-4 hidden xl:table-cell text-xs font-medium text-slate-500">
-                      {ins.phone_no ? (
-                        <span className="flex items-center gap-1.5"><Phone size={12} className="text-slate-400 shrink-0" aria-hidden="true" /> {ins.phone_no}</span>
-                      ) : <span className="text-slate-300">--</span>}
-                    </td>
                     <td className="p-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button type="button" aria-label={`Edit ${ins.name}`} title={`Edit ${ins.name}`} onClick={() => openEditModal(ins)} className="rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                          <Edit2 size={16} aria-hidden="true" />
-                        </button>
-                        <button type="button" aria-label={`Remove ${ins.name}`} title={`Remove ${ins.name}`} onClick={() => setConfirmTarget(ins)} className="rounded-md border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500">
-                          <Trash2 size={16} aria-hidden="true" />
-                        </button>
+                      <div className="flex justify-end">
+                        <RowActionsMenu
+                          label={`Actions for ${ins.name}`}
+                          actions={[
+                            { key: 'edit', label: 'Edit', icon: 'edit', onSelect: () => openEditModal(ins) },
+                            { key: 'delete', label: 'Delete', icon: 'delete', destructive: true, onSelect: () => setConfirmTarget(ins) },
+                          ]}
+                        />
                       </div>
                     </td>
                   </tr>

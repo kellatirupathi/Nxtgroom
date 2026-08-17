@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2 } from 'lucide-react';
+import { Bell, Building2, Database } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
+import InstructorSyncPanel from './InstructorSyncPanel';
 import type { NotificationSettings } from '../types';
 
 interface ToggleProps {
@@ -166,7 +167,7 @@ function NotificationSettings() {
 }
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<'notifications' | 'colleges'>('notifications');
+  const [tab, setTab] = useState<'notifications' | 'colleges' | 'sync'>('notifications');
 
   const tabClass = (value: string) =>
     `px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
@@ -204,11 +205,23 @@ export default function SettingsPage() {
             <Building2 size={16} aria-hidden="true" />
             Colleges
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'sync'}
+            onClick={() => setTab('sync')}
+            className={tabClass('sync')}
+          >
+            <Database size={16} aria-hidden="true" />
+            Sync Data
+          </button>
         </div>
       </div>
 
       <div className="flex-1 min-h-0 overflow-auto">
-        {tab === 'notifications' ? <NotificationSettings /> : <CollegeManagement />}
+        {tab === 'notifications' && <NotificationSettings />}
+        {tab === 'colleges' && <CollegeManagement />}
+        {tab === 'sync' && <InstructorSyncPanel />}
       </div>
     </section>
   );

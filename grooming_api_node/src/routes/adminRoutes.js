@@ -28,9 +28,25 @@ import {
   sendAccountInviteEmail,
 } from "../services/emailService.js";
 import { INVITE_TTL_MS, issueResetToken } from "../services/passwordResetService.js";
+import {
+  isSyncConfigured,
+  readSyncState,
+  runInstructorSync,
+} from "../services/instructorSync.js";
 import { appUrl } from "../config/env.js";
+import { rateLimit } from "express-rate-limit";
 
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
+
+// A sync queries BigQuery and writes thousands of rows, so it must not be
+// possible to start many at once by clicking repeatedly.
+const instructorSyncLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 5,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { detail: "Too many sync attempts. Please wait a few minutes." },
+});
 
 export const adminRouter = Router();
 
@@ -581,6 +597,72 @@ adminRouter.put(
       req.currentUser.email
     );
     return res.json(saved);
+  })
+);
+
+/**
+ * Current roster plus the outcome of the last sync, so the Settings screen can
+ * render the table and the "last synced" line in one request.
+ */
+adminRouter.get(
+  "/settings/instructor-sync",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    // Only rows that came from BigQuery: manually created instructors are
+    // managed on the Instructors page, not by this screen.
+    const syncedFilter = activeFilter({ source: "bigquery" });
+    const [state, records, total] = await Promise.all([
+      readSyncState(db),
+      db.collection("instructors")
+        .find(syncedFilter)
+        .project({
+          instructor_user_id: 1,
+          name: 1,
+          instructor_role: 1,
+          institute_name: 1,
+          instructor_category: 1,
+          employee_id: 1,
+          phone_no: 1,
+          synced_at: 1,
+        })
+        .sort({ name: 1 })
+        .limit(5000)
+        .toArray(),
+      db.collection("instructors").countDocuments(syncedFilter),
+    ]);
+    return res.json({
+      configured: isSyncConfigured(),
+      last_sync_at: state?.last_sync_at || null,
+      last_sync_status: state?.last_sync_status || null,
+      last_sync_error: state?.last_sync_error || null,
+      record_count: total,
+      records: records.map(serializeAdminDocument),
+    });
+  })
+);
+
+/**
+ * Triggers a sync. Long-running by nature, so it is rate limited and refuses
+ * to start when credentials are absent rather than failing halfway.
+ */
+adminRouter.post(
+  "/settings/instructor-sync",
+  requireSuperAdmin,
+  instructorSyncLimiter,
+  asyncRoute(async (req, res) => {
+    if (!isSyncConfigured()) {
+      return res.status(503).json({
+        detail: "BigQuery is not configured on the server. Add BIGQUERY_CREDENTIALS_JSON and retry.",
+      });
+    }
+    const result = await runInstructorSync(req.app.locals.db, {
+      triggeredBy: req.currentUser.email,
+    });
+    if (!result.ok) {
+      return res.status(502).json({ detail: result.last_sync_error, ...result });
+    }
+    return res.json(result);
   })
 );
 

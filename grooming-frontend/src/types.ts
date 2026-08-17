@@ -54,6 +54,7 @@ export interface DailyFeedback {
 export interface Instructor {
   _id: string;
   uuid?: string;
+  /** Optional: instructors synced from BigQuery are keyed by instructor_user_id. */
   employee_id?: string;
   name: string;
   role: string;
@@ -64,6 +65,13 @@ export interface Instructor {
   phone_no?: string | null;
   created_at?: string;
   daily_feedbacks?: DailyFeedback[];
+  /** Fields owned by the BigQuery roster; absent on manually created rows. */
+  instructor_user_id?: string | null;
+  instructor_role?: string | null;
+  institute_name?: string | null;
+  instructor_category?: string | null;
+  source?: string | null;
+  synced_at?: string | null;
 }
 
 export interface AttendanceRecord {

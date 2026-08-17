@@ -30,9 +30,14 @@ export const boaUpdateSchema = z.object({
 });
 
 export const instructorSchema = z.object({
-  employee_id: z.string().trim().min(1).max(50),
+  // Optional: instructors synced from BigQuery are keyed by instructor_user_id
+  // and many carry no employee id at all.
+  employee_id: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().trim().max(50).optional()
+  ),
   name: z.string().trim().min(2).max(120),
-  role: z.enum(["Trainee", "Senior Instructor", "Lead Instructor"]),
+  role: z.string().trim().min(1).max(80),
   gender: z.string().trim().transform((value) => value.toUpperCase()).pipe(z.enum(["MALE", "FEMALE"])),
   college_id: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
