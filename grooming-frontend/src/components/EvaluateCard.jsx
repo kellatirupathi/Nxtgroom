@@ -122,7 +122,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
   };
 
   return (
-    <section className="bg-white rounded-3xl shadow-xl shadow-slate-200/50 p-6 md:p-8 flex flex-col h-full border border-slate-100 relative overflow-hidden group" aria-labelledby="attendance-action-title">
+    <section className="bg-white rounded-md shadow-xl shadow-slate-200/50 p-6 md:p-8 flex flex-col h-full border border-slate-100 relative overflow-hidden group" aria-labelledby="attendance-action-title">
       <div className="absolute top-0 right-0 -mt-16 -mr-16 w-48 h-48 bg-indigo-50 rounded-full blur-3xl opacity-60 pointer-events-none group-hover:bg-indigo-100 transition-colors duration-700" />
 
       <div className="relative z-10">
@@ -132,7 +132,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
         {message.text && (
           <div
             role={message.type === 'error' ? 'alert' : 'status'}
-            className={`mb-5 rounded-xl border p-3 text-sm font-medium ${message.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}
+            className={`mb-5 rounded-md border p-3 text-sm font-medium ${message.type === 'error' ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}
           >
             {message.text}
           </div>
@@ -143,7 +143,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
           <div className="relative">
             <select
               id="instructor-select"
-              className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 text-sm font-medium text-slate-700 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none appearance-none cursor-pointer transition-all hover:bg-slate-100"
+              className="w-full rounded-md border-2 border-slate-100 bg-slate-50 p-4 text-sm font-medium text-slate-700 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none appearance-none cursor-pointer transition-all hover:bg-slate-100"
               value={selectedUuid}
               onChange={(event) => setSelectedUuid(event.target.value)}
             >
@@ -160,7 +160,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
 
         <div className="flex-1 flex flex-col mb-6">
           <label htmlFor="check-in-photo" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Check-In Photo</label>
-          <div className="flex-1 min-h-[240px] border-3 border-dashed border-slate-200 rounded-3xl flex flex-col items-center justify-center bg-slate-50/50 relative overflow-hidden transition-all hover:border-indigo-400 hover:bg-indigo-50/30 group/drop">
+          <div className="flex-1 min-h-[240px] border-3 border-dashed border-slate-200 rounded-md flex flex-col items-center justify-center bg-slate-50/50 relative overflow-hidden transition-all hover:border-indigo-400 hover:bg-indigo-50/30 group/drop">
             <input
               ref={fileInputRef}
               id="check-in-photo"
@@ -174,7 +174,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
               <img src={preview} alt="Selected check-in preview" className="absolute inset-0 w-full h-full object-cover object-top" />
             ) : (
               <div className="flex flex-col items-center text-slate-400 group-hover/drop:text-indigo-500 transition-colors p-6 text-center">
-                <div className="w-16 h-16 rounded-2xl bg-white shadow-sm flex items-center justify-center mb-4 group-hover/drop:scale-110 transition-transform duration-300">
+                <div className="w-16 h-16 rounded-md bg-white shadow-sm flex items-center justify-center mb-4 group-hover/drop:scale-110 transition-transform duration-300">
                   <Camera size={32} aria-hidden="true" />
                 </div>
                 <p className="font-bold text-sm text-slate-600 mb-1">Take or upload a photo</p>
@@ -195,7 +195,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
             type="button"
             onClick={handleCheckIn}
             disabled={loading || checkoutLoading}
-            className={`flex-1 rounded-2xl py-4 font-bold text-sm flex items-center justify-center gap-2 transition-all ${loading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-[#8b5cf6] text-white hover:bg-[#7c3aed] shadow-lg shadow-indigo-200 hover:-translate-y-0.5'}`}
+            className={`flex-1 rounded-md py-4 font-bold text-sm flex items-center justify-center gap-2 transition-all ${loading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-[#8b5cf6] text-white hover:bg-[#7c3aed] shadow-lg shadow-indigo-200 hover:-translate-y-0.5'}`}
           >
             {loading ? <RefreshCw size={18} className="animate-spin" aria-hidden="true" /> : <UploadCloud size={18} aria-hidden="true" />}
             {loading ? 'Submitting…' : 'Check-In'}
@@ -205,7 +205,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }) {
             type="button"
             onClick={handleCheckOut}
             disabled={loading || checkoutLoading}
-            className={`flex-1 rounded-2xl py-4 font-bold text-sm flex items-center justify-center gap-2 transition-all ${checkoutLoading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200'}`}
+            className={`flex-1 rounded-md py-4 font-bold text-sm flex items-center justify-center gap-2 transition-all ${checkoutLoading ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200'}`}
           >
             {checkoutLoading ? <RefreshCw size={18} className="animate-spin" aria-hidden="true" /> : <LogOut size={18} aria-hidden="true" />}
             {checkoutLoading ? 'Submitting…' : 'Check-Out'}

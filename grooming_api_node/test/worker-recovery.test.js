@@ -22,10 +22,17 @@ import {
 } from "../src/routes/attendanceRoutes.js";
 
 function fakeDb(collections) {
+  // enqueueNotification consults workspace notification settings before
+  // queueing mail. Default the stub to "not configured" so these tests keep
+  // exercising the permissive defaults unless a case overrides it.
+  const withDefaults = {
+    app_settings: { findOne: async () => null },
+    ...collections,
+  };
   return {
     collection(name) {
-      assert.ok(collections[name], `Unexpected collection: ${name}`);
-      return collections[name];
+      assert.ok(withDefaults[name], `Unexpected collection: ${name}`);
+      return withDefaults[name];
     },
   };
 }

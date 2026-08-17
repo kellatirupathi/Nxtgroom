@@ -36,7 +36,7 @@ export default function Login({ onLogin }) {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-[#f8f9fc] p-4">
-      <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
+      <div className="bg-white p-8 md:p-10 rounded-md shadow-xl w-full max-w-md border border-slate-100">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 mb-4 flex items-center justify-center">
             <img src="/logo.png" alt="FacultyTrack" className="w-full h-full object-contain drop-shadow-sm" />
@@ -46,7 +46,7 @@ export default function Login({ onLogin }) {
         </div>
 
         {error && (
-          <div role="alert" className="mb-4 p-3 bg-red-50 text-red-600 border border-red-100 rounded-lg text-sm font-medium text-center">
+          <div role="alert" className="mb-4 p-3 bg-red-50 text-red-600 border border-red-100 rounded-md text-sm font-medium text-center">
             {error}
           </div>
         )}
@@ -60,7 +60,7 @@ export default function Login({ onLogin }) {
               type="email"
               maxLength="254"
               autoComplete="username"
-              className="w-full rounded-xl border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
+              className="w-full rounded-md border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               placeholder="admin@nxtwave.com"
@@ -75,7 +75,7 @@ export default function Login({ onLogin }) {
               type="password"
               maxLength="128"
               autoComplete="current-password"
-              className="w-full rounded-xl border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
+              className="w-full rounded-md border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               placeholder="••••••••"
@@ -85,7 +85,7 @@ export default function Login({ onLogin }) {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-[#8b5cf6] text-white py-3.5 rounded-xl font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-[#7c3aed] transition-colors shadow-md shadow-indigo-200 disabled:opacity-70 mt-4"
+            className="w-full bg-[#8b5cf6] text-white py-3.5 rounded-md font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-[#7c3aed] transition-colors shadow-md shadow-indigo-200 disabled:opacity-70 mt-4"
           >
             {loading ? 'Authenticating…' : 'Sign In'}
             {!loading && <ArrowRight size={18} aria-hidden="true" />}

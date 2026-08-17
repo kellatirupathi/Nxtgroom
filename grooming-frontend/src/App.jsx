@@ -6,7 +6,8 @@ import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
 import DailyAttendanceTable from './components/DailyAttendanceTable';
 import BOAManagement from './components/BOAManagement';
-import CollegeManagement from './components/CollegeManagement';
+import SettingsPage from './components/SettingsPage';
+import { ChangePasswordModal, ProfileModal } from './components/AccountModals';
 import InstructorManagement from './components/InstructorManagement';
 import {
   apiFetch,
@@ -18,7 +19,7 @@ import {
   SESSION_EXPIRED_EVENT,
 } from './api';
 
-const ADMIN_TABS = new Set(['boa-management', 'college-management', 'instructor-management']);
+const ADMIN_TABS = new Set(['boa-management', 'settings', 'instructor-management']);
 
 function initialSession() {
   try {
@@ -26,7 +27,7 @@ function initialSession() {
     localStorage.removeItem('nxtwave_role');
   } catch { /* Legacy storage may be blocked by browser policy. */ }
   const token = getSessionToken();
-  return { token, role: token ? getSessionRole() : null, validated: !token };
+  return { token, role: token ? getSessionRole() : null, email: null, collegeId: null, validated: !token };
 }
 
 export default function App() {
@@ -38,16 +39,17 @@ export default function App() {
   const [loadError, setLoadError] = useState('');
   const [sessionCheckError, setSessionCheckError] = useState('');
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
+  const [accountModal, setAccountModal] = useState(null);
 
   const handleLogin = (token, role) => {
-    setSession({ token, role, validated: true });
+    setSession({ token, role, email: null, collegeId: null, validated: true });
     setSessionCheckError('');
     setActiveTab('overview');
   };
 
   const handleLogout = useCallback(() => {
     clearSession();
-    setSession({ token: null, role: null, validated: true });
+    setSession({ token: null, role: null, email: null, collegeId: null, validated: true });
     setInstructors([]);
     setSelectedAttendanceRecord(null);
     setActiveTab('overview');
@@ -69,7 +71,7 @@ export default function App() {
           throw new Error('The server returned an invalid user role.');
         }
         saveSession(session.token, currentUser.role);
-        setSession({ token: session.token, role: currentUser.role, validated: true });
+        setSession({ token: session.token, role: currentUser.role, email: currentUser.email || null, collegeId: currentUser.college_id || null, validated: true });
       } catch (error) {
         if (!controller.signal.aborted && error.status !== 401) setSessionCheckError(error.message);
       }
@@ -117,14 +119,14 @@ export default function App() {
   if (!session.validated) {
     return (
       <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm max-w-md">
+        <div className="rounded-md border border-slate-200 bg-white p-8 text-center shadow-sm max-w-md">
           {sessionCheckError ? (
             <>
               <h1 className="text-lg font-extrabold text-slate-800">Could not verify your session</h1>
               <p role="alert" className="mt-2 text-sm text-rose-600">{sessionCheckError}</p>
               <div className="mt-5 flex justify-center gap-3">
-                <button type="button" onClick={handleLogout} className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">Sign out</button>
-                <button type="button" onClick={() => setSessionCheckAttempt((value) => value + 1)} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Retry</button>
+                <button type="button" onClick={handleLogout} className="rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">Sign out</button>
+                <button type="button" onClick={() => setSessionCheckAttempt((value) => value + 1)} className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Retry</button>
               </div>
             </>
           ) : (
@@ -152,34 +154,28 @@ export default function App() {
         activeTab={activeTab}
         navigate={navigate}
         role={session.role}
+        email={session.email}
+        onLogout={handleLogout}
+        onOpenProfile={() => setAccountModal('profile')}
+        onOpenChangePassword={() => setAccountModal('password')}
       />
 
       <main className="flex-1 h-full overflow-auto p-4 md:p-6 flex flex-col w-full">
-        <div className="flex items-center justify-between gap-4 mb-6 shrink-0">
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              aria-label="Open navigation menu"
-              className="lg:hidden text-slate-600 hover:text-slate-900 bg-white p-2 rounded-lg border border-slate-200 shadow-sm"
-              onClick={() => setIsSidebarOpen(true)}
-            >
-              <Menu size={20} aria-hidden="true" />
-            </button>
-            <h1 className="text-2xl md:text-3xl lg:text-4xl font-extrabold text-[#1a1f36] tracking-tight">
-              Instructor Grooming Standard
-            </h1>
-          </div>
+        {/* Mobile-only trigger: the shared page header was removed, but small
+            screens still need a way to reveal the off-canvas sidebar. */}
+        <div className="lg:hidden mb-4 shrink-0">
           <button
             type="button"
-            onClick={handleLogout}
-            className="px-4 py-2 text-sm font-bold text-slate-500 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
+            aria-label="Open navigation menu"
+            className="text-slate-600 hover:text-slate-900 bg-white p-2 rounded-md border border-slate-200"
+            onClick={() => setIsSidebarOpen(true)}
           >
-            Logout
+            <Menu size={20} aria-hidden="true" />
           </button>
         </div>
 
         {loadError && (
-          <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
+          <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             {loadError}
           </div>
         )}
@@ -212,8 +208,8 @@ export default function App() {
             <div className="w-full h-full"><BOAManagement /></div>
           )}
 
-          {activeTab === 'college-management' && session.role === 'SUPER_ADMIN' && (
-            <div className="w-full h-full"><CollegeManagement /></div>
+          {activeTab === 'settings' && session.role === 'SUPER_ADMIN' && (
+            <div className="w-full h-full"><SettingsPage /></div>
           )}
 
           {activeTab === 'instructor-management' && session.role === 'SUPER_ADMIN' && (
@@ -221,6 +217,25 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {accountModal === 'profile' && (
+        <ProfileModal
+          email={session.email}
+          role={session.role}
+          collegeId={session.collegeId}
+          onClose={() => setAccountModal(null)}
+        />
+      )}
+
+      {accountModal === 'password' && (
+        <ChangePasswordModal
+          onClose={() => setAccountModal(null)}
+          onPasswordChanged={() => {
+            setAccountModal(null);
+            handleLogout();
+          }}
+        />
+      )}
     </div>
   );
 }

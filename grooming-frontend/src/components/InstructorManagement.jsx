@@ -136,7 +136,7 @@ export default function InstructorManagement() {
             <input 
               type="text" 
               placeholder="Search instructors..." 
-              className="pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none w-64 shadow-sm transition-all"
+              className="pl-10 pr-4 py-2.5 rounded-md border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none w-64 shadow-sm transition-all"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -144,7 +144,7 @@ export default function InstructorManagement() {
         <button
             type="button"
             onClick={openAddModal}
-            className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 shrink-0"
+            className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 shrink-0"
           >
             <Plus size={18} />
             Add Instructor
@@ -152,9 +152,9 @@ export default function InstructorManagement() {
         </div>
       </div>
 
-      {error && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
+      {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+      <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
@@ -201,10 +201,10 @@ export default function InstructorManagement() {
                     </td>
                     <td className="p-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button type="button" aria-label={`Edit ${ins.name}`} title={`Edit ${ins.name}`} onClick={() => openEditModal(ins)} className="rounded-lg border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <button type="button" aria-label={`Edit ${ins.name}`} title={`Edit ${ins.name}`} onClick={() => openEditModal(ins)} className="rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500">
                           <Edit2 size={16} aria-hidden="true" />
                         </button>
-                        <button type="button" aria-label={`Remove ${ins.name}`} title={`Remove ${ins.name}`} onClick={() => handleDelete(ins._id)} className="rounded-lg border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500">
+                        <button type="button" aria-label={`Remove ${ins.name}`} title={`Remove ${ins.name}`} onClick={() => handleDelete(ins._id)} className="rounded-md border border-rose-100 bg-rose-50 p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500">
                           <Trash2 size={16} aria-hidden="true" />
                         </button>
                       </div>
@@ -219,7 +219,7 @@ export default function InstructorManagement() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="instructor-dialog-title">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-md shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h2 id="instructor-dialog-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
                 <UserCog size={20} className="text-indigo-600" />
@@ -234,18 +234,18 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Name</label>
-                  <input required maxLength="120" placeholder="John Doe" className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                  <input required maxLength="120" placeholder="John Doe" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Employee ID</label>
-                  <input required maxLength="50" placeholder="EMP123" className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} />
+                  <input required maxLength="50" placeholder="EMP123" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
-                  <select required className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
+                  <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
                     <option value="Trainee">Trainee</option>
                     <option value="Senior Instructor">Senior Instructor</option>
                     <option value="Lead Instructor">Lead Instructor</option>
@@ -253,7 +253,7 @@ export default function InstructorManagement() {
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gender</label>
-                  <select required className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
+                  <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
                     <option value="MALE">Male</option>
                     <option value="FEMALE">Female</option>
                   </select>
@@ -262,7 +262,7 @@ export default function InstructorManagement() {
 
               <div>
                 <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Assign College</label>
-                <select required className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.college_id} onChange={e => setFormData({...formData, college_id: e.target.value})}>
+                <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.college_id} onChange={e => setFormData({...formData, college_id: e.target.value})}>
                   <option value="" disabled>Select a college...</option>
                   {colleges.map(c => (
                     <option key={c._id} value={c._id}>{c.name} - {c.location}</option>
@@ -273,17 +273,17 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Email</label>
-                  <input required type="email" maxLength="254" placeholder="john@example.com" className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                  <input required type="email" maxLength="254" placeholder="john@example.com" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Phone (Optional)</label>
-                  <input maxLength="30" placeholder="+1 234 567 8900" className="w-full rounded-xl border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.phone_no} onChange={e => setFormData({...formData, phone_no: e.target.value})} />
+                  <input maxLength="30" placeholder="+1 234 567 8900" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.phone_no} onChange={e => setFormData({...formData, phone_no: e.target.value})} />
                 </div>
               </div>
 
               <div className="pt-6 flex gap-3">
-                <button type="button" onClick={closeModal} disabled={saving} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button>
-                <button type="submit" disabled={saving} className="flex-1 px-4 py-3 rounded-xl font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 disabled:opacity-50">
+                <button type="button" onClick={closeModal} disabled={saving} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button>
+                <button type="submit" disabled={saving} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 disabled:opacity-50">
                   {saving ? 'Saving…' : isEditMode ? 'Save Changes' : 'Create Instructor'}
                 </button>
               </div>

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { runtimeConfig } from "../config/env.js";
 import { sendCheckoutEmail, sendEvaluationEmail } from "./emailService.js";
+import { getNotificationSettings, shouldSendNotification } from "./notificationSettings.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 
 const WORKER_ID = randomUUID();
@@ -90,6 +91,20 @@ export async function enqueueNotification(db, {
       { _id: attendanceId },
       {
         $set: { [`${type}_email_status`]: "skipped_no_email" },
+        $unset: { [outboxField]: "" },
+      }
+    );
+    return false;
+  }
+
+  // Administrator email preferences are applied before a job is queued, so a
+  // suppressed report never holds recipient PII in the notification queue.
+  const settings = await getNotificationSettings(db);
+  if (!shouldSendNotification(settings, type, report || {})) {
+    await db.collection("attendance").updateOne(
+      { _id: attendanceId },
+      {
+        $set: { [`${type}_email_status`]: "skipped_by_settings" },
         $unset: { [outboxField]: "" },
       }
     );

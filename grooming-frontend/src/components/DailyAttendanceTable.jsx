@@ -151,21 +151,21 @@ export default function DailyAttendanceTable({ onRowClick }) {
         <p className="text-sm text-slate-500 mt-1">Check-ins, check-outs, and grooming audits for the selected date.</p>
       </div>
 
-      <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[170px_180px_190px_minmax(240px,1fr)] gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-[170px_180px_190px_minmax(240px,1fr)] gap-3 rounded-md border border-slate-200 bg-white p-4 shadow-sm">
         <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
           Date
-          <input type="date" value={dateFilter} max={today} onChange={handleDateChange} className="mt-1.5 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+          <input type="date" value={dateFilter} max={today} onChange={handleDateChange} className="mt-1.5 block w-full rounded-md border border-slate-200 px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
         </label>
         <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
           College
-          <select value={collegeFilter} onChange={(event) => setCollegeFilter(event.target.value)} className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+          <select value={collegeFilter} onChange={(event) => setCollegeFilter(event.target.value)} className="mt-1.5 block w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
             <option value="">All colleges</option>
             {colleges.map((college) => <option key={college} value={college}>{college}</option>)}
           </select>
         </label>
         <label className="text-xs font-bold uppercase tracking-wide text-slate-500">
           Instructor role
-          <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="mt-1.5 block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
+          <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)} className="mt-1.5 block w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20">
             <option value="">All roles</option>
             {roles.map((role) => <option key={role} value={role}>{role}</option>)}
           </select>
@@ -174,14 +174,14 @@ export default function DailyAttendanceTable({ onRowClick }) {
           Search
           <span className="relative mt-1.5 block">
             <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-            <input type="search" maxLength="120" placeholder="Name, college, coordinates, or remarks…" value={search} onChange={(event) => setSearch(event.target.value)} className="block w-full rounded-xl border border-slate-200 py-2 pl-10 pr-3 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
+            <input type="search" maxLength="120" placeholder="Name, college, coordinates, or remarks…" value={search} onChange={(event) => setSearch(event.target.value)} className="block w-full rounded-md border border-slate-200 py-2 pl-10 pr-3 text-sm font-medium normal-case text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20" />
           </span>
         </label>
       </div>
 
-      {error && <div role="alert" className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
+      {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+      <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto flex-1">
           <table className="w-full text-left border-collapse min-w-[1080px]">
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">

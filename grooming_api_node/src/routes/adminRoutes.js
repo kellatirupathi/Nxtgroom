@@ -3,6 +3,11 @@ import { withMongoTransaction } from "../config/db.js";
 import { getPasswordHash, idMatch, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { asyncRoute, createDocument, serializeDocument } from "../utils.js";
 import { boaSchema, boaUpdateSchema, collegeSchema, validate } from "../validation.js";
+import {
+  getNotificationSettings,
+  saveNotificationSettings,
+  validateNotificationSettings,
+} from "../services/notificationSettings.js";
 
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
 
@@ -466,5 +471,29 @@ adminRouter.delete(
       return res.status(409).json({ detail: "Reassign or delete active instructors before deleting this college" });
     }
     return res.json({ message: "College deleted successfully" });
+  })
+);
+
+adminRouter.get(
+  "/settings/notifications",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const settings = await getNotificationSettings(req.app.locals.db);
+    return res.json(settings);
+  })
+);
+
+adminRouter.put(
+  "/settings/notifications",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = validateNotificationSettings(req.body);
+    if (!result.valid) return res.status(422).json({ detail: result.detail });
+    const saved = await saveNotificationSettings(
+      req.app.locals.db,
+      result.value,
+      req.currentUser.email
+    );
+    return res.json(saved);
   })
 );

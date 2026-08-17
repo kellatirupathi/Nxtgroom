@@ -3,6 +3,7 @@ import { runtimeConfig } from "../config/env.js";
 import {
   createAccessToken,
   getCurrentUser,
+  getPasswordHash,
   ROLES,
   userSessionVersion,
   verifyPassword,
@@ -48,5 +49,47 @@ authRouter.post(
       role: user.role,
       expires_in: 60 * runtimeConfig().jwtExpiresMinutes,
     });
+  })
+);
+
+authRouter.post(
+  "/change-password",
+  getCurrentUser,
+  asyncRoute(async (req, res) => {
+    const currentPassword = String(req.body?.current_password || "");
+    const newPassword = String(req.body?.new_password || "");
+
+    if (!currentPassword || !newPassword) {
+      return res.status(422).json({ detail: "Current and new passwords are required" });
+    }
+    if (newPassword.length < 12 || newPassword.length > 128) {
+      return res.status(422).json({ detail: "New password must be between 12 and 128 characters" });
+    }
+    if (newPassword === currentPassword) {
+      return res.status(422).json({ detail: "New password must differ from the current password" });
+    }
+
+    const db = req.app.locals.db;
+    const user = await db.collection("users").findOne({ email: req.currentUser.email });
+    if (!user || !(await verifyPassword(currentPassword, user.password_hash))) {
+      return res.status(401).json({ detail: "Current password is incorrect" });
+    }
+
+    // Bumping session_version invalidates every existing token for this user,
+    // including the one making this request, so a stolen token cannot survive
+    // a password change.
+    await db.collection("users").updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          password_hash: await getPasswordHash(newPassword),
+          password_changed_at: new Date(),
+          updated_at: new Date(),
+        },
+        $inc: { session_version: 1 },
+      }
+    );
+
+    return res.json({ message: "Password changed successfully. Please sign in again." });
   })
 );

@@ -54,7 +54,7 @@ function ReportSection({ title, items }) {
   return (
     <section className="mb-8" aria-labelledby={`report-${title.replace(/\s+/g, '-').toLowerCase()}`}>
       <h4 id={`report-${title.replace(/\s+/g, '-').toLowerCase()}`} className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-100 pb-2">{title}</h4>
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
+      <div className="bg-white rounded-md border border-slate-200 overflow-x-auto shadow-sm">
         <table className="w-full text-left text-sm min-w-[560px]">
           <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
             <tr><th className="p-3">Checkpoint</th><th className="p-3">Result</th><th className="p-3">Observation</th><th className="p-3">Evidence</th></tr>
@@ -102,9 +102,9 @@ export default function InstructorDetail({ record, onBack }) {
 
   if (!record) {
     return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
+      <div className="rounded-md border border-slate-200 bg-white p-8 text-center">
         <p className="text-sm text-slate-500">Choose a completed attendance record to view its report.</p>
-        <button type="button" onClick={onBack} className="mt-4 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Back to records</button>
+        <button type="button" onClick={onBack} className="mt-4 rounded-md bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Back to records</button>
       </div>
     );
   }
@@ -112,7 +112,7 @@ export default function InstructorDetail({ record, onBack }) {
   return (
     <section className="w-full flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300" aria-labelledby="instructor-detail-title">
       <div className="flex items-center gap-4 mb-6 shrink-0">
-        <button type="button" aria-label="Back to daily records" onClick={onBack} className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-600 transition-colors shadow-sm">
+        <button type="button" aria-label="Back to daily records" onClick={onBack} className="p-2 bg-white border border-slate-200 rounded-md hover:bg-slate-50 text-slate-600 transition-colors shadow-sm">
           <ArrowLeft size={20} aria-hidden="true" />
         </button>
         <h2 id="instructor-detail-title" className="text-2xl font-extrabold text-slate-800">Instructor Detail View</h2>
@@ -120,40 +120,40 @@ export default function InstructorDetail({ record, onBack }) {
 
       <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 overflow-hidden">
         <div className="w-full lg:w-1/3 flex flex-col gap-6 overflow-y-auto pb-6 pr-2">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 flex flex-col items-center text-center shrink-0">
+          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-8 flex flex-col items-center text-center shrink-0">
             <div className="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-5"><User size={48} aria-hidden="true" /></div>
             <h3 className="text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
             <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-5">{record.instructor_role}</p>
             <StatusBadge status={record.status} />
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-5 shrink-0">
+          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 space-y-5 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">Session Details</h4>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-lg text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatDate(record.date)}</p></div></div>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-lg text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-In Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_in_time)}</p></div></div>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-lg text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-Out Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_out_time)}</p></div></div>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-lg text-slate-400"><MapPin size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Coordinates</p><p className="text-sm font-semibold text-indigo-600">{formatCoordinates(record.location_coordinates)}</p></div></div>
+            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatDate(record.date)}</p></div></div>
+            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-In Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_in_time)}</p></div></div>
+            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-Out Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_out_time)}</p></div></div>
+            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><MapPin size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Coordinates</p><p className="text-sm font-semibold text-indigo-600">{formatCoordinates(record.location_coordinates)}</p></div></div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 shrink-0">
+          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">AI Remarks Summary</h4>
-            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100">{record.remarks || 'No remarks available.'}</p>
+            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">{record.remarks || 'No remarks available.'}</p>
             <p className="mt-3 text-xs text-slate-400">AI output is assistive and should be reviewed by an authorized person before adverse action.</p>
           </div>
         </div>
 
-        <div className="w-full lg:w-2/3 bg-white rounded-2xl shadow-sm border border-slate-200 p-8 overflow-y-auto flex flex-col mb-6">
+        <div className="w-full lg:w-2/3 bg-white rounded-md shadow-sm border border-slate-200 p-8 overflow-y-auto flex flex-col mb-6">
           <h3 className="text-lg font-extrabold text-slate-800 mb-6 border-b border-slate-100 pb-4">Detailed Grooming Audit Report</h3>
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
           ) : error ? (
-            <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">{error}</div>
+            <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">{error}</div>
           ) : !evaluation ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-xl border border-dashed border-slate-200 p-8 text-center gap-2"><XCircle size={32} className="text-slate-300" aria-hidden="true" /><p>No detailed evaluation report is available.</p></div>
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-md border border-dashed border-slate-200 p-8 text-center gap-2"><XCircle size={32} className="text-slate-300" aria-hidden="true" /><p>No detailed evaluation report is available.</p></div>
           ) : (
             <div className="flex-1 pb-4">
               {needsHumanReview(record.status, evaluation) && (
-                <div role="note" className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <div role="note" className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
                   <div className="flex items-start gap-3">
                     <CircleAlert size={20} className="mt-0.5 shrink-0" aria-hidden="true" />
                     <div>
