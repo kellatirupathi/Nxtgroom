@@ -5,6 +5,10 @@ import { evaluateImage } from "./visionEngine.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { downloadPhoto } from "./photoStorage.js";
+import { sendGroomingAlertEmail } from "./emailService.js";
+import { getReportRecipients } from "./reportRecipients.js";
+import { ensureReportToken, localDateKey } from "./instructorReports.js";
+import { appUrl } from "../config/env.js";
 
 const WORKER_ID = randomUUID();
 const EVALUATION_OUTBOX_FIELD = "_private_evaluation_outbox";
@@ -29,6 +33,46 @@ function evaluationJobId(attendanceId) {
 function errorCode(error, fallback = "EVALUATION_ERROR") {
   const value = String(error?.code || error?.name || fallback).toUpperCase();
   return /^[A-Z][A-Z0-9_]{0,79}$/.test(value) ? value : fallback;
+}
+
+/**
+ * Sends a failed or review-required result to the instructor and to every
+ * Reporting Partner, each with a link to that day's report.
+ *
+ * The instructor's link is keyed on their own report token; RPs receive the
+ * same link, since they are trusted recipients configured by an administrator.
+ */
+async function sendGroomingAlerts(db, {
+  attendanceId,
+  instructorId,
+  instructorName,
+  instructorEmail,
+  status,
+  summary,
+  checkInTime,
+}) {
+  const instructor = instructorId
+    ? await db.collection("instructors").findOne({ _id: instructorId })
+    : null;
+  if (!instructor) return;
+
+  const token = await ensureReportToken(db, instructor);
+  const dayKey = localDateKey(new Date(checkInTime || Date.now()));
+  const reportUrl = `${appUrl()}/reports/${token}/day/${dayKey}`;
+  const payload = {
+    name: instructorName || instructor.name,
+    status,
+    summary,
+    dateLabel: dayKey,
+    reportUrl,
+  };
+
+  if (instructorEmail || instructor.email) {
+    await sendGroomingAlertEmail(instructorEmail || instructor.email, payload);
+  }
+  for (const recipient of await getReportRecipients(db)) {
+    await sendGroomingAlertEmail(recipient, { ...payload, forReviewer: true });
+  }
 }
 
 function publicEvaluation(report, job, now) {
@@ -243,6 +287,26 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
       imageQuality,
     },
   });
+
+  // A poor result is sent immediately to the instructor and the reporting
+  // partners, rather than waiting for the weekly summary. Failures here are
+  // logged and swallowed: the evaluation itself is already committed and must
+  // not be retried just because an alert could not be delivered.
+  if (attendanceStatus === "non_compliant" || attendanceStatus === "review_required") {
+    try {
+      await sendGroomingAlerts(db, {
+        attendanceId: job.attendance_id,
+        instructorId: job.instructor?.id,
+        instructorName: job.instructor?.name,
+        instructorEmail: job.instructor?.email,
+        status: attendanceStatus,
+        summary: evaluation.ai_summary || "",
+        checkInTime: job.check_in_time,
+      });
+    } catch (error) {
+      console.error(`Grooming alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);
+    }
+  }
   await db.collection("evaluation_jobs").deleteOne({
     _id: job._id,
     worker_id: WORKER_ID,

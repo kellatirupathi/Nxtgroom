@@ -1,0 +1,120 @@
+import crypto from "node:crypto";
+import { runtimeConfig } from "../config/env.js";
+
+/**
+ * Per-instructor report links.
+ *
+ * The link is keyed on an unguessable token rather than the instructor id.
+ * These URLs are emailed, and email gets forwarded; a readable id would let
+ * anyone walk the range and read other people's grooming assessments and
+ * photos. The token is stable per instructor so an old email keeps working,
+ * and can be rotated by clearing the field.
+ */
+
+const TOKEN_BYTES = 24;
+
+export async function ensureReportToken(db, instructor) {
+  if (instructor?.report_token) return instructor.report_token;
+  const token = crypto.randomBytes(TOKEN_BYTES).toString("base64url");
+  await db.collection("instructors").updateOne(
+    { _id: instructor._id },
+    { $set: { report_token: token, updated_at: new Date() } }
+  );
+  return token;
+}
+
+export async function findInstructorByReportToken(db, token) {
+  if (!token || typeof token !== "string" || token.length > 128) return null;
+  return db.collection("instructors").findOne({ report_token: token });
+}
+
+/** Formats a Date as YYYY-MM-DD in the configured business timezone. */
+export function localDateKey(date, timeZone = runtimeConfig().appTimeZone) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+}
+
+/**
+ * Monday of the week containing `date`, as a YYYY-MM-DD key.
+ *
+ * The working week is Monday to Saturday; Sunday is excluded, so a Sunday
+ * belongs to the week that just ended rather than the one about to start.
+ * That matters because the weekly report is sent on Sunday morning.
+ */
+export function weekStartKey(date, timeZone = runtimeConfig().appTimeZone) {
+  const key = localDateKey(date, timeZone);
+  const [year, month, day] = key.split("-").map(Number);
+  // Constructed as UTC so the arithmetic below cannot cross a DST boundary.
+  const local = new Date(Date.UTC(year, month - 1, day));
+  const weekday = local.getUTCDay(); // 0 = Sunday
+  const daysSinceMonday = weekday === 0 ? 6 : weekday - 1;
+  local.setUTCDate(local.getUTCDate() - daysSinceMonday);
+  return local.toISOString().slice(0, 10);
+}
+
+/** The six working dates (Mon-Sat) of the week beginning at `startKey`. */
+export function workingWeekDates(startKey) {
+  const [year, month, day] = startKey.split("-").map(Number);
+  const dates = [];
+  for (let offset = 0; offset < 6; offset += 1) {
+    const date = new Date(Date.UTC(year, month - 1, day + offset));
+    dates.push(date.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+export function isValidDateKey(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime());
+}
+
+/**
+ * Counts a week's attendance into the shape both the email and the report page
+ * need: one row per working day, plus the saree/kurti split.
+ */
+export function summariseWeek(records, startKey) {
+  const dates = workingWeekDates(startKey);
+  const byDate = new Map();
+  for (const record of records) {
+    const key = localDateKey(new Date(record.check_in_time || record.date));
+    // Keep the earliest check-in when someone checked in twice in a day.
+    const existing = byDate.get(key);
+    if (!existing || new Date(record.check_in_time) < new Date(existing.check_in_time)) {
+      byDate.set(key, record);
+    }
+  }
+
+  const days = dates.map((date) => {
+    const record = byDate.get(date) || null;
+    return {
+      date,
+      present: Boolean(record),
+      attendance_id: record ? String(record._id) : null,
+      check_in_time: record?.check_in_time || null,
+      check_out_time: record?.check_out_time || null,
+      status: record?.status || null,
+      attire_type: record?.attire_type || null,
+      remarks: record?.remarks || null,
+      missed_checkout: Boolean(record && !record.check_out_time),
+    };
+  });
+
+  const counted = days.filter((day) => day.present);
+  return {
+    week_start: startKey,
+    week_end: dates[dates.length - 1],
+    days,
+    present_days: counted.length,
+    compliant_days: counted.filter((day) => day.status === "compliant").length,
+    non_compliant_days: counted.filter((day) => day.status === "non_compliant").length,
+    review_days: counted.filter((day) => day.status === "review_required").length,
+    saree_days: counted.filter((day) => day.attire_type === "SAREE").length,
+    kurti_days: counted.filter((day) => day.attire_type === "KURTI_WITH_DUPATTA").length,
+    formal_days: counted.filter((day) => day.attire_type === "FORMAL").length,
+    missed_checkouts: counted.filter((day) => day.missed_checkout).length,
+  };
+}

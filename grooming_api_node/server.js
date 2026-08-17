@@ -22,6 +22,7 @@ import { adminRouter } from "./src/routes/adminRoutes.js";
 import { attendanceRouter } from "./src/routes/attendanceRoutes.js";
 import { authRouter } from "./src/routes/authRoutes.js";
 import { instructorRouter } from "./src/routes/instructorRoutes.js";
+import { reportRouter } from "./src/routes/reportRoutes.js";
 import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { verifyVisionAssets } from "./src/services/visionEngine.js";
@@ -105,6 +106,11 @@ app.get("/health", readinessHandler);
 
 app.use("/api/v2/auth/login", loginLimiter);
 app.use("/api/v2/auth", requireDatabase, authRouter);
+// Mounted before the authenticated routers and without getCurrentUser: report
+// pages are opened by instructors who have no account, and cron endpoints are
+// called by cron-jobs.org, which cannot hold a session. Each authenticates
+// itself — a report token in the path, or a shared secret header.
+app.use("/api/v2/reports", requireDatabase, reportRouter);
 app.use("/api/v2", requireDatabase, getCurrentUser, adminRouter);
 app.use("/api/v2/instructors", requireDatabase, getCurrentUser, instructorRouter);
 app.use("/api/v2/attendance", requireDatabase, getCurrentUser, attendanceRouter);

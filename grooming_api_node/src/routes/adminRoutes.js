@@ -29,6 +29,11 @@ import {
 } from "../services/emailService.js";
 import { INVITE_TTL_MS, issueResetToken } from "../services/passwordResetService.js";
 import {
+  addReportRecipient,
+  getReportRecipients,
+  removeReportRecipient,
+} from "../services/reportRecipients.js";
+import {
   isSyncConfigured,
   readSyncState,
   runInstructorSync,
@@ -597,6 +602,53 @@ adminRouter.put(
       req.currentUser.email
     );
     return res.json(saved);
+  })
+);
+
+/**
+ * Reporting Partners: addresses copied on grooming alerts alongside the
+ * instructor, so a failed audit reaches someone accountable.
+ */
+adminRouter.get(
+  "/settings/rp-recipients",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json({ emails: await getReportRecipients(req.app.locals.db) });
+  })
+);
+
+adminRouter.post(
+  "/settings/rp-recipients",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await addReportRecipient(
+      req.app.locals.db,
+      req.body?.email,
+      req.currentUser.email
+    );
+    if (!result.ok) {
+      const detail = result.reason === "duplicate"
+        ? "That address is already on the list."
+        : result.reason === "limit"
+          ? "The recipient list is full."
+          : "Enter a valid email address.";
+      return res.status(422).json({ detail });
+    }
+    return res.status(201).json({ emails: result.emails });
+  })
+);
+
+adminRouter.delete(
+  "/settings/rp-recipients/:email",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await removeReportRecipient(
+      req.app.locals.db,
+      decodeURIComponent(req.params.email),
+      req.currentUser.email
+    );
+    if (!result.ok) return res.status(422).json({ detail: "Enter a valid email address." });
+    return res.json({ emails: result.emails });
   })
 );
 

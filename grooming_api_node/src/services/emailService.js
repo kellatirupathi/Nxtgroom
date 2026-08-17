@@ -331,3 +331,179 @@ export function sendAccountCreatedEmail(toEmail, payload) {
 export function sendPasswordResetEmail(toEmail, payload) {
   return sendEmail(toEmail, buildPasswordResetEmail(payload));
 }
+
+function dayLabel(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  return date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
+
+function statusLabel(day) {
+  if (!day.present) return "No check-in";
+  if (day.status === "compliant") return "Compliant";
+  if (day.status === "non_compliant") return "Non-compliant";
+  if (day.status === "review_required") return "Review required";
+  if (day.status === "error") return "Analysis error";
+  return "Pending";
+}
+
+const ATTIRE_LABELS = {
+  FORMAL: "Formal",
+  SAREE: "Saree",
+  KURTI_WITH_DUPATTA: "Kurti with dupatta",
+};
+
+/** Weekly summary with a link to the instructor's own report page. */
+export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
+  const person = name || "there";
+  const range = `${dayLabel(summary.week_start)} to ${dayLabel(summary.week_end)}`;
+  const rows = summary.days.map((day) => ({
+    label: dayLabel(day.date),
+    status: statusLabel(day),
+    attire: day.present ? (ATTIRE_LABELS[day.attire_type] || "Not identified") : "-",
+  }));
+
+  const textRows = rows
+    .map((row) => `  ${row.label.padEnd(14)} ${row.status.padEnd(18)} ${row.attire}`)
+    .join("\n");
+  const htmlRows = rows
+    .map((row) => `<tr>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0">${escapeHtml(row.label)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0">${escapeHtml(row.status)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e2e8f0">${escapeHtml(row.attire)}</td>
+      </tr>`)
+    .join("");
+
+  return {
+    subject: `Your grooming summary for ${range}`,
+    text: [
+      `Hello ${person},`,
+      "",
+      `Here is your grooming summary for ${range}.`,
+      "",
+      `Days present: ${summary.present_days} of 6`,
+      `Compliant: ${summary.compliant_days} | Needs review: ${summary.review_days} | Non-compliant: ${summary.non_compliant_days}`,
+      `Attire: formal ${summary.formal_days}, saree ${summary.saree_days}, kurti ${summary.kurti_days}`,
+      ...(summary.missed_checkouts ? [`Missed check-outs: ${summary.missed_checkouts}`] : []),
+      "",
+      "Day by day:",
+      textRows,
+      "",
+      "Full report:",
+      reportUrl,
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello ${escapeHtml(person)},</p>
+      <p>Here is your grooming summary for <strong>${escapeHtml(range)}</strong>.</p>
+      <p>
+        Days present: <strong>${summary.present_days} of 6</strong><br>
+        Compliant: ${summary.compliant_days} &middot; Needs review: ${summary.review_days} &middot; Non-compliant: ${summary.non_compliant_days}<br>
+        Attire: formal ${summary.formal_days}, saree ${summary.saree_days}, kurti ${summary.kurti_days}
+        ${summary.missed_checkouts ? `<br>Missed check-outs: ${summary.missed_checkouts}` : ""}
+      </p>
+      <table style="border-collapse:collapse;font-size:14px;margin:16px 0">
+        <thead><tr style="background:#f1f5f9">
+          <th style="padding:6px 10px;text-align:left">Day</th>
+          <th style="padding:6px 10px;text-align:left">Result</th>
+          <th style="padding:6px 10px;text-align:left">Attire</th>
+        </tr></thead>
+        <tbody>${htmlRows}</tbody>
+      </table>
+      <p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View your full report</a></p>
+      <p style="color:#64748b;font-size:12px">This link is personal to you. Please do not forward it.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+/** Sent as soon as an analysis finishes badly, to the instructor and the RPs. */
+export function buildGroomingAlertEmail({ name, status, summary, dateLabel, reportUrl, forReviewer = false }) {
+  const person = name || "Instructor";
+  const heading = status === "non_compliant"
+    ? "did not meet the grooming standards"
+    : "needs a manual review";
+  const subject = forReviewer
+    ? `Grooming alert: ${person} - ${dateLabel}`
+    : `Your check-in on ${dateLabel} ${heading}`;
+
+  const opening = forReviewer
+    ? `${person}'s check-in on ${dateLabel} ${heading}.`
+    : `Your check-in on ${dateLabel} ${heading}.`;
+
+  return {
+    subject,
+    text: [
+      forReviewer ? "Hello," : `Hello ${person},`,
+      "",
+      opening,
+      "",
+      summary || "See the full report for the checkpoint detail.",
+      "",
+      "Full report:",
+      reportUrl,
+      "",
+      "This is an assistive screening result and should be reviewed before any action is taken.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>${forReviewer ? "Hello," : `Hello ${escapeHtml(person)},`}</p>
+      <p>${escapeHtml(opening)}</p>
+      <p style="background:#fff7ed;border-left:3px solid #f59e0b;padding:10px 14px">${escapeHtml(summary || "See the full report for the checkpoint detail.")}</p>
+      <p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View the full report</a></p>
+      <p style="color:#64748b;font-size:12px">This is an assistive screening result and should be reviewed before any action is taken.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+/** Friendly nudge when a check-in or check-out was missed. */
+export function buildAttendanceReminderEmail({ name, kind, dateLabel }) {
+  const person = name || "there";
+  const missedCheckout = kind === "checkout";
+  const line = missedCheckout
+    ? `It looks like you checked in on ${dateLabel} but did not check out.`
+    : `It looks like you checked out on ${dateLabel} without a check-in recorded.`;
+  const ask = missedCheckout
+    ? "Please remember to check out at the end of the day so your attendance is complete."
+    : "Please remember to check in at the start of the day so your attendance is complete.";
+
+  return {
+    subject: missedCheckout
+      ? `Reminder: check-out missing for ${dateLabel}`
+      : `Reminder: check-in missing for ${dateLabel}`,
+    text: [
+      `Hello ${person},`,
+      "",
+      line,
+      ask,
+      "",
+      "No action is needed if this was intentional.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello ${escapeHtml(person)},</p>
+      <p>${escapeHtml(line)}</p>
+      <p>${escapeHtml(ask)}</p>
+      <p style="color:#64748b;font-size:12px">No action is needed if this was intentional.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+export function sendWeeklyReportEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildWeeklyReportEmail(payload));
+}
+
+export function sendGroomingAlertEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildGroomingAlertEmail(payload));
+}
+
+export function sendAttendanceReminderEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildAttendanceReminderEmail(payload));
+}
