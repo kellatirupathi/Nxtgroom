@@ -18,15 +18,15 @@ interface DailyAttendanceTableProps {
 function StatusBadge({ status }: { status?: string }) {
   switch (normalizeAttendanceStatus(status)) {
     case 'compliant':
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-200"><CheckCircle2 size={12} aria-hidden="true" /> Compliant</span>;
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-50 text-emerald-600 border border-emerald-200"><CheckCircle2 size={12} aria-hidden="true" /> Compliant</span>;
     case 'non_compliant':
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-600 border border-rose-200"><XCircle size={12} aria-hidden="true" /> Non-compliant</span>;
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-50 text-rose-600 border border-rose-200"><XCircle size={12} aria-hidden="true" /> Non-compliant</span>;
     case 'review_required':
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200"><CircleAlert size={12} aria-hidden="true" /> Review required</span>;
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200"><CircleAlert size={12} aria-hidden="true" /> Review required</span>;
     case 'error':
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200"><TriangleAlert size={12} aria-hidden="true" /> Analysis error</span>;
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-slate-100 text-slate-600 border border-slate-200"><TriangleAlert size={12} aria-hidden="true" /> Analysis error</span>;
     default:
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-600 border border-amber-200"><Clock size={12} aria-hidden="true" /> Pending AI</span>;
+      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-600 border border-amber-200"><Clock size={12} aria-hidden="true" /> Pending AI</span>;
   }
 }
 
@@ -210,12 +210,26 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
 
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto flex-1">
-          <table className="w-full text-left border-collapse min-w-0 lg:min-w-[1080px]">
+          {/*
+            table-fixed with explicit widths, because auto layout was sizing
+            columns from their content and wrapping "Vikram Balai" and
+            "Aug 17, 2026" onto two and three lines. Every column now gets a
+            width that fits one line, and the table scrolls horizontally rather
+            than compressing to fit.
+          */}
+          <table className="text-left border-collapse table-fixed w-max min-w-full">
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
-              <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">Instructor Name</th><th className="p-4 hidden xl:table-cell">Role</th><th className="p-4 hidden md:table-cell">College</th><th className="p-4 hidden lg:table-cell">Date</th>
-                <th className="p-4">Check-In</th><th className="p-4 hidden sm:table-cell">Check-Out</th><th className="p-4 hidden xl:table-cell">Coordinates</th>
-                <th className="p-4">Status</th><th className="p-4">Photo</th><th className="p-4 w-1/4 hidden lg:table-cell">Remark</th>
+              <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                <th className="p-4 w-[200px]">Instructor Name</th>
+                <th className="p-4 w-[150px]">Role</th>
+                <th className="p-4 w-[160px]">College</th>
+                <th className="p-4 w-[130px]">Date</th>
+                <th className="p-4 w-[110px]">Check-In</th>
+                <th className="p-4 w-[110px]">Check-Out</th>
+                <th className="p-4 w-[190px]">Coordinates</th>
+                <th className="p-4 w-[150px]">Status</th>
+                <th className="p-4 w-[90px]">Photo</th>
+                <th className="p-4 w-[320px]">Remark</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -241,24 +255,26 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                     aria-label={canOpen ? `Open evaluation for ${record.instructor_name}` : undefined}
                     className={`transition-colors ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
                   >
-                    <td className="p-4 font-bold text-slate-800">{record.instructor_name}</td>
-                    <td className="p-4 text-sm font-medium text-slate-500 hidden xl:table-cell">{record.instructor_role}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600 hidden md:table-cell">{record.college_name || 'Unknown'}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600 hidden lg:table-cell">{formatDate(record.date)}</td>
-                    <td className="p-4 text-sm font-bold text-slate-700">{formatTime(record.check_in_time)}</td>
-                    <td className="p-4 text-sm font-bold text-slate-700 hidden sm:table-cell">{formatTime(record.check_out_time)}</td>
-                    <td className="p-4 text-sm text-slate-500 hidden xl:table-cell">
+                    {/* truncate on every text cell: one line, an ellipsis when
+                        it overflows, and the full value in the tooltip. */}
+                    <td className="p-4 font-bold text-slate-800 truncate" title={record.instructor_name || ''}>{record.instructor_name}</td>
+                    <td className="p-4 text-sm font-medium text-slate-500 truncate" title={record.instructor_role || ''}>{record.instructor_role || '--'}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600 truncate" title={record.college_name || ''}>{record.college_name || 'Unknown'}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600 whitespace-nowrap">{formatDate(record.date)}</td>
+                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">{formatTime(record.check_in_time)}</td>
+                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">{formatTime(record.check_out_time)}</td>
+                    <td className="p-4 text-sm text-slate-500 truncate">
                       {record.location_coordinates ? (
                         <span className="flex items-center gap-1.5 text-indigo-600 font-medium whitespace-nowrap" title="Latitude, longitude">
-                          <MapPin size={14} aria-hidden="true" /> {formatCoordinates(record.location_coordinates)}
+                          <MapPin size={14} className="shrink-0" aria-hidden="true" /> {formatCoordinates(record.location_coordinates)}
                         </span>
                       ) : '--'}
                     </td>
-                    <td className="p-4"><StatusBadge status={record.status} /></td>
+                    <td className="p-4 whitespace-nowrap"><StatusBadge status={record.status} /></td>
                     <td className="p-4">
                       {/* stopPropagation: the row itself opens the evaluation
                           detail, and viewing a photo should not also do that. */}
-                      <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+                      <div className="flex items-center gap-1.5 whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                         {record.check_in_photo_key ? (
                           <button
                             type="button"
@@ -285,7 +301,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                         )}
                       </div>
                     </td>
-                    <td className="p-4 text-sm text-slate-500 max-w-xs truncate hidden lg:table-cell" title={record.remarks || ''}>{record.remarks}</td>
+                    <td className="p-4 text-sm text-slate-500 truncate" title={record.remarks || ''}>{record.remarks || '--'}</td>
                   </tr>
                 );
               })}
