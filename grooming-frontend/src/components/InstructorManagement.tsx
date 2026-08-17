@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import { Plus, UserCog, Search, Mail, Building2 } from 'lucide-react';
+import { Plus, UserCog, Search, Mail } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import RowActionsMenu from './RowActionsMenu';
@@ -162,11 +162,6 @@ export default function InstructorManagement() {
     setEditingId(null);
   };
 
-  const getCollegeName = (collegeId: string) => {
-    const col = colleges.find(c => c._id === collegeId);
-    return col ? col.name : <span className="text-slate-400 font-mono text-xs">{collegeId}</span>;
-  };
-
   // Search covers the synced columns too, since employee_id is often absent
   // on roster rows and the user id is what identifies them.
   const filteredInstructors = instructors.filter((ins) => {
@@ -226,9 +221,10 @@ export default function InstructorManagement() {
                 <th className="p-4 hidden xl:table-cell">Instructor User ID</th>
                 <th className="p-4">Instructor Name</th>
                 <th className="p-4">Role</th>
+                {/* Institute replaces College: they name the same thing, and
+                    the roster is authoritative for it. */}
                 <th className="p-4 hidden lg:table-cell">Institute</th>
                 <th className="p-4 hidden lg:table-cell">Category</th>
-                <th className="p-4 hidden md:table-cell">College</th>
                 <th className="p-4 hidden xl:table-cell">Email</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
@@ -236,11 +232,11 @@ export default function InstructorManagement() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
+                  <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
                 </tr>
               ) : filteredInstructors.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
+                  <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
                 </tr>
               ) : (
                 filteredInstructors.map(ins => (
@@ -261,12 +257,6 @@ export default function InstructorManagement() {
                     </td>
                     <td className="p-4 hidden lg:table-cell text-sm text-slate-600">
                       {ins.instructor_category || <span className="text-slate-300">--</span>}
-                    </td>
-                    <td className="p-4 hidden md:table-cell text-sm font-semibold text-slate-700">
-                      <span className="flex items-center gap-1.5">
-                        <Building2 size={14} className="text-slate-400 shrink-0" aria-hidden="true" />
-                        {ins.college_id ? getCollegeName(ins.college_id) : <span className="font-normal text-slate-300">Unassigned</span>}
-                      </span>
                     </td>
                     <td className="p-4 hidden xl:table-cell text-xs font-medium text-slate-500">
                       {ins.email ? (

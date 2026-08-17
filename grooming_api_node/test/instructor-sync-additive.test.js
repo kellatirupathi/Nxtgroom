@@ -34,10 +34,7 @@ const roster = [
     instructor_role: "CENTRAL_INSTRUCTOR",
     institute_name: "Vivekananda global University",
     instructor_category: "TECH",
-    employee_id: null,
-    phone_no: null,
-    email: null,
-    manager_email: "manager@nxtwave.co.in",
+    email: "sumit@nxtwave.co.in",
   },
 ];
 
@@ -93,20 +90,27 @@ test("fields FacultyTrack owns are set only when the record is created", async (
   }
 });
 
-test("blank warehouse columns never overwrite a value entered by hand", async () => {
+test("a missing email never overwrites one entered by hand", async () => {
+  const db = recordingDb();
+  // Roughly half the roster has no address in the demo table. Writing that
+  // null would erase an email an administrator added so the check-in report
+  // could actually be delivered.
+  await saveInstructorRoster(db, [{ ...roster[0], email: null }]);
+  const [{ updateOne }] = db.operations();
+
+  assert.equal(
+    "email" in updateOne.update.$set,
+    false,
+    "a null email must be dropped, not written over an existing address",
+  );
+  assert.equal(updateOne.update.$set.name, "Sumit Kumar", "the rest of the row still syncs");
+});
+
+test("an email the warehouse does supply is written", async () => {
   const db = recordingDb();
   await saveInstructorRoster(db, roster);
   const [{ updateOne }] = db.operations();
-  const written = updateOne.update.$set;
-
-  // This table carries no email, phone, or employee id at all. Writing those
-  // nulls would erase contact details an administrator added, and check-in
-  // needs the email address to send the grooming report.
-  for (const field of ["email", "phone_no", "employee_id"]) {
-    assert.equal(field in written, false, `null ${field} must be dropped, not written`);
-  }
-  // A value the warehouse does supply is still written.
-  assert.equal(written.manager_email, "manager@nxtwave.co.in");
+  assert.equal(updateOne.update.$set.email, "sumit@nxtwave.co.in");
 });
 
 test("an empty roster performs no writes at all", async () => {

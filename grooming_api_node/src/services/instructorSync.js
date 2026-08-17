@@ -11,6 +11,8 @@ import { BigQuery } from "@google-cloud/bigquery";
 
 const DATASET = "niat_instructor_automation_data";
 const TABLE = "niat_instructor_managers_and_instructors_details";
+/** Carries instructor_mail; the roster table has no email column. */
+const EMAIL_TABLE = "z_niat_training_instructors_online_demo_details";
 export const SYNC_STATE_ID = "instructor_sync";
 
 /** Guards against a runaway query; the roster is a few thousand rows. */
@@ -90,39 +92,71 @@ export function mapInstructorRow(row) {
     instructor_role: pick("instructor_role", "instructorrole"),
     institute_name: pick("institute_name", "institutename"),
     instructor_category: pick("instructor_category", "instructorcategory"),
-    // Present on some rows only; both are optional in FacultyTrack.
-    employee_id: pick("employee_id", "employeeid"),
-    phone_no: pick("employee_mobile_number", "instructor_mobile_number", "mobile_number", "phone_no"),
-    email: (pick("instructor_email", "instructor_mail", "email") || "").toLowerCase() || null,
-    manager_email: (pick("instructor_manager_mail", "manager_email") || "").toLowerCase() || null,
+    // Joined from the demo table; the roster itself has no email column and
+    // roughly half the instructors have no record there.
+    email: (pick("instructor_mail", "instructor_email", "email") || "").toLowerCase() || null,
   };
 }
 
-/** Fetches and normalises the roster. Rows missing an id or name are skipped. */
+/**
+ * Fetches one row per instructor, with their email joined in.
+ *
+ * Deduplication happens in BigQuery rather than in JavaScript: the roster
+ * repeats a person once per manager (4,606 rows for 599 people) and the demo
+ * table once per week, so grouping at the source moves a fraction of the data
+ * over the wire. Each instructor has exactly one institute, role and category,
+ * verified against the warehouse, so ANY_VALUE is safe here.
+ */
 export async function fetchInstructorRoster() {
   const projectId = process.env.BIGQUERY_PROJECT_ID || credentials()?.project_id;
   const query = `
-    SELECT *
-    FROM \`${projectId}.${DATASET}.${TABLE}\`
+    WITH roster AS (
+      SELECT
+        instructor_user_id,
+        ANY_VALUE(instructor_name)     AS instructor_name,
+        ANY_VALUE(instructor_role)     AS instructor_role,
+        ANY_VALUE(institute_name)      AS institute_name,
+        ANY_VALUE(instructor_category) AS instructor_category
+      FROM \`${projectId}.${DATASET}.${TABLE}\`
+      WHERE instructor_user_id IS NOT NULL
+        AND TRIM(instructor_user_id) != ''
+      GROUP BY instructor_user_id
+    ),
+    mails AS (
+      SELECT
+        instructor_user_id,
+        ANY_VALUE(instructor_mail) AS instructor_mail
+      FROM \`${projectId}.${DATASET}.${EMAIL_TABLE}\`
+      WHERE instructor_user_id IS NOT NULL
+        AND instructor_mail IS NOT NULL
+        AND TRIM(instructor_mail) != ''
+      GROUP BY instructor_user_id
+    )
+    SELECT roster.*, mails.instructor_mail
+    FROM roster
+    LEFT JOIN mails USING (instructor_user_id)
     LIMIT ${MAX_ROWS}
   `;
   const [rows] = await getClient().query({ query, location: process.env.BIGQUERY_LOCATION || undefined });
 
   const mapped = [];
-  const seen = new Set();
   let skipped = 0;
   for (const row of rows) {
     const record = mapInstructorRow(row);
+    // Rows are already one per instructor; anything rejected here is missing
+    // a name and cannot be displayed.
     if (!record) {
       skipped += 1;
       continue;
     }
-    // The warehouse can repeat a person across manager rows; keep one.
-    if (seen.has(record.instructor_user_id)) continue;
-    seen.add(record.instructor_user_id);
     mapped.push(record);
   }
-  return { records: mapped, fetched: rows.length, skipped };
+  return {
+    records: mapped,
+    fetched: rows.length,
+    skipped,
+    withEmail: mapped.filter((record) => record.email).length,
+  };
 }
 
 /**
@@ -149,10 +183,12 @@ export async function saveInstructorRoster(db, records) {
   if (!records.length) return { upserted: 0, modified: 0 };
   const now = new Date();
   const operations = records.map((record) => {
-    // Only overwrite the columns BigQuery is authoritative for. Writing null
-    // over a locally set email or phone would undo an administrator's edit.
+    // Only overwrite the columns BigQuery is authoritative for. About half the
+    // instructors have no email in the warehouse, and writing that null would
+    // erase an address an administrator entered so a check-in report could be
+    // delivered.
     const owned = { ...record };
-    for (const key of ["employee_id", "phone_no", "email", "manager_email"]) {
+    for (const key of ["email"]) {
       if (owned[key] === null) delete owned[key];
     }
     return {

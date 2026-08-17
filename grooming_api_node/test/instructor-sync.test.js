@@ -9,7 +9,7 @@ test("maps the roster columns the Settings table displays", () => {
     instructor_role: "INSTRUCTOR",
     institute_name: "Training Institute",
     instructor_category: "TECH",
-    instructor_manager_mail: "Satyasyamala.Penumarthi@NxtWave.co.in",
+    instructor_mail: "Ponneboina.Vamshi@NxtWave.co.in",
   };
   const mapped = mapInstructorRow(row);
 
@@ -18,7 +18,7 @@ test("maps the roster columns the Settings table displays", () => {
   assert.equal(mapped.instructor_role, "INSTRUCTOR");
   assert.equal(mapped.institute_name, "Training Institute");
   assert.equal(mapped.instructor_category, "TECH");
-  assert.equal(mapped.manager_email, "satyasyamala.penumarthi@nxtwave.co.in", "addresses lowercase");
+  assert.equal(mapped.email, "ponneboina.vamshi@nxtwave.co.in", "addresses lowercase");
 });
 
 test("column names are matched regardless of casing", () => {
@@ -33,11 +33,13 @@ test("column names are matched regardless of casing", () => {
   assert.equal(mapped.instructor_role, "CENTRAL_INSTRUCTOR");
 });
 
-test("employee id and phone are optional", () => {
-  const mapped = mapInstructorRow({ instructor_user_id: "U-3", instructor_name: "No Extras" });
-  assert.equal(mapped.employee_id, null);
-  assert.equal(mapped.phone_no, null);
+test("an instructor with no email in the warehouse is still imported", () => {
+  // The email is joined from a second table that covers only about half the
+  // roster, so a missing address must not drop the instructor.
+  const mapped = mapInstructorRow({ instructor_user_id: "U-3", instructor_name: "No Email" });
+  assert.equal(mapped.email, null);
   assert.equal(mapped.instructor_user_id, "U-3", "the row is still usable");
+  assert.equal(mapped.name, "No Email");
 });
 
 test("rows without an id or a name are rejected", () => {
