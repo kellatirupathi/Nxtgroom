@@ -128,6 +128,21 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     ...report.accessories_check,
     ...report.footwear_check,
   ];
+  // A photo that shows nothing assessable comes back with every checkpoint
+  // N/A. That is not a compliance verdict, so the pass/fail rule below cannot
+  // apply to it: previously such a photo was rejected as "inconsistent",
+  // retried three times, and left the attendance record permanently in error.
+  // Treat it as unevaluable and send it for human review instead.
+  const assessed = checks.filter((item) => item.status !== "N/A");
+  if (assessed.length === 0) {
+    return {
+      ...report,
+      overall_status: "NON_COMPLIANT",
+      image_quality: "RETAKE_RECOMMENDED",
+      requires_human_review: true,
+    };
+  }
+
   const expectedStatus = checks.some((item) => item.status === "FAIL")
     ? "NON_COMPLIANT"
     : "COMPLIANT";
