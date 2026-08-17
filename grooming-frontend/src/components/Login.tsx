@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight } from 'lucide-react';
 import { apiFetch, saveSession } from '../api';
+import GoogleSignInButton from './GoogleSignInButton';
 import type { LoginResponse, Role } from '../types';
 
 interface LoginProps {
@@ -96,6 +97,13 @@ export default function Login({ onLogin }: LoginProps) {
             {!loading && <ArrowRight size={18} aria-hidden="true" />}
           </button>
         </form>
+
+        {/* Renders nothing unless the server reports Google sign-in is configured. */}
+        <GoogleSignInButton
+          onLogin={onLogin}
+          onError={setError}
+          disabled={loading}
+        />
       </div>
     </main>
   );

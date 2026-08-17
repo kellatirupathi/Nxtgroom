@@ -9,6 +9,22 @@ import {
   verifyPassword,
 } from "../middleware/auth.js";
 import { asyncRoute } from "../utils.js";
+import {
+  googleClientId,
+  isGoogleLoginEnabled,
+  verifyGoogleIdToken,
+} from "../services/googleAuth.js";
+import rateLimit from "express-rate-limit";
+
+// Credential verification is a network call to Google; rate limit it so a
+// flood of forged tokens cannot exhaust the request budget.
+const googleLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { detail: "Too many sign-in attempts. Please try again later." },
+});
 
 export const authRouter = Router();
 
@@ -91,5 +107,53 @@ authRouter.post(
     );
 
     return res.json({ message: "Password changed successfully. Please sign in again." });
+  })
+);
+
+/** Advertises whether the Google button should render, so the UI never shows a dead control. */
+authRouter.get("/google/config", (_req, res) => {
+  res.json({ enabled: isGoogleLoginEnabled(), client_id: googleClientId() || null });
+});
+
+/**
+ * Sign-in only. A verified Google address must already belong to an active
+ * user; this route never provisions accounts, so administrators keep sole
+ * control of who exists via BOA management.
+ */
+authRouter.post(
+  "/google",
+  googleLoginLimiter,
+  asyncRoute(async (req, res) => {
+    if (!isGoogleLoginEnabled()) {
+      return res.status(503).json({ detail: "Google sign-in is not enabled" });
+    }
+
+    const verification = await verifyGoogleIdToken(req.body?.credential);
+    if (verification.error) {
+      return res.status(401).json({ detail: verification.error });
+    }
+
+    const user = await req.app.locals.db
+      .collection("users")
+      .findOne({ email: verification.email });
+
+    // One message for "no such user", "disabled", and "bad role" so the
+    // endpoint cannot be used to enumerate which emails hold accounts.
+    if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role)) {
+      return res.status(403).json({
+        detail: "This Google account is not authorised. Ask an administrator to add it first.",
+      });
+    }
+
+    return res.json({
+      access_token: createAccessToken({
+        sub: user.email,
+        role: user.role,
+        sessionVersion: userSessionVersion(user),
+      }),
+      token_type: "bearer",
+      role: user.role,
+      expires_in: 60 * runtimeConfig().jwtExpiresMinutes,
+    });
   })
 );
