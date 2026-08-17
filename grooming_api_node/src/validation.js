@@ -38,6 +38,14 @@ export const instructorSchema = z.object({
   ),
   name: z.string().trim().min(2).max(120),
   role: z.string().trim().min(1).max(80),
+  // Mirrors role onto the field the tables display. Synced instructors are
+  // shown by instructor_role, so an edit that only set role would appear to
+  // do nothing. A later sync restores the BigQuery value, which is correct:
+  // the warehouse is authoritative for people it knows about.
+  instructor_role: z.preprocess(
+    (value) => (value === "" || value == null ? undefined : value),
+    z.string().trim().max(80).optional()
+  ),
   gender: z.string().trim().transform((value) => value.toUpperCase()).pipe(z.enum(["MALE", "FEMALE"])),
   college_id: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),

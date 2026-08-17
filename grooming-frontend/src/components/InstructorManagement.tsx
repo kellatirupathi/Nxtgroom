@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
@@ -42,7 +42,7 @@ export default function InstructorManagement() {
   const [formData, setFormData] = useState<InstructorForm>({
     name: '',
     employee_id: '',
-    role: 'Trainee',
+    role: '',
     gender: 'MALE',
     college_id: '',
     email: '',
@@ -91,12 +91,16 @@ export default function InstructorManagement() {
       // list, so the table updates in place with no loading blank.
       const saved = await apiJson<{ id?: string }>(path, {
         method: isEditMode ? 'PUT' : 'POST',
-        body: formData,
+        // instructor_role is what the tables display, so it is sent alongside
+        // role; otherwise an edit would save but appear to change nothing.
+        body: { ...formData, instructor_role: formData.role },
       });
       invalidateCache(INSTRUCTORS_PATH);
       if (isEditMode) {
         setInstructors((current) => current.map((ins) => (
-          String(ins._id) === editingId ? { ...ins, ...formData } : ins
+          String(ins._id) === editingId
+            ? { ...ins, ...formData, instructor_role: formData.role }
+            : ins
         )));
       } else if (saved?.id) {
         setInstructors((current) => [
@@ -137,7 +141,7 @@ export default function InstructorManagement() {
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
-    setFormData({ name: '', employee_id: '', role: 'Trainee', gender: 'MALE', college_id: '', email: '', phone_no: '' });
+    setFormData({ name: '', employee_id: '', role: '', gender: 'MALE', college_id: '', email: '', phone_no: '' });
     setShowModal(true);
   };
 
@@ -147,7 +151,7 @@ export default function InstructorManagement() {
     setFormData({
       name: ins.name,
       employee_id: ins.employee_id || '',
-      role: ins.role || 'Trainee',
+      role: ins.instructor_role || ins.role || '',
       gender: String(ins.gender || 'MALE').toUpperCase(),
       college_id: ins.college_id,
       email: ins.email || '',
@@ -161,6 +165,22 @@ export default function InstructorManagement() {
     setIsEditMode(false);
     setEditingId(null);
   };
+
+  /**
+   * Every distinct role in the roster, plus the one being edited so an unusual
+   * value is never silently replaced by the first option when the form opens.
+   */
+  const roleOptions = useMemo(() => {
+    const roles = new Set<string>();
+    for (const instructor of instructors) {
+      const role = instructor.instructor_role || instructor.role;
+      if (role) roles.add(role);
+    }
+    if (formData.role) roles.add(formData.role);
+    // A fallback only when the roster is empty, so the form is never unusable.
+    if (roles.size === 0) ["INSTRUCTOR", "CENTRAL_INSTRUCTOR"].forEach((role) => roles.add(role));
+    return [...roles].sort((a, b) => a.localeCompare(b));
+  }, [instructors, formData.role]);
 
   // Search covers the synced columns too, since employee_id is often absent
   // on roster rows and the user id is what identifies them.
@@ -310,10 +330,14 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
+                  {/* Options come from the roles present in the roster, not a
+                      fixed list: the synced data uses CENTRAL_INSTRUCTOR and
+                      INSTRUCTOR, which the old hardcoded three did not include,
+                      so editing a synced instructor silently changed their role. */}
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
-                    <option value="Trainee">Trainee</option>
-                    <option value="Senior Instructor">Senior Instructor</option>
-                    <option value="Lead Instructor">Lead Instructor</option>
+                    {roleOptions.map((role: string) => (
+                      <option key={role} value={role}>{role}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
