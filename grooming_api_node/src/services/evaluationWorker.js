@@ -46,6 +46,9 @@ function publicEvaluation(report, job, now) {
     requires_human_review: Boolean(report.requires_human_review)
       || imageQuality === "RETAKE_RECOMMENDED",
     image_quality: imageQuality,
+    // Classified independently of pass/fail so the weekly saree/kurti split
+    // can be counted even on a non-compliant day.
+    attire_type: report.attire_type || "UNKNOWN",
     model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
     prompt_version: PROMPT_VERSION,
     processed_at: now,
@@ -214,6 +217,9 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         remarks: evaluation.ai_summary || "",
         analysis_completed_at: evaluation.processed_at || now,
         evaluation_queue_status: "completed",
+        // Denormalised onto attendance so Daily Records and the weekly report
+        // need no join to the evaluations collection.
+        attire_type: evaluation.attire_type || "UNKNOWN",
         requires_human_review: requiresHumanReview,
         image_quality: imageQuality,
         updated_at: now,

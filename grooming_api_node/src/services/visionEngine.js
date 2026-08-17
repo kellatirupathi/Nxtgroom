@@ -35,6 +35,10 @@ const CheckItem = z.object({
 
 const GroomingReport = z.object({
   overall_status: z.enum(["COMPLIANT", "NON_COMPLIANT"]),
+  // What the instructor is wearing, so the weekly saree/kurti split can be
+  // counted. UNKNOWN when the photo does not show enough to tell, which must
+  // not be silently counted as either.
+  attire_type: z.enum(["FORMAL", "SAREE", "KURTI_WITH_DUPATTA", "UNKNOWN"]),
   requires_human_review: z.boolean(),
   image_quality: z.enum(["ADEQUATE", "RETAKE_RECOMMENDED"]),
   ai_summary: z.string().min(1).max(1500),

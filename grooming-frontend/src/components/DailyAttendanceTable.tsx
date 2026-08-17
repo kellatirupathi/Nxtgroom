@@ -30,6 +30,24 @@ function StatusBadge({ status }: { status?: string }) {
   }
 }
 
+/** Formal / Saree / Kurti, classified by the AI independently of pass or fail. */
+function AttireTag({ attire }: { attire?: string | null }) {
+  const labels: Record<string, { text: string; style: string }> = {
+    FORMAL: { text: 'Formal', style: 'bg-sky-50 text-sky-700 border-sky-200' },
+    SAREE: { text: 'Saree', style: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200' },
+    KURTI_WITH_DUPATTA: { text: 'Kurti + Dupatta', style: 'bg-violet-50 text-violet-700 border-violet-200' },
+  };
+  const match = attire ? labels[attire] : undefined;
+  // UNKNOWN and missing both render as a dash: an unclassified photo must not
+  // be presented as though it were one of the three.
+  if (!match) return <span className="text-xs text-slate-300">--</span>;
+  return (
+    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold whitespace-nowrap ${match.style}`}>
+      {match.text}
+    </span>
+  );
+}
+
 function formatTime(isoString?: string | null) {
   if (!isoString) return '--';
   return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -223,7 +241,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             scroll the row far off screen instead of truncating at 320px.
             1610px is the sum of the column widths below.
           */}
-          <table className="text-left border-collapse table-fixed w-[1610px] max-w-none">
+          <table className="text-left border-collapse table-fixed w-[1780px] max-w-none">
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                 <th className="p-4 w-[200px]">Instructor Name</th>
@@ -234,17 +252,18 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                 <th className="p-4 w-[110px]">Check-Out</th>
                 <th className="p-4 w-[190px]">Coordinates</th>
                 <th className="p-4 w-[150px]">Status</th>
+                <th className="p-4 w-[170px]">Attire</th>
                 <th className="p-4 w-[90px]">Photo</th>
                 <th className="p-4 w-[320px]">Remark</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
-                <tr><td colSpan={10} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+                <tr><td colSpan={11} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
               ) : records.length === 0 ? (
-                <tr><td colSpan={10} className="p-8 text-center text-slate-400">No attendance records found for this date.</td></tr>
+                <tr><td colSpan={11} className="p-8 text-center text-slate-400">No attendance records found for this date.</td></tr>
               ) : filteredRecords.length === 0 ? (
-                <tr><td colSpan={10} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+                <tr><td colSpan={11} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {
                 const canOpen = hasEvaluation(record.status);
                 return (
@@ -277,6 +296,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                       ) : '--'}
                     </td>
                     <td className="p-4 whitespace-nowrap"><StatusBadge status={record.status} /></td>
+                    <td className="p-4 whitespace-nowrap"><AttireTag attire={record.attire_type} /></td>
                     <td className="p-4">
                       {/* stopPropagation: the row itself opens the evaluation
                           detail, and viewing a photo should not also do that. */}
