@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search } from 'lucide-react';
 
 export interface SelectOption {
@@ -23,6 +24,8 @@ interface SearchableSelectProps {
 
 /** About six rows, so the list never runs the height of the screen. */
 const LIST_MAX_HEIGHT = 'max-h-60';
+/** Search box, padding and roughly six rows. Used to decide whether to flip. */
+const ESTIMATED_MENU_HEIGHT = 300;
 
 /**
  * A select with a search box inside it.
@@ -47,8 +50,31 @@ export default function SearchableSelect({
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
+  const [position, setPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  /**
+   * The menu is rendered into document.body, so its place on screen has to be
+   * measured from the trigger. Inside the dialog it was clipped by the
+   * dialog's own scroll area; a portal escapes that without the dialog
+   * needing to know a select is in it.
+   */
+  const positionMenu = useCallback(() => {
+    const rect = triggerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    // Flip above only when there is genuinely more room there, so the menu is
+    // never pinned against the bottom of the viewport.
+    const flip = spaceBelow < ESTIMATED_MENU_HEIGHT && rect.top > spaceBelow;
+    setPosition({
+      top: flip ? Math.max(8, rect.top - ESTIMATED_MENU_HEIGHT - 4) : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+    });
+  }, []);
 
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -63,11 +89,27 @@ export default function SearchableSelect({
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      // The menu is outside the container in the DOM, so both are checked.
+      if (containerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onPointerDown);
     return () => document.removeEventListener('mousedown', onPointerDown);
   }, []);
+
+  // Follow the trigger while open: a dialog that scrolls would otherwise
+  // leave the menu behind.
+  useEffect(() => {
+    if (!open) return undefined;
+    positionMenu();
+    window.addEventListener('scroll', positionMenu, true);
+    window.addEventListener('resize', positionMenu);
+    return () => {
+      window.removeEventListener('scroll', positionMenu, true);
+      window.removeEventListener('resize', positionMenu);
+    };
+  }, [open, positionMenu]);
 
   useEffect(() => {
     if (!open) return;
@@ -110,6 +152,7 @@ export default function SearchableSelect({
   return (
     <div ref={containerRef} className={`relative ${className}`}>
       <button
+        ref={triggerRef}
         type="button"
         id={id}
         aria-label={ariaLabel}
@@ -125,8 +168,12 @@ export default function SearchableSelect({
         <ChevronDown size={16} className="shrink-0 text-slate-400" aria-hidden="true" />
       </button>
 
-      {open && (
-        <div className="absolute z-40 mt-1 w-full overflow-hidden rounded-md border border-slate-200 bg-white shadow-xl">
+      {open && position && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: position.top, left: position.left, width: position.width }}
+          // Above the dialog's own layer, so the list is never clipped by it.
+          className="z-[200] overflow-hidden rounded-md border border-slate-200 bg-white shadow-2xl">
           {/* The search sits inside the menu and above the list, so it stays
               in place while the options scroll beneath it. */}
           <div className="border-b border-slate-100 p-2">
@@ -180,7 +227,8 @@ export default function SearchableSelect({
               ))
             )}
           </ul>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
