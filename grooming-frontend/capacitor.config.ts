@@ -10,10 +10,14 @@ const config: CapacitorConfig = {
   appName: 'FacultyTrack',
   webDir: 'dist',
   server: {
-    // Served over https rather than the default http, so the WebView treats
-    // the app as a secure context. Geolocation and the camera both require
-    // one, and they are the two features this app depends on most.
     androidScheme: 'https',
+    // The app loads the deployed site rather than assets bundled into the
+    // APK. Every Vercel deploy therefore reaches users immediately, with no
+    // rebuild and nothing for them to reinstall — the same update story as the
+    // website. The trade is that the app needs a connection, which it already
+    // did: there is no local database to fall back on.
+    url: 'https://nxtgroom-xi.vercel.app',
+    cleartext: false,
   },
   android: {
     // The check-in photo is uploaded, never dragged in from elsewhere.

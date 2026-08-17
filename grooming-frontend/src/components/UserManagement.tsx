@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import PasswordInput from './PasswordInput';
 import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
@@ -516,7 +517,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
                 {/* Blank on create is a deliberate choice, not an omission: the
                     server emails an invitation link instead of storing a
                     password the account holder never picked. */}
-                <input id="user-password" type="password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+                <PasswordInput id="user-password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
                 <p className="mt-1 text-xs text-slate-400">
                   {editing
                     ? 'Leave blank to keep the current password.'
@@ -545,12 +546,12 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
               <p className="text-sm text-slate-600">Setting a new password for <strong className="font-semibold text-slate-800">{passwordFor.name}</strong>.</p>
               <div>
                 <label htmlFor="set-new-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">New password</label>
-                <input id="set-new-password" required type="password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                <PasswordInput id="set-new-password" required minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
                 <p className="mt-1 text-xs text-slate-400">Minimum 12 characters.</p>
               </div>
               <div>
                 <label htmlFor="set-confirm-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Confirm password</label>
-                <input id="set-confirm-password" required type="password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                <PasswordInput id="set-confirm-password" required minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
               </div>
               <p className="text-xs text-slate-500">This signs that user out of all devices.</p>
               <div className="pt-1 flex gap-3">

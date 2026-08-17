@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiFetch, apiJson, saveSession } from '../api';
+import { isNativeApp } from '../lib/platform';
 import type { LoginResponse, Role } from '../types';
 
 const GSI_SRC = 'https://accounts.google.com/gsi/client';
@@ -85,6 +86,14 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
   // never renders against a missing or stale client id.
   useEffect(() => {
     let disposed = false;
+    // Google refuses to serve its sign-in script inside a WebView, so the
+    // button can never work in the Android app. Reporting that as an error on
+    // every launch made a working app look broken; the field is simply not
+    // offered there, and email sign-in is unaffected.
+    if (isNativeApp()) {
+      setConfig({ enabled: false, client_id: null });
+      return () => { disposed = true; };
+    }
     apiFetch<GoogleConfig>('/api/v2/auth/google/config', { auth: false })
       .then((data) => {
         if (!disposed) setConfig(data);

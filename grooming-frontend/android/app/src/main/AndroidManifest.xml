@@ -38,4 +38,25 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Check-in photo. CAMERA is what the WebView asks for when the file
+         input opens the camera; the media permissions cover choosing an
+         existing photo, and READ_EXTERNAL_STORAGE is only for Android 12 and
+         below, where the granular ones do not exist. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Where the check-in happened. FINE is requested because the report
+         records accuracy, and a coarse fix is too vague to be evidence;
+         COARSE is declared so the app still works if a user grants only that. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Declared optional so the app installs on devices without them rather
+         than being filtered out of the store listing. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 </manifest>

@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
+import PasswordInput from './PasswordInput';
 import { KeyRound, User } from 'lucide-react';
 import { apiJson } from '../api';
 import type { Role } from '../types';
@@ -146,9 +147,8 @@ export function ChangePasswordModal({ onClose, onPasswordChanged, onForgotPasswo
           <label htmlFor="current-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
             Current password
           </label>
-          <input
+          <PasswordInput
             id="current-password"
-            type="password"
             required
             autoComplete="current-password"
             className={inputClass}
@@ -160,9 +160,8 @@ export function ChangePasswordModal({ onClose, onPasswordChanged, onForgotPasswo
           <label htmlFor="new-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
             New password
           </label>
-          <input
+          <PasswordInput
             id="new-password"
-            type="password"
             required
             minLength={12}
             maxLength={128}
@@ -177,9 +176,8 @@ export function ChangePasswordModal({ onClose, onPasswordChanged, onForgotPasswo
           <label htmlFor="confirm-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
             Confirm new password
           </label>
-          <input
+          <PasswordInput
             id="confirm-password"
-            type="password"
             required
             minLength={12}
             maxLength={128}

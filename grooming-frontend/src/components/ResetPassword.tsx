@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import PasswordInput from './PasswordInput';
 import { KeyRound, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import { useToast } from './useToast';
@@ -148,10 +149,9 @@ export default function ResetPassword({ token, onDone }: ResetPasswordProps) {
               <label htmlFor="reset-new-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                 New Password
               </label>
-              <input
+              <PasswordInput
                 id="reset-new-password"
                 required
-                type="password"
                 minLength={MIN_LENGTH}
                 maxLength={128}
                 autoComplete="new-password"
@@ -166,10 +166,9 @@ export default function ResetPassword({ token, onDone }: ResetPasswordProps) {
               <label htmlFor="reset-confirm-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                 Confirm New Password
               </label>
-              <input
+              <PasswordInput
                 id="reset-confirm-password"
                 required
-                type="password"
                 minLength={MIN_LENGTH}
                 maxLength={128}
                 autoComplete="new-password"

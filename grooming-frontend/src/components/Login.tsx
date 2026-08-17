@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import PasswordInput from './PasswordInput';
 import { ArrowRight } from 'lucide-react';
 import { apiFetch, saveSession } from '../api';
 import GoogleSignInButton from './GoogleSignInButton';
@@ -103,10 +104,9 @@ export default function Login({ onLogin }: LoginProps) {
                 Forgot password?
               </button>
             </div>
-            <input
+            <PasswordInput
               id="login-password"
               required
-              type="password"
               maxLength={128}
               autoComplete="current-password"
               className="w-full rounded-md border border-slate-200 p-3 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-sm transition-all"
