@@ -198,14 +198,14 @@ test("SES check-in report is concise and escapes instructor data", () => {
     aiSummary: "ID card is missing.",
     checkInTime: "2026-08-14T03:30:00.000Z",
   });
-  assert.equal(email.subject, "Your check-in grooming report");
-  assert.match(email.text, /Grooming status: NON-COMPLIANT/);
+  assert.equal(email.subject, "Your check-in appearance report");
+  assert.match(email.text, /Appearance status: NON-COMPLIANT/);
   assert.match(email.text, /ID card is missing\./);
   assert.match(email.html, /A &lt;Instructor&gt;/);
   assert.doesNotMatch(email.html, /A <Instructor>/);
 });
 
-test("SES checkout report includes attendance times and latest grooming status", () => {
+test("SES checkout report includes attendance times and latest appearance status", () => {
   const email = buildCheckoutEmail({
     instructorName: "Test Instructor",
     checkInTime: "2026-08-14T03:30:00.000Z",
@@ -214,7 +214,7 @@ test("SES checkout report includes attendance times and latest grooming status",
     remarks: "All checks passed.",
   });
   assert.match(email.subject, /Checkout confirmation/);
-  assert.match(email.text, /Grooming status: COMPLIANT/);
+  assert.match(email.text, /Appearance status: COMPLIANT/);
   assert.match(email.text, /All checks passed\./);
 });
 
@@ -226,7 +226,7 @@ test("SES report does not call an uncertain image compliant", () => {
     requiresHumanReview: true,
     imageQuality: "RETAKE_RECOMMENDED",
   });
-  assert.match(email.text, /Grooming status: REVIEW REQUIRED/);
+  assert.match(email.text, /Appearance status: REVIEW REQUIRED/);
   assert.match(email.text, /clearer full-body photo/);
-  assert.doesNotMatch(email.text, /Grooming status: COMPLIANT/);
+  assert.doesNotMatch(email.text, /Appearance status: COMPLIANT/);
 });

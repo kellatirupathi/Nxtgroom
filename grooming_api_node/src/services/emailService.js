@@ -41,7 +41,7 @@ function reviewNotice(status, requiresHumanReview = false) {
     || status === "NON-COMPLIANT"
     || status === "ANALYSIS UNAVAILABLE"
     ? "This automated report requires administrator review before any action is taken."
-    : "This is an automated, assistive grooming report.";
+    : "This is an automated, assistive appearance report.";
 }
 
 export function buildEvaluationEmail({
@@ -65,13 +65,13 @@ export function buildEvaluationEmail({
     : "Your check-in photo has been analysed.";
 
   return {
-    subject: "Your check-in grooming report",
+    subject: "Your check-in appearance report",
     text: [
       `Hello ${name},`,
       "",
       introduction,
       `Check-in: ${checkIn}`,
-      `Grooming status: ${status}`,
+      `Appearance status: ${status}`,
       `Summary: ${summary}`,
       ...(qualityLine ? [qualityLine] : []),
       notice,
@@ -84,7 +84,7 @@ export function buildEvaluationEmail({
       <p>${escapeHtml(introduction)}</p>
       <p>
         <strong>Check-in:</strong> ${escapeHtml(checkIn)}<br>
-        <strong>Grooming status:</strong> ${escapeHtml(status)}<br>
+        <strong>Appearance status:</strong> ${escapeHtml(status)}<br>
         <strong>Summary:</strong> ${escapeHtml(summary)}
       </p>
       ${qualityLine ? `<p>${escapeHtml(qualityLine)}</p>` : ""}
@@ -114,14 +114,14 @@ export function buildCheckoutEmail({
     : null;
 
   return {
-    subject: "Checkout confirmation and grooming summary",
+    subject: "Checkout confirmation and appearance summary",
     text: [
       `Hello ${name},`,
       "",
       "Your checkout has been recorded successfully.",
       `Check-in: ${checkIn}`,
       `Check-out: ${checkOut}`,
-      `Grooming status: ${reportStatus}`,
+      `Appearance status: ${reportStatus}`,
       `Summary: ${summary}`,
       ...(qualityLine ? [qualityLine] : []),
       notice,
@@ -135,7 +135,7 @@ export function buildCheckoutEmail({
       <p>
         <strong>Check-in:</strong> ${escapeHtml(checkIn)}<br>
         <strong>Check-out:</strong> ${escapeHtml(checkOut)}<br>
-        <strong>Grooming status:</strong> ${escapeHtml(reportStatus)}<br>
+        <strong>Appearance status:</strong> ${escapeHtml(reportStatus)}<br>
         <strong>Summary:</strong> ${escapeHtml(summary)}
       </p>
       ${qualityLine ? `<p>${escapeHtml(qualityLine)}</p>` : ""}
@@ -374,11 +374,11 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
     .join("");
 
   return {
-    subject: `Your grooming summary for ${range}`,
+    subject: `Your appearance summary for ${range}`,
     text: [
       `Hello ${person},`,
       "",
-      `Here is your grooming summary for ${range}.`,
+      `Here is your appearance summary for ${range}.`,
       "",
       `Days present: ${summary.present_days} of 6`,
       `Compliant: ${summary.compliant_days} | Needs review: ${summary.review_days} | Non-compliant: ${summary.non_compliant_days}`,
@@ -396,7 +396,7 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
     ].join("\n"),
     html: `
       <p>Hello ${escapeHtml(person)},</p>
-      <p>Here is your grooming summary for <strong>${escapeHtml(range)}</strong>.</p>
+      <p>Here is your appearance summary for <strong>${escapeHtml(range)}</strong>.</p>
       <p>
         Days present: <strong>${summary.present_days} of 6</strong><br>
         Compliant: ${summary.compliant_days} &middot; Needs review: ${summary.review_days} &middot; Non-compliant: ${summary.non_compliant_days}<br>
@@ -422,10 +422,10 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
 export function buildGroomingAlertEmail({ name, status, summary, dateLabel, reportUrl, forReviewer = false }) {
   const person = name || "Instructor";
   const heading = status === "non_compliant"
-    ? "did not meet the grooming standards"
+    ? "did not meet the appearance standards"
     : "needs a manual review";
   const subject = forReviewer
-    ? `Grooming alert: ${person} - ${dateLabel}`
+    ? `Appearance alert: ${person} - ${dateLabel}`
     : `Your check-in on ${dateLabel} ${heading}`;
 
   const opening = forReviewer

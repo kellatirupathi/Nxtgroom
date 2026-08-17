@@ -179,7 +179,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             <History size={22} className="text-indigo-600" aria-hidden="true" />
             Daily Attendance Records
           </h2>
-          <p className="text-sm text-slate-500 mt-1">Check-ins, check-outs, and grooming audits for the selected date.</p>
+          <p className="text-sm text-slate-500 mt-1">Check-ins, check-outs, and appearance reports for the selected date.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

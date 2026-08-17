@@ -18,7 +18,7 @@ const TOGGLES: { key: keyof NotificationSettings; label: string; description: st
   {
     key: 'checkin_email_enabled',
     label: 'Check-in report to instructor',
-    description: 'Send the grooming report once AI analysis of a check-in photo completes.',
+    description: 'Send the appearance report once AI analysis of a check-in photo completes.',
   },
   {
     key: 'checkout_email_enabled',
@@ -124,7 +124,7 @@ function NotificationSettings() {
       <div className="mb-5">
         <h3 className="text-base font-bold text-slate-800">Email notifications</h3>
         <p className="text-sm text-slate-500 mt-1">
-          Control which grooming reports are emailed to instructors. Changes apply to new check-ins immediately.
+          Control which appearance reports are emailed to instructors. Changes apply to new check-ins immediately.
         </p>
       </div>
 

@@ -111,7 +111,7 @@ export default function InstructorDetail({ record, onBack }: InstructorDetailPro
         </div>
 
         <div className="w-full lg:w-2/3 bg-white rounded-md shadow-sm border border-slate-200 p-8 overflow-y-auto flex flex-col mb-6">
-          <h3 className="text-lg font-extrabold text-slate-800 mb-6 border-b border-slate-100 pb-4">Detailed Grooming Audit Report</h3>
+          <h3 className="text-lg font-extrabold text-slate-800 mb-6 border-b border-slate-100 pb-4">Detailed Appearance Report</h3>
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
           ) : error ? (

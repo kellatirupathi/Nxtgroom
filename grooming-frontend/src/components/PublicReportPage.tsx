@@ -176,7 +176,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
           <div className="min-w-0">
             <p className="text-sm font-extrabold text-slate-800">FacultyTrack</p>
             <p className="text-[11px] font-medium uppercase tracking-widest text-slate-400">
-              Grooming report
+              Appearance report
             </p>
           </div>
         </header>
@@ -228,7 +228,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
             </section>
 
             <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-base font-extrabold text-slate-800">Detailed Grooming Audit Report</h2>
+              <h2 className="mb-4 text-base font-extrabold text-slate-800">Detailed Appearance Report</h2>
               {day.evaluation ? (
                 <GroomingReport evaluation={day.evaluation} />
               ) : (

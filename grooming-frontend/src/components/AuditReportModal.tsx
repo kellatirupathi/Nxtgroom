@@ -197,7 +197,7 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/60 px-5 py-4">
           <div className="min-w-0">
             <h2 id="audit-report-title" className="text-lg font-extrabold text-slate-800">
-              Detailed Grooming Audit Report
+              Detailed Appearance Report
             </h2>
             <p className="mt-0.5 truncate text-sm text-slate-500">{instructorName}</p>
           </div>
@@ -229,7 +229,7 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
                   state={attendanceId ? 'done' : 'active'}
                 />
                 <ProgressStep
-                  label="Analysing grooming standards"
+                  label="Analysing appearance standards"
                   state={attendanceId ? 'active' : 'pending'}
                 />
               </ol>
