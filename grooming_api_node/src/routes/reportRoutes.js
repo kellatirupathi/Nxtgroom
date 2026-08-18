@@ -80,7 +80,7 @@ async function loadInstructorWeek(db, instructor, startKey) {
   const inWeek = records.filter((record) => (
     dates.includes(localDateKey(new Date(record.check_in_time || record.date)))
   ));
-  return summariseWeek(inWeek, startKey);
+  return summariseWeek(inWeek, startKey, { gender: instructor.gender });
 }
 
 async function loadInstructorMonth(db, instructor, monthKey) {
@@ -173,6 +173,14 @@ reportRouter.get(
     const evaluation = await db.collection("evaluations").findOne({
       attendance_id: String(record._id),
     });
+    // The saree/kurti rotation is a claim about the week, not about this
+    // photograph, so it is counted from the week the day falls in. Null for
+    // men, who have no rotation to satisfy.
+    const { weekly_rotation: weeklyRotation } = await loadInstructorWeek(
+      db,
+      instructor,
+      weekStartKey(new Date(`${date}T12:00:00.000Z`))
+    );
 
     return res.json({
       instructor: {
@@ -195,12 +203,19 @@ reportRouter.get(
       },
       // Null rather than 404 when analysis has not finished, so the page can
       // say so instead of looking like a broken link.
+      weekly_rotation: weeklyRotation,
       evaluation: evaluation
         ? {
           overall_status: evaluation.overall_status,
           ai_summary: evaluation.ai_summary,
           image_quality: evaluation.image_quality,
           requires_human_review: evaluation.requires_human_review,
+          attire_type: evaluation.attire_type || record.attire_type || "UNKNOWN",
+          // Explains the N/A rows: a checkpoint marked unassessable should be
+          // traceable to a part of the body the photograph did not show.
+          visible_regions: evaluation.visible_regions || null,
+          unassessed_reason: evaluation.unassessed_reason || null,
+          improvement_tips: evaluation.improvement_tips || [],
           general_idcard_check: evaluation.general_idcard_check || [],
           grooming_check: evaluation.grooming_check || [],
           attire_check: evaluation.attire_check || [],

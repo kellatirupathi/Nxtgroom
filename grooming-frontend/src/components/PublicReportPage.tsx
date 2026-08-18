@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, CircleAlert, Clock, Image as ImageIcon, TriangleAlert, XCircle } from 'lucide-react';
 import { apiFetch } from '../api';
 import GroomingReport from './GroomingReport';
+import { AiSummary, ReportFlags, VisibleRegions, WeeklyRotationCard } from './ReportMeta';
 import BrandedLoader from './BrandedLoader';
 import PhotoViewer from './PhotoViewer';
-import type { Evaluation } from '../types';
+import type { Evaluation, WeeklyRotation } from '../types';
 
 interface PublicReportPageProps {
   token: string;
@@ -26,6 +27,8 @@ interface DayResponse {
     has_checkout_photo?: boolean;
   };
   evaluation: Evaluation | null;
+  /** Counted from the week, and supplied for women only. */
+  weekly_rotation?: WeeklyRotation | null;
 }
 
 interface WeekDay {
@@ -174,7 +177,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
 
   return (
     <main className="min-h-[100svh] bg-[#f8f9fc] py-8 px-4">
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-5xl">
         <header className="mb-6 flex items-center gap-3">
           <img src="/logo.png" alt="" className="h-10 w-10 object-contain" />
           <div className="min-w-0">
@@ -213,13 +216,16 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
         {kind === 'day' && day && (
           <>
             <section className="mb-6 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center gap-3">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                 <StatusPill status={day.attendance.status} />
                 {day.attendance.attire_type && ATTIRE_LABELS[day.attendance.attire_type] && (
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-600">
                     {ATTIRE_LABELS[day.attendance.attire_type]}
                   </span>
                 )}
+                </div>
+                {day.evaluation && <ReportFlags evaluation={day.evaluation} />}
               </div>
               <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                 <div>
@@ -237,11 +243,13 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
                   </div>
                 )}
               </dl>
-              {day.attendance.remarks && (
-                <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                  {day.attendance.remarks}
-                </p>
-              )}
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                <div className="space-y-3">
+                  <AiSummary summary={day.evaluation?.ai_summary || day.attendance.remarks || undefined} />
+                  <VisibleRegions regions={day.evaluation?.visible_regions} />
+                </div>
+                <WeeklyRotationCard rotation={day.weekly_rotation} />
+              </div>
             </section>
 
             <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">

@@ -6,7 +6,7 @@ import { CORS_METHODS, runtimeConfig, validateEnvironment } from "../src/config/
 import { createAccessToken } from "../src/middleware/auth.js";
 import { detectImageMimeType, validateImageUpload } from "../src/imageValidation.js";
 import { normalizeInstructorImage } from "../src/imageProcessor.js";
-import { SYSTEM_PROMPT } from "../src/prompts.js";
+import { buildSystemPrompt } from "../src/prompts.js";
 import { buildCheckoutEmail, buildEvaluationEmail } from "../src/services/emailService.js";
 import { dateBoundsInTimeZone, parsePagination } from "../src/utils.js";
 import { instructorGenderSchema, parseCoordinates } from "../src/validation.js";
@@ -201,9 +201,10 @@ test("technical analysis errors are never described as non-compliance", () => {
 });
 
 test("AI instructions request concise evidence instead of hidden reasoning", () => {
-  assert.doesNotMatch(SYSTEM_PROMPT, /Chain of Thought/i);
-  assert.match(SYSTEM_PROMPT, /requires_human_review/);
-  assert.match(SYSTEM_PROMPT, /checkpoint_name/);
+  const prompt = buildSystemPrompt("MALE", "FORMAL");
+  assert.doesNotMatch(prompt, /Chain of Thought/i);
+  assert.match(prompt, /requires_human_review/);
+  assert.match(prompt, /checkpoint_name/);
 });
 
 test("gender edits accept only male or female, in any casing", () => {

@@ -5,7 +5,8 @@ import OpenAI from "openai";
 import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
-import { SYSTEM_PROMPT } from "../prompts.js";
+import { ATTIRE_CLASSIFIER_PROMPT, buildSystemPrompt } from "../prompts.js";
+import { checkpointSet, SECTION_KEYS } from "../checkpoints.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
@@ -26,28 +27,107 @@ function getClient() {
   return client;
 }
 
-const CheckItem = z.object({
-  checkpoint_name: z.string().min(1).max(120),
-  observation: z.string().min(1).max(1000),
+const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
+
+/**
+ * One checkpoint's verdict.
+ *
+ * The code and the display name are deliberately absent: they come from the
+ * checkpoint table, not from the model, so they cannot be misspelled, renamed
+ * or invented. The model supplies only the judgement.
+ */
+const Entry = z.object({
   status: z.enum(["PASS", "FAIL", "N/A"]),
-  reason: z.string().min(1).max(1000),
+  observation: z.string(),
+  reason: z.string(),
 });
 
-const GroomingReport = z.object({
-  overall_status: z.enum(["COMPLIANT", "NON_COMPLIANT"]),
-  // What the instructor is wearing, so the weekly saree/kurti split can be
-  // counted. UNKNOWN when the photo does not show enough to tell, which must
-  // not be silently counted as either.
+const AttireClassification = z.object({
   attire_type: z.enum(["FORMAL", "SAREE", "KURTI_WITH_DUPATTA", "UNKNOWN"]),
-  requires_human_review: z.boolean(),
-  image_quality: z.enum(["ADEQUATE", "RETAKE_RECOMMENDED"]),
-  ai_summary: z.string().min(1).max(1500),
-  general_idcard_check: z.array(CheckItem).min(1).max(20),
-  grooming_check: z.array(CheckItem).min(1).max(20),
-  attire_check: z.array(CheckItem).min(1).max(20),
-  accessories_check: z.array(CheckItem).min(1).max(20),
-  footwear_check: z.array(CheckItem).min(1).max(20),
 });
+
+/**
+ * A schema whose keys are exactly this instructor's checkpoint codes.
+ *
+ * Structured outputs require every object key to be present, so keying by code
+ * rather than returning an array makes four whole classes of bad response
+ * impossible rather than merely detectable: a checkpoint cannot be omitted,
+ * duplicated, returned under a foreign code, or returned out of order. The
+ * previous array schema could express all four, and did.
+ */
+function buildReportSchema(sections) {
+  const shape = {
+    requires_human_review: z.boolean(),
+    image_quality: z.enum(["ADEQUATE", "RETAKE_RECOMMENDED"]),
+    ai_summary: z.string(),
+    visible_regions: z.object({
+      face: VISIBILITY,
+      upper_body: VISIBILITY,
+      lower_body: VISIBILITY,
+      footwear: VISIBILITY,
+      id_card: VISIBILITY,
+      hands: VISIBILITY,
+    }),
+  };
+  for (const key of SECTION_KEYS) {
+    shape[key] = z.object(
+      Object.fromEntries(sections[key].map((item) => [item.code, Entry]))
+    );
+  }
+  return z.object(shape);
+}
+
+/** Rebuilds the ordered rows the report renders, from the checkpoint table. */
+function toOrderedRows(sections, parsed) {
+  const result = {};
+  for (const key of SECTION_KEYS) {
+    result[key] = sections[key].map((item) => {
+      const entry = parsed[key][item.code];
+      return {
+        code: item.code,
+        checkpoint_name: item.name,
+        status: entry.status,
+        observation: String(entry.observation || "").slice(0, 1000) || "Not stated.",
+        reason: String(entry.reason || "").slice(0, 1000) || "Not stated.",
+      };
+    });
+  }
+  return result;
+}
+
+/**
+ * The compliance verdict, computed from the checkpoints rather than asked for.
+ *
+ * The model used to be asked for overall_status and then checked against the
+ * rows; a disagreement threw away an otherwise sound evaluation and left the
+ * attendance record in error. The rule has one line, so there is nothing to
+ * ask: any FAIL means non-compliant, and N/A never does.
+ */
+export function deriveVerdict(rows, { imageQuality, modelRequestedReview } = {}) {
+  const checks = SECTION_KEYS.flatMap((key) => rows[key] || []);
+  const anyFail = checks.some((item) => item.status === "FAIL");
+  // A photo showing nothing assessable comes back entirely N/A. That is not a
+  // verdict about the instructor, so it asks for a retake instead of one.
+  const nothingAssessed = checks.length > 0
+    && checks.every((item) => item.status === "N/A");
+  const resolvedQuality = nothingAssessed ? "RETAKE_RECOMMENDED" : (imageQuality || "ADEQUATE");
+  // ID card, attire and footwear carry the standard. If one could not be seen,
+  // the report is incomplete regardless of what the rest of it says.
+  const criticalNotAssessed = [
+    ...(rows.general_idcard_check || []),
+    ...(rows.attire_check || []),
+    ...(rows.footwear_check || []),
+  ].some((item) => item.status === "N/A");
+
+  return {
+    overall_status: anyFail ? "NON_COMPLIANT" : "COMPLIANT",
+    image_quality: resolvedQuality,
+    requires_human_review: Boolean(modelRequestedReview)
+      || anyFail
+      || resolvedQuality === "RETAKE_RECOMMENDED"
+      || criticalNotAssessed,
+  };
+}
 
 function isReferenceRelevant(filename, gender) {
   const name = filename.toLowerCase();
@@ -79,17 +159,86 @@ export async function verifyVisionAssets() {
   return true;
 }
 
+function instructorImagePart(imageBuffer, mimeType) {
+  return {
+    type: "image_url",
+    image_url: {
+      url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
+      detail: "high",
+    },
+  };
+}
+
+/**
+ * The evaluation returned when no gender is on the instructor record.
+ *
+ * Every dress-code rule below the ID card differs by gender, so there is no
+ * honest verdict to give: assessing against both — which is what happened
+ * before — measured men against saree standards and produced failures for
+ * rules that never applied to them. This makes no compliance claim at all and
+ * asks for the missing field instead.
+ */
+export function unknownGenderEvaluation() {
+  return {
+    overall_status: "COMPLIANT",
+    attire_type: "UNKNOWN",
+    requires_human_review: true,
+    image_quality: "ADEQUATE",
+    ai_summary:
+      "This instructor has no gender recorded, so the applicable dress code could not be determined and no appearance assessment was made. Set the gender on the instructor record; the next check-in will be assessed normally.",
+    general_idcard_check: [],
+    grooming_check: [],
+    attire_check: [],
+    accessories_check: [],
+    footwear_check: [],
+    visible_regions: null,
+    unassessed_reason: "GENDER_NOT_CONFIGURED",
+  };
+}
+
+/**
+ * Names the garment before the main pass.
+ *
+ * A woman's attire checkpoints depend on the answer, and the garment has to be
+ * read from the photograph rather than assumed from her gender: a woman in
+ * formal trousers is exactly the case the weekly rotation needs to catch, and
+ * inferring the garment from the person would hide it.
+ */
+async function classifyAttire(imageBuffer, mimeType) {
+  const response = await getClient().beta.chat.completions.parse({
+    model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
+    messages: [
+      { role: "system", content: ATTIRE_CLASSIFIER_PROMPT },
+      { role: "user", content: [instructorImagePart(imageBuffer, mimeType)] },
+    ],
+    response_format: zodResponseFormat(AttireClassification, "attire_classification"),
+    temperature: 0,
+    max_completion_tokens: 100,
+  });
+  return response.choices?.[0]?.message?.parsed?.attire_type || "UNKNOWN";
+}
+
 export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
     throw new Error("Instructor image is empty or invalid");
   }
   const normalizedGender = gender?.toUpperCase();
+  if (normalizedGender !== "MALE" && normalizedGender !== "FEMALE") {
+    return unknownGenderEvaluation();
+  }
+
+  // Men are assessed against one attire set whatever they are wearing, so only
+  // a woman's report depends on naming the garment first.
+  const attireType = normalizedGender === "FEMALE"
+    ? await classifyAttire(imageBuffer, mimeType)
+    : "FORMAL";
+
+  const sections = checkpointSet(normalizedGender, attireType);
   const references = await getReferenceImages();
   const content = [{
     type: "text",
     text: "Here are the reference images for the NxtWave Grooming Standards (DOs and DON'Ts).",
   }];
-
   for (const reference of references) {
     if (!isReferenceRelevant(reference.filename, normalizedGender)) continue;
     content.push({
@@ -97,72 +246,38 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
       image_url: { url: reference.dataUrl, detail: "high" },
     });
   }
-
-  content.push({
-    type: "text",
-    text: `Now evaluate the instructor image. The instructor's gender is ${normalizedGender || "not provided"}.`,
-  });
-  content.push({
-    type: "image_url",
-    image_url: {
-      url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
-      detail: "high",
-    },
-  });
+  content.push({ type: "text", text: "Now assess the instructor in the final image." });
+  content.push(instructorImagePart(imageBuffer, mimeType));
 
   const response = await getClient().beta.chat.completions.parse({
     model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: buildSystemPrompt(normalizedGender, attireType) },
       { role: "user", content },
     ],
-    response_format: zodResponseFormat(GroomingReport, "grooming_report"),
+    response_format: zodResponseFormat(
+      buildReportSchema(sections),
+      "appearance_report"
+    ),
     temperature: 0,
-    max_completion_tokens: 3000,
+    max_completion_tokens: 6000,
   });
 
   const message = response.choices?.[0]?.message;
   if (message?.refusal) throw new Error("The image evaluation was refused by the model");
   if (!message?.parsed) throw new Error("The model returned no structured evaluation");
-  const report = message.parsed;
-  const checks = [
-    ...report.general_idcard_check,
-    ...report.grooming_check,
-    ...report.attire_check,
-    ...report.accessories_check,
-    ...report.footwear_check,
-  ];
-  // A photo that shows nothing assessable comes back with every checkpoint
-  // N/A. That is not a compliance verdict, so the pass/fail rule below cannot
-  // apply to it: previously such a photo was rejected as "inconsistent",
-  // retried three times, and left the attendance record permanently in error.
-  // Treat it as unevaluable and send it for human review instead.
-  const assessed = checks.filter((item) => item.status !== "N/A");
-  if (assessed.length === 0) {
-    return {
-      ...report,
-      overall_status: "NON_COMPLIANT",
-      image_quality: "RETAKE_RECOMMENDED",
-      requires_human_review: true,
-    };
-  }
 
-  const expectedStatus = checks.some((item) => item.status === "FAIL")
-    ? "NON_COMPLIANT"
-    : "COMPLIANT";
-  if (report.overall_status !== expectedStatus) {
-    throw new Error("The model returned an internally inconsistent evaluation");
-  }
-  const criticalChecks = [
-    ...report.general_idcard_check,
-    ...report.attire_check,
-    ...report.footwear_check,
-  ];
-  const reviewRequired = expectedStatus === "NON_COMPLIANT"
-    || report.image_quality === "RETAKE_RECOMMENDED"
-    || criticalChecks.some((item) => item.status === "N/A");
-  if (reviewRequired && !report.requires_human_review) {
-    throw new Error("The model omitted a required human-review flag");
-  }
-  return report;
+  const rows = toOrderedRows(sections, message.parsed);
+  const verdict = deriveVerdict(rows, {
+    imageQuality: message.parsed.image_quality,
+    modelRequestedReview: message.parsed.requires_human_review,
+  });
+
+  return {
+    ...verdict,
+    attire_type: attireType,
+    ai_summary: String(message.parsed.ai_summary || "").slice(0, 1500),
+    visible_regions: message.parsed.visible_regions,
+    ...rows,
+  };
 }

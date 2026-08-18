@@ -1,4 +1,9 @@
+import { Lightbulb } from 'lucide-react';
+import { improvementTipsFor, isUnassessed, REPORT_COLUMNS, reportTables } from '../reportLayout';
 import type { CheckItem, Evaluation } from '../types';
+
+/** Kept beside REPORT_COLUMNS so a column can never lose its width. */
+const COLUMN_WIDTHS = ['w-[23%]', 'w-[10%]', 'w-[31%]', 'w-[36%]'];
 
 interface ReportRow {
   key: string;
@@ -23,7 +28,7 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
   if (!items || (Array.isArray(items) && items.length === 0)) return null;
   const rows: ReportRow[] = Array.isArray(items)
     ? items.map((item, index) => ({
-      key: `${item.checkpoint_name || 'checkpoint'}-${index}`,
+      key: `${item.code || item.checkpoint_name || 'checkpoint'}-${index}`,
       name: item.checkpoint_name,
       observation: item.observation,
       status: item.status,
@@ -31,14 +36,18 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
     }))
     : Object.entries(items as Record<string, unknown>).map(([name, observation]) => ({ key: name, name, observation }));
 
-  const anchor = `report-${title.replace(/\s+/g, '-').toLowerCase()}`;
+  const anchor = `report-${title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
   return (
     <section className="mb-6" aria-labelledby={anchor}>
       <h4 id={anchor} className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-100 pb-2">{title}</h4>
       <div className="bg-white rounded-md border border-slate-200 overflow-x-auto shadow-sm">
         <table className="w-full text-left text-sm min-w-[520px]">
           <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            <tr><th className="p-3">Checkpoint</th><th className="p-3">Result</th><th className="p-3">Observation</th><th className="p-3">Evidence</th></tr>
+            <tr>
+              {REPORT_COLUMNS.map((column, index) => (
+                <th key={column} scope="col" className={`p-3 ${COLUMN_WIDTHS[index]}`}>{column}</th>
+              ))}
+            </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.map((item) => (
@@ -57,18 +66,60 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
 }
 
 /**
- * The five checkpoint tables that make up a grooming audit. Shared by the
- * full detail page and the post-check-in modal so the two cannot drift into
- * showing the same evaluation differently.
+ * What the instructor should change.
+ *
+ * The list is derived from the failing checkpoints by the backend, so the
+ * report page and the emails cannot advise different things. Only FAIL
+ * produces a tip: a passing checkpoint needs no action, and an N/A means the
+ * camera could not see it, which is not something the instructor did.
+ */
+export function ImprovementTips({ evaluation }: { evaluation: Evaluation }) {
+  const tips = improvementTipsFor(evaluation);
+
+  return (
+    <section aria-labelledby="report-improvement-tips" className="rounded-md border border-amber-200 bg-amber-50/60 p-4 sm:p-5">
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-6">
+        <h4 id="report-improvement-tips" className="flex items-center gap-2 text-sm font-bold text-amber-700 shrink-0">
+          <Lightbulb size={18} aria-hidden="true" />
+          Improvement Tips
+        </h4>
+        {tips.length === 0 ? (
+          <p className="text-sm font-medium text-slate-500">None</p>
+        ) : (
+          <ul className="list-disc pl-5 space-y-1.5 text-sm text-slate-700">
+            {tips.map((tip) => <li key={tip}>{tip}</li>)}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The five checkpoint tables that make up an appearance audit. Shared by the
+ * public report page, the authenticated detail view and the post-check-in
+ * modal, so the same evaluation cannot appear differently in different parts
+ * of FacultyTrack.
  */
 export default function GroomingReport({ evaluation }: { evaluation: Evaluation }) {
+  // An evaluation with no dress code applied has nothing to tabulate. Five
+  // empty tables would imply the checks ran and found nothing.
+  if (isUnassessed(evaluation)) {
+    return (
+      <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">
+        No appearance assessment was made, because this instructor has no gender recorded and the
+        applicable dress code could not be determined. Set it under Instructors and the next
+        check-in will be assessed normally.
+      </div>
+    );
+  }
+
   return (
     <>
-      <ReportSection title="General ID Card Check" items={evaluation.general_idcard_check} />
-      <ReportSection title="Grooming Check" items={evaluation.grooming_check} />
-      <ReportSection title="Attire Check" items={evaluation.attire_check} />
-      <ReportSection title="Accessories Check" items={evaluation.accessories_check} />
-      <ReportSection title="Footwear Check" items={evaluation.footwear_check} />
+      {reportTables(evaluation).map((table) => (
+        <ReportSection key={table.key} title={table.title} items={table.items} />
+      ))}
+      <ImprovementTips evaluation={evaluation} />
     </>
   );
 }

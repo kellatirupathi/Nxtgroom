@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { runtimeConfig } from "../config/env.js";
 import { PROMPT_VERSION } from "../prompts.js";
 import { evaluateImage } from "./visionEngine.js";
+import { improvementTips } from "../checkpoints.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { downloadPhoto } from "./photoStorage.js";
@@ -93,6 +94,15 @@ function publicEvaluation(report, job, now) {
     // Classified independently of pass/fail so the weekly saree/kurti split
     // can be counted even on a non-compliant day.
     attire_type: report.attire_type || "UNKNOWN",
+    // Which parts of the body the photo actually showed. Stored because it is
+    // what explains an N/A row to whoever reads the report later.
+    visible_regions: report.visible_regions || null,
+    // Set only when no assessment was attempted, so the report can say why
+    // rather than showing five empty tables.
+    unassessed_reason: report.unassessed_reason || null,
+    // Derived from the failing checkpoints here rather than in the browser, so
+    // the report page and the emails cannot advise different things.
+    improvement_tips: improvementTips(report),
     model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
     prompt_version: PROMPT_VERSION,
     processed_at: now,

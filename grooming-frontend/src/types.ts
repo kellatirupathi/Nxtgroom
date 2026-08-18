@@ -99,10 +99,36 @@ export interface AttendanceRecord {
 }
 
 export interface CheckItem {
+  /** Stable identity for the checkpoint. Internal: never rendered. */
+  code?: string;
   checkpoint_name: string;
   observation: string;
   status: 'PASS' | 'FAIL' | 'N/A';
   reason: string;
+}
+
+export type Visibility = 'VISIBLE' | 'PARTIAL' | 'NOT_VISIBLE';
+
+/** Which parts of the body the photograph showed. Explains the N/A rows. */
+export interface VisibleRegions {
+  face: Visibility;
+  upper_body: Visibility;
+  lower_body: Visibility;
+  footwear: Visibility;
+  id_card: Visibility;
+  hands: Visibility;
+}
+
+export type AttireType = 'FORMAL' | 'SAREE' | 'KURTI_WITH_DUPATTA' | 'UNKNOWN';
+
+/** Counted from the week's records, never from a single photograph. */
+export interface WeeklyRotation {
+  saree_days: number;
+  kurti_days: number;
+  unknown_days: number;
+  required_saree_days: number;
+  required_kurti_days: number;
+  status: 'IN_PROGRESS' | 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
 }
 
 export interface Evaluation {
@@ -110,6 +136,12 @@ export interface Evaluation {
   ai_summary?: string;
   requires_human_review?: boolean;
   image_quality?: ImageQuality;
+  attire_type?: AttireType;
+  visible_regions?: VisibleRegions | null;
+  /** Set when no assessment was attempted, so the report can say why. */
+  unassessed_reason?: string | null;
+  /** Derived from the failing checkpoints by the backend, in report order. */
+  improvement_tips?: string[];
   general_idcard_check?: CheckItem[];
   grooming_check?: CheckItem[];
   attire_check?: CheckItem[];
