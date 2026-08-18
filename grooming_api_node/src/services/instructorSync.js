@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { BigQuery } from "@google-cloud/bigquery";
 
 /**
@@ -205,7 +206,16 @@ export async function saveInstructorRoster(db, records) {
         filter: { instructor_user_id: record.instructor_user_id },
         update: {
           $set: { ...owned, source: "bigquery", synced_at: now, updated_at: now },
-          $setOnInsert: { created_at: now, deleted_at: null, college_id: null, gender: null },
+          $setOnInsert: {
+            created_at: now,
+            deleted_at: null,
+            college_id: null,
+            gender: null,
+            // Minted here rather than when the first alert is sent. Waiting
+            // meant an instructor had no report link until an email had gone
+            // out, and while alerts were broken that was almost everybody.
+            report_token: crypto.randomBytes(24).toString("base64url"),
+          },
         },
         upsert: true,
       },

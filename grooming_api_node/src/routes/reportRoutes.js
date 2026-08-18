@@ -14,6 +14,12 @@ import {
   ensureReportToken,
 } from "../services/instructorReports.js";
 import { getReportRecipients } from "../services/reportRecipients.js";
+import { deletePhoto } from "../services/photoStorage.js";
+
+/** Attendance photographs are kept for this long, then deleted. */
+const PHOTO_RETENTION_MONTHS = 2;
+/** Capped so one run cannot exceed the scheduler's request timeout. */
+const PHOTO_PURGE_BATCH = 200;
 import { evaluationFilter } from "../services/evaluationWorker.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
 import {
@@ -461,6 +467,100 @@ reportRouter.get(
       current_week_start: weekStartKey(new Date()),
       today: localDateKey(new Date()),
       rp_recipients: recipients.length,
+    });
+  })
+);
+
+/**
+ * Deletes attendance photographs older than the retention window.
+ *
+ * The photograph is the only part that expires. Its report — the checkpoints,
+ * observations, evidence and summary — lives in MongoDB and stays, so an old
+ * record remains fully readable with no image behind it.
+ *
+ * R2 and MongoDB are cleared in the same pass on purpose. A lifecycle rule on
+ * the bucket alone would remove the file and leave the key on the record, and
+ * the interface decides whether to offer a photo button from that key: every
+ * old record would show a button that opens an error.
+ *
+ * ?dry=1 reports what it would remove without removing anything.
+ */
+reportRouter.post(
+  "/cron/purge-photos",
+  requireCronSecret,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const months = Number.parseInt(req.query.months, 10);
+    const retentionMonths = Number.isInteger(months) && months >= 1 && months <= 60
+      ? months
+      : PHOTO_RETENTION_MONTHS;
+    const dryRun = req.query.dry === "1" || req.query.dry === "true";
+
+    const cutoff = new Date();
+    cutoff.setUTCMonth(cutoff.getUTCMonth() - retentionMonths);
+
+    const records = await db.collection("attendance")
+      .find(
+        {
+          check_in_time: { $lt: cutoff },
+          $or: [
+            { check_in_photo_key: { $type: "string" } },
+            { check_out_photo_key: { $type: "string" } },
+          ],
+        },
+        { projection: { check_in_photo_key: 1, check_out_photo_key: 1 } }
+      )
+      .limit(PHOTO_PURGE_BATCH)
+      .toArray();
+
+    if (dryRun) {
+      return res.json({
+        dry_run: true,
+        retention_months: retentionMonths,
+        cutoff: cutoff.toISOString(),
+        records: records.length,
+        photos: records.reduce(
+          (total, row) => total + (row.check_in_photo_key ? 1 : 0) + (row.check_out_photo_key ? 1 : 0),
+          0
+        ),
+      });
+    }
+
+    let deleted = 0;
+    let failed = 0;
+    for (const record of records) {
+      const cleared = {};
+      for (const field of ["check_in_photo_key", "check_out_photo_key"]) {
+        const key = record[field];
+        if (!key) continue;
+        const result = await deletePhoto(key);
+        if (result.deleted) {
+          deleted += 1;
+          cleared[field] = null;
+        } else {
+          failed += 1;
+        }
+      }
+      // Only the keys whose objects are actually gone are cleared, so a
+      // storage outage leaves the record intact for the next run rather than
+      // orphaning a file nothing points at any more.
+      if (Object.keys(cleared).length) {
+        await db.collection("attendance").updateOne(
+          { _id: record._id },
+          { $set: { ...cleared, photos_purged_at: new Date() } }
+        );
+      }
+    }
+
+    return res.json({
+      retention_months: retentionMonths,
+      cutoff: cutoff.toISOString(),
+      records: records.length,
+      photos_deleted: deleted,
+      photos_failed: failed,
+      // The batch is capped, so a large backlog clears over several runs
+      // rather than one request timing out part way through.
+      more: records.length === PHOTO_PURGE_BATCH,
     });
   })
 );

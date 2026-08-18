@@ -611,7 +611,10 @@ attendanceRouter.get(
     const legacyInstructors = instructorIds.length
       ? await db.collection("instructors").find(
           { _id: { $in: lookupIdVariants(instructorIds) } },
-          { projection: { name: 1, role: 1, college_id: 1, report_token: 1 } }
+          // instructor_role as well as role: an instructor imported from
+          // BigQuery carries only the former, so projecting role alone left
+          // every synced person showing as "Unknown".
+          { projection: { name: 1, role: 1, instructor_role: 1, college_id: 1, report_token: 1 } }
         ).toArray()
       : [];
     const instructorMap = new Map(legacyInstructors.map((row) => [String(row._id), row]));
@@ -634,7 +637,10 @@ attendanceRouter.get(
       return {
         ...serializeAttendance(attendance),
         instructor_name: attendance.instructor_name || instructor?.name || "Unknown",
-        instructor_role: attendance.instructor_role || instructor?.role || "Unknown",
+        instructor_role: attendance.instructor_role
+          || instructor?.instructor_role
+          || instructor?.role
+          || "Unknown",
         college_name: collegeId
           ? (collegeMap.get(String(collegeId)) || "Unknown College")
           : "No College",
