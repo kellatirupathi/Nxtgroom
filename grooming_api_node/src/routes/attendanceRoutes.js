@@ -225,7 +225,11 @@ export async function commitGuardedCheckIn(
     const attendance = createDocument({
       instructor_id: String(instructor._id),
       instructor_name: instructor.name,
-      instructor_role: instructor.role,
+      // instructor_role first: an instructor imported from BigQuery carries
+      // their real role there and has no `role` at all, so snapshotting
+      // `role` alone recorded null for 599 of 600 people and lost the
+      // distinction between an INSTRUCTOR and a CENTRAL_INSTRUCTOR.
+      instructor_role: instructor.instructor_role || instructor.role || null,
       college_id: String(instructor.college_id),
       boa_id: currentUser.referenceId ? String(currentUser.referenceId) : "super-admin",
       date: now,
@@ -660,12 +664,29 @@ attendanceRouter.get(
 attendanceRouter.get(
   "/:attendanceId",
   asyncRoute(async (req, res) => {
-    const attendance = await req.app.locals.db.collection("attendance").findOne({
+    const db = req.app.locals.db;
+    const attendance = await db.collection("attendance").findOne({
       _id: idMatch(req.params.attendanceId),
       ...attendanceScope(req.currentUser),
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
-    return res.json(serializeAttendance(attendance));
+
+    // Records written before the snapshot was fixed carry no role, and this
+    // route is what serves a detail page opened directly from its URL. Without
+    // the lookup the role reads blank there while the list shows it correctly.
+    const instructor = await db.collection("instructors").findOne(
+      { _id: idMatch(String(attendance.instructor_id)) },
+      { projection: { name: 1, role: 1, instructor_role: 1, report_token: 1 } }
+    );
+    return res.json({
+      ...serializeAttendance(attendance),
+      instructor_name: attendance.instructor_name || instructor?.name || "Unknown",
+      instructor_role: attendance.instructor_role
+        || instructor?.instructor_role
+        || instructor?.role
+        || "Unknown",
+      report_token: instructor?.report_token || null,
+    });
   })
 );
 

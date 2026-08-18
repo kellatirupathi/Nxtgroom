@@ -182,3 +182,31 @@ test("a backwards range is refused rather than returning nothing", () => {
     RangeError
   );
 });
+
+test("the role snapshot prefers the field imported instructors actually carry", () => {
+  // An instructor from BigQuery has instructor_role and no role at all.
+  // Snapshotting `role` alone recorded null for 599 of 600 people, and lost
+  // the distinction between an INSTRUCTOR and a CENTRAL_INSTRUCTOR.
+  const snapshot = (instructor) => instructor.instructor_role || instructor.role || null;
+
+  assert.equal(snapshot({ instructor_role: "CENTRAL_INSTRUCTOR" }), "CENTRAL_INSTRUCTOR");
+  // A hand-added instructor has role and no instructor_role.
+  assert.equal(snapshot({ role: "INSTRUCTOR" }), "INSTRUCTOR");
+  // Both present: the warehouse value wins, since a sync refreshes it.
+  assert.equal(snapshot({ instructor_role: "CENTRAL_INSTRUCTOR", role: "INSTRUCTOR" }), "CENTRAL_INSTRUCTOR");
+  assert.equal(snapshot({}), null);
+});
+
+test("a role missing from an older record falls back to the instructor", () => {
+  // Records written before the snapshot was fixed carry no role. Reading it
+  // back from the instructor is what stops them showing "Unknown" forever.
+  const resolve = (attendance, instructor) => attendance.instructor_role
+    || instructor?.instructor_role
+    || instructor?.role
+    || "Unknown";
+
+  assert.equal(resolve({ instructor_role: null }, { instructor_role: "CENTRAL_INSTRUCTOR" }), "CENTRAL_INSTRUCTOR");
+  assert.equal(resolve({ instructor_role: "INSTRUCTOR" }, { instructor_role: "CENTRAL_INSTRUCTOR" }),
+    "INSTRUCTOR", "the snapshot wins, so a report shows the role held on the day");
+  assert.equal(resolve({}, null), "Unknown");
+});
