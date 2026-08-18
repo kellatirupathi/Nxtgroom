@@ -5,19 +5,11 @@
 
 :root {
   /* The bottom bar's own height, excluding the safe-area inset it also pads
-     for. Declared once because two places must agree on it: the bar sizes
-     itself from this, and the scrolling content reserves it. When they drift,
-     the last row of a table ends up under the bar. */
+     for. The bar is a row of the layout, so it claims this space rather than
+     being painted over the page — nothing has to reserve it. The variable
+     remains because the overflow sheet opens directly above the bar and has
+     to clear exactly this much. */
   --bottom-nav-height: 3.5rem;
-  /* Breathing room between the last element and the bar, so content stops
-     above it rather than touching it. */
-  --bottom-nav-gap: 1rem;
-
-  /* Intentional stacking order. Raising the bar alone would only hide more
-     content behind it, so the bar deliberately sits below anything that must
-     cover the whole screen. */
-  --z-bottom-nav: 40;
-  --z-overlay: 100;
 }
 
 body {

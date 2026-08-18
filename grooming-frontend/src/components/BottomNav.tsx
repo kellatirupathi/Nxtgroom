@@ -180,7 +180,7 @@ export default function BottomNav({
 
       <nav
         aria-label="Primary"
-        className="fixed bottom-0 inset-x-0 z-[var(--z-bottom-nav)] lg:hidden bg-white border-t border-slate-300 flex items-stretch pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.10)]"
+        className="shrink-0 lg:hidden bg-white border-t border-slate-300 flex items-stretch pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.10)]"
       >
         {primary.map((item) => {
           const Icon = item.icon;

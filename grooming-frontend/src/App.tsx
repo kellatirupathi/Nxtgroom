@@ -301,15 +301,21 @@ export default function App() {
         onOpenChangePassword={() => setAccountModal('password')}
       />
 
-      {/* The shell is exactly the visible viewport — 100dvh, not 100vh, which
-          on phones counts the retracting address bar and makes the whole page
-          taller than the screen, so the fixed bottom bar drifts as you scroll.
-          Only this element scrolls; overscroll-contain stops a list reaching
-          its end from dragging the document behind it.
+      {/* A column, so the bar below is a row of the layout rather than
+          something painted over it. main takes what is left after the bar has
+          taken its height, which is what keeps the page from ever occupying
+          the same pixels — reserving padding instead only adds scrolling room
+          at the end, and the content still passes under the bar on its way
+          there.
 
-          pb clears the fixed bottom bar (and the iOS home indicator) so the
-          last row of any list stays reachable on touch devices. */}
-      <main className="flex-1 h-full overflow-auto overscroll-contain p-4 md:p-6 pb-[calc(var(--bottom-nav-height)+env(safe-area-inset-bottom)+var(--bottom-nav-gap))] lg:pb-6 flex flex-col w-full">
+          min-h-0 is what makes that work: without it a flex child refuses to
+          shrink below its content and the column grows past the viewport. */}
+      <div className="flex flex-1 flex-col min-w-0 min-h-0">
+      {/* The shell is exactly the visible viewport — 100dvh, not 100vh, which
+          on phones counts the retracting address bar and makes the document
+          taller than the screen. Only this element scrolls; overscroll-contain
+          stops a list reaching its end from dragging the page behind it. */}
+      <main className="flex-1 min-h-0 overflow-auto overscroll-contain p-4 md:p-6 pb-6 flex flex-col w-full">
         {loadError && (
           <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             {loadError}
@@ -371,6 +377,7 @@ export default function App() {
         onOpenProfile={() => setAccountModal('profile')}
         onOpenChangePassword={() => setAccountModal('password')}
       />
+      </div>
 
       {accountModal === 'profile' && (
         <ProfileModal
