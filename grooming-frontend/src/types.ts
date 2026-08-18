@@ -88,6 +88,8 @@ export interface AttendanceRecord {
   /** Reverse-geocoded once at check-in and stored, not looked up per view. */
   location_address?: string | null;
   location_address_full?: string | null;
+  /** Where the check-out happened, captured separately from the check-in fix. */
+  check_out_coordinates?: string | null;
   /** FORMAL | SAREE | KURTI_WITH_DUPATTA | UNKNOWN, set by the AI analysis. */
   attire_type?: string | null;
   /** R2 object keys. Presence is what enables the view-photo buttons. */

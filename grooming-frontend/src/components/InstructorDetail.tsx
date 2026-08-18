@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, User, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, Image as ImageIcon, LogIn, LogOut, Trash2 } from 'lucide-react';
+import { ArrowLeft, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, LogIn, LogOut, Trash2 } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import PhotoViewer from './PhotoViewer';
+import AttendancePhotoCircle from './AttendancePhotoCircle';
 import { useToast } from './useToast';
 import { normalizeAttendanceStatus } from '../status';
 import GroomingReport from './GroomingReport';
@@ -46,6 +47,9 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
   const [loading, setLoading] = useState(Boolean(record));
   const [error, setError] = useState('');
   const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
+  // Check-in opens first: it is the half that carries the appearance report,
+  // and on most records the only half that has happened yet.
+  const [tab, setTab] = useState<'checkin' | 'checkout'>('checkin');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const toast = useToast();
@@ -110,81 +114,148 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
         </button>
         <h2 id="instructor-detail-title" className="text-xl sm:text-2xl font-extrabold text-slate-800">Instructor Detail View</h2>
 
-        {/* These act on the record as a whole, so they sit with its title
-            rather than inside the profile card, which describes the person.
-            ml-auto claims the empty space the heading row already had. */}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+        {/* Acts on the record as a whole, so it sits with the title rather
+            than inside the profile card, which describes the person. */}
+        {canDelete && (
           <button
             type="button"
-            onClick={() => setPhotoKind('checkin')}
-            disabled={!record.check_in_photo_key}
-            title={record.check_in_photo_key ? 'View the check-in photo' : 'No check-in photo was stored'}
-            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+            onClick={() => setConfirmDelete(true)}
+            aria-label="Delete this attendance record"
+            title="Delete this attendance record"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
           >
-            <LogIn size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Check-in photo</span>
-            <ImageIcon size={14} aria-hidden="true" />
+            <Trash2 size={14} aria-hidden="true" />
+            <span className="hidden sm:inline">Delete</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setPhotoKind('checkout')}
-            disabled={!record.check_out_photo_key}
-            title={record.check_out_photo_key ? 'View the check-out photo' : 'No check-out photo was stored'}
-            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
-          >
-            <LogOut size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Check-out photo</span>
-            <ImageIcon size={14} aria-hidden="true" />
-          </button>
-          {canDelete && (
-            <button
-              type="button"
-              onClick={() => setConfirmDelete(true)}
-              aria-label="Delete this attendance record"
-              title="Delete this attendance record"
-              className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">Delete</span>
-            </button>
-          )}
-        </div>
+        )}
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 overflow-hidden">
-        <div className="w-full lg:w-1/3 flex flex-col gap-6 overflow-y-auto pb-6 pr-2">
-          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-8 flex flex-col items-center text-center shrink-0">
-            <div className="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mb-5"><User size={48} aria-hidden="true" /></div>
-            <h3 className="text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
-            <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-5">{record.instructor_role}</p>
+      {/* One record, two halves. Switching swaps the photo, the time and the
+          location together, so what is on screen always describes the same
+          moment rather than mixing the two. */}
+      <div role="tablist" aria-label="Attendance report" className="mb-4 flex shrink-0 gap-1 rounded-md border border-slate-200 bg-white p-1 sm:w-fit">
+        {([
+          { key: 'checkin', label: 'Check-in report', Icon: LogIn },
+          { key: 'checkout', label: 'Check-out report', Icon: LogOut },
+        ] as const).map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs sm:text-sm font-bold transition-colors sm:flex-none ${
+              tab === key
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Icon size={15} aria-hidden="true" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 lg:overflow-hidden">
+        {/* pr-2 only once the column can scroll on its own; below lg the page
+            scrolls as one and an inner scrollbar would trap the content. */}
+        <div className="w-full lg:w-1/3 flex flex-col gap-4 sm:gap-6 lg:overflow-y-auto lg:pb-6 lg:pr-2">
+          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 flex flex-col items-center text-center shrink-0">
+            <AttendancePhotoCircle
+              attendanceId={String(record._id)}
+              kind={tab}
+              hasPhoto={Boolean(tab === 'checkin' ? record.check_in_photo_key : record.check_out_photo_key)}
+              label={tab === 'checkin' ? 'Check-in' : 'Check-out'}
+              onOpen={() => setPhotoKind(tab)}
+            />
+            <h3 className="mt-4 text-xl sm:text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
+            <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-4 sm:mb-5">{record.instructor_role}</p>
             <StatusBadge status={record.status} />
+            {tab === 'checkout' && !record.check_out_photo_key && (
+              <p className="mt-4 text-xs font-medium text-slate-400">
+                {record.check_out_time ? 'No photo was taken at check-out.' : 'This instructor has not checked out yet.'}
+              </p>
+            )}
           </div>
 
-          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 space-y-5 shrink-0">
+          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 space-y-5 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">Session Details</h4>
             <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatDate(record.date)}</p></div></div>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-In Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_in_time)}</p></div></div>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Clock size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-Out Time</p><p className="text-sm font-semibold text-slate-700">{formatTime(record.check_out_time)}</p></div></div>
+            {/* Both times stay visible whichever tab is open — the pair is what
+                gives either one meaning — but the active half is the emphasised
+                one, so the tab is legible at a glance. */}
+            <div className="flex items-start gap-4">
+              <div className={`p-2 rounded-md ${tab === 'checkin' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}><Clock size={18} aria-hidden="true" /></div>
+              <div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-In Time</p><p className={`text-sm font-semibold ${tab === 'checkin' ? 'text-slate-800' : 'text-slate-500'}`}>{formatTime(record.check_in_time)}</p></div>
+            </div>
+            <div className="flex items-start gap-4">
+              <div className={`p-2 rounded-md ${tab === 'checkout' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}><Clock size={18} aria-hidden="true" /></div>
+              <div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-Out Time</p><p className={`text-sm font-semibold ${tab === 'checkout' ? 'text-slate-800' : 'text-slate-500'}`}>{formatTime(record.check_out_time)}</p></div>
+            </div>
             <div>
-              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">Location</p>
-              <LocationPanel
-                coordinates={record.location_coordinates}
-                address={record.location_address}
-                accuracyMetres={record.location_accuracy_m}
-              />
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                {tab === 'checkin' ? 'Check-in location' : 'Check-out location'}
+              </p>
+              {tab === 'checkout' && !record.check_out_coordinates ? (
+                <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-medium text-slate-400">
+                  {record.check_out_time
+                    ? 'No location was captured at check-out.'
+                    : 'Available once this instructor checks out.'}
+                </p>
+              ) : (
+                <LocationPanel
+                  coordinates={tab === 'checkin' ? record.location_coordinates : record.check_out_coordinates}
+                  address={tab === 'checkin' ? record.location_address : null}
+                  accuracyMetres={tab === 'checkin' ? record.location_accuracy_m : null}
+                />
+              )}
             </div>
           </div>
 
-          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 shrink-0">
+          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">AI Remarks Summary</h4>
             <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">{record.remarks || 'No remarks available.'}</p>
             <p className="mt-3 text-xs text-slate-400">AI output is assistive and should be reviewed by an authorized person before adverse action.</p>
           </div>
         </div>
 
-        <div className="w-full lg:w-2/3 bg-white rounded-md shadow-sm border border-slate-200 p-8 overflow-y-auto flex flex-col mb-6">
-          <h3 className="text-lg font-extrabold text-slate-800 mb-6 border-b border-slate-100 pb-4">Detailed Appearance Report</h3>
-          {loading ? (
+        <div className="w-full lg:w-2/3 bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 lg:overflow-y-auto flex flex-col mb-4 lg:mb-6">
+          <h3 className="text-base sm:text-lg font-extrabold text-slate-800 mb-4 sm:mb-6 border-b border-slate-100 pb-3 sm:pb-4">
+            {tab === 'checkin' ? 'Detailed Appearance Report' : 'Check-out Summary'}
+          </h3>
+          {/* The appearance report is made from the check-in photo, so the
+              check-out tab says what it has rather than repeating a report
+              that describes the other half of the day. */}
+          {tab === 'checkout' ? (
+            <div className="flex-1">
+              {record.check_out_time ? (
+                <dl className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Checked out at</dt>
+                    <dd className="mt-1 text-sm font-semibold text-slate-800">{formatTime(record.check_out_time)}</dd>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                    <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Photo</dt>
+                    <dd className="mt-1 text-sm font-semibold text-slate-800">
+                      {record.check_out_photo_key ? 'Stored — shown on the left' : 'None taken'}
+                    </dd>
+                  </div>
+                  <div className="rounded-md border border-slate-200 bg-white p-4 sm:col-span-2">
+                    <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Appearance assessment</dt>
+                    <dd className="mt-1 text-sm text-slate-600 leading-relaxed">
+                      Appearance is assessed once, from the check-in photo. Open the check-in tab for the
+                      checkpoint report.
+                    </dd>
+                  </div>
+                </dl>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-slate-200 bg-slate-50 p-8 text-center font-medium text-slate-500">
+                  <LogOut size={32} className="text-slate-300" aria-hidden="true" />
+                  <p>This instructor has not checked out yet.</p>
+                </div>
+              )}
+            </div>
+          ) : loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
           ) : error ? (
             <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">{error}</div>

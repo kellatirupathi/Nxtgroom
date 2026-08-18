@@ -93,7 +93,10 @@ export default function App() {
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
 
   const handleLogin = (token: string, role: Role) => {
-    setSession({ token, role, email: null, collegeId: null, validated: true });
+    // validated: false so /me runs. Marking a fresh sign-in as validated
+    // skipped it entirely, which left email, college and — once permissions
+    // arrived — the delete capability unset until the next full page load.
+    setSession({ token, role, email: null, collegeId: null, validated: false });
     setSessionCheckError('');
     setActiveTab('overview');
     replaceTabPath('overview');
@@ -285,7 +288,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
+    <div className="flex h-[100dvh] bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
       {/* Desktop keeps the full sidebar; below lg it is hidden entirely in
           favour of the app-style bottom navigation bar. */}
       <Sidebar
@@ -298,9 +301,15 @@ export default function App() {
         onOpenChangePassword={() => setAccountModal('password')}
       />
 
-      {/* pb clears the fixed bottom bar (and the iOS home indicator) so the
+      {/* The shell is exactly the visible viewport — 100dvh, not 100vh, which
+          on phones counts the retracting address bar and makes the whole page
+          taller than the screen, so the fixed bottom bar drifts as you scroll.
+          Only this element scrolls; overscroll-contain stops a list reaching
+          its end from dragging the document behind it.
+
+          pb clears the fixed bottom bar (and the iOS home indicator) so the
           last row of any list stays reachable on touch devices. */}
-      <main className="flex-1 h-full overflow-auto p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5rem)] lg:pb-6 flex flex-col w-full">
+      <main className="flex-1 h-full overflow-auto overscroll-contain p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5rem)] lg:pb-6 flex flex-col w-full">
         {loadError && (
           <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             {loadError}
