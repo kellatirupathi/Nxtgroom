@@ -156,6 +156,35 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
         ))}
       </div>
 
+      {/* Nothing about a check-out that has not happened is worth laying out.
+          Splitting it across a status badge from the other half, an empty
+          time, an empty location and an empty summary made the page look
+          broken rather than pending, so it says the one true thing instead. */}
+      {tab === 'checkout' && !record.check_out_time ? (
+        <div className="flex flex-1 min-h-0 items-start justify-center overflow-y-auto lg:items-center">
+          <div className="w-full max-w-lg rounded-md border border-dashed border-slate-300 bg-white p-6 sm:p-10 text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-50 text-amber-500">
+              <LogOut size={26} aria-hidden="true" />
+            </div>
+            <h3 className="text-base sm:text-lg font-extrabold text-slate-800">No check-out recorded</h3>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+              {record.instructor_name || 'This instructor'} checked in at {formatTime(record.check_in_time)} on{' '}
+              {formatDate(record.date)} and has not checked out. Please follow up with them.
+            </p>
+            <p className="mt-4 text-xs font-medium text-slate-400">
+              The check-out time, location and photo appear here once they do.
+            </p>
+            <button
+              type="button"
+              onClick={() => setTab('checkin')}
+              className="mt-5 inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
+            >
+              <LogIn size={15} aria-hidden="true" />
+              View the check-in report
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 lg:overflow-hidden">
         {/* pr-2 only once the column can scroll on its own; below lg the page
             scrolls as one and an inner scrollbar would trap the content. */}
@@ -172,25 +201,25 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
             <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-4 sm:mb-5">{record.instructor_role}</p>
             <StatusBadge status={record.status} />
             {tab === 'checkout' && !record.check_out_photo_key && (
-              <p className="mt-4 text-xs font-medium text-slate-400">
-                {record.check_out_time ? 'No photo was taken at check-out.' : 'This instructor has not checked out yet.'}
-              </p>
+              <p className="mt-4 text-xs font-medium text-slate-400">No photo was taken at check-out.</p>
             )}
           </div>
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 space-y-5 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">Session Details</h4>
             <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatDate(record.date)}</p></div></div>
-            {/* Both times stay visible whichever tab is open — the pair is what
-                gives either one meaning — but the active half is the emphasised
-                one, so the tab is legible at a glance. */}
+            {/* Only this tab's half. Showing the other one's time here put an
+                empty check-out row on a report about the check-in. */}
             <div className="flex items-start gap-4">
-              <div className={`p-2 rounded-md ${tab === 'checkin' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}><Clock size={18} aria-hidden="true" /></div>
-              <div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-In Time</p><p className={`text-sm font-semibold ${tab === 'checkin' ? 'text-slate-800' : 'text-slate-500'}`}>{formatTime(record.check_in_time)}</p></div>
-            </div>
-            <div className="flex items-start gap-4">
-              <div className={`p-2 rounded-md ${tab === 'checkout' ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}><Clock size={18} aria-hidden="true" /></div>
-              <div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Check-Out Time</p><p className={`text-sm font-semibold ${tab === 'checkout' ? 'text-slate-800' : 'text-slate-500'}`}>{formatTime(record.check_out_time)}</p></div>
+              <div className="bg-indigo-50 text-indigo-600 p-2 rounded-md"><Clock size={18} aria-hidden="true" /></div>
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                  {tab === 'checkin' ? 'Check-in time' : 'Check-out time'}
+                </p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {formatTime(tab === 'checkin' ? record.check_in_time : record.check_out_time)}
+                </p>
+              </div>
             </div>
             <div>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
@@ -198,9 +227,7 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
               </p>
               {tab === 'checkout' && !record.check_out_coordinates ? (
                 <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-3 text-xs font-medium text-slate-400">
-                  {record.check_out_time
-                    ? 'No location was captured at check-out.'
-                    : 'Available once this instructor checks out.'}
+                  No location was captured at check-out.
                 </p>
               ) : (
                 <LocationPanel
@@ -228,8 +255,7 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
               that describes the other half of the day. */}
           {tab === 'checkout' ? (
             <div className="flex-1">
-              {record.check_out_time ? (
-                <dl className="grid gap-4 sm:grid-cols-2">
+              <dl className="grid gap-4 sm:grid-cols-2">
                   <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
                     <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Checked out at</dt>
                     <dd className="mt-1 text-sm font-semibold text-slate-800">{formatTime(record.check_out_time)}</dd>
@@ -247,13 +273,7 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
                       checkpoint report.
                     </dd>
                   </div>
-                </dl>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center gap-2 rounded-md border border-dashed border-slate-200 bg-slate-50 p-8 text-center font-medium text-slate-500">
-                  <LogOut size={32} className="text-slate-300" aria-hidden="true" />
-                  <p>This instructor has not checked out yet.</p>
-                </div>
-              )}
+              </dl>
             </div>
           ) : loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
@@ -285,6 +305,7 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
           )}
         </div>
       </div>
+      )}
 
       {photoKind && record && (
         <PhotoViewer
