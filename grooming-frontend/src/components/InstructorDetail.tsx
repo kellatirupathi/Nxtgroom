@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, User, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert } from 'lucide-react';
-import { apiFetch } from '../api';
+import { ArrowLeft, User, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, Image as ImageIcon, LogIn, LogOut, Trash2 } from 'lucide-react';
+import { apiFetch, apiJson } from '../api';
+import ConfirmDialog from './ConfirmDialog';
+import PhotoViewer from './PhotoViewer';
+import { useToast } from './useToast';
 import { imageQualityLabel, needsHumanReview, normalizeAttendanceStatus } from '../status';
 import GroomingReport from './GroomingReport';
 import LocationPanel from './LocationPanel';
@@ -9,6 +12,10 @@ import type { AttendanceRecord, Evaluation } from '../types';
 interface InstructorDetailProps {
   record: AttendanceRecord | null;
   onBack: () => void;
+  /** Hidden entirely when the signed-in user may not delete. */
+  canDelete?: boolean;
+  /** Called after the record is gone, so the list behind can drop it. */
+  onDeleted?: (attendanceId: string) => void;
 }
 
 function StatusBadge({ status }: { status?: string }) {
@@ -36,10 +43,37 @@ function formatDate(isoString?: string | null) {
   return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function InstructorDetail({ record, onBack }: InstructorDetailProps) {
+export default function InstructorDetail({ record, onBack, canDelete, onDeleted }: InstructorDetailProps) {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [loading, setLoading] = useState(Boolean(record));
   const [error, setError] = useState('');
+  const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const toast = useToast();
+
+  const handleDelete = async () => {
+    if (!record) return;
+    setDeleting(true);
+    try {
+      await apiJson(`/api/v2/attendance/${encodeURIComponent(String(record._id))}`, {
+        method: 'DELETE',
+      });
+      toast.success('Attendance record deleted', {
+        detail: `${record.instructor_name || 'The record'} and its photos have been removed.`,
+      });
+      setConfirmDelete(false);
+      // Back to the list, which no longer contains this record: staying here
+      // would leave the page describing something that no longer exists.
+      onDeleted?.(String(record._id));
+      onBack();
+    } catch (deleteError) {
+      toast.error('Could not delete the record', {
+        detail: deleteError instanceof Error ? deleteError.message : String(deleteError),
+      });
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     if (!record) return undefined;
@@ -86,6 +120,45 @@ export default function InstructorDetail({ record, onBack }: InstructorDetailPro
             <h3 className="text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
             <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-5">{record.instructor_role}</p>
             <StatusBadge status={record.status} />
+
+            {/* The photographs are the evidence the report was made from, so
+                they belong beside the verdict rather than a page away. */}
+            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPhotoKind('checkin')}
+                disabled={!record.check_in_photo_key}
+                title={record.check_in_photo_key ? 'View the check-in photo' : 'No check-in photo was stored'}
+                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+              >
+                <LogIn size={14} aria-hidden="true" />
+                Check-in photo
+                <ImageIcon size={14} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoKind('checkout')}
+                disabled={!record.check_out_photo_key}
+                title={record.check_out_photo_key ? 'View the check-out photo' : 'No check-out photo was stored'}
+                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+              >
+                <LogOut size={14} aria-hidden="true" />
+                Check-out photo
+                <ImageIcon size={14} aria-hidden="true" />
+              </button>
+              {canDelete && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(true)}
+                  aria-label="Delete this attendance record"
+                  title="Delete this attendance record"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Delete
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 space-y-5 shrink-0">
@@ -145,6 +218,28 @@ export default function InstructorDetail({ record, onBack }: InstructorDetailPro
           )}
         </div>
       </div>
+
+      {photoKind && record && (
+        <PhotoViewer
+          attendanceId={String(record._id)}
+          kind={photoKind}
+          title={record.instructor_name || 'Attendance photo'}
+          subtitle={`${photoKind === 'checkin' ? 'Check-in' : 'Check-out'} · ${formatDate(record.date)}`}
+          onClose={() => setPhotoKind(null)}
+        />
+      )}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        destructive
+        busy={deleting}
+        title="Delete this attendance record?"
+        message={`This removes the check-in for ${record?.instructor_name || 'this instructor'} on ${formatDate(record?.date)}.`}
+        detail="The appearance report and both photographs are deleted with it. This cannot be undone."
+        confirmLabel="Delete record"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </section>
   );
 }

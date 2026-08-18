@@ -10,6 +10,12 @@ import {
 } from "../middleware/auth.js";
 import { asyncRoute, createDocument, serializeDocument } from "../utils.js";
 import {
+  describeDeletePermission,
+  getAccessSettings,
+  saveAccessSettings,
+  validateAccessSettings,
+} from "../services/accessSettings.js";
+import {
   adminSchema,
   adminUpdateSchema,
   boaSchema,
@@ -932,5 +938,80 @@ adminRouter.post(
       return res.status(404).json({ detail: "No active sign-in account for this BOA" });
     }
     return res.json({ message: "Password updated. The BOA must sign in again." });
+  })
+);
+
+adminRouter.get(
+  "/settings/access",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(await getAccessSettings(req.app.locals.db));
+  })
+);
+
+adminRouter.put(
+  "/settings/access",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = validateAccessSettings(req.body);
+    if (!result.valid) return res.status(422).json({ detail: result.detail });
+    return res.json(await saveAccessSettings(req.app.locals.db, req.body));
+  })
+);
+
+/**
+ * One user's capabilities, and where each one comes from.
+ *
+ * The source matters to whoever is looking: a toggle that is on because the
+ * workspace default is on behaves differently from one somebody chose for this
+ * person, and the difference is invisible unless it is said.
+ */
+adminRouter.get(
+  "/users/:userId/permissions",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const user = await db.collection("users").findOne({ _id: idMatch(req.params.userId) });
+    if (!user) return res.status(404).json({ detail: "User not found" });
+    const settings = await getAccessSettings(db);
+    return res.json({
+      user_id: String(user._id),
+      email: user.email,
+      role: user.role,
+      ...describeDeletePermission(user, settings),
+    });
+  })
+);
+
+adminRouter.put(
+  "/users/:userId/permissions",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const value = req.body?.can_delete_records;
+    // null clears the override so the person follows the workspace default
+    // again, which is different from choosing false for them.
+    if (value !== null && typeof value !== "boolean") {
+      return res.status(422).json({
+        detail: "can_delete_records must be true, false, or null to follow the workspace default",
+      });
+    }
+
+    const db = req.app.locals.db;
+    const user = await db.collection("users").findOne({ _id: idMatch(req.params.userId) });
+    if (!user) return res.status(404).json({ detail: "User not found" });
+    if (user.role !== ROLES.BOA) {
+      return res.status(422).json({
+        detail: "Only BOA accounts have deletion configured; admins always have it",
+      });
+    }
+
+    await db.collection("users").updateOne(
+      { _id: user._id },
+      value === null
+        ? { $unset: { can_delete_records: "" }, $set: { updated_at: new Date() } }
+        : { $set: { can_delete_records: value, updated_at: new Date() } }
+    );
+    const settings = await getAccessSettings(db);
+    return res.json(describeDeletePermission({ ...user, can_delete_records: value ?? undefined }, settings));
   })
 );

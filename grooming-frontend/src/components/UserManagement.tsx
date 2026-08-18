@@ -3,6 +3,7 @@ import PasswordInput from './PasswordInput';
 import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
+import UserPermissionsModal from './UserPermissionsModal';
 import ConfirmDialog from './ConfirmDialog';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
@@ -95,6 +96,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [confirmDelete, setConfirmDelete] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [passwordFor, setPasswordFor] = useState<UserRow | null>(null);
+  const [permissionsFor, setPermissionsFor] = useState<UserRow | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -358,6 +360,14 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
           setError('');
         },
       },
+      // Only BOA accounts have anything to configure: administrators can
+      // always delete, which the modal would only be able to state, not change.
+      ...(row.kind === 'boa' ? [{
+        key: 'permissions',
+        label: 'Permissions',
+        icon: 'permissions' as const,
+        onSelect: () => setPermissionsFor(row),
+      }] : []),
       {
         key: 'delete',
         label: 'Delete',
@@ -561,6 +571,14 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
             </form>
           </div>
         </div>
+      )}
+
+      {permissionsFor && (
+        <UserPermissionsModal
+          userId={String(permissionsFor.id)}
+          email={permissionsFor.email}
+          onClose={() => setPermissionsFor(null)}
+        />
       )}
     </section>
   );

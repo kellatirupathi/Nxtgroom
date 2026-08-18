@@ -105,7 +105,17 @@ export async function getCurrentUser(req, res, next) {
       }
       collegeId = String(boa.college_id);
     }
-    req.currentUser = { email: user.email, role: user.role, referenceId: user.reference_id, collegeId };
+    req.currentUser = {
+      email: user.email,
+      role: user.role,
+      referenceId: user.reference_id,
+      collegeId,
+      // Absent unless someone set it for this person, which is deliberately
+      // distinct from false: absent follows the workspace default.
+      ...(typeof user.can_delete_records === "boolean"
+        ? { can_delete_records: user.can_delete_records }
+        : {}),
+    };
     return next();
   } catch (error) {
     if (!["JsonWebTokenError", "TokenExpiredError", "NotBeforeError"].includes(error?.name)) {

@@ -69,6 +69,9 @@ test("login preserves the frontend authentication contract", async () => {
   const passwordHash = await getPasswordHash("admin@123");
   app.locals.db = {
     collection(name) {
+      // /me also reads the workspace permission defaults, so it can tell the
+      // browser which actions to offer.
+      if (name === "settings") return { findOne: async () => null };
       assert.equal(name, "users");
       return {
         findOne: async ({ email }) => email === "admin@nxtwave.com"
@@ -97,6 +100,9 @@ test("login preserves the frontend authentication contract", async () => {
     email: "admin@nxtwave.com",
     role: "SUPER_ADMIN",
     college_id: null,
+    // Sent so the interface only offers actions the server would allow. An
+    // admin always may; a BOA depends on the workspace and per-user settings.
+    can_delete_records: true,
   });
 });
 

@@ -4,9 +4,10 @@ import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import InstructorSyncPanel from './InstructorSyncPanel';
 import ReportRecipients from './ReportRecipients';
+import AccessSettingsSection from './AccessSettingsSection';
 import type { NotificationSettings } from '../types';
 
-interface ToggleProps {
+export interface ToggleProps {
   id: string;
   checked: boolean;
   disabled: boolean;
@@ -45,7 +46,7 @@ const DEFAULTS: NotificationSettings = {
   only_when_review_required: false,
 };
 
-function Toggle({ id, checked, disabled, onChange }: ToggleProps) {
+export function Toggle({ id, checked, disabled, onChange }: ToggleProps) {
   return (
     <button
       type="button"
@@ -163,6 +164,8 @@ function NotificationSettings() {
         Suppression filters apply on top of the report switches: if either filter is on, a report is sent only when it
         matches at least one enabled filter.
       </p>
+
+      <AccessSettingsSection />
     </div>
   );
 }

@@ -153,6 +153,23 @@ export interface CurrentUser {
   email: string;
   role: Role;
   college_id: string | null;
+  /** Whether this account may delete attendance records. */
+  can_delete_records?: boolean;
+}
+
+/** One account's capabilities, and where each answer comes from. */
+export interface UserPermissions {
+  user_id?: string;
+  email?: string;
+  role?: Role;
+  can_delete_records: boolean;
+  /** ROLE for admins, USER for a personal override, WORKSPACE for the default. */
+  source: 'ROLE' | 'USER' | 'WORKSPACE';
+  workspace_default: boolean;
+}
+
+export interface AccessSettings {
+  boa_can_delete_records: boolean;
 }
 
 export interface NotificationSettings {

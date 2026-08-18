@@ -41,6 +41,8 @@ interface SessionState {
   email: string | null;
   collegeId: string | null;
   validated: boolean;
+  /** Decided by the server; the UI only uses it to hide what it would refuse. */
+  canDeleteRecords?: boolean;
 }
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
@@ -123,7 +125,7 @@ export default function App() {
           throw new Error('The server returned an invalid user role.');
         }
         saveSession(session.token as string, currentUser.role);
-        setSession({ token: session.token, role: currentUser.role, email: currentUser.email || null, collegeId: currentUser.college_id || null, validated: true });
+        setSession({ token: session.token, role: currentUser.role, email: currentUser.email || null, collegeId: currentUser.college_id || null, validated: true, canDeleteRecords: Boolean(currentUser.can_delete_records) });
       } catch (error) {
         if (!controller.signal.aborted && (error as { status?: number })?.status !== 401) setSessionCheckError(error instanceof Error ? error.message : String(error));
       }
@@ -328,7 +330,12 @@ export default function App() {
 
           {activeTab === 'instructor-detail' && (
             <div className="w-full h-full">
-              <InstructorDetail record={selectedAttendanceRecord} onBack={() => navigate('daily-records')} />
+              <InstructorDetail
+                record={selectedAttendanceRecord}
+                canDelete={session.canDeleteRecords}
+                onDeleted={() => setSelectedAttendanceRecord(null)}
+                onBack={() => navigate('daily-records')}
+              />
             </div>
           )}
 

@@ -8,7 +8,8 @@ import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation } from "../services/evaluationWorker.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
-import { buildPhotoKey, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
+import { buildPhotoKey, deletePhoto, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
+import { canDeleteAttendance, getAccessSettings } from "../services/accessSettings.js";
 import { attachAddressToAttendance } from "../services/geocoding.js";
 import {
   asyncRoute,
@@ -89,6 +90,33 @@ function attendanceScope(currentUser) {
   return isElevated(currentUser?.role)
     ? {}
     : { college_id: idMatch(String(currentUser.collegeId)) };
+}
+
+/**
+ * Removes a check-in entirely: the record, its evaluation, its queued job and
+ * its photographs.
+ *
+ * Photographs are normally kept indefinitely and never expired on a schedule.
+ * This is the one path that removes them, because it is someone deliberately
+ * erasing the check-in they belong to — leaving the images behind would retain
+ * a person's photograph with no record explaining why it was held.
+ *
+ * The record goes last. If a photo delete fails the record is still there to
+ * try again, whereas the reverse would leave images nothing points at.
+ */
+async function purgeAttendance(db, attendance) {
+  const keys = [attendance.check_in_photo_key, attendance.check_out_photo_key].filter(Boolean);
+  for (const key of keys) {
+    try {
+      await deletePhoto(key);
+    } catch {
+      // A photo already gone, or storage briefly unavailable, must not strand
+      // the record: the caller asked for it to be removed.
+    }
+  }
+  await db.collection("evaluation_jobs").deleteOne({ _id: `${attendance._id}:evaluation` });
+  await db.collection("evaluations").deleteMany({ attendance_id: String(attendance._id) });
+  await db.collection("attendance").deleteOne({ _id: attendance._id });
 }
 
 /**
@@ -731,5 +759,34 @@ attendanceRouter.get(
     if (!url) return res.status(503).json({ detail: "Photo storage is unavailable right now" });
 
     return res.json({ url, expires_in: 900 });
+  })
+);
+
+/**
+ * Permanently removes a check-in.
+ *
+ * Scoped like every other read: a BOA can only reach records at their own
+ * college, so the capability toggle governs whether they may delete, never
+ * whose records they can see.
+ */
+attendanceRouter.delete(
+  "/:attendanceId",
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const settings = await getAccessSettings(db);
+    if (!canDeleteAttendance(req.currentUser, settings)) {
+      return res.status(403).json({
+        detail: "You do not have permission to delete attendance records",
+      });
+    }
+
+    const attendance = await db.collection("attendance").findOne({
+      _id: idMatch(req.params.attendanceId),
+      ...attendanceScope(req.currentUser),
+    });
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+
+    await purgeAttendance(db, attendance);
+    return res.json({ message: "Attendance record deleted" });
   })
 );

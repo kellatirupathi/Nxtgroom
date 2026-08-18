@@ -9,6 +9,7 @@ import {
   verifyPassword,
 } from "../middleware/auth.js";
 import { asyncRoute } from "../utils.js";
+import { canDeleteAttendance, getAccessSettings } from "../services/accessSettings.js";
 import {
   googleClientId,
   isGoogleLoginEnabled,
@@ -62,13 +63,17 @@ async function displayNameForUser(db, user) {
 
 export const authRouter = Router();
 
-authRouter.get("/me", getCurrentUser, (req, res) => {
+authRouter.get("/me", getCurrentUser, asyncRoute(async (req, res) => {
+  const settings = await getAccessSettings(req.app.locals.db);
   res.json({
     email: req.currentUser.email,
     role: req.currentUser.role,
     college_id: req.currentUser.collegeId,
+    // Sent so the interface can hide an action the server would refuse. The
+    // server still checks on every delete; this only keeps the UI honest.
+    can_delete_records: canDeleteAttendance(req.currentUser, settings),
   });
-});
+}));
 
 authRouter.post(
   "/login",
