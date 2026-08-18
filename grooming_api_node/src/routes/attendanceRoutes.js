@@ -6,7 +6,7 @@ import { runtimeConfig } from "../config/env.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
-import { enqueueEvaluation } from "../services/evaluationWorker.js";
+import { enqueueEvaluation, evaluationFilter } from "../services/evaluationWorker.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
 import { buildPhotoKey, deletePhoto, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
 import { canDeleteAttendance, getAccessSettings } from "../services/accessSettings.js";
@@ -512,6 +512,35 @@ attendanceRouter.post(
     } catch (error) {
       console.error(`Checkout outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
     }
+
+    // The check-out photo is assessed the same way the check-in one is, when
+    // there is one. Queued after the record is committed and failures are
+    // swallowed: the check-out itself is the thing that matters for
+    // attendance, and it has already succeeded by this point.
+    if (checkOutPhotoKey) {
+      try {
+        await enqueueEvaluation(db, {
+          attendanceId: attendance._id,
+          kind: "checkout",
+          instructor: {
+            id: String(candidate.instructor_id),
+            name: attendance.instructor_name || instructor?.name || "Instructor",
+            email: recipient || instructor?.email || null,
+            gender: instructor?.gender || null,
+          },
+          photoKey: checkOutPhotoKey,
+          mimeType: "image/jpeg",
+          checkInTime: checkOutTime,
+        });
+        await db.collection("attendance").updateOne(
+          { _id: attendance._id },
+          { $set: { checkout_evaluation_queue_status: "queued" } }
+        );
+      } catch (error) {
+        console.error(`Checkout evaluation not queued for ${attendance._id} (${error.name || "ERROR"})`);
+      }
+    }
+
     return res.json({
       message: recipient
         ? "Check-out successful. Email confirmation is queued."
@@ -638,9 +667,12 @@ attendanceRouter.get(
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 
-    const evaluation = await db.collection("evaluations").findOne({
-      attendance_id: String(attendance._id),
-    });
+    // ?kind=checkout selects the check-out assessment. The default stays the
+    // check-in one, so every existing caller keeps the report it asked for.
+    const kind = req.query.kind === "checkout" ? "checkout" : "checkin";
+    const evaluation = await db.collection("evaluations").findOne(
+      evaluationFilter(String(attendance._id), kind)
+    );
     if (!evaluation) {
       return res.status(404).json({ detail: "Evaluation is still pending or unavailable" });
     }

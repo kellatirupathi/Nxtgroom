@@ -28,8 +28,21 @@ function updated(result) {
   return Boolean(result && (result.matchedCount > 0 || result.modifiedCount > 0));
 }
 
-function evaluationJobId(attendanceId) {
-  return `${attendanceId}:evaluation`;
+/**
+ * One job per half of the record.
+ *
+ * The check-in keeps its original id so jobs queued before check-out analysis
+ * existed still run rather than being orphaned by a rename.
+ */
+function evaluationJobId(attendanceId, kind = "checkin") {
+  return kind === "checkout"
+    ? `${attendanceId}:evaluation:checkout`
+    : `${attendanceId}:evaluation`;
+}
+
+/** Evaluations stored before check-out analysis existed are all check-ins. */
+function jobKind(job) {
+  return job?.kind === "checkout" ? "checkout" : "checkin";
 }
 
 function errorCode(error, fallback = "EVALUATION_ERROR") {
@@ -165,13 +178,15 @@ function publicEvaluation(report, job, now) {
 export async function enqueueEvaluation(db, payload) {
   const now = new Date();
   const deadlineAt = payload.deadlineAt || new Date(now.getTime() + EVALUATION_DEADLINE_MS);
-  const jobId = evaluationJobId(payload.attendanceId);
+  const kind = payload.kind === "checkout" ? "checkout" : "checkin";
+  const jobId = evaluationJobId(payload.attendanceId, kind);
   await db.collection("evaluation_jobs").updateOne(
     { _id: jobId },
     {
       $setOnInsert: {
         _id: jobId,
         attendance_id: payload.attendanceId,
+        kind,
         instructor: payload.instructor,
         // The job carries a pointer, not the image. Bytes live only in R2.
         // imageBuffer is still honoured so jobs queued before the move to
@@ -306,6 +321,32 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   const overallStatus = evaluation.overall_status;
   const imageQuality = evaluation.image_quality || "RETAKE_RECOMMENDED";
   const attendanceStatus = overallStatus === "COMPLIANT" ? "compliant" : "non_compliant";
+
+  // The day's status belongs to the check-in. A check-out assessment is
+  // recorded alongside it under its own fields: overwriting status and remarks
+  // would rewrite the morning's verdict with the evening's photograph, and the
+  // weekly counts read those fields.
+  if (jobKind(job) === "checkout") {
+    await db.collection("attendance").updateOne(
+      { _id: job.attendance_id },
+      {
+        $set: {
+          checkout_compliance_status: overallStatus,
+          checkout_remarks: evaluation.ai_summary || "",
+          checkout_image_quality: imageQuality,
+          checkout_analysis_completed_at: evaluation.processed_at || now,
+          checkout_evaluation_queue_status: "completed",
+          updated_at: now,
+        },
+      }
+    );
+    await db.collection("evaluation_jobs").deleteOne({
+      _id: job._id,
+      worker_id: WORKER_ID,
+      status: ownedStatus,
+    });
+    return;
+  }
   await db.collection("attendance").updateOne(
     { _id: job.attendance_id },
     {
@@ -366,14 +407,30 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   });
 }
 
+/**
+ * Matches one half's evaluation.
+ *
+ * A check-in is matched on the absence of a kind as well as on "checkin",
+ * because every evaluation stored before check-out analysis existed has no
+ * kind field and all of them are check-ins.
+ */
+export function evaluationFilter(attendanceId, kind = "checkin") {
+  return kind === "checkout"
+    ? { attendance_id: attendanceId, kind: "checkout" }
+    : { attendance_id: attendanceId, kind: { $ne: "checkout" } };
+}
+
 async function completeEvaluation(db, job, report) {
   if (!(await renewEvaluationLease(db, job))) return false;
 
   const now = new Date();
   const evaluation = publicEvaluation(report, job, now);
   await db.collection("evaluations").updateOne(
-    { attendance_id: job.attendance_id },
-    { $set: evaluation, $setOnInsert: { _id: randomUUID(), created_at: now } },
+    evaluationFilter(job.attendance_id, jobKind(job)),
+    {
+      $set: { ...evaluation, kind: jobKind(job) },
+      $setOnInsert: { _id: randomUUID(), created_at: now },
+    },
     { upsert: true }
   );
   await syncStoredEvaluation(db, job, evaluation, "processing");
@@ -381,9 +438,9 @@ async function completeEvaluation(db, job, report) {
 }
 
 export async function recoverClaimedEvaluation(db, job) {
-  const storedEvaluation = await db.collection("evaluations").findOne({
-    attendance_id: job.attendance_id,
-  });
+  const storedEvaluation = await db.collection("evaluations").findOne(
+    evaluationFilter(job.attendance_id, jobKind(job))
+  );
   if (!storedEvaluation) return null;
   if (!(await renewEvaluationLease(db, job))) return false;
   await syncStoredEvaluation(db, job, storedEvaluation, "processing");

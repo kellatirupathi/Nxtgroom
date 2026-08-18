@@ -255,3 +255,25 @@ test("a missing gender produces no compliance claim", () => {
   }
   assert.match(evaluation.ai_summary, /gender/i);
 });
+
+test("each half of a record has its own evaluation", async () => {
+  const { evaluationFilter } = await import("../src/services/evaluationWorker.js");
+  // Every evaluation stored before check-out analysis existed has no kind
+  // field, and all of them are check-ins. Matching "checkin" alone would have
+  // hidden the entire history behind an empty report.
+  assert.deepEqual(evaluationFilter("a1"), { attendance_id: "a1", kind: { $ne: "checkout" } });
+  assert.deepEqual(evaluationFilter("a1", "checkin"), { attendance_id: "a1", kind: { $ne: "checkout" } });
+  assert.deepEqual(evaluationFilter("a1", "checkout"), { attendance_id: "a1", kind: "checkout" });
+
+  // The two filters must not both match one document, or a check-out would
+  // overwrite the morning's report.
+  const checkin = { attendance_id: "a1" };
+  const checkout = { attendance_id: "a1", kind: "checkout" };
+  const matches = (filter, doc) => Object.entries(filter).every(([key, value]) => (
+    value && typeof value === "object" && "$ne" in value ? doc[key] !== value.$ne : doc[key] === value
+  ));
+  assert.equal(matches(evaluationFilter("a1"), checkin), true);
+  assert.equal(matches(evaluationFilter("a1"), checkout), false);
+  assert.equal(matches(evaluationFilter("a1", "checkout"), checkout), true);
+  assert.equal(matches(evaluationFilter("a1", "checkout"), checkin), false);
+});

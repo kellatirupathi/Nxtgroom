@@ -85,7 +85,10 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
       setEvaluation(null);
       setError('');
       try {
-        const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation`, { signal: controller.signal });
+        // Each half is assessed separately, so the tab decides which report
+        // is fetched rather than both halves sharing one.
+        const query = tab === 'checkout' ? '?kind=checkout' : '';
+        const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation${query}`, { signal: controller.signal });
         setEvaluation(data);
       } catch (requestError) {
         if (!controller.signal.aborted && (requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -95,7 +98,7 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
     };
     fetchEvaluation();
     return () => controller.abort();
-  }, [record]);
+  }, [record, tab]);
 
   if (!record) {
     return (
@@ -248,39 +251,23 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
 
         <div className="w-full lg:w-2/3 bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 lg:overflow-y-auto flex flex-col mb-4 lg:mb-6">
           <h3 className="text-base sm:text-lg font-extrabold text-slate-800 mb-4 sm:mb-6 border-b border-slate-100 pb-3 sm:pb-4">
-            {tab === 'checkin' ? 'Detailed Appearance Report' : 'Check-out Summary'}
+            Detailed Appearance Report
           </h3>
-          {/* The appearance report is made from the check-in photo, so the
-              check-out tab says what it has rather than repeating a report
-              that describes the other half of the day. */}
-          {tab === 'checkout' ? (
-            <div className="flex-1">
-              <dl className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Checked out at</dt>
-                    <dd className="mt-1 text-sm font-semibold text-slate-800">{formatTime(record.check_out_time)}</dd>
-                  </div>
-                  <div className="rounded-md border border-slate-200 bg-slate-50 p-4">
-                    <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Photo</dt>
-                    <dd className="mt-1 text-sm font-semibold text-slate-800">
-                      {record.check_out_photo_key ? 'Stored — shown on the left' : 'None taken'}
-                    </dd>
-                  </div>
-                  <div className="rounded-md border border-slate-200 bg-white p-4 sm:col-span-2">
-                    <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Appearance assessment</dt>
-                    <dd className="mt-1 text-sm text-slate-600 leading-relaxed">
-                      Appearance is assessed once, from the check-in photo. Open the check-in tab for the
-                      checkpoint report.
-                    </dd>
-                  </div>
-              </dl>
-            </div>
-          ) : loading ? (
+          {/* Both halves are assessed the same way, so both render the same
+              report. The check-out one only exists when a photo was taken. */}
+          {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
           ) : error ? (
             <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">{error}</div>
           ) : !evaluation ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-md border border-dashed border-slate-200 p-8 text-center gap-2"><XCircle size={32} className="text-slate-300" aria-hidden="true" /><p>No detailed evaluation report is available.</p></div>
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-md border border-dashed border-slate-200 p-8 text-center gap-2">
+              <XCircle size={32} className="text-slate-300" aria-hidden="true" />
+              <p>
+                {tab === 'checkout' && !record.check_out_photo_key
+                  ? 'No photo was taken at check-out, so there is nothing to assess.'
+                  : 'No detailed evaluation report is available.'}
+              </p>
+            </div>
           ) : (
             <div className="flex-1 pb-4">
               {/* The verdict stands whatever the photo was like. This only
