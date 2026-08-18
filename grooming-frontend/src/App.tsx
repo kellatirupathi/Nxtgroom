@@ -309,7 +309,7 @@ export default function App() {
 
           pb clears the fixed bottom bar (and the iOS home indicator) so the
           last row of any list stays reachable on touch devices. */}
-      <main className="flex-1 h-full overflow-auto overscroll-contain p-4 md:p-6 pb-[calc(env(safe-area-inset-bottom)+5rem)] lg:pb-6 flex flex-col w-full">
+      <main className="flex-1 h-full overflow-auto overscroll-contain p-4 md:p-6 pb-[calc(var(--bottom-nav-height)+env(safe-area-inset-bottom)+var(--bottom-nav-gap))] lg:pb-6 flex flex-col w-full">
         {loadError && (
           <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             {loadError}

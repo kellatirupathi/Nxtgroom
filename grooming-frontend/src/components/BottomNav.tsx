@@ -94,7 +94,7 @@ export default function BottomNav({
   const initial = (displayEmail[0] || 'A').toUpperCase();
 
   const itemClass = (isActive: boolean) =>
-    `flex flex-1 flex-col items-center justify-center gap-1 py-2 min-h-[56px] transition-colors ${
+    `flex flex-1 flex-col items-center justify-center gap-1 py-2 min-h-[var(--bottom-nav-height)] transition-colors ${
       isActive ? 'text-indigo-600' : 'text-slate-500'
     }`;
 
@@ -105,7 +105,7 @@ export default function BottomNav({
           <button
             type="button"
             aria-label="Close menu"
-            className="fixed inset-0 bg-slate-900/40 z-40 lg:hidden"
+            className="fixed inset-0 bg-slate-900/40 z-[45] lg:hidden"
             onClick={() => setIsSheetOpen(false)}
           />
           <div
@@ -114,7 +114,7 @@ export default function BottomNav({
             aria-label="More navigation options"
             /* Sits directly above the bar; pb accounts for the bar height plus
                the iOS home indicator inset. */
-            className="fixed bottom-0 inset-x-0 z-50 lg:hidden bg-white border-t border-slate-200 rounded-t-xl pb-[calc(env(safe-area-inset-bottom)+4.5rem)] shadow-[0_-4px_24px_rgba(0,0,0,0.08)]"
+            className="fixed bottom-0 inset-x-0 z-[46] lg:hidden bg-white border-t border-slate-200 rounded-t-xl pb-[calc(env(safe-area-inset-bottom)+var(--bottom-nav-height)+0.25rem)] shadow-[0_-4px_24px_rgba(0,0,0,0.08)]"
           >
             <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-100">
               <span
@@ -180,7 +180,7 @@ export default function BottomNav({
 
       <nav
         aria-label="Primary"
-        className="fixed bottom-0 inset-x-0 z-50 lg:hidden bg-white border-t border-slate-200 flex items-stretch pb-[env(safe-area-inset-bottom)] shadow-[0_-2px_12px_rgba(0,0,0,0.06)]"
+        className="fixed bottom-0 inset-x-0 z-[var(--z-bottom-nav)] lg:hidden bg-white border-t border-slate-300 flex items-stretch pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.10)]"
       >
         {primary.map((item) => {
           const Icon = item.icon;
