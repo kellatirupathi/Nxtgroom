@@ -1,9 +1,13 @@
-import { useEffect, useMemo, useState, type ChangeEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, CircleAlert, Image as ImageIcon, LogOut } from 'lucide-react';
 import { apiFetchAllPages } from '../api';
 import PhotoViewer from './PhotoViewer';
+import DateRangeFilter from './DateRangeFilter';
 import {
-  attendancePath,
+  attendanceRangePath,
+  rangeForPreset,
+  type DatePreset,
+  type DateRange,
   filterAttendanceRecords,
   localDateValue,
   uniqueRecordValues,
@@ -66,7 +70,8 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
   >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [dateFilter, setDateFilter] = useState(today);
+  const [preset, setPreset] = useState<DatePreset>('today');
+  const [range, setRange] = useState<DateRange>(() => rangeForPreset('today'));
   const [roleFilter, setRoleFilter] = useState('');
   const [collegeFilter, setCollegeFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -75,7 +80,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let activeController: AbortController | null = null;
-    const endpoint = attendancePath(dateFilter);
+    const endpoint = attendanceRangePath(range);
     setRecords([]);
     setLoading(true);
 
@@ -139,7 +144,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
       activeController?.abort();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [dateFilter]);
+  }, [range]);
 
   const roles = useMemo(
     () => uniqueRecordValues(records, 'instructor_role', roleFilter),
@@ -162,10 +167,11 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
     if (hasEvaluation(record.status)) onRowClick(record);
   };
 
-  const handleDateChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleRangeChange = (nextPreset: DatePreset, nextRange: DateRange) => {
     setRecords([]);
     setLoading(true);
-    setDateFilter(event.target.value);
+    setPreset(nextPreset);
+    setRange(nextRange);
   };
 
   return (
@@ -181,13 +187,11 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
         </h2>
 
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-          <input
-            type="date"
-            aria-label="Filter by date"
-            value={dateFilter}
-            max={today}
-            onChange={handleDateChange}
-            className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          <DateRangeFilter
+            preset={preset}
+            range={range}
+            today={today}
+            onChange={handleRangeChange}
           />
           <select
             aria-label="Filter by institute"
@@ -259,7 +263,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
               {loading && records.length === 0 ? (
                 <tr><td colSpan={11} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
               ) : records.length === 0 ? (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-400">No attendance records found for this date.</td></tr>
+                <tr><td colSpan={11} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
               ) : filteredRecords.length === 0 ? (
                 <tr><td colSpan={11} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {

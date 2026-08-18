@@ -5,6 +5,9 @@ import {
   filterAttendanceRecords,
   localDateValue,
   uniqueRecordValues,
+  rangeForPreset,
+  attendanceRangePath,
+  isCompleteRange,
 } from '../src/attendanceFilters.ts';
 
 const records = [
@@ -28,4 +31,51 @@ test('filters attendance by role, college, and searchable visible fields', () =>
 test('filter options are unique, sorted, and retain a selected historical value', () => {
   assert.deepEqual(uniqueRecordValues(records, 'college_name'), ['Campus A', 'Campus B']);
   assert.deepEqual(uniqueRecordValues([], 'college_name', 'Campus Z'), ['Campus Z']);
+});
+
+test('presets cover the days people mean by them', () => {
+  const today = '2026-08-18';
+  assert.deepEqual(rangeForPreset('today', today), { from: today, to: today });
+  // Seven days including today, not the seven before it: a filter that hid
+  // the current day would hide the check-ins most people are looking for.
+  assert.deepEqual(rangeForPreset('last_week', today), { from: '2026-08-12', to: today });
+  assert.deepEqual(rangeForPreset('last_month', today), { from: '2026-07-20', to: today });
+  // Both ends open, so the server leaves the date filter off entirely rather
+  // than inventing an earliest date records would have to sit after.
+  assert.deepEqual(rangeForPreset('all_time', today), { from: '', to: '' });
+});
+
+test('presets step across month and year boundaries by calendar date', () => {
+  assert.deepEqual(rangeForPreset('last_week', '2026-01-03'), { from: '2025-12-28', to: '2026-01-03' });
+  assert.deepEqual(rangeForPreset('last_month', '2026-03-05'), { from: '2026-02-04', to: '2026-03-05' });
+  // 2028 is a leap year, so the window has to include 29 February.
+  assert.deepEqual(rangeForPreset('last_week', '2028-03-02'), { from: '2028-02-25', to: '2028-03-02' });
+});
+
+test('a single day still uses the endpoint the page always used', () => {
+  // Keeps the common case producing exactly the request it did before, so
+  // nothing about existing behaviour depends on the new range parameters.
+  assert.equal(attendanceRangePath({ from: '2026-08-18', to: '2026-08-18' }), '/api/v2/attendance/today?date=2026-08-18');
+});
+
+test('a range asks for both bounds, and all time asks for neither', () => {
+  assert.equal(
+    attendanceRangePath({ from: '2026-08-01', to: '2026-08-18' }),
+    '/api/v2/attendance/today?from=2026-08-01&to=2026-08-18'
+  );
+  assert.equal(attendanceRangePath({ from: '', to: '' }), '/api/v2/attendance/today?from=&to=');
+  // One open end is a legitimate range, not a broken one.
+  assert.equal(attendanceRangePath({ from: '2026-08-01', to: '' }), '/api/v2/attendance/today?from=2026-08-01');
+});
+
+test('a half-filled custom range is not queried', () => {
+  // Sending it would return every record from that date onwards, which is not
+  // what someone half way through picking two dates asked for.
+  assert.equal(isCompleteRange({ from: '2026-08-01', to: '' }, 'custom'), false);
+  assert.equal(isCompleteRange({ from: '', to: '2026-08-01' }, 'custom'), false);
+  assert.equal(isCompleteRange({ from: '2026-08-20', to: '2026-08-10' }, 'custom'), false);
+  assert.equal(isCompleteRange({ from: '2026-08-10', to: '2026-08-20' }, 'custom'), true);
+  assert.equal(isCompleteRange({ from: '2026-08-10', to: '2026-08-10' }, 'custom'), true);
+  // All time is complete precisely because it has no bounds.
+  assert.equal(isCompleteRange({ from: '', to: '' }, 'all_time'), true);
 });

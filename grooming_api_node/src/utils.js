@@ -122,6 +122,47 @@ export function dateBoundsInTimeZone(dateValue, timeZone, now = new Date()) {
   };
 }
 
+/**
+ * Bounds covering whole local days from `from` to `to`, both inclusive.
+ *
+ * Built from calendar dates rather than timestamps because a day means a day
+ * where the instructor is, not a 24-hour window from whenever the request was
+ * made: a check-in at 00:30 in Asia/Kolkata belongs to that date, not the one
+ * before it in UTC.
+ *
+ * Either end may be omitted to leave that side open, which is what "all time"
+ * and open-ended ranges use.
+ */
+export function dateRangeBoundsInTimeZone(from, to, timeZone) {
+  for (const [name, value] of [["from", from], ["to", to]]) {
+    if (value !== undefined && typeof value !== "string") {
+      throw new RangeError(`${name} must be provided only once in YYYY-MM-DD format`);
+    }
+  }
+
+  const start = from === undefined
+    ? null
+    : localMidnightUtc(parseCalendarDate(from), timeZone);
+
+  let end = null;
+  if (to !== undefined) {
+    // The day after `to` at local midnight, so the final day is included in
+    // full rather than truncated at 00:00.
+    const parsed = parseCalendarDate(to);
+    const dayAfter = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + 1));
+    end = localMidnightUtc({
+      year: dayAfter.getUTCFullYear(),
+      month: dayAfter.getUTCMonth() + 1,
+      day: dayAfter.getUTCDate(),
+    }, timeZone);
+  }
+
+  if (start && end && start >= end) {
+    throw new RangeError("from must be on or before to");
+  }
+  return { start, end };
+}
+
 function parseCanonicalPageInteger(value, name, { minimum, maximum, fallback }) {
   if (value === undefined) return fallback;
   if (typeof value !== "string") {

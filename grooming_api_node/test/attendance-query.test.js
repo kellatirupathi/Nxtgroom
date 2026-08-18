@@ -1,3 +1,4 @@
+import { dateRangeBoundsInTimeZone } from "../src/utils.js";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { app } from "../server.js";
@@ -118,4 +119,53 @@ test("attendance date query is strict, timezone-aware, scoped, and includes coll
     assert.equal(invalidPage.status, 422, query);
   }
   assert.equal(attendanceFinds, 1);
+});
+
+test("a date range covers whole local days at both ends", () => {
+  const zone = "Asia/Kolkata";
+  const { start, end } = dateRangeBoundsInTimeZone("2026-08-10", "2026-08-12", zone);
+  // Local midnight in Asia/Kolkata is 18:30 UTC the previous day.
+  assert.equal(start.toISOString(), "2026-08-09T18:30:00.000Z");
+  // The final day is included in full: the bound is midnight after the 12th,
+  // not midnight starting it, so a 23:00 check-in on the 12th is inside.
+  assert.equal(end.toISOString(), "2026-08-12T18:30:00.000Z");
+});
+
+test("a single-day range still contains that day", () => {
+  const { start, end } = dateRangeBoundsInTimeZone("2026-08-18", "2026-08-18", "Asia/Kolkata");
+  assert.ok(start < end);
+  assert.equal(end - start, 24 * 60 * 60 * 1000);
+});
+
+test("either end of a range may be left open", () => {
+  const openEnded = dateRangeBoundsInTimeZone("2026-08-01", undefined, "Asia/Kolkata");
+  assert.ok(openEnded.start instanceof Date);
+  assert.equal(openEnded.end, null);
+
+  const openStart = dateRangeBoundsInTimeZone(undefined, "2026-08-01", "Asia/Kolkata");
+  assert.equal(openStart.start, null);
+  assert.ok(openStart.end instanceof Date);
+
+  // Both open is what "all time" asks for, and must not throw.
+  assert.deepEqual(dateRangeBoundsInTimeZone(undefined, undefined, "Asia/Kolkata"), {
+    start: null,
+    end: null,
+  });
+});
+
+test("a backwards range is refused rather than returning nothing", () => {
+  // Silently returning an empty table would read as "no records exist", which
+  // is a different thing from "these dates are the wrong way round".
+  assert.throws(
+    () => dateRangeBoundsInTimeZone("2026-08-20", "2026-08-10", "Asia/Kolkata"),
+    RangeError
+  );
+  assert.throws(
+    () => dateRangeBoundsInTimeZone(["2026-08-01"], undefined, "Asia/Kolkata"),
+    RangeError
+  );
+  assert.throws(
+    () => dateRangeBoundsInTimeZone("18-08-2026", undefined, "Asia/Kolkata"),
+    RangeError
+  );
 });

@@ -17,6 +17,7 @@ import {
   dateBoundsInTimeZone,
   parsePagination,
   serializeDocument,
+  dateRangeBoundsInTimeZone,
 } from "../utils.js";
 import { checkoutSchema, parseCoordinates, validate } from "../validation.js";
 
@@ -523,13 +524,30 @@ attendanceRouter.get(
   "/today",
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
-    let bounds;
+    let dateFilter;
     let pagination;
     try {
-      bounds = dateBoundsInTimeZone(
-        req.query.date,
-        runtimeConfig().appTimeZone
-      );
+      const zone = runtimeConfig().appTimeZone;
+      // A range wins when either end is given; otherwise this stays the
+      // single-day endpoint it has always been, so existing callers and saved
+      // links keep working.
+      const ranged = req.query.from !== undefined || req.query.to !== undefined;
+      if (ranged) {
+        // An empty bound means that side is open, which is how "all time"
+        // arrives: both present and both blank.
+        const blankToUndefined = (value) => (value === "" ? undefined : value);
+        const { start, end } = dateRangeBoundsInTimeZone(
+          blankToUndefined(req.query.from),
+          blankToUndefined(req.query.to),
+          zone
+        );
+        dateFilter = {};
+        if (start) dateFilter.$gte = start;
+        if (end) dateFilter.$lt = end;
+      } else {
+        const { start, end } = dateBoundsInTimeZone(req.query.date, zone);
+        dateFilter = { $gte: start, $lt: end };
+      }
       pagination = parsePagination(req.query, {
         defaultLimit: 200,
         maxLimit: 1000,
@@ -540,9 +558,13 @@ attendanceRouter.get(
       }
       throw error;
     }
-    const { start, end } = bounds;
     const attendances = await db.collection("attendance")
-      .find({ date: { $gte: start, $lt: end }, ...attendanceScope(req.currentUser) })
+      // An unbounded range still filters on the field so the same index is
+      // used; $exists alone would fall back to a collection scan.
+      .find({
+        ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
+        ...attendanceScope(req.currentUser),
+      })
       .project({
         _private_evaluation_outbox: 0,
         _private_checkin_outbox: 0,
