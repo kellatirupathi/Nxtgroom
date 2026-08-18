@@ -19,6 +19,16 @@ export function isProduction() {
   return process.env.NODE_ENV === "production";
 }
 
+/**
+ * HTTP methods the browser is allowed to preflight.
+ *
+ * Exported so it can be asserted against the routes the API actually serves.
+ * It lived inline in server.js and fell out of date the moment a PATCH route
+ * was added: the route worked, but every browser call failed at preflight,
+ * which no route test would have caught.
+ */
+export const CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+
 export function corsOrigins() {
   return (process.env.CORS_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
     .split(",")

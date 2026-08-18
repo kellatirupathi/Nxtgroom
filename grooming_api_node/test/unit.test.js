@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import jwt from "jsonwebtoken";
 import sharp from "sharp";
-import { runtimeConfig, validateEnvironment } from "../src/config/env.js";
+import { CORS_METHODS, runtimeConfig, validateEnvironment } from "../src/config/env.js";
 import { createAccessToken } from "../src/middleware/auth.js";
 import { detectImageMimeType, validateImageUpload } from "../src/imageValidation.js";
 import { normalizeInstructorImage } from "../src/imageProcessor.js";
@@ -213,5 +213,31 @@ test("gender edits accept only male or female, in any casing", () => {
   // to a rule set has to be refused rather than stored and silently ignored.
   for (const rejected of ["", "OTHER", "M", "unknown", null]) {
     assert.throws(() => instructorGenderSchema.parse({ gender: rejected }));
+  }
+});
+
+test("every HTTP method the API routes use is allowed through CORS", async () => {
+  // A route the browser cannot preflight is invisible from the frontend: the
+  // request fails before it reaches Express, so route-level tests still pass
+  // while the feature is broken in production. This compares the allowlist
+  // against the verbs the routers actually register.
+  const routers = await Promise.all([
+    import("../src/routes/instructorRoutes.js"),
+    import("../src/routes/attendanceRoutes.js"),
+    import("../src/routes/authRoutes.js"),
+  ]);
+  const used = new Set();
+  for (const module of routers) {
+    for (const router of Object.values(module)) {
+      for (const layer of router?.stack || []) {
+        for (const method of Object.keys(layer.route?.methods || {})) {
+          used.add(method.toUpperCase());
+        }
+      }
+    }
+  }
+  assert.ok(used.size > 0, "no routes were discovered; the test cannot verify anything");
+  for (const method of used) {
+    assert.ok(CORS_METHODS.includes(method), `${method} is routed but blocked by CORS`);
   }
 });

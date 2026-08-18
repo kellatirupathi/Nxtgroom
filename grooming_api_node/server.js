@@ -11,7 +11,7 @@ import {
   closeMongoConnection,
   connectToMongo,
 } from "./src/config/db.js";
-import { isProduction, runtimeConfig, validateEnvironment } from "./src/config/env.js";
+import { CORS_METHODS, isProduction, runtimeConfig, validateEnvironment } from "./src/config/env.js";
 import {
   getCurrentUser,
   getPasswordHash,
@@ -51,7 +51,7 @@ app.use(cors({
     error.statusCode = 403;
     return callback(error);
   },
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  methods: CORS_METHODS,
   allowedHeaders: ["Authorization", "Content-Type"],
   maxAge: 86400,
 }));
