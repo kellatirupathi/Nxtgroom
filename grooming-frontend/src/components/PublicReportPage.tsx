@@ -11,6 +11,8 @@ interface PublicReportPageProps {
   token: string;
   kind: 'day' | 'week';
   date: string;
+  /** Which half a day link is for. Absent on weekly links. */
+  half?: 'checkin' | 'checkout';
 }
 
 interface DayResponse {
@@ -125,7 +127,7 @@ function Stat({ label, value }: { label: string; value: number | string }) {
  * about — with no controls for browsing to another week, so a link cannot be
  * walked backwards through someone's history.
  */
-export default function PublicReportPage({ token, kind, date }: PublicReportPageProps) {
+export default function PublicReportPage({ token, kind, date, half = 'checkin' }: PublicReportPageProps) {
   const [day, setDay] = useState<DayResponse | null>(null);
   const [week, setWeek] = useState<WeekResponse | null>(null);
   const [error, setError] = useState('');
@@ -136,7 +138,10 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
     let disposed = false;
     setLoading(true);
     setError('');
-    const path = `/api/v2/reports/${encodeURIComponent(token)}/${kind}/${encodeURIComponent(date)}`;
+    // A day link names its half; a weekly one has none.
+    const path = kind === 'day'
+      ? `/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(date)}/${half === 'checkout' ? 'check-out' : 'check-in'}`
+      : `/api/v2/reports/${encodeURIComponent(token)}/week/${encodeURIComponent(date)}`;
     apiFetch<DayResponse | WeekResponse>(path, { auth: false })
       .then((data) => {
         if (disposed) return;
@@ -153,7 +158,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
     return () => {
       disposed = true;
     };
-  }, [token, kind, date]);
+  }, [token, kind, date, half]);
 
   if (loading) return <BrandedLoader label="Loading your report" />;
 
@@ -190,7 +195,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
         <section className="mb-6 rounded-md border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <h1 className="text-xl font-extrabold text-slate-800">{instructor?.name}</h1>
-            {kind === 'day' && day?.attendance.has_checkin_photo && (
+            {kind === 'day' && (half === 'checkout' ? day?.attendance.has_checkout_photo : day?.attendance.has_checkin_photo) && (
               <button
                 type="button"
                 onClick={() => setPhotoDate(date)}
@@ -228,12 +233,12 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
               </div>
               <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                 <div>
-                  <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Check-in</dt>
-                  <dd className="mt-0.5 font-semibold text-slate-700">{formatTime(day.attendance.check_in_time)}</dd>
-                </div>
-                <div>
-                  <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Check-out</dt>
-                  <dd className="mt-0.5 font-semibold text-slate-700">{formatTime(day.attendance.check_out_time)}</dd>
+                  <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    {half === 'checkout' ? 'Check-out' : 'Check-in'}
+                  </dt>
+                  <dd className="mt-0.5 font-semibold text-slate-700">
+                    {formatTime(half === 'checkout' ? day.attendance.check_out_time : day.attendance.check_in_time)}
+                  </dd>
                 </div>
                 {day.attendance.location_address && (
                   <div className="col-span-2 sm:col-span-1">
@@ -349,7 +354,7 @@ export default function PublicReportPage({ token, kind, date }: PublicReportPage
           <PhotoViewer
             // The token in the path is the credential here, so no bearer token
             // is sent: the recipient has no account to authenticate with.
-            path={`/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(photoDate)}/photo/checkin`}
+            path={`/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(photoDate)}/photo/${half === 'checkout' ? 'checkout' : 'checkin'}`}
             auth={false}
             kind="checkin"
             title={instructor?.name ?? 'Instructor'}

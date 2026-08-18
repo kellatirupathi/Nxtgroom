@@ -92,6 +92,8 @@ export interface AttendanceRecord {
   check_out_coordinates?: string | null;
   /** FORMAL | SAREE | KURTI_WITH_DUPATTA | UNKNOWN, set by the AI analysis. */
   attire_type?: string | null;
+  /** The instructor's public report token, for linking to their own report. */
+  report_token?: string | null;
   /** R2 object keys. Presence is what enables the view-photo buttons. */
   check_in_photo_key?: string | null;
   check_out_photo_key?: string | null;

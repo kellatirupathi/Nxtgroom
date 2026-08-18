@@ -65,6 +65,7 @@ async function sendGroomingAlerts(db, {
   status,
   summary,
   checkInTime,
+  kind = "checkin",
 }) {
   // idMatch, not the raw value: attendance stores instructor_id as a string,
   // while a synced instructor's _id is an ObjectId. Matching on the string
@@ -81,7 +82,11 @@ async function sendGroomingAlerts(db, {
 
   const token = await ensureReportToken(db, instructor);
   const dayKey = localDateKey(new Date(checkInTime || Date.now()));
-  const reportUrl = `${appUrl()}/reports/${token}/day/${dayKey}`;
+  // The link names the half it belongs to, so an alert about a check-out
+  // opens the check-out report rather than the morning's.
+  const reportUrl = `${appUrl()}/reports/${token}/day/${dayKey}/${
+    kind === "checkout" ? "check-out" : "check-in"
+  }`;
   const payload = {
     name: instructorName || instructor.name,
     status,
@@ -395,6 +400,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         status: attendanceStatus,
         summary: evaluation.ai_summary || "",
         checkInTime: job.check_in_time,
+        kind: jobKind(job),
       });
     } catch (error) {
       console.error(`Grooming alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);

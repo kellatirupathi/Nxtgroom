@@ -604,12 +604,15 @@ attendanceRouter.get(
       .limit(pagination.limit)
       .toArray();
 
-    const missingSnapshots = attendances.filter((row) => !row.instructor_name);
-    const missingIds = [...new Set(missingSnapshots.map((row) => String(row.instructor_id)))];
-    const legacyInstructors = missingIds.length
-      ? await db.collection("instructors").find({
-          _id: { $in: lookupIdVariants(missingIds) },
-        }).toArray()
+    // Every row is looked up now, not only the ones missing a name snapshot:
+    // the report token lives on the instructor and the table needs it to build
+    // the public report links.
+    const instructorIds = [...new Set(attendances.map((row) => String(row.instructor_id)))];
+    const legacyInstructors = instructorIds.length
+      ? await db.collection("instructors").find(
+          { _id: { $in: lookupIdVariants(instructorIds) } },
+          { projection: { name: 1, role: 1, college_id: 1, report_token: 1 } }
+        ).toArray()
       : [];
     const instructorMap = new Map(legacyInstructors.map((row) => [String(row._id), row]));
     const collegeIds = [...new Set(attendances
@@ -635,6 +638,9 @@ attendanceRouter.get(
         college_name: collegeId
           ? (collegeMap.get(String(collegeId)) || "Unknown College")
           : "No College",
+        // Lets the table link straight to the public report an instructor
+        // receives by email, rather than a second internal-only view of it.
+        report_token: instructor?.report_token || null,
       };
     }));
   })

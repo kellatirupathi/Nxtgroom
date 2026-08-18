@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, Image as ImageIcon, LogOut } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut } from 'lucide-react';
 import { apiFetchAllPages } from '../api';
 import PhotoViewer from './PhotoViewer';
 import DateRangeFilter from './DateRangeFilter';
@@ -12,6 +12,7 @@ import {
   localDateValue,
   uniqueRecordValues,
 } from '../attendanceFilters';
+import { publicDayReportPath } from '../routes';
 import { formatCoordinates, hasEvaluation, normalizeAttendanceStatus } from '../status';
 import type { AttendanceRecord } from '../types';
 
@@ -254,16 +255,17 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                 <th className="p-4 w-[150px]">Status</th>
                 <th className="p-4 w-[170px]">Attire</th>
                 <th className="p-4 w-[90px]">Photo</th>
+                <th className="p-4 w-[100px]">Report</th>
                 <th className="p-4 w-[320px]">Remark</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+                <tr><td colSpan={12} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
               ) : records.length === 0 ? (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
+                <tr><td colSpan={12} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
               ) : filteredRecords.length === 0 ? (
-                <tr><td colSpan={11} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+                <tr><td colSpan={12} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {
                 const canOpen = hasEvaluation(record.status);
                 return (
@@ -324,6 +326,41 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                           >
                             <LogOut size={15} aria-hidden="true" />
                           </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      {/* The public report an instructor is emailed, one link
+                          per half. New tab, and the click is kept off the row
+                          so it does not also open the internal detail view. */}
+                      <div className="flex items-center gap-1.5 whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                        {record.report_token ? (
+                          <>
+                            <a
+                              href={publicDayReportPath(record.report_token, localDateValue(new Date(record.date || record.check_in_time || Date.now())), 'checkin')}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open the check-in report"
+                              aria-label={`Open the check-in report for ${record.instructor_name}`}
+                              className="inline-flex rounded-md border border-indigo-100 bg-indigo-50 p-1.5 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                              <FileText size={15} aria-hidden="true" />
+                            </a>
+                            {record.check_out_time ? (
+                              <a
+                                href={publicDayReportPath(record.report_token, localDateValue(new Date(record.date || record.check_in_time || Date.now())), 'checkout')}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Open the check-out report"
+                                aria-label={`Open the check-out report for ${record.instructor_name}`}
+                                className="inline-flex rounded-md border border-rose-100 bg-rose-50 p-1.5 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                              >
+                                <FileText size={15} aria-hidden="true" />
+                              </a>
+                            ) : null}
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-300">--</span>
                         )}
                       </div>
                     </td>

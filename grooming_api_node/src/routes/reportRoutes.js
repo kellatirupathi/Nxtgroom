@@ -14,6 +14,7 @@ import {
   ensureReportToken,
 } from "../services/instructorReports.js";
 import { getReportRecipients } from "../services/reportRecipients.js";
+import { evaluationFilter } from "../services/evaluationWorker.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
 import {
   sendAttendanceReminderEmail,
@@ -147,11 +148,15 @@ reportRouter.get(
  * immediate alert email links to.
  */
 reportRouter.get(
-  "/:token/day/:date",
+  ["/:token/day/:date", "/:token/day/:date/:half(check-in|check-out)"],
   publicReportLimiter,
   asyncRoute(async (req, res) => {
     const { token, date } = req.params;
     if (!isValidDateKey(date)) return res.status(400).json({ detail: "Invalid date" });
+    // Both halves are assessed separately, so the link names which one it is
+    // for. A bare /day/:date stays the check-in, which is what every link
+    // already sent out points at.
+    const half = req.params.half === "check-out" ? "checkout" : "checkin";
 
     const db = req.app.locals.db;
     const instructor = await findInstructorByReportToken(db, token);
@@ -170,9 +175,9 @@ reportRouter.get(
     ));
     if (!record) return res.status(404).json({ detail: "No check-in was recorded that day" });
 
-    const evaluation = await db.collection("evaluations").findOne({
-      attendance_id: String(record._id),
-    });
+    const evaluation = await db.collection("evaluations").findOne(
+      evaluationFilter(String(record._id), half)
+    );
     // The saree/kurti rotation is a claim about the week, not about this
     // photograph, so it is counted from the week the day falls in. Null for
     // men, who have no rotation to satisfy.
@@ -203,6 +208,7 @@ reportRouter.get(
       },
       // Null rather than 404 when analysis has not finished, so the page can
       // say so instead of looking like a broken link.
+      half,
       weekly_rotation: weeklyRotation,
       evaluation: evaluation
         ? {

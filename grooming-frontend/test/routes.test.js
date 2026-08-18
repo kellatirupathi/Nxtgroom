@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pathForTab, tabForPath, TABS, RESET_PASSWORD_PATH } from '../src/routes.ts';
+import {
+  pathForTab,
+  tabForPath,
+  TABS,
+  RESET_PASSWORD_PATH,
+  publicDayReportPath,
+  publicReportFromLocation,
+} from '../src/routes.ts';
 
 test('every screen has its own address', () => {
   // Before this, every screen rendered at "/", so a refresh always returned
@@ -137,4 +144,39 @@ test('a report link is never mistaken for a tab', () => {
     false,
     'no tab may claim a /reports path, so the shell must handle it first',
   );
+});
+
+test('a day report link names the half it belongs to', () => {
+  assert.equal(
+    publicDayReportPath('VQddo8RAwJWYQcfurNOktTEQz0NgOTe9', '2026-08-18', 'checkin'),
+    '/reports/VQddo8RAwJWYQcfurNOktTEQz0NgOTe9/day/2026-08-18/check-in'
+  );
+  assert.equal(
+    publicDayReportPath('VQddo8RAwJWYQcfurNOktTEQz0NgOTe9', '2026-08-18', 'checkout'),
+    '/reports/VQddo8RAwJWYQcfurNOktTEQz0NgOTe9/day/2026-08-18/check-out'
+  );
+});
+
+test('both halves are recognised, and an older link still opens', () => {
+  const at = (pathname) => {
+    globalThis.window = { location: { pathname } };
+    return publicReportFromLocation();
+  };
+
+  assert.deepEqual(at('/reports/abcdefgh12345678/day/2026-08-18/check-in'), {
+    token: 'abcdefgh12345678', kind: 'day', date: '2026-08-18', half: 'checkin',
+  });
+  assert.deepEqual(at('/reports/abcdefgh12345678/day/2026-08-18/check-out'), {
+    token: 'abcdefgh12345678', kind: 'day', date: '2026-08-18', half: 'checkout',
+  });
+  // Links already sent by email carry no half and are check-ins. They have to
+  // keep working, so the bare form is not a 404.
+  assert.deepEqual(at('/reports/abcdefgh12345678/day/2026-08-18'), {
+    token: 'abcdefgh12345678', kind: 'day', date: '2026-08-18', half: 'checkin',
+  });
+  // A weekly report covers both halves, so it takes no suffix.
+  assert.equal(at('/reports/abcdefgh12345678/week/2026-08-17').half, 'checkin');
+  // An unrecognised suffix is not a report link at all.
+  assert.equal(at('/reports/abcdefgh12345678/day/2026-08-18/check-sideways'), null);
+  delete globalThis.window;
 });

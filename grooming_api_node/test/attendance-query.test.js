@@ -69,6 +69,16 @@ test("attendance date query is strict, timezone-aware, scoped, and includes coll
           toArray: async () => [{ _id: "college-date-1", name: "Date College" }],
         }),
       };
+      // Every row is looked up now, for the report token the table links with.
+      if (name === "instructors") return {
+        find: () => ({
+          toArray: async () => [{
+            _id: "instructor-date-1",
+            name: "Date Instructor",
+            report_token: "token-date-1",
+          }],
+        }),
+      };
       throw new Error(`Unexpected collection ${name}`);
     },
   };
@@ -87,6 +97,9 @@ test("attendance date query is strict, timezone-aware, scoped, and includes coll
   assert.equal(attendanceLimit, 1000);
   const rows = await response.json();
   assert.equal(rows[0].college_name, "Date College");
+  // Carried so the records table can link to the same public report the
+  // instructor receives by email, rather than a second view of it.
+  assert.equal(rows[0].report_token, "token-date-1");
   assert.equal(rows[0]._private_evaluation_outbox, undefined);
   assert.equal(rows[0]._private_attendance_guard_version, undefined);
 

@@ -42,6 +42,18 @@ export interface PublicReportRoute {
   token: string;
   kind: 'day' | 'week';
   date: string;
+  /** Which half of the day the link is for. Weekly links have none. */
+  half?: 'checkin' | 'checkout';
+}
+
+/** The path segment naming a half, as it appears in an emailed link. */
+export function halfSegment(half: 'checkin' | 'checkout'): string {
+  return half === 'checkout' ? 'check-out' : 'check-in';
+}
+
+/** A public day-report link for one half of one day. */
+export function publicDayReportPath(token: string, date: string, half: 'checkin' | 'checkout'): string {
+  return `/reports/${encodeURIComponent(token)}/day/${date}/${halfSegment(half)}`;
 }
 
 /**
@@ -52,10 +64,17 @@ export interface PublicReportRoute {
 export function publicReportFromLocation(): PublicReportRoute | null {
   if (typeof window === 'undefined') return null;
   const match = window.location.pathname.match(
-    /^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/,
+    /^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})(?:\/(check-in|check-out))?\/?$/,
   );
   if (!match) return null;
-  return { token: match[1], kind: match[2] as 'day' | 'week', date: match[3] };
+  return {
+    token: match[1],
+    kind: match[2] as 'day' | 'week',
+    date: match[3],
+    // A link without a half is a check-in: that is what every link already
+    // sent out points at, and they must keep working.
+    half: match[4] === 'check-out' ? 'checkout' : 'checkin',
+  };
 }
 
 export function pathForTab(tab: string, recordId?: string): string {
