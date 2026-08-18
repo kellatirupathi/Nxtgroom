@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
-import { apiFetch } from '../api';
+import { Camera, FileText, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
+import { ApiError, apiFetch } from '../api';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { preparePhoto } from '../lib/imageCapture';
 import {
@@ -17,6 +17,8 @@ import AuditReportModal from './AuditReportModal';
 import CameraCapture from './CameraCapture';
 import InstructorSearchSelect from './InstructorSearchSelect';
 import { useToast } from './useToast';
+import { pathForTab } from '../routes';
+import { TABS } from '../routes';
 import type { Instructor } from '../types';
 
 interface EvaluateCardProps {
@@ -37,6 +39,9 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  // Set only when a check-in is refused because one is already open, so the
+  // refusal can point at the record instead of just naming it.
+  const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
   // attendanceId is null until the record is saved, so the modal can show the
   // saving step instead of opening empty.
   const [reportTarget, setReportTarget] = useState<
@@ -130,6 +135,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
     setLoading(true);
     setMessage({ type: '', text: '' });
+    setActiveRecordId(null);
 
     // Open the dialog before the request so the saving step is visible from
     // the moment the button is pressed, rather than after the upload finishes.
@@ -169,8 +175,20 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       void fetchInstructors();
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      // Reported inside the dialog that is already open, so the failure
-      // appears where the user is looking.
+      // A duplicate check-in was refused before anything was saved, so there
+      // is nothing to save or analyse. Leaving the dialog up meant watching
+      // two spinners for work that was never started; close it and point at
+      // the check-in that is already open instead.
+      if (error instanceof ApiError && error.status === 409) {
+        const existingId = (error.details as { attendance_id?: string } | null)?.attendance_id;
+        setReportTarget(null);
+        setActiveRecordId(existingId ?? null);
+        setMessage({ type: 'error', text });
+        toast.error('Already checked in', { detail: text });
+        return;
+      }
+      // Any other failure happened mid-save, so it is reported inside the
+      // dialog that is already open, where the user is looking.
       setReportTarget((current) => (current ? { ...current, saveError: text } : current));
       toast.error('Check-in failed', { detail: text });
     } finally {
@@ -228,7 +246,21 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
             what the dialog already showed and lingered after it closed. */}
         {message.text && message.type === 'error' && (
           <div role="alert" className="mb-5 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
-            {message.text}
+            <p>{message.text}</p>
+            {/* A new tab rather than in-page navigation: the instructor is
+                still selected and the photo still taken, so replacing this
+                screen would discard work the user may still want. */}
+            {activeRecordId && (
+              <a
+                href={pathForTab(TABS.INSTRUCTOR_DETAIL, activeRecordId)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2.5 inline-flex items-center gap-1.5 rounded-md border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition-colors"
+              >
+                <FileText size={13} aria-hidden="true" />
+                View their report
+              </a>
+            )}
           </div>
         )}
 

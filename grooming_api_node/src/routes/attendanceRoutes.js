@@ -91,6 +91,25 @@ function attendanceScope(currentUser) {
     : { college_id: idMatch(String(currentUser.collegeId)) };
 }
 
+/**
+ * The id of the instructor's open check-in, or null.
+ *
+ * Used only on the refusal path, where a duplicate check-in has already been
+ * rejected and the caller needs somewhere to look. A failed lookup must not
+ * turn a clear 409 into a 500, so it degrades to null.
+ */
+async function activeAttendanceId(db, instructorId) {
+  try {
+    const record = await db.collection("attendance").findOne(
+      { instructor_id: idMatch(String(instructorId)), check_out_time: null },
+      { projection: { _id: 1 } },
+    );
+    return record ? String(record._id) : null;
+  } catch {
+    return null;
+  }
+}
+
 function isValidEmail(value) {
   return typeof value === "string"
     && value.length <= 254
@@ -243,11 +262,18 @@ attendanceRouter.post(
       });
     }
 
-    if (await db.collection("attendance").findOne({
+    // Return the open record's id, not just the refusal: the caller's next
+    // step is almost always to look at that check-in, and without the id the
+    // user has to go and find it by hand.
+    const activeRecord = await db.collection("attendance").findOne({
       instructor_id: idMatch(String(instructor._id)),
       check_out_time: null,
-    })) {
-      return res.status(409).json({ detail: "This instructor already has an active check-in" });
+    });
+    if (activeRecord) {
+      return res.status(409).json({
+        detail: "This instructor already has an active check-in",
+        attendance_id: String(activeRecord._id),
+      });
     }
 
     let normalizedImage;
@@ -300,7 +326,10 @@ attendanceRouter.post(
       });
     } catch (error) {
       if (error.code === 11000) {
-        return res.status(409).json({ detail: "This instructor already has an active check-in" });
+        return res.status(409).json({
+          detail: "This instructor already has an active check-in",
+          attendance_id: await activeAttendanceId(db, instructor._id),
+        });
       }
       throw error;
     }
@@ -313,7 +342,10 @@ attendanceRouter.post(
       });
     }
     if (committed.outcome === "already_active") {
-      return res.status(409).json({ detail: "This instructor already has an active check-in" });
+      return res.status(409).json({
+        detail: "This instructor already has an active check-in",
+        attendance_id: await activeAttendanceId(db, instructor._id),
+      });
     }
     const { attendance, evaluationPayload } = committed;
     try {
