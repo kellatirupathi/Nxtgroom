@@ -9,7 +9,7 @@ import { normalizeInstructorImage } from "../src/imageProcessor.js";
 import { SYSTEM_PROMPT } from "../src/prompts.js";
 import { buildCheckoutEmail, buildEvaluationEmail } from "../src/services/emailService.js";
 import { dateBoundsInTimeZone, parsePagination } from "../src/utils.js";
-import { parseCoordinates } from "../src/validation.js";
+import { instructorGenderSchema, parseCoordinates } from "../src/validation.js";
 
 const originalEnvironment = { ...process.env };
 
@@ -204,4 +204,14 @@ test("AI instructions request concise evidence instead of hidden reasoning", () 
   assert.doesNotMatch(SYSTEM_PROMPT, /Chain of Thought/i);
   assert.match(SYSTEM_PROMPT, /requires_human_review/);
   assert.match(SYSTEM_PROMPT, /checkpoint_name/);
+});
+
+test("gender edits accept only male or female, in any casing", () => {
+  assert.equal(instructorGenderSchema.parse({ gender: "male" }).gender, "MALE");
+  assert.equal(instructorGenderSchema.parse({ gender: " Female " }).gender, "FEMALE");
+  // The AI selects reference photos from this value, so anything it cannot map
+  // to a rule set has to be refused rather than stored and silently ignored.
+  for (const rejected of ["", "OTHER", "M", "unknown", null]) {
+    assert.throws(() => instructorGenderSchema.parse({ gender: rejected }));
+  }
 });

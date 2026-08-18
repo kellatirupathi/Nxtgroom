@@ -2,7 +2,7 @@ import { Router } from "express";
 import { withMongoTransaction } from "../config/db.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { asyncRoute, createDocument, parsePagination, serializeDocument } from "../utils.js";
-import { instructorSchema, validate } from "../validation.js";
+import { instructorGenderSchema, instructorSchema, validate } from "../validation.js";
 
 export const instructorRouter = Router();
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
@@ -332,6 +332,33 @@ instructorRouter.put(
       return res.status(400).json({ detail: "Instructor Employee ID exists" });
     }
     return res.json({ message: "Instructor updated successfully" });
+  })
+);
+
+/**
+ * Sets gender alone.
+ *
+ * The AI is given the instructor's gender so it compares against the right
+ * reference photos; synced instructors have none, so they are currently
+ * judged against both men's and women's examples. The full update route
+ * cannot fix that — it requires a college and email the roster never
+ * supplied — so this narrow route exists to make the field settable from the
+ * table without touching anything else on the record.
+ */
+instructorRouter.patch(
+  "/:instructorId/gender",
+  requireSuperAdmin,
+  validate(instructorGenderSchema),
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const result = await db.collection("instructors").updateOne(
+      activeFilter({ _id: idMatch(req.params.instructorId) }),
+      { $set: { gender: req.validatedBody.gender, updated_at: new Date() } }
+    );
+    if (!result.matchedCount) {
+      return res.status(404).json({ detail: "Instructor not found" });
+    }
+    return res.json({ message: "Gender updated", gender: req.validatedBody.gender });
   })
 );
 

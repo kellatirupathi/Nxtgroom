@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
+import InstructorGenderCell from './InstructorGenderCell';
 import RowActionsMenu from './RowActionsMenu';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
@@ -239,9 +240,13 @@ export default function InstructorManagement() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4 hidden xl:table-cell">Instructor User ID</th>
                 <th className="p-4">Instructor Name</th>
                 <th className="p-4">Role</th>
+                {/* The AI compares against gendered reference photos, so an
+                    unset value degrades the report. It is edited here rather
+                    than in the dialog because the dialog requires a college
+                    and email that synced instructors do not have. */}
+                <th className="p-4">Gender</th>
                 {/* Institute replaces College: they name the same thing, and
                     the roster is authoritative for it. */}
                 <th className="p-4 hidden lg:table-cell">Institute</th>
@@ -262,16 +267,21 @@ export default function InstructorManagement() {
               ) : (
                 filteredInstructors.map(ins => (
                   <tr key={ins._id} className="hover:bg-slate-50 transition-colors group">
-                    {/* Employee ID is optional on synced rows, so the stable
-                        identifier is the instructor_user_id from BigQuery. */}
-                    <td className="p-4 hidden xl:table-cell text-xs font-mono font-medium text-slate-500">
-                      {ins.instructor_user_id || ins.employee_id || <span className="text-slate-300">--</span>}
-                    </td>
                     <td className="p-4 font-bold text-slate-800">{ins.name}</td>
                     <td className="p-4">
                       <span className="inline-flex px-2.5 py-1 bg-indigo-50 text-indigo-700 font-bold text-[11px] rounded-md border border-indigo-100 whitespace-nowrap">
                         {ins.instructor_role || ins.role || '--'}
                       </span>
+                    </td>
+                    <td className="p-4">
+                      <InstructorGenderCell
+                        instructorId={String(ins._id)}
+                        instructorName={ins.name}
+                        value={ins.gender}
+                        onSaved={(gender) => setInstructors((current) => current.map(
+                          (row) => (row._id === ins._id ? { ...row, gender } : row),
+                        ))}
+                      />
                     </td>
                     <td className="p-4 hidden lg:table-cell text-sm text-slate-600">
                       {ins.institute_name || <span className="text-slate-300">--</span>}

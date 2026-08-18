@@ -55,6 +55,21 @@ export const instructorSchema = z.object({
   ),
 });
 
+/**
+ * Gender on its own, for the inline editor in the instructor table.
+ *
+ * Separate from instructorSchema because that requires a college and email,
+ * which synced instructors do not have — demanding them here would make the
+ * field uneditable for exactly the people whose gender is missing.
+ */
+export const instructorGenderSchema = z.object({
+  gender: z
+    .string()
+    .trim()
+    .transform((value) => value.toUpperCase())
+    .pipe(z.enum(["MALE", "FEMALE"])),
+});
+
 export const checkoutSchema = z.object({
   instructor_id: z.string().trim().min(1).max(100),
 });
