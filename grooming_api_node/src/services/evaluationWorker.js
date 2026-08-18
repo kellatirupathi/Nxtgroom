@@ -77,12 +77,53 @@ async function sendGroomingAlerts(db, {
     reportUrl,
   };
 
-  if (instructorEmail || instructor.email) {
-    await sendGroomingAlertEmail(instructorEmail || instructor.email, payload);
+  const deliveries = [];
+  const to = instructorEmail || instructor.email;
+  if (to) {
+    deliveries.push({ to, role: "instructor", ...(await sendGroomingAlertEmail(to, payload)) });
   }
-  for (const recipient of await getReportRecipients(db)) {
-    await sendGroomingAlertEmail(recipient, { ...payload, forReviewer: true });
+
+  const recipients = await getReportRecipients(db);
+  for (const recipient of recipients) {
+    deliveries.push({
+      to: recipient,
+      role: "reporting_partner",
+      ...(await sendGroomingAlertEmail(recipient, { ...payload, forReviewer: true })),
+    });
   }
+
+  // Recorded per recipient, because the last time these stopped arriving there
+  // was nothing to look at: the send was fire-and-forget, so a refusal by SES
+  // and an alert that was never attempted were indistinguishable afterwards.
+  const failed = deliveries.filter((delivery) => !delivery.sent);
+  if (failed.length) {
+    console.error(
+      `Appearance alert not delivered for ${attendanceId}: ${failed
+        .map((delivery) => `${delivery.role}=${delivery.reason || "unknown"}`)
+        .join(", ")}`
+    );
+  }
+  if (!recipients.length) {
+    console.warn("No reporting partners are configured; only the instructor was alerted.");
+  }
+  await db.collection("attendance").updateOne(
+    { _id: attendanceId },
+    {
+      $set: {
+        alert_deliveries: deliveries.map(({ to: address, role, sent, reason }) => ({
+          to: address,
+          role,
+          sent: Boolean(sent),
+          ...(reason ? { reason } : {}),
+        })),
+        alert_sent_at: new Date(),
+      },
+    }
+  ).catch(() => {
+    // The alert itself already went out; failing to record that must not undo
+    // it or fail the evaluation.
+  });
+  return deliveries;
 }
 
 function publicEvaluation(report, job, now) {

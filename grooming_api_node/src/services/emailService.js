@@ -416,9 +416,12 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
 /** Sent as soon as an analysis finishes badly, to the instructor and the RPs. */
 export function buildGroomingAlertEmail({ name, status, summary, dateLabel, reportUrl, forReviewer = false }) {
   const person = name || "Instructor";
+  // Alerts only fire on a failure now that manual review is gone, but the
+  // wording still handles the other case rather than asserting a status that
+  // an older queued job might not have.
   const heading = status === "non_compliant"
     ? "did not meet the appearance standards"
-    : "needs a manual review";
+    : "needs attention";
   const subject = forReviewer
     ? `Appearance alert: ${person} - ${dateLabel}`
     : `Your check-in on ${dateLabel} ${heading}`;

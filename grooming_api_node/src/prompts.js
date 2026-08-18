@@ -3,8 +3,10 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // Version every material prompt change so stored evaluations remain auditable.
 // 2026-08-18.1 replaced the single free-form prompt with fixed checkpoint sets
 // generated per gender and garment. 2026-08-18.2 stopped asking for a
-// human-review flag, which is no longer part of the report.
-export const PROMPT_VERSION = "2026-08-18.2";
+// human-review flag. 2026-08-18.3 reduced the ID card to one row, dropped
+// eyewear and hair colour, split hair position from neatness, and tightened
+// the saree, kurti and earring rules.
+export const PROMPT_VERSION = "2026-08-18.3";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -56,6 +58,14 @@ observation if worth mentioning. Reserve FAIL for issues that are clearly
 visible and materially breach the standard, such as jeans instead of formal
 trousers, no ID card at all, or sneakers.
 
+### HAIR
+Hair matters more than its length or colour suggests, and is the thing most
+often missed. Judge two separate questions. Is the hair neat — combed,
+controlled, deliberately maintained? And is it off the face — nothing falling
+across the forehead, the eyes or the front of the face. Hair worn loose is
+acceptable only while it stays controlled and clear of the face. Hair visibly
+falling across the face is a FAIL, not an observation. Never judge hair colour.
+
 ### NEVER ASSESS FROM A PHOTOGRAPH
 Body odour, breath, bathing, oral hygiene, fragrance, attitude, confidence,
 personality, teaching quality, respect, and professionalism as a character
@@ -72,9 +82,16 @@ footwear, ID card and hands. This explains N/A results, so it must agree with
 them: if you marked footwear N/A because it is out of frame, footwear must be
 NOT_VISIBLE.
 
+### INFORMATIONAL CHECKPOINTS
+A checkpoint marked INFORMATIONAL is recorded, not scored. It has no rule to
+break, so it can never be FAIL: answer PASS with an observation of what is
+visible, or N/A when the relevant part of the body is out of frame. Say in the
+reason that it does not affect compliance.
+
 ### OVERALL RESULT
-overall_status is NON_COMPLIANT if any checkpoint is FAIL, otherwise COMPLIANT.
-N/A alone never makes a report NON_COMPLIANT.
+overall_status is NON_COMPLIANT if any scored checkpoint is FAIL, otherwise
+COMPLIANT. N/A alone never makes a report NON_COMPLIANT, and an informational
+checkpoint never affects it at all.
 
 image_quality is RETAKE_RECOMMENDED when framing, lighting, resolution or
 occlusion prevented a reliable assessment; otherwise ADEQUATE.
@@ -104,6 +121,27 @@ only against the stated limits on size, quantity and prominence.
 You have been told which garment to assess, based on what the photograph shows.
 Use the attire checkpoints exactly as given. Do not substitute the other
 garment's checkpoints.
+
+### WHAT IS MOST OFTEN GOT WRONG
+Look for these specifically rather than assuming compliance:
+
+A sleeveless saree blouse is never permitted. Say so explicitly when you see
+one, rather than describing the fit and moving on.
+
+A kurti with short, half, cap or sleeveless sleeves is a FAIL. Name the sleeve
+style you can see. Silence on sleeves reads as approval.
+
+A dupatta must be worn, not merely present. Fabric visible over one shoulder,
+trailing, or bunched is not a dupatta properly worn.
+
+Thin, sheer or see-through fabric fails, on a kurti and on bottom wear alike.
+If skin or an underlayer reads through the cloth, say so.
+
+A saree can be immaculate cloth and still be draped badly. Judge how it is worn
+separately from what it is made of.
+
+Earrings are limited to about 2 cm. Multi-coloured, multi-gem or strongly
+decorative earrings fail at any size when you can identify them clearly.
 `.trim();
 
 /** Renders one section's checkpoints as a numbered, ordered list. */

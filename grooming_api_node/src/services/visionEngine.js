@@ -6,7 +6,7 @@ import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
 import { ATTIRE_CLASSIFIER_PROMPT, buildSystemPrompt } from "../prompts.js";
-import { checkpointSet, SECTION_KEYS } from "../checkpoints.js";
+import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
@@ -103,7 +103,12 @@ function toOrderedRows(sections, parsed) {
  * ask: any FAIL means non-compliant, and N/A never does.
  */
 export function deriveVerdict(rows, { imageQuality } = {}) {
-  const checks = SECTION_KEYS.flatMap((key) => rows[key] || []);
+  // Informational rows are excluded outright rather than trusted to come back
+  // as PASS. A watch is optional, so a model that returns FAIL for one must
+  // not be able to mark somebody non-compliant for wearing it.
+  const checks = SECTION_KEYS
+    .flatMap((key) => rows[key] || [])
+    .filter((item) => !INFORMATIONAL_CODES.has(item.code));
   const anyFail = checks.some((item) => item.status === "FAIL");
   // A photo showing nothing assessable comes back entirely N/A. That is not a
   // verdict about the instructor, so it asks for a retake instead of one.

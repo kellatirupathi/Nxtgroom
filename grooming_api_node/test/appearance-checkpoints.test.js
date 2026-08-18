@@ -4,6 +4,7 @@ import {
   checkpointSet,
   improvementTips,
   IMPROVEMENT_TIPS,
+  INFORMATIONAL_CODES,
   KURTI_ATTIRE_CHECKS,
   MEN_ATTIRE_CHECKS,
   SAREE_ATTIRE_CHECKS,
@@ -27,13 +28,13 @@ test("each variant returns its agreed number of checkpoints", () => {
   const shape = (gender, attire) =>
     SECTION_KEYS.map((key) => checkpointSet(gender, attire)[key].length);
 
-  assert.deepEqual(shape("MALE", "FORMAL"), [6, 8, 8, 4, 2]);
-  assert.deepEqual(shape("FEMALE", "SAREE"), [6, 6, 7, 7, 3]);
-  assert.deepEqual(shape("FEMALE", "KURTI_WITH_DUPATTA"), [6, 6, 7, 7, 3]);
+  assert.deepEqual(shape("MALE", "FORMAL"), [1, 5, 8, 4, 2]);
+  assert.deepEqual(shape("FEMALE", "SAREE"), [1, 5, 6, 5, 2]);
+  assert.deepEqual(shape("FEMALE", "KURTI_WITH_DUPATTA"), [1, 5, 7, 5, 2]);
 
-  assert.equal(codesOf("MALE", "FORMAL").length, 28);
-  assert.equal(codesOf("FEMALE", "SAREE").length, 29);
-  assert.equal(codesOf("FEMALE", "KURTI_WITH_DUPATTA").length, 29);
+  assert.equal(codesOf("MALE", "FORMAL").length, 20);
+  assert.equal(codesOf("FEMALE", "SAREE").length, 19);
+  assert.equal(codesOf("FEMALE", "KURTI_WITH_DUPATTA").length, 20);
 });
 
 test("no checkpoint appears twice in a report", () => {
@@ -105,12 +106,47 @@ test("the prompt version records that the checkpoints changed", () => {
   assert.notEqual(PROMPT_VERSION, "2026-08-17.1");
 });
 
-test("every checkpoint can tell a failing instructor what to change", () => {
+test("every scored checkpoint can tell a failing instructor what to change", () => {
   for (const [gender, attire] of [["MALE", "FORMAL"], ["FEMALE", "SAREE"], ["FEMALE", "KURTI_WITH_DUPATTA"]]) {
     for (const code of codesOf(gender, attire)) {
+      // An informational row has no rule to break, so it has nothing to advise.
+      if (INFORMATIONAL_CODES.has(code)) continue;
       assert.ok(IMPROVEMENT_TIPS[code], `${code} has no improvement tip`);
     }
   }
+});
+
+test("an optional item cannot make anybody non-compliant", () => {
+  // A watch is recorded, not required. Excluded from the verdict outright
+  // rather than trusted to come back as PASS, so a model that returns FAIL for
+  // one cannot mark somebody non-compliant for wearing it.
+  const rows = {
+    general_idcard_check: [{ code: "ID_PRESENT", status: "PASS" }],
+    accessories_check: [{ code: "M_WATCH", status: "FAIL" }],
+  };
+  assert.equal(deriveVerdict(rows, { imageQuality: "ADEQUATE" }).overall_status, "COMPLIANT");
+  assert.deepEqual(improvementTips(rows), []);
+});
+
+test("checks the stakeholders asked to drop are gone", () => {
+  const everything = new Set([
+    ...codesOf("MALE", "FORMAL"),
+    ...codesOf("FEMALE", "SAREE"),
+    ...codesOf("FEMALE", "KURTI_WITH_DUPATTA"),
+  ]);
+  // Eyewear, hair colour, heel height, mangalsutra and nose pin were removed;
+  // the ID card collapsed from six rows to one.
+  for (const code of [
+    "M_EYEWEAR", "W_EYEWEAR", "M_HAIR_COLOR", "W_HAIR_COLOR", "W_HEEL_HEIGHT",
+    "W_CHAIN", "W_NOSE_PIN", "ID_VISIBILITY", "ID_CHEST_POSITION",
+    "ID_OFFICIAL_LANYARD", "ID_READABILITY", "ID_CONDITION",
+  ]) {
+    assert.equal(everything.has(code), false, `${code} should no longer be asked for`);
+  }
+  // Hair position is now its own row rather than folded into neatness, because
+  // hair across the face is the failure the reports kept missing.
+  assert.ok(everything.has("M_HAIR_POSITION"));
+  assert.ok(everything.has("W_HAIR_POSITION"));
 });
 
 test("improvement tips come only from failures", () => {
@@ -118,16 +154,16 @@ test("improvement tips come only from failures", () => {
     general_idcard_check: [{ code: "ID_PRESENT", status: "PASS" }],
     grooming_check: [{ code: "M_FACIAL_HAIR", status: "N/A" }],
     attire_check: [
-      { code: "M_SHIRT_STYLE", status: "FAIL" },
+      { code: "M_SHIRT_TYPE", status: "FAIL" },
       { code: "M_TROUSERS_TYPE", status: "FAIL" },
     ],
     accessories_check: [],
     footwear_check: [{ code: "M_FOOTWEAR_TYPE", status: "FAIL" }],
   };
   assert.deepEqual(improvementTips(sections), [
-    "Wear a formal collared shirt.",
+    "Wear a formal full-sleeve collared shirt.",
     "Replace jeans with formal trousers.",
-    "Wear clean formal shoes instead of sneakers.",
+    "Wear clean formal shoes instead of casual footwear.",
   ]);
 
   // A passing report has nothing to advise, and an unassessable checkpoint is
