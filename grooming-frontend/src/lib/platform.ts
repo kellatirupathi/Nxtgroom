@@ -8,3 +8,11 @@ export function isNativeApp(): boolean {
   const capacitor = (window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return Boolean(capacitor?.isNativePlatform?.());
 }
+
+/**
+ * Tags the document so app-only styling in index.css can apply. Called once at
+ * startup; on the web it does nothing, so the site is unaffected.
+ */
+export function markNativeShell(): void {
+  if (isNativeApp()) document.documentElement.classList.add('native');
+}

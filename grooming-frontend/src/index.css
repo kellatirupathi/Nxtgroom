@@ -36,3 +36,61 @@ body {
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   border-radius: 1rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Android app only. Scoped to .native, which is set at startup solely inside
+   the Capacitor shell, so nothing here reaches the website.
+
+   These are the differences between a page and an app. In a browser the
+   address bar, text selection and rubber-band scroll are expected furniture;
+   inside an app they read as bugs — a long-press that selects a heading, or a
+   list that bounces past its own background, is something no native screen
+   does.
+   --------------------------------------------------------------------------- */
+.native {
+  /* The status bar and gesture bar overlap the webview once the viewport is
+     drawn edge to edge, so the app owns the inset rather than the OS. */
+  padding-top: env(safe-area-inset-top);
+  background-color: #f9fafb;
+}
+
+.native body {
+  /* Selection handles and the grey flash on tap are the clearest tells that a
+     screen is a web page. Inputs are exempted below: text there is meant to be
+     selected and corrected. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.native input,
+.native textarea,
+.native [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Scroll containers keep momentum but stop chaining to the document, so a
+   list that reaches its end does not drag the whole screen with it. */
+.native .overflow-auto,
+.native .overflow-y-auto {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Touch has no hover state: a tap that leaves a button looking hovered reads
+   as stuck. Pressed feedback replaces it. */
+.native button:active:not(:disabled),
+.native a:active {
+  transform: scale(0.98);
+  transition: transform 0.06s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .native button:active:not(:disabled),
+  .native a:active {
+    transform: none;
+  }
+}

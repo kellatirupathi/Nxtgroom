@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Camera, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
 import { apiFetch } from '../api';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
@@ -14,6 +14,7 @@ import {
   type LocationStatus,
 } from '../lib/location';
 import AuditReportModal from './AuditReportModal';
+import CameraCapture from './CameraCapture';
 import InstructorSearchSelect from './InstructorSearchSelect';
 import { useToast } from './useToast';
 import type { Instructor } from '../types';
@@ -35,12 +36,12 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [locationState, setLocationState] = useState<LocationStatus>('idle');
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   // attendanceId is null until the record is saved, so the modal can show the
   // saving step instead of opening empty.
   const [reportTarget, setReportTarget] = useState<
     { attendanceId: string | null; instructorName: string; saveError?: string } | null
   >(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
 
   useEffect(() => () => {
@@ -81,11 +82,10 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const resetPhoto = () => {
     setFile(null);
     setPreview(null);
-    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0];
+  const handleCapture = async (selected: File) => {
+    setCameraOpen(false);
 
     // Check the camera file loosely, then downscale, then apply the real
     // limit. Validating the original first rejected ordinary phone photos:
@@ -246,7 +246,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
         <div className="flex-1 flex flex-col mb-6">
           <div className="flex items-center justify-between mb-2">
-            <label htmlFor="check-in-photo" className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Check-In Photo</label>
+            <p className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Check-In Photo</p>
             {/* Grooming shots are usually selfies, so the front camera is the
                 default, but the rear camera stays one tap away. */}
             <button
@@ -258,39 +258,38 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
               {facing === 'user' ? 'Front camera' : 'Back camera'}
             </button>
           </div>
-          <div className="flex-1 min-h-[240px] border-3 border-dashed border-slate-200 rounded-md flex flex-col items-center justify-center bg-slate-50/50 relative overflow-hidden transition-all hover:border-indigo-400 hover:bg-indigo-50/30 group/drop">
-            <input
-              // Remounting on facing change is required: browsers read the
-              // capture attribute when the picker opens, so mutating it on a
-              // live input has no effect on which camera launches.
-              key={facing}
-              ref={fileInputRef}
-              id="check-in-photo"
-              type="file"
-              // HEIC is accepted because iPhones produce it by default; it is
-              // re-encoded to JPEG during downscaling before it ever uploads.
-              accept=".jpg,.jpeg,.png,.webp,.heic,.heif,image/jpeg,image/png,image/webp,image/heic,image/heif"
-              capture={facing}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              onChange={handleFileChange}
-            />
+          {/* The photo must be taken now, not chosen from a gallery: it is
+              evidence of appearance on this date, so an older or borrowed
+              image would defeat the point of the check-in. */}
+          <button
+            type="button"
+            onClick={() => setCameraOpen(true)}
+            disabled={preparing || loading || checkoutLoading}
+            className="flex-1 min-h-[240px] w-full border-3 border-dashed border-slate-200 rounded-md flex flex-col items-center justify-center bg-slate-50/50 relative overflow-hidden transition-all hover:border-indigo-400 hover:bg-indigo-50/30 group/drop disabled:opacity-60"
+          >
             {preparing ? (
               <div className="flex flex-col items-center text-slate-500 p-6 text-center" role="status">
                 <RefreshCw size={28} className="animate-spin mb-3" aria-hidden="true" />
                 <p className="font-bold text-sm">Preparing photo…</p>
               </div>
             ) : preview ? (
-              <img src={preview} alt="Selected check-in preview" className="absolute inset-0 w-full h-full object-cover object-top" />
+              <>
+                <img src={preview} alt="Check-in photo preview" className="absolute inset-0 w-full h-full object-cover object-top" />
+                <span className="absolute bottom-3 right-3 rounded-md bg-slate-900/70 px-3 py-1.5 text-xs font-semibold text-white flex items-center gap-1.5">
+                  <RefreshCw size={13} aria-hidden="true" />
+                  Retake
+                </span>
+              </>
             ) : (
               <div className="flex flex-col items-center text-slate-400 group-hover/drop:text-indigo-500 transition-colors p-6 text-center">
                 <div className="w-16 h-16 rounded-md bg-white shadow-sm flex items-center justify-center mb-4 group-hover/drop:scale-110 transition-transform duration-300">
                   <Camera size={32} aria-hidden="true" />
                 </div>
-                <p className="font-bold text-sm text-slate-600 mb-1">Take or upload a photo</p>
-                <p className="text-xs font-medium px-4 leading-relaxed">JPEG, PNG, HEIC, or WebP.</p>
+                <p className="font-bold text-sm text-slate-600 mb-1">Take a photo</p>
+                <p className="text-xs font-medium px-4 leading-relaxed">Opens the camera. Photos cannot be uploaded from your gallery.</p>
               </div>
             )}
-          </div>
+          </button>
         </div>
 
         {/* Show the accuracy, not just that a location exists: a 3km IP-based
@@ -340,6 +339,15 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           </button>
         </div>
       </div>
+
+      {cameraOpen && (
+        <CameraCapture
+          facing={facing}
+          onFlip={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
+          onCapture={handleCapture}
+          onClose={() => setCameraOpen(false)}
+        />
+      )}
 
       {reportTarget && (
         <AuditReportModal
