@@ -106,11 +106,51 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
 
   return (
     <section className="w-full flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300" aria-labelledby="instructor-detail-title">
-      <div className="flex items-center gap-4 mb-6 shrink-0">
+      <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-6 shrink-0">
         <button type="button" aria-label="Back to daily records" onClick={onBack} className="p-2 bg-white border border-slate-200 rounded-md hover:bg-slate-50 text-slate-600 transition-colors shadow-sm">
           <ArrowLeft size={20} aria-hidden="true" />
         </button>
-        <h2 id="instructor-detail-title" className="text-2xl font-extrabold text-slate-800">Instructor Detail View</h2>
+        <h2 id="instructor-detail-title" className="text-xl sm:text-2xl font-extrabold text-slate-800">Instructor Detail View</h2>
+
+        {/* These act on the record as a whole, so they sit with its title
+            rather than inside the profile card, which describes the person.
+            ml-auto claims the empty space the heading row already had. */}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPhotoKind('checkin')}
+            disabled={!record.check_in_photo_key}
+            title={record.check_in_photo_key ? 'View the check-in photo' : 'No check-in photo was stored'}
+            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+          >
+            <LogIn size={14} aria-hidden="true" />
+            <span className="hidden sm:inline">Check-in photo</span>
+            <ImageIcon size={14} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPhotoKind('checkout')}
+            disabled={!record.check_out_photo_key}
+            title={record.check_out_photo_key ? 'View the check-out photo' : 'No check-out photo was stored'}
+            className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
+          >
+            <LogOut size={14} aria-hidden="true" />
+            <span className="hidden sm:inline">Check-out photo</span>
+            <ImageIcon size={14} aria-hidden="true" />
+          </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              aria-label="Delete this attendance record"
+              title="Delete this attendance record"
+              className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 overflow-hidden">
@@ -120,45 +160,6 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
             <h3 className="text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
             <p className="text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-5">{record.instructor_role}</p>
             <StatusBadge status={record.status} />
-
-            {/* The photographs are the evidence the report was made from, so
-                they belong beside the verdict rather than a page away. */}
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPhotoKind('checkin')}
-                disabled={!record.check_in_photo_key}
-                title={record.check_in_photo_key ? 'View the check-in photo' : 'No check-in photo was stored'}
-                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
-              >
-                <LogIn size={14} aria-hidden="true" />
-                Check-in photo
-                <ImageIcon size={14} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setPhotoKind('checkout')}
-                disabled={!record.check_out_photo_key}
-                title={record.check_out_photo_key ? 'View the check-out photo' : 'No check-out photo was stored'}
-                className="inline-flex items-center gap-1.5 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300"
-              >
-                <LogOut size={14} aria-hidden="true" />
-                Check-out photo
-                <ImageIcon size={14} aria-hidden="true" />
-              </button>
-              {canDelete && (
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(true)}
-                  aria-label="Delete this attendance record"
-                  title="Delete this attendance record"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
-                >
-                  <Trash2 size={14} aria-hidden="true" />
-                  Delete
-                </button>
-              )}
-            </div>
           </div>
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-6 space-y-5 shrink-0">
