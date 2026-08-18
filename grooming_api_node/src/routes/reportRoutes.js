@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { asyncRoute } from "../utils.js";
+import { idMatch } from "../middleware/auth.js";
 import { appUrl, runtimeConfig } from "../config/env.js";
 import {
   findInstructorByReportToken,
@@ -296,7 +297,7 @@ async function deliverWeeklyReports(db, startKey) {
   const failures = [];
   for (const instructorId of instructorIds) {
     try {
-      const instructor = await db.collection("instructors").findOne({ _id: instructorId });
+      const instructor = await db.collection("instructors").findOne({ _id: idMatch(String(instructorId)) });
       if (!instructor?.email) {
         skipped += 1;
         continue;
@@ -398,7 +399,7 @@ async function deliverAttendanceReminders(db) {
     try {
       // Guard against a repeat run sending the same nudge twice.
       if (record.checkout_reminder_sent_at) continue;
-      const instructor = await db.collection("instructors").findOne({ _id: record.instructor_id });
+      const instructor = await db.collection("instructors").findOne({ _id: idMatch(String(record.instructor_id)) });
       const email = instructor?.email;
       if (!email) continue;
 

@@ -71,7 +71,7 @@ test("login preserves the frontend authentication contract", async () => {
     collection(name) {
       // /me also reads the workspace permission defaults, so it can tell the
       // browser which actions to offer.
-      if (name === "settings") return { findOne: async () => null };
+      if (name === "app_settings") return { findOne: async () => null };
       assert.equal(name, "users");
       return {
         findOne: async ({ email }) => email === "admin@nxtwave.com"

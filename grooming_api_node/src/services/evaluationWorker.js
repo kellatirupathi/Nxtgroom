@@ -7,6 +7,7 @@ import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { downloadPhoto } from "./photoStorage.js";
 import { sendGroomingAlertEmail } from "./emailService.js";
+import { idMatch } from "../middleware/auth.js";
 import { getReportRecipients } from "./reportRecipients.js";
 import { ensureReportToken, localDateKey } from "./instructorReports.js";
 import { appUrl } from "../config/env.js";
@@ -52,10 +53,18 @@ async function sendGroomingAlerts(db, {
   summary,
   checkInTime,
 }) {
+  // idMatch, not the raw value: attendance stores instructor_id as a string,
+  // while a synced instructor's _id is an ObjectId. Matching on the string
+  // alone found nobody for all 599 imported instructors, and the early return
+  // below then silently cancelled the alert — to the instructor and to every
+  // reporting partner alike.
   const instructor = instructorId
-    ? await db.collection("instructors").findOne({ _id: instructorId })
+    ? await db.collection("instructors").findOne({ _id: idMatch(String(instructorId)) })
     : null;
-  if (!instructor) return;
+  if (!instructor) {
+    console.error(`Grooming alert skipped: instructor ${instructorId} was not found`);
+    return;
+  }
 
   const token = await ensureReportToken(db, instructor);
   const dayKey = localDateKey(new Date(checkInTime || Date.now()));
