@@ -4,7 +4,6 @@ import {
   formatCoordinates,
   hasEvaluation,
   imageQualityLabel,
-  needsHumanReview,
   normalizeAttendanceStatus,
 } from '../src/status.ts';
 
@@ -14,18 +13,19 @@ test('maps current and legacy attendance states', () => {
   assert.equal(normalizeAttendanceStatus('non_compliant'), 'non_compliant');
   assert.equal(normalizeAttendanceStatus('fail'), 'non_compliant');
   assert.equal(normalizeAttendanceStatus('error'), 'error');
-  assert.equal(normalizeAttendanceStatus('review_required'), 'review_required');
-  assert.equal(normalizeAttendanceStatus('needs_review'), 'review_required');
   assert.equal(normalizeAttendanceStatus('processing'), 'pending');
+  // Records evaluated before human review was removed still carry these. They
+  // were compliant results that had been flagged, so they read as compliant
+  // rather than falling through to "pending" and looking unanalysed.
+  assert.equal(normalizeAttendanceStatus('review_required'), 'compliant');
+  assert.equal(normalizeAttendanceStatus('needs_review'), 'compliant');
   assert.equal(hasEvaluation('error'), false);
-  assert.equal(hasEvaluation('review_required'), true);
+  assert.equal(hasEvaluation('review_required'), true, 'a legacy record still has a verdict');
 });
 
-test('human-review notices follow status and evaluation flags', () => {
-  assert.equal(needsHumanReview('review_required', { image_quality: 'ADEQUATE' }), true);
-  assert.equal(needsHumanReview('non_compliant', { requires_human_review: true }), true);
-  assert.equal(needsHumanReview('compliant', { image_quality: 'RETAKE_RECOMMENDED' }), true);
-  assert.equal(needsHumanReview('compliant', { image_quality: 'ADEQUATE' }), false);
+test('image quality is reported separately from the verdict', () => {
+  // Kept after human review was removed because it says something different:
+  // the verdict stands either way, but a poor photo is worth retaking.
   assert.equal(imageQualityLabel('RETAKE_RECOMMENDED'), 'Retake recommended');
   assert.equal(imageQualityLabel('ADEQUATE'), 'Adequate');
   assert.equal(imageQualityLabel(null), 'Not reported');

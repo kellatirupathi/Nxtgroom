@@ -21,7 +21,10 @@ function activeFilter(extra = {}) {
 function feedbackStatus(status) {
   if (status === "pending") return "PENDING";
   if (status === "error") return "ERROR";
-  if (status === "review_required" || status === "needs_review") return "REVIEW_REQUIRED";
+  // Records evaluated before the review flag was removed still carry this
+  // status. They were compliant results that had been flagged, so that is
+  // what they report now; the stored value is left untouched.
+  if (status === "review_required" || status === "needs_review") return "COMPLIANT";
   if (status === "non_compliant" || status === "fail") return "FLAGGED";
   if (status === "compliant" || status === "done") return "COMPLIANT";
   return "UNKNOWN";

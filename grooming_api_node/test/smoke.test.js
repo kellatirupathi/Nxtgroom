@@ -224,15 +224,15 @@ test("SES checkout report includes attendance times and latest appearance status
   assert.match(email.text, /All checks passed\./);
 });
 
-test("SES report does not call an uncertain image compliant", () => {
+test("SES report asks for a retake when the photo could not be assessed", () => {
   const email = buildEvaluationEmail({
     instructorName: "Test Instructor",
     overallStatus: "COMPLIANT",
     aiSummary: "Footwear was not visible.",
-    requiresHumanReview: true,
     imageQuality: "RETAKE_RECOMMENDED",
   });
-  assert.match(email.text, /Appearance status: REVIEW REQUIRED/);
+  // Nothing failed, so the result stands. The photo is still the problem, and
+  // saying so is what gets a usable one next time.
+  assert.match(email.text, /Appearance status: COMPLIANT/);
   assert.match(email.text, /clearer full-body photo/);
-  assert.doesNotMatch(email.text, /Appearance status: COMPLIANT/);
 });

@@ -98,7 +98,6 @@ async function loadInstructorMonth(db, instructor, monthKey) {
     present_days: present,
     compliant_days: records.filter((r) => r.status === "compliant").length,
     non_compliant_days: records.filter((r) => r.status === "non_compliant").length,
-    review_days: records.filter((r) => r.status === "review_required").length,
     saree_days: records.filter((r) => r.attire_type === "SAREE").length,
     kurti_days: records.filter((r) => r.attire_type === "KURTI_WITH_DUPATTA").length,
     formal_days: records.filter((r) => r.attire_type === "FORMAL").length,
@@ -210,7 +209,6 @@ reportRouter.get(
           overall_status: evaluation.overall_status,
           ai_summary: evaluation.ai_summary,
           image_quality: evaluation.image_quality,
-          requires_human_review: evaluation.requires_human_review,
           attire_type: evaluation.attire_type || record.attire_type || "UNKNOWN",
           // Explains the N/A rows: a checkpoint marked unassessable should be
           // traceable to a part of the body the photograph did not show.

@@ -142,9 +142,12 @@ export function summariseWeek(records, startKey, options = {}) {
     week_end: dates[dates.length - 1],
     days,
     present_days: counted.length,
-    compliant_days: counted.filter((day) => day.status === "compliant").length,
+    // review_required is read here but never written: records evaluated before
+    // the review flag was removed carry it, and they were compliant results.
+    compliant_days: counted.filter(
+      (day) => day.status === "compliant" || day.status === "review_required"
+    ).length,
     non_compliant_days: counted.filter((day) => day.status === "non_compliant").length,
-    review_days: counted.filter((day) => day.status === "review_required").length,
     saree_days: counted.filter((day) => day.attire_type === "SAREE").length,
     kurti_days: counted.filter((day) => day.attire_type === "KURTI_WITH_DUPATTA").length,
     formal_days: counted.filter((day) => day.attire_type === "FORMAL").length,

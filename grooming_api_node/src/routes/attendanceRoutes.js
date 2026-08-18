@@ -664,7 +664,6 @@ attendanceRouter.get(
           compliance_status: 1,
           remarks: 1,
           evaluation_queue_status: 1,
-          requires_human_review: 1,
           updated_at: 1,
         },
       }
@@ -677,7 +676,6 @@ attendanceRouter.get(
       compliance_status: attendance.compliance_status || null,
       remarks: attendance.remarks || null,
       queue_status: attendance.evaluation_queue_status || null,
-      requires_human_review: Boolean(attendance.requires_human_review),
       // Lets the client stop polling instead of guessing from the status text.
       settled: attendance.status !== "pending",
       updated_at: attendance.updated_at || null,
@@ -728,7 +726,6 @@ attendanceRouter.post(
           status: "pending",
           compliance_status: null,
           remarks: "AI analysis is in progress.",
-          requires_human_review: false,
           evaluation_queue_status: "queued",
           updated_at: now,
         },

@@ -13,7 +13,6 @@ export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
   checkin_email_enabled: true,
   checkout_email_enabled: true,
   only_when_non_compliant: false,
-  only_when_review_required: false,
 });
 
 const BOOLEAN_KEYS = Object.keys(DEFAULT_NOTIFICATION_SETTINGS);
@@ -84,17 +83,7 @@ export function shouldSendNotification(settings, type, evaluation = {}) {
   const isNonCompliant = status === "NON_COMPLIANT"
     || status === "NON-COMPLIANT"
     || status === "FAIL";
-  const requiresReview = evaluation.requiresHumanReview === true
-    || evaluation.requires_human_review === true
-    || evaluation.imageQuality === "RETAKE_RECOMMENDED"
-    || evaluation.image_quality === "RETAKE_RECOMMENDED";
-
-  // Suppression filters are OR-ed: if either is enabled, the message must
-  // satisfy at least one of the enabled conditions to go out.
-  const filters = [];
-  if (config.only_when_non_compliant) filters.push(isNonCompliant);
-  if (config.only_when_review_required) filters.push(requiresReview);
-  if (filters.length && !filters.some(Boolean)) return false;
+  if (config.only_when_non_compliant && !isNonCompliant) return false;
 
   return true;
 }

@@ -37,9 +37,10 @@ test("the summary counts attire and compliance per day", () => {
   assert.equal(summary.present_days, 3);
   assert.equal(summary.saree_days, 2);
   assert.equal(summary.kurti_days, 1);
-  assert.equal(summary.compliant_days, 1);
+  // Two: the compliant day, plus a legacy review_required record, which was a
+  // compliant result flagged under a rule that no longer exists.
+  assert.equal(summary.compliant_days, 2);
   assert.equal(summary.non_compliant_days, 1);
-  assert.equal(summary.review_days, 1);
   assert.equal(summary.missed_checkouts, 1, "b never checked out");
   assert.equal(summary.days[3].present, false, "Thursday is absent");
 });

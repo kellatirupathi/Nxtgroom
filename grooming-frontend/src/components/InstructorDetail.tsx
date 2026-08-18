@@ -4,7 +4,7 @@ import { apiFetch, apiJson } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import PhotoViewer from './PhotoViewer';
 import { useToast } from './useToast';
-import { imageQualityLabel, needsHumanReview, normalizeAttendanceStatus } from '../status';
+import { normalizeAttendanceStatus } from '../status';
 import GroomingReport from './GroomingReport';
 import LocationPanel from './LocationPanel';
 import type { AttendanceRecord, Evaluation } from '../types';
@@ -24,8 +24,6 @@ function StatusBadge({ status }: { status?: string }) {
       return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-emerald-50 text-emerald-600 border border-emerald-200"><CheckCircle2 size={16} aria-hidden="true" /> Compliant</span>;
     case 'non_compliant':
       return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-rose-50 text-rose-600 border border-rose-200"><XCircle size={16} aria-hidden="true" /> Non-compliant</span>;
-    case 'review_required':
-      return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-amber-50 text-amber-700 border border-amber-200"><CircleAlert size={16} aria-hidden="true" /> Review required</span>;
     case 'error':
       return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-slate-100 text-slate-600 border border-slate-200"><TriangleAlert size={16} aria-hidden="true" /> Analysis error</span>;
     default:
@@ -194,21 +192,18 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-md border border-dashed border-slate-200 p-8 text-center gap-2"><XCircle size={32} className="text-slate-300" aria-hidden="true" /><p>No detailed evaluation report is available.</p></div>
           ) : (
             <div className="flex-1 pb-4">
-              {needsHumanReview(record.status, evaluation) && (
+              {/* The verdict stands whatever the photo was like. This only
+                  asks for a better one next time, so the checkpoints that
+                  could not be seen can be. */}
+              {evaluation.image_quality === 'RETAKE_RECOMMENDED' && (
                 <div role="note" className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
                   <div className="flex items-start gap-3">
                     <CircleAlert size={20} className="mt-0.5 shrink-0" aria-hidden="true" />
                     <div>
-                      <h4 className="text-sm font-extrabold">Human review required</h4>
+                      <h4 className="text-sm font-extrabold">Retake recommended</h4>
                       <p className="mt-1 text-sm leading-relaxed">
-                        {evaluation.image_quality === 'RETAKE_RECOMMENDED'
-                          ? 'The image did not support a reliable assessment of every critical checkpoint. Retake the photo and have an authorized reviewer confirm the result.'
-                          : normalizeAttendanceStatus(record.status) === 'review_required'
-                            ? 'At least one critical checkpoint needs confirmation by an authorized reviewer before this result is treated as compliant.'
-                            : 'An authorized reviewer must confirm the AI findings before any action is taken.'}
-                      </p>
-                      <p className="mt-2 text-xs font-bold uppercase tracking-wide">
-                        Image quality: {imageQualityLabel(evaluation.image_quality)}
+                        The framing, lighting or resolution prevented some checkpoints from being
+                        assessed. A clearer full-body photo next time will cover them.
                       </p>
                     </div>
                   </div>

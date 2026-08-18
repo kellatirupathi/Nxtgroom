@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, CircleAlert, Image as ImageIcon, LogOut } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, XCircle, Clock, TriangleAlert, Image as ImageIcon, LogOut } from 'lucide-react';
 import { apiFetchAllPages } from '../api';
 import PhotoViewer from './PhotoViewer';
 import DateRangeFilter from './DateRangeFilter';
@@ -25,8 +25,6 @@ function StatusBadge({ status }: { status?: string }) {
       return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-emerald-50 text-emerald-600 border border-emerald-200"><CheckCircle2 size={12} aria-hidden="true" /> Compliant</span>;
     case 'non_compliant':
       return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-50 text-rose-600 border border-rose-200"><XCircle size={12} aria-hidden="true" /> Non-compliant</span>;
-    case 'review_required':
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200"><CircleAlert size={12} aria-hidden="true" /> Review required</span>;
     case 'error':
       return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-slate-100 text-slate-600 border border-slate-200"><TriangleAlert size={12} aria-hidden="true" /> Analysis error</span>;
     default:

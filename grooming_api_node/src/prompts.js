@@ -2,8 +2,9 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 
 // Version every material prompt change so stored evaluations remain auditable.
 // 2026-08-18.1 replaced the single free-form prompt with fixed checkpoint sets
-// generated per gender and garment.
-export const PROMPT_VERSION = "2026-08-18.1";
+// generated per gender and garment. 2026-08-18.2 stopped asking for a
+// human-review flag, which is no longer part of the report.
+export const PROMPT_VERSION = "2026-08-18.2";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -77,10 +78,6 @@ N/A alone never makes a report NON_COMPLIANT.
 
 image_quality is RETAKE_RECOMMENDED when framing, lighting, resolution or
 occlusion prevented a reliable assessment; otherwise ADEQUATE.
-
-requires_human_review is true when any checkpoint is FAIL, the image should be
-retaken, or a critical area — ID card, attire or footwear — could not be
-assessed.
 
 ai_summary is two or three factual sentences naming the meaningful failures. Do
 not list everything that passed. Do not claim identity, intent, or anything not

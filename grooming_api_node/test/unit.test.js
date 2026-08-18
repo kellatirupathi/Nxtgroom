@@ -203,7 +203,7 @@ test("technical analysis errors are never described as non-compliance", () => {
 test("AI instructions request concise evidence instead of hidden reasoning", () => {
   const prompt = buildSystemPrompt("MALE", "FORMAL");
   assert.doesNotMatch(prompt, /Chain of Thought/i);
-  assert.match(prompt, /requires_human_review/);
+  assert.match(prompt, /image_quality/);
   assert.match(prompt, /checkpoint_name/);
 });
 

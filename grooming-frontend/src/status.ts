@@ -1,4 +1,4 @@
-import type { AttendanceStatus, Evaluation, ImageQuality } from './types.ts';
+import type { AttendanceStatus, ImageQuality } from './types.ts';
 
 export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
   switch (String(status || '').toLowerCase()) {
@@ -8,9 +8,12 @@ export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
     case 'fail':
     case 'non_compliant':
       return 'non_compliant';
+    // Records evaluated before the review flag was removed still carry these.
+    // They were compliant results that had been flagged, so that is how they
+    // read now. The stored value itself is left untouched.
     case 'needs_review':
     case 'review_required':
-      return 'review_required';
+      return 'compliant';
     case 'error':
       return 'error';
     default:
@@ -20,13 +23,7 @@ export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
 
 export function hasEvaluation(status: unknown): boolean {
   const normalized = normalizeAttendanceStatus(status);
-  return normalized === 'compliant' || normalized === 'non_compliant' || normalized === 'review_required';
-}
-
-export function needsHumanReview(status: unknown, evaluation: Evaluation = {}): boolean {
-  return normalizeAttendanceStatus(status) === 'review_required'
-    || evaluation.requires_human_review === true
-    || evaluation.image_quality === 'RETAKE_RECOMMENDED';
+  return normalized === 'compliant' || normalized === 'non_compliant';
 }
 
 export function imageQualityLabel(imageQuality: ImageQuality | string | undefined | null): string {

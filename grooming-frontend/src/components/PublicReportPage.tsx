@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, CircleAlert, Clock, Image as ImageIcon, TriangleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, Image as ImageIcon, TriangleAlert, XCircle } from 'lucide-react';
 import { apiFetch } from '../api';
 import GroomingReport from './GroomingReport';
 import { AiSummary, ReportFlags, VisibleRegions, WeeklyRotationCard } from './ReportMeta';
@@ -79,7 +79,6 @@ function StatusPill({ status }: { status: string | null }) {
   const map: Record<string, { text: string; style: string; Icon: typeof CheckCircle2 }> = {
     compliant: { text: 'Compliant', style: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: CheckCircle2 },
     non_compliant: { text: 'Non-compliant', style: 'bg-rose-50 text-rose-700 border-rose-200', Icon: XCircle },
-    review_required: { text: 'Review required', style: 'bg-amber-50 text-amber-700 border-amber-200', Icon: CircleAlert },
     error: { text: 'Analysis error', style: 'bg-slate-100 text-slate-600 border-slate-200', Icon: TriangleAlert },
   };
   const match = status ? map[status] : undefined;

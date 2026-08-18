@@ -2,26 +2,20 @@ import { CreditCard, Eye, Footprints, Hand, Shirt, Sparkles, User } from 'lucide
 import type { Evaluation, Visibility, WeeklyRotation } from '../types';
 
 /**
- * Image quality and human review, shown together because they answer the same
- * question: how much weight this report can carry on its own.
+ * Whether the photograph itself supported the assessment.
+ *
+ * Kept after human review was removed because it says something different: the
+ * verdict stands either way, but a poor photo is worth retaking so the next
+ * one is assessable.
  */
 export function ReportFlags({ evaluation }: { evaluation: Evaluation }) {
   const retake = evaluation.image_quality === 'RETAKE_RECOMMENDED';
-  const review = Boolean(evaluation.requires_human_review);
   return (
-    <div className="flex flex-wrap gap-2">
-      <div className={`rounded-md border px-3 py-2 ${retake ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Image quality</p>
-        <p className={`text-xs font-extrabold ${retake ? 'text-amber-700' : 'text-slate-700'}`}>
-          {retake ? 'Retake recommended' : 'Adequate'}
-        </p>
-      </div>
-      <div className={`rounded-md border px-3 py-2 ${review ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
-        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Human review</p>
-        <p className={`text-xs font-extrabold ${review ? 'text-rose-700' : 'text-emerald-700'}`}>
-          {review ? 'Required' : 'Not required'}
-        </p>
-      </div>
+    <div className={`rounded-md border px-3 py-2 ${retake ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-slate-50'}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Image quality</p>
+      <p className={`text-xs font-extrabold ${retake ? 'text-amber-700' : 'text-slate-700'}`}>
+        {retake ? 'Retake recommended' : 'Adequate'}
+      </p>
     </div>
   );
 }

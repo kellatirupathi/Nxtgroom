@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, CircleAlert, Loader2, RefreshCw, TriangleAlert, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCw, TriangleAlert, X, XCircle } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import GroomingReport from './GroomingReport';
 import { useToast } from './useToast';
@@ -22,7 +22,6 @@ interface StatusPayload {
   status: string;
   compliance_status: string | null;
   remarks: string | null;
-  requires_human_review: boolean;
   settled: boolean;
 }
 
@@ -53,13 +52,6 @@ function ProgressStep({ label, state }: { label: string; state: 'pending' | 'act
 }
 
 function Verdict({ status }: { status: StatusPayload }) {
-  if (status.requires_human_review) {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
-        <CircleAlert size={14} aria-hidden="true" /> Review required
-      </span>
-    );
-  }
   if (status.compliance_status === 'COMPLIANT') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
@@ -170,7 +162,6 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
         status: 'pending',
         compliance_status: null,
         remarks: null,
-        requires_human_review: false,
         settled: false,
       });
       toast.info('Re-analysis queued', { detail: 'The same photo is being analysed again.' });

@@ -171,7 +171,6 @@ test("a failing checkpoint makes the report non-compliant", () => {
     footwear_check: [{ status: "PASS" }],
   }, { imageQuality: "ADEQUATE" });
   assert.equal(verdict.overall_status, "NON_COMPLIANT");
-  assert.equal(verdict.requires_human_review, true);
 });
 
 test("an unassessable checkpoint is not a violation", () => {
@@ -184,10 +183,9 @@ test("an unassessable checkpoint is not a violation", () => {
     footwear_check: [{ status: "PASS" }],
   }, { imageQuality: "ADEQUATE" });
   assert.equal(verdict.overall_status, "COMPLIANT");
-  assert.equal(verdict.requires_human_review, false);
 });
 
-test("a critical area that could not be seen asks for a human", () => {
+test("a critical area that could not be seen does not fail the report", () => {
   for (const section of ["general_idcard_check", "attire_check", "footwear_check"]) {
     const rows = {
       general_idcard_check: [{ status: "PASS" }],
@@ -197,7 +195,6 @@ test("a critical area that could not be seen asks for a human", () => {
     rows[section] = [{ status: "N/A" }];
     const verdict = deriveVerdict(rows, { imageQuality: "ADEQUATE" });
     assert.equal(verdict.overall_status, "COMPLIANT", `${section} must not fail the report`);
-    assert.equal(verdict.requires_human_review, true, `${section} unseen needs review`);
   }
 });
 
@@ -209,15 +206,13 @@ test("a photo showing nothing assessable asks for a retake, not a verdict", () =
   }, { imageQuality: "ADEQUATE" });
   assert.equal(verdict.overall_status, "COMPLIANT");
   assert.equal(verdict.image_quality, "RETAKE_RECOMMENDED");
-  assert.equal(verdict.requires_human_review, true);
 });
 
 test("a missing gender produces no compliance claim", () => {
   const evaluation = unknownGenderEvaluation();
   // Not NON_COMPLIANT: the instructor did nothing wrong, the record is
-  // incomplete. Review is requested instead so nobody is emailed a verdict.
+  // incomplete. The reason says so rather than a verdict implying otherwise.
   assert.equal(evaluation.overall_status, "COMPLIANT");
-  assert.equal(evaluation.requires_human_review, true);
   assert.equal(evaluation.unassessed_reason, "GENDER_NOT_CONFIGURED");
   for (const key of SECTION_KEYS) {
     assert.deepEqual(evaluation[key], [], `${key} must stay empty without a dress code`);

@@ -275,6 +275,9 @@ export async function prepareCheckoutReport(db, job) {
     throw error;
   }
 
+  // review_required is retained here alone: records evaluated before the
+  // review flag was removed still carry it, and their notifications must
+  // still be recognised as finished work.
   const analysisTerminal = new Set(["compliant", "non_compliant", "review_required", "error"])
     .has(attendance.status);
   const checkinNotificationTerminal = new Set([
@@ -297,7 +300,6 @@ export async function prepareCheckoutReport(db, job) {
       checkOutTime: attendance.check_out_time || job.report?.checkOutTime,
       status: attendance.status,
       remarks: attendance.remarks,
-      requiresHumanReview: Boolean(attendance.requires_human_review),
       imageQuality: attendance.image_quality || null,
     },
   };

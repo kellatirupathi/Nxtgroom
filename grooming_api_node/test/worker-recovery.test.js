@@ -189,7 +189,6 @@ test("a final-attempt crash after evaluation persistence completes remaining eff
         attendance_id: "attendance-3",
         overall_status: "COMPLIANT",
         ai_summary: "All checks passed.",
-        requires_human_review: false,
         image_quality: "ADEQUATE",
         processed_at: new Date("2026-08-14T03:31:00.000Z"),
       }),
@@ -212,7 +211,7 @@ test("a final-attempt crash after evaluation persistence completes remaining eff
   assert.equal(deletedJobs[0][0].status, "recovering");
 });
 
-test("a normal retry reuses a stored evaluation and preserves human-review state", async () => {
+test("a normal retry reuses a stored evaluation rather than paying for it twice", async () => {
   const attendanceUpdates = [];
   const deletedJobs = [];
   const job = {
@@ -231,7 +230,6 @@ test("a normal retry reuses a stored evaluation and preserves human-review state
         attendance_id: "attendance-normal",
         overall_status: "COMPLIANT",
         ai_summary: "Critical item was not visible.",
-        requires_human_review: true,
         image_quality: "RETAKE_RECOMMENDED",
         processed_at: new Date("2026-08-14T03:31:00.000Z"),
       }),
@@ -261,9 +259,10 @@ test("a normal retry reuses a stored evaluation and preserves human-review state
   });
 
   assert.equal(await recoverClaimedEvaluation(db, job), true);
-  assert.equal(attendanceUpdates[0][1].$set.status, "review_required");
+  assert.equal(attendanceUpdates[0][1].$set.status, "compliant");
   assert.equal(attendanceUpdates[0][1].$set.compliance_status, "COMPLIANT");
-  assert.equal(attendanceUpdates[0][1].$set.requires_human_review, true);
+  // The photo quality is still recorded, so the instructor is still told to
+  // retake it even though nothing failed.
   assert.equal(attendanceUpdates[0][1].$set.image_quality, "RETAKE_RECOMMENDED");
   assert.equal(deletedJobs.length, 1);
 });
@@ -409,7 +408,6 @@ test("checkout waits for analysis and the check-in email, then uses current atte
         check_in_time: new Date("2026-08-14T03:30:00.000Z"),
         check_out_time: exactCheckout,
         checkin_email_status: "sent",
-        requires_human_review: true,
         image_quality: "RETAKE_RECOMMENDED",
       }),
     },
@@ -418,7 +416,6 @@ test("checkout waits for analysis and the check-in email, then uses current atte
   assert.equal(prepared.report.status, "non_compliant");
   assert.equal(prepared.report.remarks, "ID card missing.");
   assert.equal(prepared.report.checkOutTime, exactCheckout);
-  assert.equal(prepared.report.requiresHumanReview, true);
   assert.equal(prepared.report.imageQuality, "RETAKE_RECOMMENDED");
 });
 

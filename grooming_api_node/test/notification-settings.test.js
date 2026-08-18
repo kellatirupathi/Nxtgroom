@@ -26,14 +26,14 @@ test("suppression filters are OR-ed and accept either payload casing", () => {
   assert.equal(shouldSendNotification(nonCompliantOnly, "checkin", { overallStatus: "NON_COMPLIANT" }), true);
   assert.equal(shouldSendNotification(nonCompliantOnly, "checkin", { overall_status: "NON_COMPLIANT" }), true);
 
-  const both = { ...nonCompliantOnly, only_when_review_required: true };
+  const both = { ...nonCompliantOnly };
   assert.equal(
-    shouldSendNotification(both, "checkin", { overallStatus: "COMPLIANT", requiresHumanReview: true }),
+    shouldSendNotification(both, "checkin", { overallStatus: "NON_COMPLIANT" }),
     true,
     "matching either enabled filter is enough"
   );
   assert.equal(
-    shouldSendNotification(both, "checkin", { overallStatus: "COMPLIANT", requiresHumanReview: false }),
+    shouldSendNotification(both, "checkin", { overallStatus: "COMPLIANT" }),
     false
   );
 });

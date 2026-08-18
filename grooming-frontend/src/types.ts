@@ -23,7 +23,6 @@ export interface AdminUser {
 export type AttendanceStatus =
   | 'compliant'
   | 'non_compliant'
-  | 'review_required'
   | 'error'
   | 'pending';
 
@@ -134,7 +133,6 @@ export interface WeeklyRotation {
 export interface Evaluation {
   overall_status?: string;
   ai_summary?: string;
-  requires_human_review?: boolean;
   image_quality?: ImageQuality;
   attire_type?: AttireType;
   visible_regions?: VisibleRegions | null;
@@ -176,7 +174,6 @@ export interface NotificationSettings {
   checkin_email_enabled: boolean;
   checkout_email_enabled: boolean;
   only_when_non_compliant: boolean;
-  only_when_review_required: boolean;
 }
 
 /** Options accepted by the shared fetch helpers. */

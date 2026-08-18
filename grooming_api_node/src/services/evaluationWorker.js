@@ -97,8 +97,6 @@ function publicEvaluation(report, job, now) {
     attire_check: report.attire_check || [],
     accessories_check: report.accessories_check || [],
     footwear_check: report.footwear_check || [],
-    requires_human_review: Boolean(report.requires_human_review)
-      || imageQuality === "RETAKE_RECOMMENDED",
     image_quality: imageQuality,
     // Classified independently of pass/fail so the weekly saree/kurti split
     // can be counted even on a non-compliant day.
@@ -266,11 +264,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   const now = new Date();
   const overallStatus = evaluation.overall_status;
   const imageQuality = evaluation.image_quality || "RETAKE_RECOMMENDED";
-  const requiresHumanReview = Boolean(evaluation.requires_human_review)
-    || imageQuality === "RETAKE_RECOMMENDED";
-  const attendanceStatus = overallStatus === "COMPLIANT"
-    ? (requiresHumanReview ? "review_required" : "compliant")
-    : "non_compliant";
+  const attendanceStatus = overallStatus === "COMPLIANT" ? "compliant" : "non_compliant";
   await db.collection("attendance").updateOne(
     { _id: job.attendance_id },
     {
@@ -283,7 +277,6 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         // Denormalised onto attendance so Daily Records and the weekly report
         // need no join to the evaluations collection.
         attire_type: evaluation.attire_type || "UNKNOWN",
-        requires_human_review: requiresHumanReview,
         image_quality: imageQuality,
         updated_at: now,
       },
@@ -302,16 +295,15 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
       overallStatus,
       aiSummary: evaluation.ai_summary || "",
       checkInTime: job.check_in_time,
-      requiresHumanReview,
       imageQuality,
     },
   });
 
-  // A poor result is sent immediately to the instructor and the reporting
+  // A failed result is sent immediately to the instructor and the reporting
   // partners, rather than waiting for the weekly summary. Failures here are
   // logged and swallowed: the evaluation itself is already committed and must
   // not be retried just because an alert could not be delivered.
-  if (attendanceStatus === "non_compliant" || attendanceStatus === "review_required") {
+  if (attendanceStatus === "non_compliant") {
     try {
       await sendGroomingAlerts(db, {
         attendanceId: job.attendance_id,
@@ -434,7 +426,6 @@ export async function syncFailedEvaluationOutcome(db, job) {
         evaluation_queue_status: "failed",
         remarks: "AI analysis could not be completed. Check out this attendance, then check in again with a new photo.",
         analysis_error_code: terminalErrorCode,
-        requires_human_review: true,
         image_quality: null,
         checkin_email_status: notification ? "outbox_pending" : "skipped_no_email",
         ...(notification ? { _private_checkin_outbox: notification } : {}),

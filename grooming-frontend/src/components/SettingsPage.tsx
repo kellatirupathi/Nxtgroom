@@ -32,18 +32,12 @@ const TOGGLES: { key: keyof NotificationSettings; label: string; description: st
     label: 'Only email when NON-COMPLIANT',
     description: 'Suppress emails for compliant results so instructors only hear about issues.',
   },
-  {
-    key: 'only_when_review_required',
-    label: 'Only email when human review is required',
-    description: 'Suppress emails unless the AI flagged the result for administrator review.',
-  },
 ];
 
 const DEFAULTS: NotificationSettings = {
   checkin_email_enabled: true,
   checkout_email_enabled: true,
   only_when_non_compliant: false,
-  only_when_review_required: false,
 };
 
 export function Toggle({ id, checked, disabled, onChange }: ToggleProps) {
@@ -161,8 +155,8 @@ function NotificationSettings() {
       </div>
 
       <p className="text-xs text-slate-500 mt-4">
-        Suppression filters apply on top of the report switches: if either filter is on, a report is sent only when it
-        matches at least one enabled filter.
+        The suppression filter applies on top of the report switches: with it on, a report is sent only when the result
+        is non-compliant.
       </p>
 
       <AccessSettingsSection />

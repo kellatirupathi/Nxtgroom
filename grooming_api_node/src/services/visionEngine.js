@@ -57,7 +57,6 @@ const AttireClassification = z.object({
  */
 function buildReportSchema(sections) {
   const shape = {
-    requires_human_review: z.boolean(),
     image_quality: z.enum(["ADEQUATE", "RETAKE_RECOMMENDED"]),
     ai_summary: z.string(),
     visible_regions: z.object({
@@ -103,29 +102,17 @@ function toOrderedRows(sections, parsed) {
  * attendance record in error. The rule has one line, so there is nothing to
  * ask: any FAIL means non-compliant, and N/A never does.
  */
-export function deriveVerdict(rows, { imageQuality, modelRequestedReview } = {}) {
+export function deriveVerdict(rows, { imageQuality } = {}) {
   const checks = SECTION_KEYS.flatMap((key) => rows[key] || []);
   const anyFail = checks.some((item) => item.status === "FAIL");
   // A photo showing nothing assessable comes back entirely N/A. That is not a
   // verdict about the instructor, so it asks for a retake instead of one.
   const nothingAssessed = checks.length > 0
     && checks.every((item) => item.status === "N/A");
-  const resolvedQuality = nothingAssessed ? "RETAKE_RECOMMENDED" : (imageQuality || "ADEQUATE");
-  // ID card, attire and footwear carry the standard. If one could not be seen,
-  // the report is incomplete regardless of what the rest of it says.
-  const criticalNotAssessed = [
-    ...(rows.general_idcard_check || []),
-    ...(rows.attire_check || []),
-    ...(rows.footwear_check || []),
-  ].some((item) => item.status === "N/A");
 
   return {
     overall_status: anyFail ? "NON_COMPLIANT" : "COMPLIANT",
-    image_quality: resolvedQuality,
-    requires_human_review: Boolean(modelRequestedReview)
-      || anyFail
-      || resolvedQuality === "RETAKE_RECOMMENDED"
-      || criticalNotAssessed,
+    image_quality: nothingAssessed ? "RETAKE_RECOMMENDED" : (imageQuality || "ADEQUATE"),
   };
 }
 
@@ -182,7 +169,6 @@ export function unknownGenderEvaluation() {
   return {
     overall_status: "COMPLIANT",
     attire_type: "UNKNOWN",
-    requires_human_review: true,
     image_quality: "ADEQUATE",
     ai_summary:
       "This instructor has no gender recorded, so the applicable dress code could not be determined and no appearance assessment was made. Set the gender on the instructor record; the next check-in will be assessed normally.",
@@ -268,10 +254,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   if (!message?.parsed) throw new Error("The model returned no structured evaluation");
 
   const rows = toOrderedRows(sections, message.parsed);
-  const verdict = deriveVerdict(rows, {
-    imageQuality: message.parsed.image_quality,
-    modelRequestedReview: message.parsed.requires_human_review,
-  });
+  const verdict = deriveVerdict(rows, { imageQuality: message.parsed.image_quality });
 
   return {
     ...verdict,

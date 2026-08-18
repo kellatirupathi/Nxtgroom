@@ -24,23 +24,21 @@ function formatDateTime(value) {
   }).format(parsed);
 }
 
-function displayStatus(status, requiresHumanReview = false) {
+function displayStatus(status) {
   const normalized = String(status || "").toLowerCase();
-  if (["review_required", "needs_review"].includes(normalized)) return "REVIEW REQUIRED";
-  if (["compliant", "done"].includes(normalized)) {
-    return requiresHumanReview ? "REVIEW REQUIRED" : "COMPLIANT";
+  // review_required is still read, never written: records evaluated before the
+  // review flag was removed keep it, and their emails must not read "pending".
+  if (["compliant", "done", "review_required", "needs_review"].includes(normalized)) {
+    return "COMPLIANT";
   }
   if (["non_compliant", "non-compliant", "fail"].includes(normalized)) return "NON-COMPLIANT";
   if (["error", "analysis_error"].includes(normalized)) return "ANALYSIS UNAVAILABLE";
   return "AI ANALYSIS PENDING";
 }
 
-function reviewNotice(status, requiresHumanReview = false) {
-  return requiresHumanReview
-    || status === "REVIEW REQUIRED"
-    || status === "NON-COMPLIANT"
-    || status === "ANALYSIS UNAVAILABLE"
-    ? "This automated report requires administrator review before any action is taken."
+function reviewNotice(status) {
+  return status === "NON-COMPLIANT" || status === "ANALYSIS UNAVAILABLE"
+    ? "This is an automated, assistive appearance report. Please review the detail before acting on it."
     : "This is an automated, assistive appearance report.";
 }
 
@@ -49,14 +47,13 @@ export function buildEvaluationEmail({
   overallStatus,
   aiSummary,
   checkInTime,
-  requiresHumanReview = false,
   imageQuality,
 }) {
   const name = instructorName || "Instructor";
-  const status = displayStatus(overallStatus, requiresHumanReview);
+  const status = displayStatus(overallStatus);
   const summary = aiSummary || "No additional observations were provided.";
   const checkIn = formatDateTime(checkInTime);
-  const notice = reviewNotice(status, requiresHumanReview);
+  const notice = reviewNotice(status);
   const qualityLine = imageQuality === "RETAKE_RECOMMENDED"
     ? "Image quality: A clearer full-body photo is recommended."
     : null;
@@ -100,15 +97,14 @@ export function buildCheckoutEmail({
   checkOutTime,
   status,
   remarks,
-  requiresHumanReview = false,
   imageQuality,
 }) {
   const name = instructorName || "Instructor";
-  const reportStatus = displayStatus(status, requiresHumanReview);
+  const reportStatus = displayStatus(status);
   const summary = remarks || "No additional observations were provided.";
   const checkIn = formatDateTime(checkInTime);
   const checkOut = formatDateTime(checkOutTime);
-  const notice = reviewNotice(reportStatus, requiresHumanReview);
+  const notice = reviewNotice(reportStatus);
   const qualityLine = imageQuality === "RETAKE_RECOMMENDED"
     ? "Image quality: A clearer full-body photo is recommended."
     : null;
@@ -341,7 +337,6 @@ function statusLabel(day) {
   if (!day.present) return "No check-in";
   if (day.status === "compliant") return "Compliant";
   if (day.status === "non_compliant") return "Non-compliant";
-  if (day.status === "review_required") return "Review required";
   if (day.status === "error") return "Analysis error";
   return "Pending";
 }
