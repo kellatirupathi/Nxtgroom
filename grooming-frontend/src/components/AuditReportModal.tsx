@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, RefreshCw, TriangleAlert, X, XCircle } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import GroomingReport from './GroomingReport';
@@ -88,8 +88,9 @@ export default function AuditReportModal({
   onClose,
 }: AuditReportModalProps) {
   // Both halves have their own report and their own queue, so every request
-  // names the one being waited on.
-  const kindQuery = kind === 'checkout' ? '?kind=checkout' : '';
+  // names the one being waited on. Memoised so the polling effects can depend
+  // on it: a stale value here would quietly follow the wrong half.
+  const kindQuery = useMemo(() => (kind === 'checkout' ? '?kind=checkout' : ''), [kind]);
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [error, setError] = useState('');
@@ -108,7 +109,7 @@ export default function AuditReportModal({
       // A settled record without a stored evaluation is possible after an
       // analysis error; the verdict banner already explains that case.
     }
-  }, [attendanceId]);
+  }, [attendanceId, kindQuery]);
 
   // Follow the record until it settles, then pull the full report.
   useEffect(() => {
@@ -147,7 +148,7 @@ export default function AuditReportModal({
       clearTimeout(timer);
     };
     // reanalysing is in the deps so a re-run restarts the poll loop.
-  }, [attendanceId, loadEvaluation, reanalysing]);
+  }, [attendanceId, kindQuery, loadEvaluation, reanalysing]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
