@@ -32,12 +32,14 @@ function displayStatus(status) {
     return "COMPLIANT";
   }
   if (["non_compliant", "non-compliant", "fail"].includes(normalized)) return "NON-COMPLIANT";
+  // Neither a pass nor a failure: the photograph did not show enough to judge.
+  if (normalized === "unassessed") return "NOT ASSESSED";
   if (["error", "analysis_error"].includes(normalized)) return "ANALYSIS UNAVAILABLE";
   return "AI ANALYSIS PENDING";
 }
 
 function reviewNotice(status) {
-  return status === "NON-COMPLIANT" || status === "ANALYSIS UNAVAILABLE"
+  return status === "NON-COMPLIANT" || status === "ANALYSIS UNAVAILABLE" || status === "NOT ASSESSED"
     ? "This is an automated, assistive appearance report. Please review the detail before acting on it."
     : "This is an automated, assistive appearance report.";
 }

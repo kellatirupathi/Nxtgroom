@@ -100,3 +100,12 @@ test('a historical report without checkpoint codes still renders', () => {
   assert.equal(tables[2].title, '3. Attire Check');
   assert.deepEqual(improvementTipsFor(legacy), []);
 });
+
+test('a report with nothing to assess renders a reason, not empty tables', () => {
+  // Both reasons behave the same way: the sections are empty, and rendering
+  // five empty tables would read as checks that ran and found nothing wrong.
+  assert.equal(isUnassessed({ unassessed_reason: 'NO_PERSON_VISIBLE' }), true);
+  assert.equal(isUnassessed({ unassessed_reason: 'GENDER_NOT_CONFIGURED' }), true);
+  assert.equal(isUnassessed({ unassessed_reason: null }), false);
+  assert.equal(isUnassessed({}), false);
+});

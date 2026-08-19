@@ -246,9 +246,10 @@ test("a photo showing nothing assessable asks for a retake, not a verdict", () =
 
 test("a missing gender produces no compliance claim", () => {
   const evaluation = unknownGenderEvaluation();
-  // Not NON_COMPLIANT: the instructor did nothing wrong, the record is
-  // incomplete. The reason says so rather than a verdict implying otherwise.
-  assert.equal(evaluation.overall_status, "COMPLIANT");
+  // Neither COMPLIANT nor NON_COMPLIANT. The instructor did nothing wrong, and
+  // nothing was examined either — calling that compliant is what let a
+  // photograph of a wall pass.
+  assert.equal(evaluation.overall_status, "UNASSESSED");
   assert.equal(evaluation.unassessed_reason, "GENDER_NOT_CONFIGURED");
   for (const key of SECTION_KEYS) {
     assert.deepEqual(evaluation[key], [], `${key} must stay empty without a dress code`);
@@ -276,4 +277,39 @@ test("each half of a record has its own evaluation", async () => {
   assert.equal(matches(evaluationFilter("a1"), checkout), false);
   assert.equal(matches(evaluationFilter("a1", "checkout"), checkout), true);
   assert.equal(matches(evaluationFilter("a1", "checkout"), checkin), false);
+});
+
+test("a photograph with nobody in it is not a compliant check-in", async () => {
+  const { unassessedEvaluation } = await import("../src/services/visionEngine.js");
+  const evaluation = unassessedEvaluation(
+    "NO_PERSON_VISIBLE",
+    "The photograph does not show the instructor.",
+    { imageQuality: "RETAKE_RECOMMENDED" }
+  );
+
+  // The rule that let this through counted failures: an empty photo has none,
+  // so it came back COMPLIANT and anyone could pass by photographing a wall.
+  assert.equal(evaluation.overall_status, "UNASSESSED");
+  assert.notEqual(evaluation.overall_status, "COMPLIANT");
+  assert.equal(evaluation.unassessed_reason, "NO_PERSON_VISIBLE");
+  assert.equal(evaluation.image_quality, "RETAKE_RECOMMENDED");
+
+  // No checkpoints at all. Twenty rows of N/A say nothing a single sentence
+  // does not, and they read as checks that ran and found nothing wrong.
+  for (const key of SECTION_KEYS) {
+    assert.deepEqual(evaluation[key], [], `${key} must be empty`);
+  }
+  assert.deepEqual(improvementTips(evaluation), []);
+});
+
+test("an unassessed result counts as neither compliant nor a violation", () => {
+  // The mapping the worker applies. Left out of both counts rather than
+  // pushed into one of them.
+  const toAttendanceStatus = (overall) => (
+    overall === "UNASSESSED" ? "unassessed"
+      : overall === "COMPLIANT" ? "compliant" : "non_compliant"
+  );
+  assert.equal(toAttendanceStatus("UNASSESSED"), "unassessed");
+  assert.equal(toAttendanceStatus("COMPLIANT"), "compliant");
+  assert.equal(toAttendanceStatus("NON_COMPLIANT"), "non_compliant");
 });

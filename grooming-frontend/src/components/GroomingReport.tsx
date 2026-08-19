@@ -107,9 +107,9 @@ export default function GroomingReport({ evaluation }: { evaluation: Evaluation 
   if (isUnassessed(evaluation)) {
     return (
       <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">
-        No appearance assessment was made, because this instructor has no gender recorded and the
-        applicable dress code could not be determined. Set it under Instructors and the next
-        check-in will be assessed normally.
+        {evaluation.unassessed_reason === 'NO_PERSON_VISIBLE'
+          ? 'No appearance assessment was made, because the photograph does not show the instructor. Retake it as a clear, full-length photo of the person checking in.'
+          : 'No appearance assessment was made, because this instructor has no gender recorded and the applicable dress code could not be determined. Set it under Instructors and the next check-in will be assessed normally.'}
       </div>
     );
   }

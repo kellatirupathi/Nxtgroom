@@ -5,8 +5,9 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // generated per gender and garment. 2026-08-18.2 stopped asking for a
 // human-review flag. 2026-08-18.3 reduced the ID card to one row, dropped
 // eyewear and hair colour, split hair position from neatness, and tightened
-// the saree, kurti and earring rules.
-export const PROMPT_VERSION = "2026-08-18.3";
+// the saree, kurti and earring rules. 2026-08-19.1 asks whether the photograph
+// shows a person at all.
+export const PROMPT_VERSION = "2026-08-19.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -74,6 +75,19 @@ trait. A photograph cannot establish any of these. Do not mention them.
 Do not infer or comment on any personal characteristic beyond the specific
 appearance standards listed. This is a dress-code screening, not an assessment
 of the person.
+
+### IS THERE ANYONE IN THE PHOTOGRAPH
+Before anything else, decide whether the image actually shows the person being
+checked in. Set subject_visible to false when it does not — a wall, a ceiling,
+a floor, a desk, a blank or black frame, a screenshot, or any picture with no
+person in it. When it is false, nothing else is assessed: every checkpoint is
+irrelevant, so answer N/A throughout and say in ai_summary that the photograph
+does not show a person.
+
+Set it to true whenever a person is visible, even if the framing is poor, they
+are partly out of shot, or most checkpoints will end up N/A. Being hard to
+assess is not the same as being absent, and a person cropped at the waist is
+still a person.
 
 ### VISIBLE REGIONS
 Report separately which parts of the body the photograph actually shows, using

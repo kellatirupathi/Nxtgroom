@@ -40,9 +40,13 @@ export function reportTables(evaluation: Evaluation): ReportTable[] {
   ];
 }
 
-/** True when no dress code could be applied, so there is nothing to tabulate. */
+/**
+ * True when the checkpoints could not meaningfully be applied, so there is
+ * nothing to tabulate. Any reason counts: the sections come back empty either
+ * way, and five empty tables read as checks that ran and found nothing.
+ */
 export function isUnassessed(evaluation: Evaluation): boolean {
-  return evaluation.unassessed_reason === 'GENDER_NOT_CONFIGURED';
+  return Boolean(evaluation.unassessed_reason);
 }
 
 /**

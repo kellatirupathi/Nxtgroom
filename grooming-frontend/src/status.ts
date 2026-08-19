@@ -8,6 +8,8 @@ export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
     case 'fail':
     case 'non_compliant':
       return 'non_compliant';
+    case 'unassessed':
+      return 'unassessed';
     // Records evaluated before the review flag was removed still carry these.
     // They were compliant results that had been flagged, so that is how they
     // read now. The stored value itself is left untouched.
@@ -23,6 +25,8 @@ export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
 
 export function hasEvaluation(status: unknown): boolean {
   const normalized = normalizeAttendanceStatus(status);
+  // Deliberately excludes 'unassessed': the analysis finished, but produced no
+  // checkpoints, so there is no report behind it to open.
   return normalized === 'compliant' || normalized === 'non_compliant';
 }
 

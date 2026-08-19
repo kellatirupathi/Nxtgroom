@@ -57,6 +57,10 @@ const AttireClassification = z.object({
  */
 function buildReportSchema(sections) {
   const shape = {
+    // Asked directly rather than inferred from the checkpoints. "Nothing was
+    // examined" and "nothing was wrong" both produce a report with no
+    // failures, and only this tells them apart.
+    subject_visible: z.boolean(),
     image_quality: z.enum(["ADEQUATE", "RETAKE_RECOMMENDED"]),
     ai_summary: z.string(),
     visible_regions: z.object({
@@ -162,29 +166,46 @@ function instructorImagePart(imageBuffer, mimeType) {
 }
 
 /**
- * The evaluation returned when no gender is on the instructor record.
+ * A result that makes no compliance claim.
  *
- * Every dress-code rule below the ID card differs by gender, so there is no
- * honest verdict to give: assessing against both — which is what happened
- * before — measured men against saree standards and produced failures for
- * rules that never applied to them. This makes no compliance claim at all and
- * asks for the missing field instead.
+ * Used wherever the checkpoints could not meaningfully be applied. The five
+ * sections come back empty on purpose: twenty rows of N/A tell a reader
+ * nothing they cannot already see from one sentence, and rendering them
+ * implies the checks ran and found nothing wrong.
+ *
+ * overall_status is UNASSESSED rather than COMPLIANT. A report with no
+ * failures and a report where nothing was examined are not the same thing, and
+ * calling the second one compliant is how a photograph of a ceiling passed.
  */
-export function unknownGenderEvaluation() {
+export function unassessedEvaluation(reason, summary, { imageQuality = "ADEQUATE" } = {}) {
   return {
-    overall_status: "COMPLIANT",
+    overall_status: "UNASSESSED",
     attire_type: "UNKNOWN",
-    image_quality: "ADEQUATE",
-    ai_summary:
-      "This instructor has no gender recorded, so the applicable dress code could not be determined and no appearance assessment was made. Set the gender on the instructor record; the next check-in will be assessed normally.",
+    image_quality: imageQuality,
+    ai_summary: summary,
     general_idcard_check: [],
     grooming_check: [],
     attire_check: [],
     accessories_check: [],
     footwear_check: [],
     visible_regions: null,
-    unassessed_reason: "GENDER_NOT_CONFIGURED",
+    unassessed_reason: reason,
   };
+}
+
+/**
+ * The evaluation returned when no gender is on the instructor record.
+ *
+ * Every dress-code rule below the ID card differs by gender, so there is no
+ * honest verdict to give: assessing against both — which is what happened
+ * before — measured men against saree standards and produced failures for
+ * rules that never applied to them.
+ */
+export function unknownGenderEvaluation() {
+  return unassessedEvaluation(
+    "GENDER_NOT_CONFIGURED",
+    "This instructor has no gender recorded, so the applicable dress code could not be determined and no appearance assessment was made. Set the gender on the instructor record; the next check-in will be assessed normally."
+  );
 }
 
 /**
@@ -257,6 +278,17 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   const message = response.choices?.[0]?.message;
   if (message?.refusal) throw new Error("The image evaluation was refused by the model");
   if (!message?.parsed) throw new Error("The model returned no structured evaluation");
+
+  // Nothing to tabulate when the photograph does not show the person. The
+  // checkpoints are dropped rather than returned as twenty N/A rows, and no
+  // verdict is recorded against the instructor for a picture of a wall.
+  if (message.parsed.subject_visible === false) {
+    return unassessedEvaluation(
+      "NO_PERSON_VISIBLE",
+      "The photograph does not show the instructor, so no appearance assessment could be made. Retake it as a clear, full-length photo of the person checking in.",
+      { imageQuality: "RETAKE_RECOMMENDED" }
+    );
+  }
 
   const rows = toOrderedRows(sections, message.parsed);
   const verdict = deriveVerdict(rows, { imageQuality: message.parsed.image_quality });

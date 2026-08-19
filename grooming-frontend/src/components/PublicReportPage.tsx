@@ -81,6 +81,7 @@ function StatusPill({ status }: { status: string | null }) {
   const map: Record<string, { text: string; style: string; Icon: typeof CheckCircle2 }> = {
     compliant: { text: 'Compliant', style: 'bg-emerald-50 text-emerald-700 border-emerald-200', Icon: CheckCircle2 },
     non_compliant: { text: 'Non-compliant', style: 'bg-rose-50 text-rose-700 border-rose-200', Icon: XCircle },
+    unassessed: { text: 'Not assessed', style: 'bg-amber-50 text-amber-700 border-amber-200', Icon: TriangleAlert },
     error: { text: 'Analysis error', style: 'bg-slate-100 text-slate-600 border-slate-200', Icon: TriangleAlert },
   };
   const match = status ? map[status] : undefined;

@@ -278,7 +278,7 @@ export async function prepareCheckoutReport(db, job) {
   // review_required is retained here alone: records evaluated before the
   // review flag was removed still carry it, and their notifications must
   // still be recognised as finished work.
-  const analysisTerminal = new Set(["compliant", "non_compliant", "review_required", "error"])
+  const analysisTerminal = new Set(["compliant", "non_compliant", "unassessed", "review_required", "error"])
     .has(attendance.status);
   const checkinNotificationTerminal = new Set([
     "sent",

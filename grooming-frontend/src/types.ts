@@ -23,6 +23,8 @@ export interface AdminUser {
 export type AttendanceStatus =
   | 'compliant'
   | 'non_compliant'
+  /** Analysed, but the photograph showed nothing to judge. Neither of the above. */
+  | 'unassessed'
   | 'error'
   | 'pending';
 

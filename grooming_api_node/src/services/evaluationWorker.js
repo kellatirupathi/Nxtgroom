@@ -325,7 +325,13 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   const now = new Date();
   const overallStatus = evaluation.overall_status;
   const imageQuality = evaluation.image_quality || "RETAKE_RECOMMENDED";
-  const attendanceStatus = overallStatus === "COMPLIANT" ? "compliant" : "non_compliant";
+  // UNASSESSED is neither. A photograph that does not show the instructor is
+  // not a violation, and it is not a clean check-in either — recording it as
+  // compliant is how a picture of a ceiling used to pass. It is left out of
+  // the compliant and non-compliant counts entirely.
+  const attendanceStatus = overallStatus === "UNASSESSED"
+    ? "unassessed"
+    : overallStatus === "COMPLIANT" ? "compliant" : "non_compliant";
 
   // The day's status belongs to the check-in. A check-out assessment is
   // recorded alongside it under its own fields: overwriting status and remarks
