@@ -27,7 +27,7 @@ export const ID_CARD_CHECKS = [
   {
     code: "ID_PRESENT",
     name: "ID Card Present",
-    rule: "An instructor ID card is visibly being worn. PASS when a card is visible, FAIL when the chest and upper body are visible and no card is. N/A when the framing does not show enough of the upper body to tell. Do not judge the card's position, condition, readability or lanyard.",
+    rule: "An instructor ID card is visibly being worn around the neck at chest level using the official lanyard, PASS when a card is visible, FAIL when the chest and upper body are visible and no card is present , if it's not worn around the neck (e.g., clipped to a belt). N/A when the framing does not show enough of the upper body to tell. Do not judge the card's position, condition, readability or lanyard.",
   },
 ];
 
@@ -61,6 +61,7 @@ export const MEN_ACCESSORIES_CHECKS = [
   { code: "M_RINGS", name: "Rings", rule: "At most one visible ring per hand. N/A when the hands are not visible." },
   { code: "M_CHAIN", name: "Chain / Necklace", rule: "No distracting chain visible above the collar." },
   { code: "M_DISTRACTING_ACCESSORIES", name: "Bracelets / Distracting Accessories", rule: "Bracelets and other clearly distracting statement pieces, judged together." },
+  { code: "M_EYEWEAR", name: "Eyewear", rule: "Simple and professional eyewear is permitted. Wearing no eyewear is also PASS. FAIL if the instructor is wearing sunglasses, tinted glasses indoors, or overly fancy/distracting frames." },
   {
     code: "M_WATCH",
     name: "Watch",
@@ -133,6 +134,7 @@ export const WOMEN_ACCESSORIES_CHECKS = [
   { code: "W_BANGLES", name: "Bangles", rule: "Judge the number and prominence of visible bangles against a modest limit. Bangles are cultural wear and are never a violation merely by existing; FAIL only a clearly excessive or distracting quantity." },
   { code: "W_BINDI", name: "Bindi", rule: "A small, plain bindi passes. Wearing none is not a violation." },
   { code: "W_DISTRACTING_ACCESSORIES", name: "Distracting Accessories", rule: "Other clearly distracting statement pieces." },
+  { code: "W_EYEWEAR", name: "Eyewear", rule: "Simple and professional eyewear is permitted. Wearing no eyewear is also PASS. FAIL if the instructor is wearing sunglasses, tinted glasses indoors, or overly fancy/distracting frames." },
   {
     code: "W_WATCH",
     name: "Watch",
@@ -204,7 +206,7 @@ export const INFORMATIONAL_CODES = new Set(
  * to correct, and an informational one has no rule to have broken.
  */
 export const IMPROVEMENT_TIPS = {
-  ID_PRESENT: "Wear your instructor ID card.",
+  ID_PRESENT: "Wear your instructor ID card around your neck at chest level using the official lanyard.",
   M_HAIR_NEATNESS: "Comb your hair neatly before the session.",
   M_HAIR_POSITION: "Keep your hair back and away from your face.",
   M_HAIR_LENGTH: "Trim your hair so it does not fall past the collar.",
@@ -221,6 +223,7 @@ export const IMPROVEMENT_TIPS = {
   M_RINGS: "Wear at most one ring per hand.",
   M_CHAIN: "Keep chains below the collar line.",
   M_DISTRACTING_ACCESSORIES: "Remove bracelets and statement accessories.",
+  M_EYEWEAR: "Wear simple, professional eyewear. Sunglasses and tinted glasses are not permitted indoors.",
   M_FOOTWEAR_TYPE: "Wear clean formal shoes instead of casual footwear.",
   M_FOOTWEAR_CONDITION: "Wear clean, polished shoes.",
   W_HAIR_NEATNESS: "Tie or pin your hair neatly.",
@@ -245,6 +248,7 @@ export const IMPROVEMENT_TIPS = {
   W_BANGLES: "Reduce the number of bangles worn.",
   W_BINDI: "Wear a small, plain bindi.",
   W_DISTRACTING_ACCESSORIES: "Remove statement accessories.",
+  W_EYEWEAR: "Wear simple, professional eyewear. Sunglasses and tinted glasses are not permitted indoors.",
   W_FOOTWEAR_TYPE: "Wear formal footwear instead of casual or sports shoes.",
   W_FOOTWEAR_CONDITION: "Wear clean, well-maintained footwear.",
 };

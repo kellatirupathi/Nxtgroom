@@ -30,7 +30,7 @@ export function isProduction() {
 export const CORS_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
 
 export function corsOrigins() {
-  return (process.env.CORS_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173")
+  return (process.env.CORS_ORIGINS || "http://localhost:5175,http://127.0.0.1:5175")
     .split(",")
     .map((origin) => origin.trim().replace(/\/$/, ""))
     .filter(Boolean);
