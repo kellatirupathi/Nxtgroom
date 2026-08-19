@@ -133,3 +133,38 @@ test('the check-out report renders the same five tables as the check-in one', ()
   // It is a real report, not the unassessed placeholder.
   assert.equal(isUnassessed(checkout), false);
 });
+
+test('a refused submission is not shown as work in progress', () => {
+  // The dialog opens before the request completes, so the saving step is
+  // visible from the moment the button is pressed. When the request is then
+  // refused — no active check-in to check out — nothing is happening any
+  // more, and leaving both steps spinning under the refusal claimed otherwise.
+  const view = (saveError, attendanceId, settled) => {
+    const failedToSave = Boolean(saveError) && !attendanceId;
+    return {
+      failedToSave,
+      running: !saveError && (!attendanceId || !settled),
+      // Nothing to re-run when the request never produced a record.
+      offersReanalyse: !failedToSave,
+    };
+  };
+
+  const refused = view('No active check-in found to check out', null, false);
+  assert.equal(refused.running, false, 'the steps must stop');
+  assert.equal(refused.offersReanalyse, false, 'there is no record to re-analyse');
+
+  // A submission still in flight keeps both, which is the normal case.
+  const saving = view(undefined, null, false);
+  assert.equal(saving.running, true);
+
+  // Saved and analysing: still running, and re-analyse stays available.
+  const analysing = view(undefined, 'a1', false);
+  assert.equal(analysing.running, true);
+  assert.equal(analysing.offersReanalyse, true);
+
+  // A failure after the record was saved is different: the record exists, so
+  // re-analysing it is a real option.
+  const failedAfterSave = view('Analysis failed', 'a1', true);
+  assert.equal(failedAfterSave.failedToSave, false);
+  assert.equal(failedAfterSave.offersReanalyse, true);
+});

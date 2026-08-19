@@ -186,8 +186,14 @@ export default function AuditReportModal({
     }
   };
 
-  // Still working while the record is saving, or while analysis runs.
-  const running = !attendanceId || (!status?.settled && !timedOut);
+  // Still working while the record is saving, or while analysis runs — but
+  // not once the save has failed. A refused check-out never got as far as a
+  // photo or an analysis, so showing both steps spinning under the refusal
+  // said work was happening that had already stopped.
+  const running = !saveError && (!attendanceId || (!status?.settled && !timedOut));
+  // Nothing to re-run when there is no record: the request was refused before
+  // one existed.
+  const failedToSave = Boolean(saveError) && !attendanceId;
 
   return (
     <div
@@ -199,8 +205,12 @@ export default function AuditReportModal({
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-md bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/60 px-5 py-4">
           <div className="min-w-0">
+            {/* A refused submission produced no report, so naming one is a
+                heading that contradicts the message beneath it. */}
             <h2 id="audit-report-title" className="text-lg font-extrabold text-slate-800">
-              Detailed Appearance Report
+              {failedToSave
+                ? `${kind === 'checkout' ? 'Check-out' : 'Check-in'} not recorded`
+                : 'Detailed Appearance Report'}
             </h2>
             {/* Names which half this report covers, since both now produce
                 one and the dialog looks identical otherwise. */}
@@ -261,7 +271,7 @@ export default function AuditReportModal({
 
           {!running && evaluation && <GroomingReport evaluation={evaluation} />}
 
-          {!running && !evaluation && !timedOut && (
+          {!running && !evaluation && !timedOut && !failedToSave && (
             <p className="py-6 text-center text-sm text-slate-500">
               No checkpoint detail was stored for this analysis.
             </p>
@@ -276,6 +286,7 @@ export default function AuditReportModal({
           >
             Close
           </button>
+          {!failedToSave && (
           <button
             type="button"
             onClick={handleReanalyse}
@@ -285,6 +296,7 @@ export default function AuditReportModal({
             <RefreshCw size={15} className={reanalysing ? 'animate-spin' : ''} aria-hidden="true" />
             {reanalysing ? 'Queueing…' : 'Re-analyse'}
           </button>
+          )}
         </div>
       </div>
     </div>
