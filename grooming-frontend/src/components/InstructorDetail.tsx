@@ -60,6 +60,13 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const [deleting, setDeleting] = useState(false);
   const toast = useToast();
 
+  // Distinguishes "still working on it" from "there is nothing". The queue
+  // status is written when the job is created and cleared when it completes.
+  const queueStatus = tab === 'checkout'
+    ? record?.checkout_evaluation_queue_status
+    : record?.evaluation_queue_status;
+  const analysisRunning = queueStatus === 'queued' || queueStatus === 'processing';
+
   const handleDelete = async () => {
     if (!record) return;
     setDeleting(true);
@@ -112,9 +119,13 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   useEffect(() => {
     if (!record) return undefined;
     const controller = new AbortController();
-    const fetchEvaluation = async () => {
-      setLoading(true);
-      setEvaluation(null);
+    const fetchEvaluation = async (showSpinner = true) => {
+      // A poll must not blank the report it already has, or the panel flickers
+      // every three seconds.
+      if (showSpinner) {
+        setLoading(true);
+        setEvaluation(null);
+      }
       setError('');
       try {
         // Each half is assessed separately, so the tab decides which report
@@ -129,8 +140,17 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
       }
     };
     fetchEvaluation();
-    return () => controller.abort();
-  }, [record, tab]);
+    // Keep looking while a job is outstanding, so the spinner resolves into
+    // the report instead of sitting there until the page is reloaded. The
+    // endpoint answers 204 until there is something to show.
+    const poll = analysisRunning
+      ? window.setInterval(() => { if (!controller.signal.aborted) void fetchEvaluation(false); }, 3000)
+      : undefined;
+    return () => {
+      controller.abort();
+      if (poll) window.clearInterval(poll);
+    };
+  }, [record, tab, analysisRunning]);
 
   if (!record) {
     return (
@@ -251,7 +271,16 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
             />
             <h3 className="mt-4 text-xl sm:text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
             <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-4 sm:mb-5">{record.instructor_role}</p>
-            <StatusBadge status={record.status} />
+            {/* Each tab shows its own verdict. This read the check-in's on
+                both, so a check-out could be labelled with the morning's
+                result — or with "Not assessed" when only the check-in was. */}
+            <StatusBadge
+              status={tab === 'checkout'
+                ? (record.checkout_compliance_status
+                  ? String(record.checkout_compliance_status).toLowerCase()
+                  : (record.check_out_photo_key ? 'pending' : undefined))
+                : record.status}
+            />
             {tab === 'checkout' && !record.check_out_photo_key && (
               <p className="mt-4 text-xs font-medium text-slate-400">No photo was taken at check-out.</p>
             )}
@@ -309,13 +338,29 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           ) : error ? (
             <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">{error}</div>
           ) : !evaluation ? (
+            /* Three different situations, which all used to read as one red
+               error: nothing was submitted to analyse, the analysis is still
+               running, or it finished without producing a report. */
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-md border border-dashed border-slate-200 p-8 text-center gap-2">
-              <XCircle size={32} className="text-slate-300" aria-hidden="true" />
-              <p>
-                {tab === 'checkout' && !record.check_out_photo_key
-                  ? 'No photo was taken at check-out, so there is nothing to assess.'
-                  : 'No detailed evaluation report is available.'}
-              </p>
+              {tab === 'checkout' && !record.check_out_photo_key ? (
+                <>
+                  <XCircle size={32} className="text-slate-300" aria-hidden="true" />
+                  <p>No photo was taken at check-out, so there was nothing to assess.</p>
+                </>
+              ) : analysisRunning ? (
+                <>
+                  <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" aria-hidden="true" />
+                  <p>Analysing the photo. This usually takes a few seconds.</p>
+                  <p className="text-xs font-normal text-slate-400">
+                    The report appears here once it finishes.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <XCircle size={32} className="text-slate-300" aria-hidden="true" />
+                  <p>No appearance report was produced for this {tab === 'checkout' ? 'check-out' : 'check-in'}.</p>
+                </>
+              )}
             </div>
           ) : (
             <div className="flex-1 pb-4">

@@ -725,7 +725,10 @@ attendanceRouter.get(
       evaluationFilter(String(attendance._id), kind)
     );
     if (!evaluation) {
-      return res.status(404).json({ detail: "Evaluation is still pending or unavailable" });
+      // 204, not 404. A half with no evaluation is an ordinary state — no
+      // photo was taken, or the analysis has not finished — and returning an
+      // error made the page paint it red as though something had broken.
+      return res.status(204).end();
     }
     return res.json(serializeDocument(evaluation));
   })

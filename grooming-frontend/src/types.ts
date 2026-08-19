@@ -97,6 +97,11 @@ export interface AttendanceRecord {
   location_address_full?: string | null;
   /** Where the check-out happened, captured separately from the check-in fix. */
   check_out_coordinates?: string | null;
+  /** The check-out's own verdict. The fields above hold the check-in's. */
+  checkout_compliance_status?: string | null;
+  /** queued or processing while a job is outstanding; cleared when it ends. */
+  evaluation_queue_status?: string | null;
+  checkout_evaluation_queue_status?: string | null;
   /** FORMAL | SAREE | KURTI_WITH_DUPATTA | UNKNOWN, set by the AI analysis. */
   attire_type?: string | null;
   /** The instructor's public report token, for linking to their own report. */

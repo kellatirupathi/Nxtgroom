@@ -250,3 +250,38 @@ test("an instructor with no address is distinguishable from one you cannot see",
   // read as absent rather than crashing.
   assert.equal(describe({}), "No email on record");
 });
+
+test("a half with no evaluation is an empty answer, not an error", () => {
+  // 404 made the detail page paint a red error box for the ordinary cases:
+  // no check-out photo was taken, or the analysis has not finished yet.
+  // Neither is a failure, and neither should look like one.
+  const respond = (evaluation) => (evaluation ? { status: 200, body: evaluation } : { status: 204 });
+
+  assert.equal(respond(null).status, 204);
+  assert.equal(respond(null).body, undefined, "204 carries no body");
+  assert.equal(respond({ overall_status: "COMPLIANT" }).status, 200);
+});
+
+test("the check-out tab reads its own verdict, never the check-in's", () => {
+  // The badge showed record.status on both tabs, so a check-out could be
+  // labelled with the morning's result — or "Not assessed" when only the
+  // check-in was.
+  const badgeFor = (tab, record) => (tab === "checkout"
+    ? (record.checkout_compliance_status
+      ? String(record.checkout_compliance_status).toLowerCase()
+      : (record.check_out_photo_key ? "pending" : undefined))
+    : record.status);
+
+  const record = {
+    status: "unassessed",
+    checkout_compliance_status: "COMPLIANT",
+    check_out_photo_key: "k",
+  };
+  assert.equal(badgeFor("checkin", record), "unassessed");
+  assert.equal(badgeFor("checkout", record), "compliant");
+
+  // A check-out photo with no verdict yet is pending, not the check-in's.
+  assert.equal(badgeFor("checkout", { status: "non_compliant", check_out_photo_key: "k" }), "pending");
+  // No photo at all means there is no verdict to show and never will be.
+  assert.equal(badgeFor("checkout", { status: "non_compliant" }), undefined);
+});
