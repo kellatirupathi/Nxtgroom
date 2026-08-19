@@ -45,7 +45,12 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   // attendanceId is null until the record is saved, so the modal can show the
   // saving step instead of opening empty.
   const [reportTarget, setReportTarget] = useState<
-    { attendanceId: string | null; instructorName: string; saveError?: string } | null
+    {
+      attendanceId: string | null;
+      instructorName: string;
+      saveError?: string;
+      kind: 'checkin' | 'checkout';
+    } | null
   >(null);
   const toast = useToast();
 
@@ -140,7 +145,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     // Open the dialog before the request so the saving step is visible from
     // the moment the button is pressed, rather than after the upload finishes.
     const submittedName = instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
-    setReportTarget({ attendanceId: null, instructorName: submittedName });
+    setReportTarget({ attendanceId: null, instructorName: submittedName, kind: 'checkin' });
 
     // The watch keeps this current, so submitting never waits on the GPS and
     // never sends a position from somewhere the instructor has already left.
@@ -204,6 +209,16 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
     setCheckoutLoading(true);
     setMessage({ type: '', text: '' });
+
+    // The check-out photo is assessed the same way the check-in one is, so it
+    // gets the same dialog: the saving step is visible from the moment the
+    // button is pressed rather than after the upload finishes.
+    const submittedName = instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
+    const hasPhoto = Boolean(file);
+    if (hasPhoto) {
+      setReportTarget({ attendanceId: null, instructorName: submittedName, kind: 'checkout' });
+    }
+
     try {
       // Multipart so an optional check-out photo rides along. Check-out still
       // succeeds without one.
@@ -215,18 +230,33 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) formData.append('location_coordinates', coordinates);
 
-      await apiFetch('/api/v2/attendance/check-out', {
-        method: 'POST',
-        body: formData,
-      });
+      const result = await apiFetch<{ message?: string; attendance_id?: string }>(
+        '/api/v2/attendance/check-out',
+        { method: 'POST', body: formData },
+      );
       toast.success('Check-out recorded', {
-        detail: file ? 'Photo saved with the check-out.' : undefined,
+        detail: hasPhoto ? 'The photo is being analysed.' : undefined,
       });
       resetPhoto();
       setSelectedUuid('');
+      if (hasPhoto && result?.attendance_id) {
+        // Hand the id over: the dialog marks saving complete and starts
+        // following the analysis.
+        setReportTarget((current) => (
+          current ? { ...current, attendanceId: result.attendance_id as string } : current
+        ));
+      } else {
+        // Without a photo there is nothing to analyse, so no report follows.
+        setReportTarget(null);
+      }
       void fetchInstructors();
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
+      // Reported inside the dialog when one is open, so the failure appears
+      // where the user is looking.
+      if (hasPhoto) {
+        setReportTarget((current) => (current ? { ...current, saveError: text } : current));
+      }
       setMessage({ type: 'error', text: `Check-out failed: ${text}` });
       toast.error('Check-out failed', { detail: text });
     } finally {
@@ -386,6 +416,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           attendanceId={reportTarget.attendanceId}
           instructorName={reportTarget.instructorName}
           saveError={reportTarget.saveError}
+          kind={reportTarget.kind}
           onClose={() => {
             // Closing clears everything, so the page returns to a clean state
             // rather than keeping a stale result behind the dialog.

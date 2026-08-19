@@ -6,11 +6,13 @@ import { useToast } from './useToast';
 import type { Evaluation } from '../types';
 
 interface AuditReportModalProps {
-  /** Null while the check-in is still being saved. */
+  /** Null while the record is still being saved. */
   attendanceId: string | null;
   instructorName: string;
   /** Shown while saving, and again if the save itself failed. */
   saveError?: string;
+  /** Which half was just submitted. Both are assessed the same way. */
+  kind?: 'checkin' | 'checkout';
   onClose: () => void;
 }
 
@@ -78,7 +80,16 @@ function Verdict({ status }: { status: StatusPayload }) {
  * screen. Opens while analysis is still running and fills in as the result
  * arrives, so the operator sees progress rather than an empty dialog.
  */
-export default function AuditReportModal({ attendanceId, instructorName, saveError, onClose }: AuditReportModalProps) {
+export default function AuditReportModal({
+  attendanceId,
+  instructorName,
+  saveError,
+  kind = 'checkin',
+  onClose,
+}: AuditReportModalProps) {
+  // Both halves have their own report and their own queue, so every request
+  // names the one being waited on.
+  const kindQuery = kind === 'checkout' ? '?kind=checkout' : '';
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [error, setError] = useState('');
@@ -90,7 +101,7 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
     if (!attendanceId) return;
     try {
       const data = await apiFetch<Evaluation>(
-        `/api/v2/attendance/${encodeURIComponent(attendanceId)}/evaluation`,
+        `/api/v2/attendance/${encodeURIComponent(attendanceId)}/evaluation${kindQuery}`,
       );
       setEvaluation(data);
     } catch {
@@ -114,7 +125,7 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
       }
       try {
         const next = await apiFetch<StatusPayload>(
-          `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status`,
+          `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status${kindQuery}`,
         );
         if (disposed) return;
         setStatus(next);
@@ -190,7 +201,11 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
             <h2 id="audit-report-title" className="text-lg font-extrabold text-slate-800">
               Detailed Appearance Report
             </h2>
-            <p className="mt-0.5 truncate text-sm text-slate-500">{instructorName}</p>
+            {/* Names which half this report covers, since both now produce
+                one and the dialog looks identical otherwise. */}
+            <p className="mt-0.5 truncate text-sm text-slate-500">
+              {instructorName} · {kind === 'checkout' ? 'Check-out' : 'Check-in'}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-3">
             {status && !running && <Verdict status={status} />}
@@ -216,7 +231,7 @@ export default function AuditReportModal({ attendanceId, instructorName, saveErr
             <div className="py-8" role="status" aria-live="polite">
               <ol className="mx-auto flex max-w-sm flex-col gap-4">
                 <ProgressStep
-                  label="Saving check-in and photo"
+                  label={kind === 'checkout' ? 'Saving check-out and photo' : 'Saving check-in and photo'}
                   state={attendanceId ? 'done' : 'active'}
                 />
                 <ProgressStep

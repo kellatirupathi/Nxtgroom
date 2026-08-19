@@ -563,6 +563,10 @@ attendanceRouter.post(
       message: recipient
         ? "Check-out successful. Email confirmation is queued."
         : "Check-out successful, but no email was sent because the instructor email is missing or invalid.",
+      // Returned so the caller can follow the check-out analysis, the same way
+      // it follows the check-in one.
+      attendance_id: String(attendance._id),
+      analysis_queued: Boolean(checkOutPhotoKey),
     });
   })
 );
@@ -743,11 +747,35 @@ attendanceRouter.get(
           compliance_status: 1,
           remarks: 1,
           evaluation_queue_status: 1,
+          check_out_photo_key: 1,
+          checkout_compliance_status: 1,
+          checkout_remarks: 1,
+          checkout_evaluation_queue_status: 1,
           updated_at: 1,
         },
       }
     );
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+
+    // Each half is assessed separately, so the caller says which one it is
+    // waiting on. The default stays the check-in, which is what every existing
+    // caller means.
+    if (req.query.kind === "checkout") {
+      const queueStatus = attendance.checkout_evaluation_queue_status || null;
+      return res.json({
+        attendance_id: String(attendance._id),
+        // No photo means nothing was ever queued, so the caller must not be
+        // left polling for an analysis that will never arrive.
+        status: attendance.checkout_compliance_status
+          ? String(attendance.checkout_compliance_status).toLowerCase()
+          : "pending",
+        compliance_status: attendance.checkout_compliance_status || null,
+        remarks: attendance.checkout_remarks || null,
+        queue_status: queueStatus,
+        settled: queueStatus === "completed" || !attendance.check_out_photo_key,
+        updated_at: attendance.updated_at || null,
+      });
+    }
 
     return res.json({
       attendance_id: String(attendance._id),
