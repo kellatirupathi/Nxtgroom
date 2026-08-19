@@ -165,7 +165,9 @@ export default function AuditReportModal({
     setReanalysing(true);
     setError('');
     try {
-      await apiJson(`/api/v2/attendance/${encodeURIComponent(attendanceId)}/reanalyse`, {
+      // Names the half, so re-running a check-out does not re-run the
+      // check-in and discard its report.
+      await apiJson(`/api/v2/attendance/${encodeURIComponent(attendanceId)}/reanalyse${kindQuery}`, {
         method: 'POST',
       });
       setEvaluation(null);

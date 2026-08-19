@@ -325,6 +325,19 @@ async function renewEvaluationLease(db, job) {
 }
 
 async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
+  // The evaluation must belong to the half being written. A lookup that
+  // matched on attendance_id alone once handed a check-out job the check-in's
+  // report, and this wrote the morning's verdict into the check-out fields
+  // while no check-out report existed at all — a record showing a result with
+  // no checkpoints behind it. Refusing here means the job is retried rather
+  // than a wrong answer being recorded.
+  const evaluationKind = evaluation?.kind === "checkout" ? "checkout" : "checkin";
+  if (evaluationKind !== jobKind(job)) {
+    throw new Error(
+      `Refusing to record a ${evaluationKind} evaluation against the ${jobKind(job)} half of ${job.attendance_id}`
+    );
+  }
+
   const now = new Date();
   const overallStatus = evaluation.overall_status;
   const imageQuality = evaluation.image_quality || "RETAKE_RECOMMENDED";
@@ -459,11 +472,13 @@ async function completeEvaluation(db, job, report) {
   if (!(await renewEvaluationLease(db, job))) return false;
 
   const now = new Date();
-  const evaluation = publicEvaluation(report, job, now);
+  // Tagged before it is written or synced, so the half it belongs to travels
+  // with it rather than being inferred at each use.
+  const evaluation = { ...publicEvaluation(report, job, now), kind: jobKind(job) };
   await db.collection("evaluations").updateOne(
     evaluationFilter(job.attendance_id, jobKind(job)),
     {
-      $set: { ...evaluation, kind: jobKind(job) },
+      $set: evaluation,
       $setOnInsert: { _id: randomUUID(), created_at: now },
     },
     { upsert: true }

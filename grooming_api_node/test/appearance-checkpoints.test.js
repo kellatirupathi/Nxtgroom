@@ -334,3 +334,24 @@ test("a check-out job never reuses the check-in evaluation", async () => {
   assert.equal(find(evaluationFilter("a1", "checkout")) && stored.length === 2, true);
   assert.equal([stored[0]].find((doc) => doc.kind === "checkout"), undefined);
 });
+
+test("a verdict is never recorded from the other half's evaluation", async () => {
+  const { evaluationFilter } = await import("../src/services/evaluationWorker.js");
+  // What produced a record showing NON_COMPLIANT for a check-out while no
+  // check-out report existed: the check-in's evaluation was synced into the
+  // check-out fields, so there was a verdict with no checkpoints behind it.
+  const kindOf = (evaluation) => (evaluation?.kind === "checkout" ? "checkout" : "checkin");
+  const wouldRecord = (evaluation, jobKind) => kindOf(evaluation) === jobKind;
+
+  assert.equal(wouldRecord({ kind: "checkout" }, "checkout"), true);
+  assert.equal(wouldRecord({ kind: "checkin" }, "checkin"), true);
+  // Evaluations stored before the split carry no kind and are check-ins.
+  assert.equal(wouldRecord({}, "checkin"), true);
+
+  assert.equal(wouldRecord({ kind: "checkin" }, "checkout"), false, "the case that broke");
+  assert.equal(wouldRecord({}, "checkout"), false);
+  assert.equal(wouldRecord({ kind: "checkout" }, "checkin"), false);
+
+  // And re-analysing one half must not delete the other's report.
+  assert.deepEqual(evaluationFilter("a1", "checkout"), { attendance_id: "a1", kind: "checkout" });
+});

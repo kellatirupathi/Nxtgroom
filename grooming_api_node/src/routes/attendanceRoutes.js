@@ -810,9 +810,16 @@ attendanceRouter.post(
       ...attendanceScope(req.currentUser),
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
-    if (!attendance.check_in_photo_key) {
+
+    // Each half has its own photograph, its own job and its own report, so a
+    // re-analysis has to say which one it means.
+    const kind = req.query.kind === "checkout" ? "checkout" : "checkin";
+    const photoKey = kind === "checkout"
+      ? attendance.check_out_photo_key
+      : attendance.check_in_photo_key;
+    if (!photoKey) {
       return res.status(422).json({
-        detail: "This check-in has no stored photo, so it cannot be analysed again.",
+        detail: `This ${kind === "checkout" ? "check-out" : "check-in"} has no stored photo, so it cannot be analysed again.`,
       });
     }
 
@@ -824,26 +831,39 @@ attendanceRouter.post(
     // Clear the finished job so the worker treats this as fresh work; the
     // upsert in enqueueEvaluation only writes on insert.
     await db.collection("evaluation_jobs").deleteOne({
-      _id: `${attendance._id}:evaluation`,
+      _id: kind === "checkout"
+        ? `${attendance._id}:evaluation:checkout`
+        : `${attendance._id}:evaluation`,
     });
-    await db.collection("evaluations").deleteMany({
-      attendance_id: String(attendance._id),
-    });
+    // Scoped to the half being re-run. An unscoped delete threw away the other
+    // half's report as well, so re-analysing a check-in silently destroyed the
+    // check-out one.
+    await db.collection("evaluations").deleteMany(
+      evaluationFilter(String(attendance._id), kind)
+    );
     await db.collection("attendance").updateOne(
       { _id: attendance._id },
       {
-        $set: {
-          status: "pending",
-          compliance_status: null,
-          remarks: "AI analysis is in progress.",
-          evaluation_queue_status: "queued",
-          updated_at: now,
-        },
+        $set: kind === "checkout"
+          ? {
+            checkout_compliance_status: null,
+            checkout_remarks: "AI analysis is in progress.",
+            checkout_evaluation_queue_status: "queued",
+            updated_at: now,
+          }
+          : {
+            status: "pending",
+            compliance_status: null,
+            remarks: "AI analysis is in progress.",
+            evaluation_queue_status: "queued",
+            updated_at: now,
+          },
       }
     );
 
     await enqueueEvaluation(db, {
       attendanceId: attendance._id,
+      kind,
       instructor: {
         id: String(attendance.instructor_id),
         name: attendance.instructor_name || instructor?.name || "Instructor",
@@ -851,9 +871,9 @@ attendanceRouter.post(
         gender: instructor?.gender || null,
         collegeId: String(attendance.college_id || instructor?.college_id || ""),
       },
-      photoKey: attendance.check_in_photo_key,
+      photoKey,
       mimeType: "image/jpeg",
-      checkInTime: attendance.check_in_time,
+      checkInTime: kind === "checkout" ? attendance.check_out_time : attendance.check_in_time,
       deadlineAt: new Date(now.getTime() + OUTBOX_DEADLINE_MS),
     });
 
