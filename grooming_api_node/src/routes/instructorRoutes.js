@@ -1,11 +1,28 @@
 import { Router } from "express";
 import { withMongoTransaction } from "../config/db.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
-import { asyncRoute, createDocument, parsePagination, serializeDocument } from "../utils.js";
+import { asyncRoute, createDocument, dateBoundsInTimeZone, parsePagination, serializeDocument } from "../utils.js";
+import { runtimeConfig } from "../config/env.js";
 import { instructorGenderSchema, instructorSchema, validate } from "../validation.js";
 
 export const instructorRouter = Router();
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
+
+/**
+ * Matches an open check-in belonging to today.
+ *
+ * A check-out that never happens leaves the record open forever, so matching
+ * any open record made one forgotten check-out permanent — the instructor
+ * could never be edited or removed again.
+ */
+function openCheckInTodayFilter(instructorId) {
+  const { start, end } = dateBoundsInTimeZone(undefined, runtimeConfig().appTimeZone);
+  return {
+    instructor_id: idMatch(String(instructorId)),
+    check_out_time: null,
+    check_in_time: { $gte: start, $lt: end },
+  };
+}
 const INSTRUCTOR_PAGE_LIMIT = 100;
 const DAILY_FEEDBACK_LIMIT = 100;
 
@@ -138,14 +155,21 @@ export async function updateInstructorGuarded(
     );
     if (!existing) return { outcome: "not_found" };
 
-    const activeAttendance = await db.collection("attendance").findOne(
-      {
-        instructor_id: idMatch(String(existing._id)),
-        check_out_time: null,
-      },
-      { session }
-    );
-    if (activeAttendance) return { outcome: "active_attendance" };
+    // Only a college reassignment conflicts with an open check-in: the
+    // attendance record snapshots the college, and moving someone mid-session
+    // would leave that record scoped to a college they are no longer at.
+    // Everything else — name, email, phone, gender, role — is harmless, and
+    // refusing those too meant a forgotten check-out made the whole profile
+    // uneditable. The window is today only, for the same reason: a record left
+    // open yesterday is a missed check-out, not a session in progress.
+    const movingCollege = String(existing.college_id) !== String(input.college_id);
+    if (movingCollege) {
+      const activeAttendance = await db.collection("attendance").findOne(
+        openCheckInTodayFilter(existing._id),
+        { session }
+      );
+      if (activeAttendance) return { outcome: "active_attendance" };
+    }
 
     const college = await db.collection("colleges").findOne(
       activeFilter({ _id: idMatch(input.college_id) }),
@@ -192,11 +216,12 @@ export async function deleteInstructorGuarded(
     );
     if (!existing) return { outcome: "not_found" };
 
+    // Removing somebody mid-session conflicts whatever the reason, so this
+    // refuses on any open check-in — but only one belonging to today, since a
+    // record left open yesterday is a missed check-out rather than a session
+    // in progress, and would otherwise make the instructor undeletable.
     const activeAttendance = await db.collection("attendance").findOne(
-      {
-        instructor_id: idMatch(String(existing._id)),
-        check_out_time: null,
-      },
+      openCheckInTodayFilter(existing._id),
       { session }
     );
     if (activeAttendance) return { outcome: "active_attendance" };
@@ -330,7 +355,7 @@ instructorRouter.put(
     }
     if (result.outcome === "active_attendance") {
       return res.status(409).json({
-        detail: "Check out this instructor before changing their profile",
+        detail: "Check this instructor out before moving them to another institute",
       });
     }
     if (result.outcome === "college_not_found") {

@@ -246,3 +246,50 @@ test("guarded instructor deletion writes the instructor in the shared transactio
   assert.equal(result.outcome, "deleted");
   assert.equal(updates, 1);
 });
+
+test("an ordinary profile edit is not blocked by an open check-in", async () => {
+  // Only a college reassignment conflicts with an open session. Refusing name,
+  // email, gender and role edits too meant one forgotten check-out made the
+  // whole profile permanently uneditable.
+  let attendanceQueried = false;
+  const db = {
+    collection(name) {
+      if (name === "instructors") return {
+        // The duplicate-employee-id lookup excludes the row being edited, so
+        // it must not match the instructor itself.
+        findOne: async (filter) => (filter?._id?.$ne
+          ? null
+          : { _id: "i1", college_id: "c1", employee_id: "E1" }),
+        updateOne: async () => ({ matchedCount: 1 }),
+      };
+      if (name === "attendance") return {
+        findOne: async () => { attendanceQueried = true; return { _id: "open" }; },
+      };
+      if (name === "colleges") return {
+        findOne: async () => ({ _id: "c1" }),
+        updateOne: async () => ({ matchedCount: 1 }),
+      };
+      throw new Error(`unexpected ${name}`);
+    },
+  };
+
+  const sameCollege = await updateInstructorGuarded(
+    db,
+    "i1",
+    { name: "New Name", college_id: "c1", employee_id: "E1" },
+    async (run) => run({})
+  );
+  assert.equal(sameCollege.outcome, "updated");
+  assert.equal(attendanceQueried, false, "an open check-in is irrelevant to a name change");
+
+  // Moving them to another institute still refuses: the attendance record
+  // snapshots the college, and the session is still running.
+  const moved = await updateInstructorGuarded(
+    db,
+    "i1",
+    { name: "New Name", college_id: "c2", employee_id: "E1" },
+    async (run) => run({})
+  );
+  assert.equal(moved.outcome, "active_attendance");
+  assert.equal(attendanceQueried, true);
+});
