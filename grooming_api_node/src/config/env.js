@@ -149,6 +149,16 @@ export function validateEnvironment() {
   if (config.adminPassword.toLowerCase().includes(config.adminEmail.split("@")[0])) {
     errors.push("ADMIN_PASSWORD cannot contain the administrator email name");
   }
+  // Emails carry links built from this. A localhost value is valid CORS — the
+  // mobile shell uses https://localhost — but as a link it sends the recipient
+  // to their own machine, so the report is simply unreachable and nothing in
+  // the system notices.
+  const resolvedAppUrl = appUrl();
+  if (!/^https:\/\//.test(resolvedAppUrl) || /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(resolvedAppUrl)) {
+    errors.push(
+      "CORS_ORIGINS must contain the public HTTPS address of the site, since emailed report links are built from it"
+    );
+  }
   if (config.origins.includes("*")) {
     errors.push("CORS_ORIGINS cannot contain * in production");
   }

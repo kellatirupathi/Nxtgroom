@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import jwt from "jsonwebtoken";
 import sharp from "sharp";
-import { CORS_METHODS, runtimeConfig, validateEnvironment } from "../src/config/env.js";
+import { appUrl, CORS_METHODS, runtimeConfig, validateEnvironment } from "../src/config/env.js";
 import { createAccessToken } from "../src/middleware/auth.js";
 import { detectImageMimeType, validateImageUpload } from "../src/imageValidation.js";
 import { normalizeInstructorImage } from "../src/imageProcessor.js";
@@ -240,5 +240,45 @@ test("every HTTP method the API routes use is allowed through CORS", async () =>
   assert.ok(used.size > 0, "no routes were discovered; the test cannot verify anything");
   for (const method of used) {
     assert.ok(CORS_METHODS.includes(method), `${method} is routed but blocked by CORS`);
+  }
+});
+
+test("emailed links cannot be built from a localhost origin in production", () => {
+  // https://localhost is a legitimate CORS entry — the mobile shell uses it —
+  // but as a link it sends the recipient to their own machine, so the report
+  // is unreachable and nothing in the system notices.
+  const withOrigins = (origins) => {
+    process.env.NODE_ENV = "production";
+    delete process.env.APP_URL;
+    Object.assign(process.env, {
+      PORT: "8000", MONGODB_URI: "mongodb+srv://u:p@h/?appName=x", DB_NAME: "d",
+      SECRET_KEY: "x".repeat(48), JWT_EXPIRE_MINUTES: "480",
+      JWT_ISSUER: "i", JWT_AUDIENCE: "a",
+      ADMIN_EMAIL: "admin@nxtwave.com", ADMIN_PASSWORD: "Faculty@2026!Track",
+      ADMIN_PASSWORD_VERSION: "2", AWS_REGION: "ap-south-1",
+      AWS_ACCESS_KEY_ID: "p", AWS_SECRET_ACCESS_KEY: "p", SES_FROM_EMAIL: "n@e.com",
+      APP_TIME_ZONE: "Asia/Kolkata", TIMEZONE_OFFSET_MINUTES: "330",
+      OPENAI_API_KEY: "p", OPENAI_MODEL: "gpt-4o-2024-11-20",
+      OPENAI_TIMEOUT_MS: "120000", OPENAI_MAX_RETRIES: "2",
+      EVALUATION_POLL_MS: "2000", EVALUATION_LEASE_MS: "600000", EVALUATION_MAX_ATTEMPTS: "3",
+      SES_TIMEOUT_MS: "10000", SES_MAX_ATTEMPTS: "3",
+      NOTIFICATION_LEASE_MS: "600000", NOTIFICATION_MAX_ATTEMPTS: "3",
+      CORS_ORIGINS: origins,
+    });
+    try {
+      validateEnvironment();
+      return null;
+    } catch (error) {
+      return error.message;
+    }
+  };
+
+  // The mobile shell's origin alongside the real site is fine: the site wins.
+  assert.equal(withOrigins("https://nxtgroom-xi.vercel.app,https://localhost"), null);
+  assert.equal(appUrl(), "https://nxtgroom-xi.vercel.app");
+
+  for (const origins of ["http://localhost:5175", "https://localhost", "http://127.0.0.1:8080"]) {
+    assert.match(String(withOrigins(origins)), /emailed report links are built from it/,
+      `${origins} would email a link nobody outside this machine can open`);
   }
 });
