@@ -162,8 +162,10 @@ export interface CurrentUser {
   email: string;
   role: Role;
   college_id: string | null;
-  /** Whether this account may delete attendance records. */
+  /** Whether this account may delete a whole attendance record. */
   can_delete_records?: boolean;
+  /** Whether it may remove a check-out on its own, leaving the check-in. */
+  can_delete_checkout?: boolean;
 }
 
 /** One account's capabilities, and where each answer comes from. */
@@ -179,6 +181,7 @@ export interface UserPermissions {
 
 export interface AccessSettings {
   boa_can_delete_records: boolean;
+  boa_can_delete_checkout: boolean;
 }
 
 export interface NotificationSettings {

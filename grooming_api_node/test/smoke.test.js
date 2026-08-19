@@ -103,6 +103,7 @@ test("login preserves the frontend authentication contract", async () => {
     // Sent so the interface only offers actions the server would allow. An
     // admin always may; a BOA depends on the workspace and per-user settings.
     can_delete_records: true,
+    can_delete_checkout: true,
   });
 });
 

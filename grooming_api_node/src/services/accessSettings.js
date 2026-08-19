@@ -13,7 +13,12 @@ import { isElevated } from "../middleware/auth.js";
 const SETTINGS_ID = "access_settings";
 
 export const DEFAULT_ACCESS_SETTINGS = Object.freeze({
+  // Kept as the check-in permission it always was, so an existing setting is
+  // not silently reinterpreted. Deleting a check-in removes the whole record.
   boa_can_delete_records: false,
+  // Removing a check-out leaves the check-in and its report standing, so it is
+  // the lesser of the two and is granted separately.
+  boa_can_delete_checkout: false,
 });
 
 const BOOLEAN_KEYS = Object.keys(DEFAULT_ACCESS_SETTINGS);
@@ -92,6 +97,18 @@ export function canDeleteAttendance(user, settings = DEFAULT_ACCESS_SETTINGS) {
   if (isElevated(user.role)) return true;
   if (typeof user.can_delete_records === "boolean") return user.can_delete_records;
   return Boolean(settings?.boa_can_delete_records);
+}
+
+/**
+ * Whether this user may remove a check-out on its own.
+ *
+ * Anybody who may delete the whole record may certainly delete half of it, so
+ * the record permission implies this one.
+ */
+export function canDeleteCheckout(user, settings = DEFAULT_ACCESS_SETTINGS) {
+  if (canDeleteAttendance(user, settings)) return true;
+  if (typeof user?.can_delete_checkout === "boolean") return user.can_delete_checkout;
+  return Boolean(settings?.boa_can_delete_checkout);
 }
 
 /** The effective capability plus where it came from, for the permissions UI. */

@@ -13,7 +13,7 @@ import {
   uniqueRecordValues,
 } from '../attendanceFilters';
 import { publicDayReportPath } from '../routes';
-import { formatCoordinates, hasEvaluation, normalizeAttendanceStatus } from '../status';
+import { canOpenRecord, formatCoordinates, normalizeAttendanceStatus } from '../status';
 import type { AttendanceRecord } from '../types';
 
 interface DailyAttendanceTableProps {
@@ -165,7 +165,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
   );
 
   const openRecord = (record: AttendanceRecord) => {
-    if (hasEvaluation(record.status)) onRowClick(record);
+    if (canOpenRecord(record.status)) onRowClick(record);
   };
 
   const handleRangeChange = (nextPreset: DatePreset, nextRange: DateRange) => {
@@ -269,7 +269,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
               ) : filteredRecords.length === 0 ? (
                 <tr><td colSpan={12} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {
-                const canOpen = hasEvaluation(record.status);
+                const canOpen = canOpenRecord(record.status);
                 return (
                   <tr
                     key={record._id}

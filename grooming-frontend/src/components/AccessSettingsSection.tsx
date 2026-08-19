@@ -16,7 +16,7 @@ const ACCESS_PATH = '/api/v2/settings/access';
  * refused it under Users regardless of what is set here.
  */
 export default function AccessSettingsSection() {
-  const [settings, setSettings] = useState<AccessSettings>({ boa_can_delete_records: false });
+  const [settings, setSettings] = useState<AccessSettings>({ boa_can_delete_records: false, boa_can_delete_checkout: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -38,18 +38,18 @@ export default function AccessSettingsSection() {
     return () => { disposed = true; };
   }, [toast]);
 
-  const update = async (value: boolean) => {
+  const update = async (key: keyof AccessSettings, value: boolean) => {
     const previous = settings;
-    setSettings({ boa_can_delete_records: value });
+    setSettings({ ...settings, [key]: value });
     setSaving(true);
     try {
       const saved = await apiJson<AccessSettings>(ACCESS_PATH, {
         method: 'PUT',
-        body: { boa_can_delete_records: value },
+        body: { [key]: value },
       });
       setSettings(saved);
       toast.success(
-        value ? 'BOAs can now delete records' : 'BOAs can no longer delete records',
+        value ? 'Permission granted to BOAs' : 'Permission withdrawn from BOAs',
         { detail: 'Accounts with their own setting under Users are unaffected.' },
       );
     } catch (error) {
@@ -72,19 +72,36 @@ export default function AccessSettingsSection() {
         <div className="flex items-start justify-between gap-6 p-4">
           <div className="min-w-0">
             <label htmlFor="boa_can_delete_records" className="block text-sm font-semibold text-slate-800">
-              Let BOAs delete attendance records
+              Let BOAs delete a whole attendance record
             </label>
             <p className="text-sm text-slate-500 mt-0.5">
-              Deleting removes the check-in, its appearance report and both photographs, and cannot be
-              undone. Administrators can always delete. A BOA given their own setting under Users keeps
-              it whatever this is.
+              A record cannot exist without its check-in, so this removes the check-in, the check-out,
+              both appearance reports and both photographs. It cannot be undone.
             </p>
           </div>
           <Toggle
             id="boa_can_delete_records"
             checked={settings.boa_can_delete_records}
             disabled={loading || saving}
-            onChange={(value) => void update(value)}
+            onChange={(value) => void update('boa_can_delete_records', value)}
+          />
+        </div>
+        <div className="flex items-start justify-between gap-6 border-t border-slate-100 p-4">
+          <div className="min-w-0">
+            <label htmlFor="boa_can_delete_checkout" className="block text-sm font-semibold text-slate-800">
+              Let BOAs delete a check-out on its own
+            </label>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Removes the check-out time, its photograph and its report, leaving the check-in and the
+              morning&rsquo;s report standing. Anyone allowed to delete the whole record can already do
+              this.
+            </p>
+          </div>
+          <Toggle
+            id="boa_can_delete_checkout"
+            checked={settings.boa_can_delete_checkout || settings.boa_can_delete_records}
+            disabled={loading || saving || settings.boa_can_delete_records}
+            onChange={(value) => void update('boa_can_delete_checkout', value)}
           />
         </div>
       </div>

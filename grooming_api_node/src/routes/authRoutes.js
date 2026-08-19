@@ -9,7 +9,7 @@ import {
   verifyPassword,
 } from "../middleware/auth.js";
 import { asyncRoute } from "../utils.js";
-import { canDeleteAttendance, getAccessSettings } from "../services/accessSettings.js";
+import { canDeleteAttendance, canDeleteCheckout, getAccessSettings } from "../services/accessSettings.js";
 import {
   googleClientId,
   isGoogleLoginEnabled,
@@ -72,6 +72,7 @@ authRouter.get("/me", getCurrentUser, asyncRoute(async (req, res) => {
     // Sent so the interface can hide an action the server would refuse. The
     // server still checks on every delete; this only keeps the UI honest.
     can_delete_records: canDeleteAttendance(req.currentUser, settings),
+    can_delete_checkout: canDeleteCheckout(req.currentUser, settings),
   });
 }));
 

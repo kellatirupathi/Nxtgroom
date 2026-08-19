@@ -97,3 +97,21 @@ test("a permission change is not hidden behind the cache", async () => {
   assert.equal(reads, 2);
   clearAccessSettingsCache();
 });
+
+test("deleting a check-out is a lesser permission than deleting the record", async () => {
+  const { canDeleteCheckout } = await import("../src/services/accessSettings.js");
+  const closed = { boa_can_delete_records: false, boa_can_delete_checkout: false };
+
+  // Anyone who may destroy the whole record may certainly remove half of it.
+  assert.equal(canDeleteCheckout({ role: "ADMIN" }, closed), true);
+  assert.equal(canDeleteCheckout({ role: "BOA", can_delete_records: true }, closed), true);
+  assert.equal(canDeleteCheckout({ role: "BOA" }, { boa_can_delete_records: true }), true);
+
+  // The reverse does not hold: removing a check-out leaves the check-in and
+  // its report standing, so it can be granted on its own.
+  assert.equal(canDeleteCheckout({ role: "BOA" }, { boa_can_delete_checkout: true }), true);
+  assert.equal(canDeleteAttendance({ role: "BOA" }, { boa_can_delete_checkout: true }), false);
+
+  assert.equal(canDeleteCheckout({ role: "BOA" }, closed), false);
+  assert.equal(canDeleteCheckout(null, closed), false);
+});

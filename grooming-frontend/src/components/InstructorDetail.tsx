@@ -13,8 +13,10 @@ import type { AttendanceRecord, Evaluation } from '../types';
 interface InstructorDetailProps {
   record: AttendanceRecord | null;
   onBack: () => void;
-  /** Hidden entirely when the signed-in user may not delete. */
+  /** Hidden entirely when the signed-in user may not delete the record. */
   canDelete?: boolean;
+  /** Removing a check-out alone is a lesser permission, granted separately. */
+  canDeleteCheckout?: boolean;
   /** Called after the record is gone, so the list behind can drop it. */
   onDeleted?: (attendanceId: string) => void;
 }
@@ -44,7 +46,7 @@ function formatDate(isoString?: string | null) {
   return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function InstructorDetail({ record, onBack, canDelete, onDeleted }: InstructorDetailProps) {
+export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, onDeleted }: InstructorDetailProps) {
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [loading, setLoading] = useState(Boolean(record));
   const [error, setError] = useState('');
@@ -52,7 +54,9 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
   // Check-in opens first: it is the half that carries the appearance report,
   // and on most records the only half that has happened yet.
   const [tab, setTab] = useState<'checkin' | 'checkout'>('checkin');
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Which delete is being confirmed. The two remove different things, so they
+  // cannot share one dialog.
+  const [confirmDelete, setConfirmDelete] = useState<'record' | 'checkout' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const toast = useToast();
 
@@ -66,13 +70,39 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
       toast.success('Attendance record deleted', {
         detail: `${record.instructor_name || 'The record'} and its photos have been removed.`,
       });
-      setConfirmDelete(false);
+      setConfirmDelete(null);
       // Back to the list, which no longer contains this record: staying here
       // would leave the page describing something that no longer exists.
       onDeleted?.(String(record._id));
       onBack();
     } catch (deleteError) {
       toast.error('Could not delete the record', {
+        detail: deleteError instanceof Error ? deleteError.message : String(deleteError),
+      });
+      setDeleting(false);
+    }
+  };
+
+  /**
+   * Removes only the check-out. The check-in and its report stay, and the
+   * instructor goes back to being checked in, so this is not a smaller version
+   * of deleting the record — it is a different act.
+   */
+  const handleDeleteCheckout = async () => {
+    if (!record) return;
+    setDeleting(true);
+    try {
+      await apiJson(`/api/v2/attendance/${encodeURIComponent(String(record._id))}/check-out`, {
+        method: 'DELETE',
+      });
+      toast.success('Check-out deleted', {
+        detail: 'The check-in and its report are unchanged.',
+      });
+      setConfirmDelete(null);
+      onDeleted?.(String(record._id));
+      onBack();
+    } catch (deleteError) {
+      toast.error('Could not delete the check-out', {
         detail: deleteError instanceof Error ? deleteError.message : String(deleteError),
       });
       setDeleting(false);
@@ -121,18 +151,35 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
 
         {/* Acts on the record as a whole, so it sits with the title rather
             than inside the profile card, which describes the person. */}
-        {canDelete && (
-          <button
-            type="button"
-            onClick={() => setConfirmDelete(true)}
-            aria-label="Delete this attendance record"
-            title="Delete this attendance record"
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Delete</span>
-          </button>
-        )}
+        {/* One button per half, because they remove different things. The
+            check-out button appears only on its own tab and only when there is
+            a check-out to remove. */}
+        <div className="ml-auto flex items-center gap-2">
+          {tab === 'checkout' && canDeleteCheckout && record.check_out_time && (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete('checkout')}
+              title="Delete only the check-out"
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-100"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Delete check-out</span>
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete('record')}
+              title="Delete the whole attendance record"
+              className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">
+                {tab === 'checkin' ? 'Delete check-in' : 'Delete record'}
+              </span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* One record, two halves. Switching swaps the photo, the time and the
@@ -307,15 +354,27 @@ export default function InstructorDetail({ record, onBack, canDelete, onDeleted 
       )}
 
       <ConfirmDialog
-        open={confirmDelete}
+        open={confirmDelete === 'record'}
         destructive
         busy={deleting}
         title="Delete this attendance record?"
         message={`This removes the check-in for ${record?.instructor_name || 'this instructor'} on ${formatDate(record?.date)}.`}
-        detail="The appearance report and both photographs are deleted with it. This cannot be undone."
+        detail="A record cannot exist without its check-in, so the check-out, both appearance reports and both photographs go with it. This cannot be undone."
         confirmLabel="Delete record"
         onConfirm={handleDelete}
-        onCancel={() => setConfirmDelete(false)}
+        onCancel={() => setConfirmDelete(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmDelete === 'checkout'}
+        destructive
+        busy={deleting}
+        title="Delete this check-out?"
+        message={`This removes the check-out for ${record?.instructor_name || 'this instructor'} on ${formatDate(record?.date)}.`}
+        detail="Its time, photograph and appearance report are deleted. The check-in and its report are untouched, and the instructor will be checked in again."
+        confirmLabel="Delete check-out"
+        onConfirm={handleDeleteCheckout}
+        onCancel={() => setConfirmDelete(null)}
       />
     </section>
   );

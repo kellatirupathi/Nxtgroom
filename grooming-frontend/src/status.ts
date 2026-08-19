@@ -25,9 +25,19 @@ export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
 
 export function hasEvaluation(status: unknown): boolean {
   const normalized = normalizeAttendanceStatus(status);
-  // Deliberately excludes 'unassessed': the analysis finished, but produced no
-  // checkpoints, so there is no report behind it to open.
   return normalized === 'compliant' || normalized === 'non_compliant';
+}
+
+/**
+ * Whether the detail page is worth opening.
+ *
+ * Wider than hasEvaluation on purpose. An unassessed record has no checkpoint
+ * tables, but it still has the photograph, the times, the location and the
+ * reason nothing was assessed — which is exactly what someone clicks the row
+ * to find out. Only a check-in still being analysed has nothing to show yet.
+ */
+export function canOpenRecord(status: unknown): boolean {
+  return normalizeAttendanceStatus(status) !== 'pending';
 }
 
 export function imageQualityLabel(imageQuality: ImageQuality | string | undefined | null): string {

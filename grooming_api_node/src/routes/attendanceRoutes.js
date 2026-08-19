@@ -9,7 +9,7 @@ import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluationFilter } from "../services/evaluationWorker.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
 import { buildPhotoKey, deletePhoto, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
-import { canDeleteAttendance, getAccessSettings } from "../services/accessSettings.js";
+import { canDeleteAttendance, canDeleteCheckout, getAccessSettings } from "../services/accessSettings.js";
 import { attachAddressToAttendance } from "../services/geocoding.js";
 import {
   asyncRoute,
@@ -914,5 +914,71 @@ attendanceRouter.delete(
 
     await purgeAttendance(db, attendance);
     return res.json({ message: "Attendance record deleted" });
+  })
+);
+
+/**
+ * Removes only the check-out half, leaving the check-in and its report intact.
+ *
+ * A record cannot exist without a check-in, so deleting that is deleting the
+ * record — which is what DELETE /:attendanceId does. This is the other half:
+ * the time, the photograph, the location and the check-out assessment go, and
+ * the instructor is back to being checked in.
+ */
+attendanceRouter.delete(
+  "/:attendanceId/check-out",
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const settings = await getAccessSettings(db);
+    if (!canDeleteCheckout(req.currentUser, settings)) {
+      return res.status(403).json({
+        detail: "You do not have permission to delete check-outs",
+      });
+    }
+
+    const attendance = await db.collection("attendance").findOne({
+      _id: idMatch(req.params.attendanceId),
+      ...attendanceScope(req.currentUser),
+    });
+    if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
+    if (!attendance.check_out_time) {
+      return res.status(409).json({ detail: "This record has no check-out to delete" });
+    }
+
+    // The photograph goes first. If it fails the record is untouched and the
+    // delete can be retried, where the reverse would leave an image in storage
+    // that nothing points at.
+    if (attendance.check_out_photo_key) {
+      try {
+        await deletePhoto(attendance.check_out_photo_key);
+      } catch {
+        // Already gone, or storage briefly unavailable; neither should strand
+        // the check-out the caller asked to remove.
+      }
+    }
+    await db.collection("evaluation_jobs").deleteOne({
+      _id: `${attendance._id}:evaluation:checkout`,
+    });
+    await db.collection("evaluations").deleteMany(
+      evaluationFilter(String(attendance._id), "checkout")
+    );
+    await db.collection("attendance").updateOne(
+      { _id: attendance._id },
+      {
+        $set: { check_out_time: null, updated_at: new Date() },
+        $unset: {
+          check_out_photo_key: "",
+          check_out_coordinates: "",
+          checkout_compliance_status: "",
+          checkout_remarks: "",
+          checkout_image_quality: "",
+          checkout_analysis_completed_at: "",
+          checkout_evaluation_queue_status: "",
+          checkout_email_status: "",
+          checkout_reminder_sent_at: "",
+        },
+      }
+    );
+    return res.json({ message: "Check-out deleted" });
   })
 );
