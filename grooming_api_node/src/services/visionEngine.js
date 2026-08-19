@@ -136,9 +136,15 @@ async function loadReferenceImages() {
   const filenames = (await fs.readdir(REFERENCE_DIR))
     .filter((filename) => filename.toLowerCase().endsWith(".jpg"))
     .sort();
-  if (filenames.length !== 8) {
-    throw new Error(`Expected 8 grooming reference images, found ${filenames.length}`);
+  // Whatever is in the folder is the reference set. This asserted a count of
+  // exactly eight, so removing an image that no longer had a checkpoint —
+  // spectacles, once eyewear was dropped — took the whole API down on boot
+  // rather than simply sending one picture fewer. An empty folder is still a
+  // real failure: the standards are what the model compares against.
+  if (filenames.length === 0) {
+    throw new Error(`No grooming reference images were found in ${REFERENCE_DIR}`);
   }
+  console.log(`Loaded ${filenames.length} grooming reference images.`);
   return Promise.all(filenames.map(async (filename) => ({
     filename,
     dataUrl: `data:image/jpeg;base64,${(await fs.readFile(path.join(REFERENCE_DIR, filename))).toString("base64")}`,

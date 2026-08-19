@@ -96,3 +96,26 @@ test("partial visibility is judged on what was actually assessed", () => {
   });
   assert.equal(reconcile(report).overall_status, "COMPLIANT");
 });
+
+test("the reference set is whatever is on disk, not a fixed count", async () => {
+  const { verifyVisionAssets } = await import("../src/services/visionEngine.js");
+  // This asserted exactly eight images. Removing one that no longer had a
+  // checkpoint — spectacles, once eyewear was dropped — crash-looped the API
+  // on boot instead of sending one picture fewer.
+  await assert.doesNotReject(() => verifyVisionAssets());
+
+  const { readdir } = await import("node:fs/promises");
+  const dir = new URL("../reference_images/", import.meta.url);
+  const images = (await readdir(dir)).filter((name) => name.toLowerCase().endsWith(".jpg"));
+  assert.ok(images.length > 0, "the model needs something to compare against");
+
+  // Filtering is by filename prefix, so a rename is what silently sends a
+  // woman men's references. Every image must still start with a known prefix.
+  const prefixes = ["accessories", "beard", "footwear", "hair", "id_card", "men", "women", "spectacles"];
+  for (const name of images) {
+    assert.ok(
+      prefixes.some((prefix) => name.toLowerCase().startsWith(prefix)),
+      `${name} starts with no prefix the gender filter recognises`
+    );
+  }
+});
