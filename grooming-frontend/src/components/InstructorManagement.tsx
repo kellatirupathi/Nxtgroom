@@ -186,6 +186,19 @@ export default function InstructorManagement() {
 
   // Search covers the synced columns too, since employee_id is often absent
   // on roster rows and the user id is what identifies them.
+  /**
+   * The institute to show for one instructor.
+   *
+   * Synced instructors carry institute_name from the warehouse; one added by
+   * hand carries only the college it was assigned to. The edit dialog resolved
+   * that id and the table did not, so the same instructor showed an institute
+   * in one place and a dash in the other.
+   */
+  const instituteFor = (ins: Instructor): string =>
+    ins.institute_name
+    || colleges.find((college) => String(college._id) === String(ins.college_id))?.name
+    || '';
+
   const filteredInstructors = instructors.filter((ins) => {
     const term = search.trim().toLowerCase();
     if (!term) return true;
@@ -195,7 +208,7 @@ export default function InstructorManagement() {
       ins.instructor_user_id,
       ins.instructor_role,
       ins.role,
-      ins.institute_name,
+      instituteFor(ins),
       ins.instructor_category,
       ins.email,
     ].some((value) => String(value ?? '').toLowerCase().includes(term));
@@ -284,7 +297,7 @@ export default function InstructorManagement() {
                       />
                     </td>
                     <td className="p-4 hidden lg:table-cell text-sm text-slate-600">
-                      {ins.institute_name || <span className="text-slate-300">--</span>}
+                      {instituteFor(ins) || <span className="text-slate-300">--</span>}
                     </td>
                     <td className="p-4 hidden lg:table-cell text-sm text-slate-600">
                       {ins.instructor_category || <span className="text-slate-300">--</span>}
