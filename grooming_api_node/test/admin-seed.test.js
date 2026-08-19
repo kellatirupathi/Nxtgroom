@@ -72,10 +72,14 @@ test("legacy default administrator is adopted and password-rotated once", async 
   assert.equal(db.users[0].session_version, 1);
 });
 
-test("administrator password version rotation revokes previously issued sessions", async () => {
+test("a deploy never replaces a password that already exists", async () => {
+  // The password an administrator is actually using lives in the database.
+  // Rotating it whenever a version string changed meant an ordinary redeploy
+  // could lock them out with nothing on screen to explain why.
   process.env.ADMIN_EMAIL = "production-admin@example.com";
   process.env.ADMIN_PASSWORD = "new-safe-test-password-123";
   process.env.ADMIN_PASSWORD_VERSION = "production-v2";
+  delete process.env.ADMIN_PASSWORD_RESET;
   const db = fakeDb([{
     _id: "managed-admin",
     email: "production-admin@example.com",
@@ -86,9 +90,59 @@ test("administrator password version rotation revokes previously issued sessions
   }]);
 
   await seedAdmin(db);
+  assert.equal(await verifyPassword("old-safe-test-password-123", db.users[0].password_hash), true,
+    "the stored password must survive the deploy");
+  assert.equal(await verifyPassword("new-safe-test-password-123", db.users[0].password_hash), false);
+  // Nobody is signed out, because nothing about their credentials changed.
+  assert.equal(db.users[0].session_version, 4);
+  // The version is still recorded, so the account says what it was created with.
   assert.equal(db.users[0].password_version, "production-v2");
-  assert.equal(db.users[0].session_version, 5);
+});
+
+test("an explicit reset overwrites the password and signs everyone out", async () => {
+  // The recovery path when a password is genuinely lost. Deliberately its own
+  // flag, so it cannot happen as a side effect of a configuration change.
+  process.env.ADMIN_EMAIL = "production-admin@example.com";
+  process.env.ADMIN_PASSWORD = "new-safe-test-password-123";
+  process.env.ADMIN_PASSWORD_VERSION = "production-v2";
+  process.env.ADMIN_PASSWORD_RESET = "true";
+  const db = fakeDb([{
+    _id: "managed-admin",
+    email: "production-admin@example.com",
+    password_hash: await getPasswordHash("old-safe-test-password-123"),
+    password_version: "production-v1",
+    session_version: 4,
+    role: "SUPER_ADMIN",
+  }]);
+
+  await seedAdmin(db);
   assert.equal(await verifyPassword("new-safe-test-password-123", db.users[0].password_hash), true);
+  assert.equal(db.users[0].session_version, 5, "every existing token is revoked");
+  delete process.env.ADMIN_PASSWORD_RESET;
+});
+
+test("only a literal true resets; a stray value leaves the password alone", async () => {
+  // "1", "yes" and an empty string are the shapes a flag like this gets typed
+  // in by mistake, and each of them overwriting a live password would be the
+  // same outage again.
+  for (const value of ["1", "yes", "TRUE", "", " true "]) {
+    process.env.ADMIN_EMAIL = "production-admin@example.com";
+    process.env.ADMIN_PASSWORD = "new-safe-test-password-123";
+    process.env.ADMIN_PASSWORD_VERSION = "production-v2";
+    process.env.ADMIN_PASSWORD_RESET = value;
+    const db = fakeDb([{
+      _id: "managed-admin",
+      email: "production-admin@example.com",
+      password_hash: await getPasswordHash("old-safe-test-password-123"),
+      password_version: "production-v1",
+      session_version: 4,
+      role: "SUPER_ADMIN",
+    }]);
+    await seedAdmin(db);
+    assert.equal(await verifyPassword("old-safe-test-password-123", db.users[0].password_hash), true,
+      `ADMIN_PASSWORD_RESET=${JSON.stringify(value)} must not overwrite the password`);
+  }
+  delete process.env.ADMIN_PASSWORD_RESET;
 });
 
 test("an unknown unversioned administrator is not silently overwritten", async () => {

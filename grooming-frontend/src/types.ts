@@ -61,6 +61,11 @@ export interface Instructor {
   college_id: string;
   college_name?: string | null;
   email?: string | null;
+  /**
+   * Whether an address exists. A BOA is not shown the address itself, so
+   * without this the interface cannot tell "has none" from "may not see it".
+   */
+  has_email?: boolean;
   phone_no?: string | null;
   created_at?: string;
   daily_feedbacks?: DailyFeedback[];

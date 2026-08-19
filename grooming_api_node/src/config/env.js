@@ -74,6 +74,9 @@ export function runtimeConfig() {
     adminEmail: (process.env.ADMIN_EMAIL || "admin@nxtwave.com").trim().toLowerCase(),
     adminPassword: process.env.ADMIN_PASSWORD || "admin@123",
     adminPasswordVersion: process.env.ADMIN_PASSWORD_VERSION || "development-v1",
+    // Break glass. Only an explicit "true" overwrites a password that already
+    // exists in the database; anything else leaves the stored one alone.
+    adminPasswordReset: process.env.ADMIN_PASSWORD_RESET === "true",
     origins: corsOrigins(),
     openAiTimeoutMs: parseInteger("OPENAI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
     openAiMaxRetries: parseInteger("OPENAI_MAX_RETRIES", 2, { min: 0, max: 2 }),

@@ -21,6 +21,20 @@ const MAX_RESULTS = 40;
  * email, institute, role and user id, and shows the email under each name so
  * two people with the same name are distinguishable.
  */
+/**
+ * What to say under an instructor's name.
+ *
+ * A BOA is not shown contact details, so an absent email here means "you may
+ * not see it", not "there isn't one" — and saying the latter told an
+ * administrator an instructor could not be emailed a report when they could.
+ * The role fills the space instead, which is useful and always visible.
+ */
+function describeContact(instructor: Instructor): string {
+  if (instructor.email) return instructor.email;
+  if (instructor.has_email) return instructor.instructor_role || instructor.role || 'Instructor';
+  return 'No email on record';
+}
+
 export default function InstructorSearchSelect({
   instructors,
   selectedId,
@@ -116,7 +130,7 @@ export default function InstructorSearchSelect({
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-bold text-slate-800">{selected.name}</span>
             <span className="block truncate text-xs text-slate-500">
-              {selected.email || 'No email on record'}
+              {describeContact(selected)}
             </span>
           </span>
           <button
@@ -192,7 +206,7 @@ export default function InstructorSearchSelect({
                   {instructor.name}
                 </span>
                 <span className="block truncate text-xs text-slate-500">
-                  {instructor.email || 'No email on record'}
+                  {describeContact(instructor)}
                   {instructor.institute_name ? ` · ${instructor.institute_name}` : ''}
                 </span>
               </li>

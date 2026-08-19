@@ -277,6 +277,11 @@ instructorRouter.get(
       for (const key of Object.keys(serialized)) {
         if (key.startsWith("_private_")) delete serialized[key];
       }
+      // Whether an address exists is not the address itself, and the two were
+      // being conflated: a BOA cannot see the email, so the attendance screen
+      // reported "No email on record" for instructors who have one. Sent for
+      // everybody so the interface can tell absence apart from permission.
+      serialized.has_email = Boolean(instructor.email);
       // Contact details are visible to both elevated roles; a BOA still only
       // sees the instructors at their own college, without contact details.
       if (!isElevated(req.currentUser.role)) {

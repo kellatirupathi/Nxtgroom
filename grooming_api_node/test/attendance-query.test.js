@@ -1,4 +1,4 @@
-import { dateRangeBoundsInTimeZone } from "../src/utils.js";
+import { dateBoundsInTimeZone, dateRangeBoundsInTimeZone } from "../src/utils.js";
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { app } from "../server.js";
@@ -209,4 +209,44 @@ test("a role missing from an older record falls back to the instructor", () => {
   assert.equal(resolve({ instructor_role: "INSTRUCTOR" }, { instructor_role: "CENTRAL_INSTRUCTOR" }),
     "INSTRUCTOR", "the snapshot wins, so a report shows the role held on the day");
   assert.equal(resolve({}, null), "Unknown");
+});
+
+test("an unclosed check-in only blocks the day it belongs to", () => {
+  // The guard matched any open check-in ever, so one missed check-out on
+  // Monday stopped that instructor checking in for the rest of time. A day is
+  // a local calendar day: yesterday's open record is a missed check-out to
+  // chase, not a reason to refuse today.
+  const { start, end } = dateBoundsInTimeZone("2026-08-19", "Asia/Kolkata");
+  const blocksToday = (checkInIso) => {
+    const at = new Date(checkInIso);
+    return at >= start && at < end;
+  };
+
+  // The record that was actually blocking check-ins: 18 August, never closed.
+  assert.equal(blocksToday("2026-08-18T13:15:00.000Z"), false, "yesterday must not block today");
+  // Anything inside today still blocks, which is the rule the guard is for.
+  assert.equal(blocksToday("2026-08-19T04:00:00.000Z"), true);
+  assert.equal(blocksToday("2026-08-19T18:29:00.000Z"), true, "23:59 local is still today");
+  // Local midnight in Asia/Kolkata is 18:30 UTC the day before, so a check-in
+  // just after it belongs to today rather than to yesterday in UTC.
+  assert.equal(blocksToday("2026-08-18T18:31:00.000Z"), true, "00:01 local today");
+  assert.equal(blocksToday("2026-08-18T18:29:00.000Z"), false, "23:59 local yesterday");
+});
+
+test("an instructor with no address is distinguishable from one you cannot see", () => {
+  // A BOA is not shown contact details. Reporting that as "no email on record"
+  // told administrators an instructor could not be emailed a report when they
+  // could, and the check-in itself would have worked.
+  const describe = (instructor) => {
+    if (instructor.email) return instructor.email;
+    if (instructor.has_email) return instructor.role || "Instructor";
+    return "No email on record";
+  };
+
+  assert.equal(describe({ email: "a@nxtwave.co.in", has_email: true }), "a@nxtwave.co.in");
+  assert.equal(describe({ has_email: true, role: "CENTRAL_INSTRUCTOR" }), "CENTRAL_INSTRUCTOR");
+  assert.equal(describe({ has_email: false }), "No email on record");
+  // Records fetched before has_email existed carry neither, and must still
+  // read as absent rather than crashing.
+  assert.equal(describe({}), "No email on record");
 });

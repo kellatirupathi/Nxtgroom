@@ -137,6 +137,21 @@ app.use((error, req, res, _next) => {
   return res.status(500).json({ detail: "Internal server error", request_id: req.requestId });
 });
 
+/**
+ * Ensures the bootstrap administrator exists.
+ *
+ * The database owns the password. The environment supplies one only when the
+ * account is being created for the first time; after that the stored hash is
+ * authoritative and a deploy never touches it. It used to rotate whenever
+ * ADMIN_PASSWORD_VERSION differed from the stored value, which meant an
+ * ordinary redeploy could silently replace the password an administrator was
+ * using and lock them out with no indication of why.
+ *
+ * ADMIN_PASSWORD_RESET=true forces one rotation, for the case where the
+ * password is genuinely lost and email recovery is unavailable. It is deliberately
+ * separate from the version string so it cannot happen as a side effect of
+ * routine configuration changes.
+ */
 export async function seedAdmin(db) {
   const currentConfig = runtimeConfig();
   const now = new Date();
@@ -205,7 +220,7 @@ export async function seedAdmin(db) {
   if (user.role !== ROLES.SUPER_ADMIN) {
     throw new Error("ADMIN_EMAIL belongs to a non-administrator account");
   }
-  if (user.password_version !== currentConfig.adminPasswordVersion) {
+  if (currentConfig.adminPasswordReset) {
     await db.collection("users").updateOne(
       { _id: user._id },
       {
@@ -215,10 +230,20 @@ export async function seedAdmin(db) {
           bootstrap_managed: true,
           updated_at: now,
         },
+        // Every existing token stops working, which is the point of a reset.
         $inc: { session_version: 1 },
       }
     );
-    console.log("Rotated the configured bootstrap administrator password.");
+    console.warn(
+      "ADMIN_PASSWORD_RESET is set: the administrator password was overwritten from the environment. "
+      + "Unset it and redeploy, or the next restart will overwrite it again."
+    );
+  } else if (user.password_version !== currentConfig.adminPasswordVersion) {
+    // Recorded, not acted on. The stored password stays exactly as it is.
+    await db.collection("users").updateOne(
+      { _id: user._id },
+      { $set: { password_version: currentConfig.adminPasswordVersion, updated_at: now } }
+    );
   }
   const unmanagedLegacyAdmin = await db.collection("users").findOne(
     {

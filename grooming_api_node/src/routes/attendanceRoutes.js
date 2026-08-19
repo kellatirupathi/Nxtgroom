@@ -121,6 +121,24 @@ async function purgeAttendance(db, attendance) {
 }
 
 /**
+ * Matches an open check-in belonging to today.
+ *
+ * The guard used to match any open check-in ever. A check-out that was never
+ * done left the record open forever, so one missed check-out on Monday blocked
+ * that instructor from checking in for the rest of time. A day here is a local
+ * calendar day — midnight to midnight where the instructor is — so yesterday's
+ * unclosed record is a missed check-out to chase, not a reason to refuse today.
+ */
+function openCheckInToday(instructorId) {
+  const { start, end } = dateBoundsInTimeZone(undefined, runtimeConfig().appTimeZone);
+  return {
+    instructor_id: idMatch(String(instructorId)),
+    check_out_time: null,
+    check_in_time: { $gte: start, $lt: end },
+  };
+}
+
+/**
  * The id of the instructor's open check-in, or null.
  *
  * Used only on the refusal path, where a duplicate check-in has already been
@@ -130,7 +148,7 @@ async function purgeAttendance(db, attendance) {
 async function activeAttendanceId(db, instructorId) {
   try {
     const record = await db.collection("attendance").findOne(
-      { instructor_id: idMatch(String(instructorId)), check_out_time: null },
+      openCheckInToday(instructorId),
       { projection: { _id: 1 } },
     );
     return record ? String(record._id) : null;
@@ -189,10 +207,7 @@ export async function commitGuardedCheckIn(
     if (!isValidEmail(instructor.email)) return { outcome: "invalid_email" };
 
     const activeAttendance = await db.collection("attendance").findOne(
-      {
-        instructor_id: idMatch(String(instructor._id)),
-        check_out_time: null,
-      },
+      openCheckInToday(instructor._id),
       { session }
     );
     if (activeAttendance) return { outcome: "already_active" };
@@ -298,10 +313,9 @@ attendanceRouter.post(
     // Return the open record's id, not just the refusal: the caller's next
     // step is almost always to look at that check-in, and without the id the
     // user has to go and find it by hand.
-    const activeRecord = await db.collection("attendance").findOne({
-      instructor_id: idMatch(String(instructor._id)),
-      check_out_time: null,
-    });
+    const activeRecord = await db.collection("attendance").findOne(
+      openCheckInToday(instructor._id)
+    );
     if (activeRecord) {
       return res.status(409).json({
         detail: "This instructor already has an active check-in",
