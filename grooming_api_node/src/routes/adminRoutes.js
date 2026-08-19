@@ -36,8 +36,10 @@ import {
 import { INVITE_TTL_MS, issueResetToken } from "../services/passwordResetService.js";
 import {
   addReportRecipient,
+  getRecipientEvents,
   getReportRecipients,
   removeReportRecipient,
+  saveRecipientEvents,
 } from "../services/reportRecipients.js";
 import {
   isSyncConfigured,
@@ -1013,5 +1015,34 @@ adminRouter.put(
     );
     const settings = await getAccessSettings(db);
     return res.json(describeDeletePermission({ ...user, can_delete_records: value ?? undefined }, settings));
+  })
+);
+
+/**
+ * Which halves reporting partners are copied on.
+ *
+ * Separate from the address list because they answer a different question:
+ * who receives reports, and which reports they receive.
+ */
+adminRouter.get(
+  "/settings/rp-recipients/events",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(await getRecipientEvents(req.app.locals.db));
+  })
+);
+
+adminRouter.put(
+  "/settings/rp-recipients/events",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    for (const key of ["checkin_enabled", "checkout_enabled"]) {
+      if (key in req.body && typeof req.body[key] !== "boolean") {
+        return res.status(422).json({ detail: `${key} must be true or false` });
+      }
+    }
+    return res.json(
+      await saveRecipientEvents(req.app.locals.db, req.body, req.currentUser.email)
+    );
   })
 );

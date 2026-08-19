@@ -8,7 +8,7 @@ import { createWorkerMonitor } from "./workerHealth.js";
 import { downloadPhoto } from "./photoStorage.js";
 import { sendGroomingAlertEmail } from "./emailService.js";
 import { idMatch } from "../middleware/auth.js";
-import { getReportRecipients } from "./reportRecipients.js";
+import { reportRecipientsFor } from "./reportRecipients.js";
 import { ensureReportToken, localDateKey } from "./instructorReports.js";
 import { appUrl } from "../config/env.js";
 
@@ -101,7 +101,10 @@ async function sendGroomingAlerts(db, {
     deliveries.push({ to, role: "instructor", ...(await sendGroomingAlertEmail(to, payload)) });
   }
 
-  const recipients = await getReportRecipients(db);
+  // Reporting partners are copied per half, each behind its own switch: an
+  // administrator may want the morning's failures without a second message
+  // every evening.
+  const recipients = (await reportRecipientsFor(db, kind));
   for (const recipient of recipients) {
     deliveries.push({
       to: recipient,
@@ -351,6 +354,26 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         },
       }
     );
+    // The check-out gets its own report email, built from its own evaluation
+    // and linking to its own half. Previously nothing was sent for it, so the
+    // only report anybody ever received described the morning.
+    if (attendanceStatus === "non_compliant") {
+      try {
+        await sendGroomingAlerts(db, {
+          attendanceId: job.attendance_id,
+          instructorId: job.instructor?.id,
+          instructorName: job.instructor?.name,
+          instructorEmail: job.instructor?.email,
+          status: attendanceStatus,
+          summary: evaluation.ai_summary || "",
+          checkInTime: job.check_in_time,
+          kind: "checkout",
+        });
+      } catch (error) {
+        console.error(`Check-out alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);
+      }
+    }
+
     await db.collection("evaluation_jobs").deleteOne({
       _id: job._id,
       worker_id: WORKER_ID,
@@ -621,9 +644,13 @@ export async function reconcileFailedEvaluationOutcomes(db) {
 }
 
 async function retryEvaluation(db, job, error) {
-  const storedEvaluation = await db.collection("evaluations").findOne({
-    attendance_id: job.attendance_id,
-  });
+  const storedEvaluation = await db.collection("evaluations").findOne(
+    // Scoped to this half. Matching on attendance_id alone found the check-in
+    // report and reused it for the check-out job, so the check-out was never
+    // analysed at all — it inherited the morning's verdict, remarks and
+    // timestamp, and the two reports were identical by construction.
+    evaluationFilter(job.attendance_id, jobKind(job))
+  );
   if (storedEvaluation) {
     if (await renewEvaluationLease(db, job)) {
       await syncStoredEvaluation(db, job, storedEvaluation, "processing");
@@ -677,9 +704,9 @@ export async function reconcileExpiredEvaluationJobs(db, now = new Date()) {
   if (!job) return false;
 
   try {
-    const storedEvaluation = await db.collection("evaluations").findOne({
-      attendance_id: job.attendance_id,
-    });
+    const storedEvaluation = await db.collection("evaluations").findOne(
+      evaluationFilter(job.attendance_id, jobKind(job))
+    );
     if (storedEvaluation) {
       await syncStoredEvaluation(db, job, storedEvaluation, "recovering");
     } else {
@@ -739,9 +766,9 @@ export async function reconcileOverdueEvaluationJobs(db, now = new Date()) {
   if (!job) return false;
 
   try {
-    const storedEvaluation = await db.collection("evaluations").findOne({
-      attendance_id: job.attendance_id,
-    });
+    const storedEvaluation = await db.collection("evaluations").findOne(
+      evaluationFilter(job.attendance_id, jobKind(job))
+    );
     if (storedEvaluation) {
       await syncStoredEvaluation(db, job, storedEvaluation, "recovering");
     } else {

@@ -90,3 +90,28 @@ test("removing one partner leaves the others receiving alerts", async () => {
   await removeReportRecipient(db, "A@NxtWave.co.in", "admin@nxtwave.com");
   assert.deepEqual(await getReportRecipients(db), ["b@nxtwave.co.in"]);
 });
+
+test("partners are copied per half, each behind its own switch", async () => {
+  const { reportRecipientsFor, getRecipientEvents } = await import("../src/services/reportRecipients.js");
+  const db = (doc) => ({
+    collection() { return { findOne: async () => doc }; },
+  });
+
+  const both = { emails: ["rp@nxtwave.co.in"], checkin_enabled: true, checkout_enabled: true };
+  assert.deepEqual(await reportRecipientsFor(db(both), "checkin"), ["rp@nxtwave.co.in"]);
+  assert.deepEqual(await reportRecipientsFor(db(both), "checkout"), ["rp@nxtwave.co.in"]);
+
+  // Each switch governs only its own half.
+  const checkinOnly = { ...both, checkout_enabled: false };
+  assert.deepEqual(await reportRecipientsFor(db(checkinOnly), "checkin"), ["rp@nxtwave.co.in"]);
+  assert.deepEqual(await reportRecipientsFor(db(checkinOnly), "checkout"), []);
+
+  const checkoutOnly = { ...both, checkin_enabled: false };
+  assert.deepEqual(await reportRecipientsFor(db(checkoutOnly), "checkin"), []);
+  assert.deepEqual(await reportRecipientsFor(db(checkoutOnly), "checkout"), ["rp@nxtwave.co.in"]);
+
+  // A configuration saved before these existed keeps behaving as it did.
+  const legacy = { emails: ["rp@nxtwave.co.in"] };
+  assert.deepEqual(await getRecipientEvents(db(legacy)), { checkin_enabled: true, checkout_enabled: true });
+  assert.deepEqual(await reportRecipientsFor(db(legacy), "checkout"), ["rp@nxtwave.co.in"]);
+});

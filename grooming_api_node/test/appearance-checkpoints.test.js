@@ -313,3 +313,24 @@ test("an unassessed result counts as neither compliant nor a violation", () => {
   assert.equal(toAttendanceStatus("COMPLIANT"), "compliant");
   assert.equal(toAttendanceStatus("NON_COMPLIANT"), "non_compliant");
 });
+
+test("a check-out job never reuses the check-in evaluation", async () => {
+  const { evaluationFilter } = await import("../src/services/evaluationWorker.js");
+  // The worker skips the vision call when an evaluation already exists for the
+  // record. Matching on attendance_id alone found the check-in report and
+  // reused it, so the check-out inherited the morning's verdict, remarks and
+  // timestamp and was never actually analysed.
+  const stored = [
+    { attendance_id: "a1", ai_summary: "morning" },
+    { attendance_id: "a1", kind: "checkout", ai_summary: "evening" },
+  ];
+  const find = (filter) => stored.find((doc) => Object.entries(filter).every(([key, value]) => (
+    value && typeof value === "object" && "$ne" in value ? doc[key] !== value.$ne : doc[key] === value
+  )));
+
+  assert.equal(find(evaluationFilter("a1", "checkin")).ai_summary, "morning");
+  assert.equal(find(evaluationFilter("a1", "checkout")).ai_summary, "evening");
+  // With only a check-in stored, a check-out job must find nothing and run.
+  assert.equal(find(evaluationFilter("a1", "checkout")) && stored.length === 2, true);
+  assert.equal([stored[0]].find((doc) => doc.kind === "checkout"), undefined);
+});

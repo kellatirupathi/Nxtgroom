@@ -3,8 +3,83 @@ import { Mail, Plus, Trash2, Users } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './useToast';
+import { Toggle } from './SettingsPage';
 
 const RP_PATH = '/api/v2/settings/rp-recipients';
+const EVENTS_PATH = '/api/v2/settings/rp-recipients/events';
+
+interface RecipientEvents {
+  checkin_enabled: boolean;
+  checkout_enabled: boolean;
+}
+
+/**
+ * Which halves the partners are copied on.
+ *
+ * Two switches rather than one, because they are genuinely different asks:
+ * somebody may want the morning's failures without a second message every
+ * evening. Both default to on, so an existing setup keeps behaving as it did.
+ */
+function EventToggles() {
+  const [events, setEvents] = useState<RecipientEvents>({ checkin_enabled: true, checkout_enabled: true });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+
+  useEffect(() => {
+    let disposed = false;
+    apiFetch<RecipientEvents>(EVENTS_PATH)
+      .then((data) => { if (!disposed && data) setEvents(data); })
+      .catch(() => { if (!disposed) toast.error('Could not load reporting partner settings'); })
+      .finally(() => { if (!disposed) setLoading(false); });
+    return () => { disposed = true; };
+  }, [toast]);
+
+  const update = async (key: keyof RecipientEvents, value: boolean) => {
+    const previous = events;
+    setEvents({ ...events, [key]: value });
+    setSaving(true);
+    try {
+      setEvents(await apiJson<RecipientEvents>(EVENTS_PATH, { method: 'PUT', body: { [key]: value } }));
+      toast.success(
+        value
+          ? `Partners will be copied on ${key === 'checkin_enabled' ? 'check-in' : 'check-out'} reports`
+          : `Partners will no longer be copied on ${key === 'checkin_enabled' ? 'check-in' : 'check-out'} reports`,
+      );
+    } catch (error) {
+      setEvents(previous);
+      toast.error('Could not save the setting', {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const rows: { key: keyof RecipientEvents; label: string; hint: string }[] = [
+    { key: 'checkin_enabled', label: 'Copy partners on check-in reports', hint: 'Sent when a check-in photo does not meet the standards.' },
+    { key: 'checkout_enabled', label: 'Copy partners on check-out reports', hint: 'Sent when a check-out photo does not meet the standards.' },
+  ];
+
+  return (
+    <div className="mb-5 rounded-md border border-slate-200 bg-white divide-y divide-slate-100">
+      {rows.map((row) => (
+        <div key={row.key} className="flex items-start justify-between gap-6 p-4">
+          <div className="min-w-0">
+            <label htmlFor={row.key} className="block text-sm font-semibold text-slate-800">{row.label}</label>
+            <p className="mt-0.5 text-sm text-slate-500">{row.hint}</p>
+          </div>
+          <Toggle
+            id={row.key}
+            checked={events[row.key]}
+            disabled={loading || saving}
+            onChange={(value: boolean) => void update(row.key, value)}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Reporting Partners: the addresses copied on an instructor's appearance
@@ -93,8 +168,8 @@ export default function ReportRecipients() {
           Reporting Partners
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          These addresses are copied when an instructor's appearance report is non-compliant or
-          needs review.
+          These addresses are copied when an instructor's appearance report is non-compliant.
+          The instructor is always emailed their own report; these settings control who else is.
         </p>
         {/* Stated plainly: it is the only way anyone but the instructor is told. */}
         <p className="mt-1 text-xs text-slate-400">
@@ -102,6 +177,8 @@ export default function ReportRecipients() {
           instructor and the partners listed here.
         </p>
       </div>
+
+      <EventToggles />
 
       <form onSubmit={handleAdd} className="mb-5 flex flex-wrap items-start gap-2">
         <div className="relative min-w-[16rem] flex-1">

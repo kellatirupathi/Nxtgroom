@@ -203,10 +203,21 @@ reportRouter.get(
       attendance: {
         check_in_time: record.check_in_time,
         check_out_time: record.check_out_time,
-        status: record.status,
-        attire_type: record.attire_type || null,
-        remarks: record.remarks || null,
-        location_address: record.location_address || null,
+        // The verdict and summary belong to the half being shown. These fields
+        // hold the check-in's, so a check-out report was displaying the
+        // morning's status and the morning's remarks under a check-out
+        // heading — the two reports read identically whatever the photographs
+        // showed.
+        status: half === "checkout"
+          ? (record.checkout_compliance_status
+            ? String(record.checkout_compliance_status).toLowerCase()
+            : null)
+          : record.status,
+        attire_type: half === "checkout" ? null : (record.attire_type || null),
+        remarks: half === "checkout"
+          ? (record.checkout_remarks || null)
+          : (record.remarks || null),
+        location_address: half === "checkout" ? null : (record.location_address || null),
         // Presence only. The key itself is withheld: it would let a recipient
         // construct requests for objects this endpoint never offered them.
         has_checkin_photo: Boolean(record.check_in_photo_key),
