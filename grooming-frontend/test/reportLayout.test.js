@@ -109,3 +109,27 @@ test('a report with nothing to assess renders a reason, not empty tables', () =>
   assert.equal(isUnassessed({ unassessed_reason: null }), false);
   assert.equal(isUnassessed({}), false);
 });
+
+test('the check-out report renders the same five tables as the check-in one', () => {
+  // Both halves use one component, so the dialog that follows a check-out is
+  // the same audit as the one that follows a check-in — five sections in the
+  // same order, whichever half produced it.
+  const checkout = {
+    attire_type: 'KURTI_WITH_DUPATTA',
+    improvement_tips: ['Wear a dupatta with the kurti.'],
+    general_idcard_check: [row('ID_PRESENT', 'PASS')],
+    grooming_check: [row('W_HAIR_NEATNESS', 'PASS')],
+    attire_check: [row('W_DUPATTA', 'FAIL')],
+    accessories_check: [row('W_EARRINGS', 'PASS')],
+    footwear_check: [row('W_FOOTWEAR_TYPE', 'PASS')],
+  };
+  const tables = reportTables(checkout);
+  assert.equal(tables.length, 5);
+  assert.deepEqual(tables.map((table) => table.items.length), [1, 1, 1, 1, 1]);
+  // The garment names the attire heading on a check-out exactly as it does on
+  // a check-in, so a saree check-out is not headed "Kurti".
+  assert.equal(tables[2].title, '3. Attire Check (Kurti with Dupatta)');
+  assert.deepEqual(improvementTipsFor(checkout), ['Wear a dupatta with the kurti.']);
+  // It is a real report, not the unassessed placeholder.
+  assert.equal(isUnassessed(checkout), false);
+});

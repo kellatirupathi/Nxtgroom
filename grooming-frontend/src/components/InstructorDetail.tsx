@@ -134,7 +134,18 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation${query}`, { signal: controller.signal });
         setEvaluation(data);
       } catch (requestError) {
-        if (!controller.signal.aborted && (requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
+        if (controller.signal.aborted) return;
+        const status = (requestError as { status?: number })?.status;
+        // A missing evaluation is not an error. The endpoint answers 204 now,
+        // but an older one replies 404 with a message, and surfacing that
+        // painted "Evaluation is still pending or unavailable" in red for a
+        // check-out that simply had no photo. Treated as empty either way, so
+        // the page explains itself rather than repeating the server.
+        if (status === 404) {
+          setEvaluation(null);
+          return;
+        }
+        if (status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
