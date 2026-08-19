@@ -36,7 +36,10 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [message, setMessage] = useState({ type: '', text: '' });
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
   const [locationState, setLocationState] = useState<LocationStatus>('idle');
-  const [facing, setFacing] = useState<'user' | 'environment'>('user');
+  // Rear camera by default. A full-body photograph needs two to three metres
+  // of distance, which is not reachable at arm's length, so the front camera
+  // cannot satisfy the framing the report depends on.
+  const [facing, setFacing] = useState<'user' | 'environment'>('environment');
   const [preparing, setPreparing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   // Set only when a check-in is refused because one is already open, so the
@@ -309,8 +312,8 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
         <div className="flex-1 flex flex-col mb-6">
           <div className="flex items-center justify-between mb-2">
             <p className="block text-xs font-bold text-slate-500 uppercase tracking-wider">Check-In Photo</p>
-            {/* Grooming shots are usually selfies, so the front camera is the
-                default, but the rear camera stays one tap away. */}
+            {/* The front camera stays one tap away for anyone photographing
+                themselves, but it cannot frame a full body. */}
             <button
               type="button"
               onClick={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}

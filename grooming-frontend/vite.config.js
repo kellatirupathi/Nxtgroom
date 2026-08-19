@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from "@tailwindcss/vite"
@@ -26,6 +27,14 @@ export default defineConfig(({ mode }) => {
   if (mode === 'production') validateProductionApiBase(env.VITE_API_BASE);
 
   return {
+    resolve: {
+      alias: {
+        // pose-detection imports this for BlazePose, which is unused here.
+        // The published bundle is not valid ESM, so it fails the build rather
+        // than merely adding weight.
+        '@mediapipe/pose': fileURLToPath(new URL('./src/lib/mediapipeStub.js', import.meta.url)),
+      },
+    },
     plugins: [react(), tailwindcss()],
   };
 })
