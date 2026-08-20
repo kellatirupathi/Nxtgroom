@@ -172,7 +172,7 @@ function publicEvaluation(report, job, now) {
     // Derived from the failing checkpoints here rather than in the browser, so
     // the report page and the emails cannot advise different things.
     improvement_tips: improvementTips(report),
-    model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
+    model: process.env.GEMINI_MODEL || "gemini-3.7-flash",
     prompt_version: PROMPT_VERSION,
     processed_at: now,
     attempts: job.attempts,

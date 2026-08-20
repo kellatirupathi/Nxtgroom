@@ -8,7 +8,7 @@ pushed to a Git provider visible to both platforms.
 
 Treat any credential previously pasted into chat, source code, screenshots,
 issue trackers, or build logs as compromised. Before the first production
-deployment, revoke and replace the MongoDB password, OpenAI API key, AWS access
+deployment, revoke and replace the MongoDB password, Gemini API key, AWS access
 key, JWT secret, and administrator password. Do not reuse development values.
 
 Store runtime secrets in Northflank's secret manager. Do not put them in Git,
@@ -143,11 +143,10 @@ but a container crash immediately after SES accepts a message can still cause a
 rare duplicate on retry. Treat these notifications as at-least-once delivery;
 the administrative attendance record remains the source of truth.
 
-### OpenAI
+### Gemini
 
 Create a project-scoped API key with an appropriate spend limit. The default
-model is the pinned `gpt-4o-2024-11-20` snapshot so behavior does not silently
-change between deployments. Validate the model is enabled for the OpenAI
+model is `gemini-3.7-flash`. Validate the model is available to the Gemini API
 project before launch.
 
 ## 3. Deploy the API on Northflank
@@ -210,12 +209,12 @@ with an insecure fallback.
 | `ADMIN_PASSWORD` | Required, secret | Unique password of at least 12 characters |
 | `ADMIN_PASSWORD_VERSION` | Required | Start at `1`; change whenever the password rotates |
 | `CORS_ORIGINS` | Required | Exact comma-separated HTTPS Vercel origins, no `*` |
-| `OPENAI_API_KEY` | Required, secret | Rotated project-scoped API key |
-| `OPENAI_MODEL` | Required | `gpt-4o-2024-11-20` |
-| `OPENAI_TIMEOUT_MS` | Required | `120000`; permitted range is 10000–600000 |
-| `OPENAI_MAX_RETRIES` | Required | `2`; permitted range is 0–2 |
+| `GEMINI_API_KEY` | Required, secret | Project-scoped Gemini API key |
+| `GEMINI_MODEL` | Required | `gemini-3.7-flash` |
+| `GEMINI_TIMEOUT_MS` | Required | `120000`; permitted range is 10000–600000 |
+| `GEMINI_MAX_RETRIES` | Required | `2`; permitted range is 0–2 |
 | `EVALUATION_POLL_MS` | Required | `2000`; permitted range is 250–60000 |
-| `EVALUATION_LEASE_MS` | Required | `600000`; range 60000–3600000 and must cover all OpenAI attempts plus 60000 |
+| `EVALUATION_LEASE_MS` | Required | `600000`; range 60000–3600000 and must cover all Gemini attempts plus 60000 |
 | `EVALUATION_MAX_ATTEMPTS` | Required | `3`; permitted range is 1–10 |
 | `AWS_REGION` | Required | SES region, for example `ap-south-1` |
 | `AWS_ACCESS_KEY_ID` | Required, secret | Rotated dedicated IAM access key |
@@ -242,9 +241,9 @@ JWT_ISSUER=facultytrack-api
 JWT_AUDIENCE=facultytrack-web
 ADMIN_PASSWORD_VERSION=1
 CORS_ORIGINS=https://facultytrack.example.com,https://facultytrack.vercel.app
-OPENAI_MODEL=gpt-4o-2024-11-20
-OPENAI_TIMEOUT_MS=120000
-OPENAI_MAX_RETRIES=2
+GEMINI_MODEL=gemini-3.7-flash
+GEMINI_TIMEOUT_MS=120000
+GEMINI_MAX_RETRIES=2
 EVALUATION_POLL_MS=2000
 EVALUATION_LEASE_MS=600000
 EVALUATION_MAX_ATTEMPTS=3
@@ -290,7 +289,7 @@ Vercel domain later changes, repeat this step.
 
 ## 5. Release verification
 
-Run these checks without sending a real instructor email or OpenAI request:
+Run these checks without sending a real instructor email or Gemini request:
 
 ```powershell
 cd grooming_api_node
@@ -326,7 +325,7 @@ Then verify the deployed services:
    data.
 
 After verification, remove test data according to the organization's retention
-policy and monitor SES bounces/complaints, OpenAI errors and spend, MongoDB
+policy and monitor SES bounces/complaints, Gemini errors and spend, MongoDB
 capacity, HTTP error rate, and worker queue age.
 
 ## 6. Rollback

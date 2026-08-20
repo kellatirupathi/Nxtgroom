@@ -35,12 +35,12 @@ test("worker heartbeat reports missing, healthy, stale, and stopped states", () 
     now,
   });
   evaluation.cycleStarted();
-  evaluation.recordJobError("OPENAI_TIMEOUT");
+  evaluation.recordJobError("GEMINI_TIMEOUT");
   evaluation.cycleCompleted();
 
   let snapshot = getWorkerHeartbeatSnapshot({ now: current, staleAfterMs: 60000 });
   assert.equal(snapshot.every((worker) => worker.state === "ok"), true);
-  assert.equal(snapshot[0].last_job_error_code, "OPENAI_TIMEOUT");
+  assert.equal(snapshot[0].last_job_error_code, "GEMINI_TIMEOUT");
 
   current = new Date(current.getTime() + 61000);
   snapshot = getWorkerHeartbeatSnapshot({ now: current, staleAfterMs: 60000 });

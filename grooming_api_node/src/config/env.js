@@ -78,8 +78,8 @@ export function runtimeConfig() {
     // exists in the database; anything else leaves the stored one alone.
     adminPasswordReset: process.env.ADMIN_PASSWORD_RESET === "true",
     origins: corsOrigins(),
-    openAiTimeoutMs: parseInteger("OPENAI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
-    openAiMaxRetries: parseInteger("OPENAI_MAX_RETRIES", 2, { min: 0, max: 2 }),
+    geminiTimeoutMs: parseInteger("GEMINI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
+    geminiMaxRetries: parseInteger("GEMINI_MAX_RETRIES", 2, { min: 0, max: 2 }),
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
     evaluationLeaseMs: parseInteger("EVALUATION_LEASE_MS", 600000, { min: 60000, max: 3600000 }),
     evaluationMaxAttempts: parseInteger("EVALUATION_MAX_ATTEMPTS", 3, { min: 1, max: 10 }),
@@ -103,10 +103,10 @@ export function validateEnvironment() {
   const required = [
     "MONGODB_URI",
     "DB_NAME",
-    "OPENAI_API_KEY",
-    "OPENAI_MODEL",
-    "OPENAI_TIMEOUT_MS",
-    "OPENAI_MAX_RETRIES",
+    "GEMINI_API_KEY",
+    "GEMINI_MODEL",
+    "GEMINI_TIMEOUT_MS",
+    "GEMINI_MAX_RETRIES",
     "EVALUATION_POLL_MS",
     "EVALUATION_LEASE_MS",
     "EVALUATION_MAX_ATTEMPTS",
@@ -196,13 +196,13 @@ export function validateEnvironment() {
       errors.push("MONGODB_URI is invalid");
     }
   }
-  if (!/^gpt-4o-\d{4}-\d{2}-\d{2}$/.test(process.env.OPENAI_MODEL || "")) {
-    errors.push("OPENAI_MODEL must use a pinned GPT-4o snapshot (for example gpt-4o-2024-11-20)");
+  if (process.env.GEMINI_MODEL !== "gemini-3.7-flash") {
+    errors.push("GEMINI_MODEL must be gemini-3.7-flash");
   }
-  const minimumEvaluationLease = config.openAiTimeoutMs * (config.openAiMaxRetries + 1) + 60000;
+  const minimumEvaluationLease = config.geminiTimeoutMs * (config.geminiMaxRetries + 1) + 60000;
   if (config.evaluationLeaseMs < minimumEvaluationLease) {
     errors.push(
-      `EVALUATION_LEASE_MS must be at least ${minimumEvaluationLease} for the configured OpenAI timeout and retries`
+      `EVALUATION_LEASE_MS must be at least ${minimumEvaluationLease} for the configured Gemini timeout and retries`
     );
   }
   if (config.notificationLeaseMs < config.sesTimeoutMs + 60000) {
