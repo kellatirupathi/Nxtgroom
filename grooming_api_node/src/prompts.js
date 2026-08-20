@@ -40,9 +40,8 @@ For every checkpoint you are given, return exactly one entry containing:
 - code: the checkpoint code, copied exactly as given
 - checkpoint_name: the checkpoint name, copied exactly as given
 - status: PASS, FAIL or N/A
-- observation: what is actually visible in the image, in one short sentence
-- reason: why that observation meets, fails, or cannot be judged against the
-  standard, in one short sentence
+- observation: compact, concise point(s) of what is actually visible (no long sentences)
+- reason: compact, concise point(s) of why it meets, fails, or cannot be judged (no long sentences)
 
 PASS  - visible evidence satisfies the requirement.
 FAIL  - a clear, visible violation contradicts the standard.

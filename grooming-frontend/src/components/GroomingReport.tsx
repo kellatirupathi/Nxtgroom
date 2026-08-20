@@ -39,23 +39,25 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
   const anchor = `report-${title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
   return (
     <section className="mb-6" aria-labelledby={anchor}>
-      <h4 id={anchor} className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-100 pb-2">{title}</h4>
-      <div className="bg-white rounded-md border border-slate-200 overflow-x-auto shadow-sm">
-        <table className="w-full text-left text-sm min-w-[520px]">
-          <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+      <h4 id={anchor} className="text-[13px] font-bold text-slate-600 uppercase tracking-wider mb-2">{title}</h4>
+      <div className="bg-white rounded-md overflow-hidden border border-slate-200">
+        <table className="w-full text-left text-sm min-w-[520px] border-collapse">
+          <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-700">
             <tr>
               {REPORT_COLUMNS.map((column, index) => (
-                <th key={column} scope="col" className={`p-3 ${COLUMN_WIDTHS[index]}`}>{column}</th>
+                <th key={column} scope="col" className={`p-3 border border-slate-200 ${COLUMN_WIDTHS[index]}`}>
+                  <div className={index === 1 ? "text-center" : ""}>{column}</div>
+                </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody>
             {rows.map((item) => (
               <tr key={item.key} className="hover:bg-slate-50 transition-colors">
-                <td className="p-3 font-bold text-slate-700">{item.name}</td>
-                <td className="p-3"><CheckStatus status={item.status} /></td>
-                <td className="p-3 text-slate-600">{String(item.observation ?? '--')}</td>
-                <td className="p-3 text-slate-500">{item.reasoning || '--'}</td>
+                <td className="p-3 border border-slate-200 font-semibold text-slate-800">{item.name}</td>
+                <td className="p-3 border border-slate-200 text-center"><CheckStatus status={item.status} /></td>
+                <td className="p-3 border border-slate-200 text-slate-700">{String(item.observation ?? '--')}</td>
+                <td className="p-3 border border-slate-200 text-slate-700">{item.reasoning || '--'}</td>
               </tr>
             ))}
           </tbody>
