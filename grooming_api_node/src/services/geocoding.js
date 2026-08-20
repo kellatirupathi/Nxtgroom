@@ -102,17 +102,25 @@ export async function reverseGeocode(coordinates) {
  * this runs, so a slow or failing lookup cannot delay the submission or fail
  * it. The record simply keeps its coordinates and no address.
  */
-export async function attachAddressToAttendance(db, attendanceId, coordinates) {
+/**
+ * Turns stored coordinates into a place name.
+ *
+ * Each half keeps its own address. They are different places — someone checks
+ * in at one campus and out from another — and writing both into one field
+ * would show the morning's location under a check-out heading.
+ */
+export async function attachAddressToAttendance(db, attendanceId, coordinates, kind = "checkin") {
   const result = await reverseGeocode(coordinates);
   if (!result) return null;
+  const prefix = kind === "checkout" ? "check_out_" : "";
   try {
     await db.collection("attendance").updateOne(
       { _id: attendanceId },
       {
         $set: {
-          location_address: result.address,
-          location_address_full: result.full_address,
-          location_geocoded_at: result.geocoded_at,
+          [`${prefix}location_address`]: result.address,
+          [`${prefix}location_address_full`]: result.full_address,
+          [`${prefix}location_geocoded_at`]: result.geocoded_at,
         },
       }
     );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, LogIn, LogOut, Trash2 } from 'lucide-react';
+import { ArrowLeft, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, LogIn, LogOut, RefreshCw, Trash2 } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import PhotoViewer from './PhotoViewer';
@@ -58,6 +58,8 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   // cannot share one dialog.
   const [confirmDelete, setConfirmDelete] = useState<'record' | 'checkout' | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [reanalysing, setReanalysing] = useState(false);
+  const [queuedNow, setQueuedNow] = useState(false);
   const toast = useToast();
 
   // Distinguishes "still working on it" from "there is nothing". The queue
@@ -65,7 +67,30 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const queueStatus = tab === 'checkout'
     ? record?.checkout_evaluation_queue_status
     : record?.evaluation_queue_status;
-  const analysisRunning = queueStatus === 'queued' || queueStatus === 'processing';
+  const analysisRunning = queuedNow || queueStatus === 'queued' || queueStatus === 'processing';
+  // Only worth offering when the photograph it would read is still there.
+  const canReanalyse = Boolean(tab === 'checkout' ? record?.check_out_photo_key : record?.check_in_photo_key);
+
+  const handleReanalyse = async () => {
+    if (!record) return;
+    setReanalysing(true);
+    try {
+      const query = tab === 'checkout' ? '?kind=checkout' : '';
+      await apiJson(
+        `/api/v2/attendance/${encodeURIComponent(String(record._id))}/reanalyse${query}`,
+        { method: 'POST' },
+      );
+      toast.success('Analysis queued', { detail: 'The report appears here once it finishes.' });
+      // Shows the spinner immediately rather than waiting for the next poll.
+      setQueuedNow(true);
+    } catch (error) {
+      toast.error('Could not queue the analysis', {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setReanalysing(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!record) return;
@@ -133,6 +158,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         const query = tab === 'checkout' ? '?kind=checkout' : '';
         const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation${query}`, { signal: controller.signal });
         setEvaluation(data);
+        if (data) setQueuedNow(false);
       } catch (requestError) {
         if (controller.signal.aborted) return;
         const status = (requestError as { status?: number })?.status;
@@ -324,7 +350,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
               ) : (
                 <LocationPanel
                   coordinates={tab === 'checkin' ? record.location_coordinates : record.check_out_coordinates}
-                  address={tab === 'checkin' ? record.location_address : null}
+                  address={tab === 'checkin' ? record.location_address : record.check_out_location_address}
                   accuracyMetres={tab === 'checkin' ? record.location_accuracy_m : null}
                 />
               )}
@@ -370,6 +396,20 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                 <>
                   <XCircle size={32} className="text-slate-300" aria-hidden="true" />
                   <p>No appearance report was produced for this {tab === 'checkout' ? 'check-out' : 'check-in'}.</p>
+                  {/* The photograph is still in storage, so the analysis can
+                      simply be run again. Without this a record left without a
+                      report could only be fixed by checking in afresh. */}
+                  {canReanalyse && (
+                    <button
+                      type="button"
+                      onClick={() => void handleReanalyse()}
+                      disabled={reanalysing}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-50"
+                    >
+                      <RefreshCw size={15} className={reanalysing ? 'animate-spin' : ''} aria-hidden="true" />
+                      {reanalysing ? 'Queueing…' : 'Analyse this photo'}
+                    </button>
+                  )}
                 </>
               )}
             </div>

@@ -217,7 +217,9 @@ reportRouter.get(
         remarks: half === "checkout"
           ? (record.checkout_remarks || null)
           : (record.remarks || null),
-        location_address: half === "checkout" ? null : (record.location_address || null),
+        location_address: half === "checkout"
+          ? (record.check_out_location_address || null)
+          : (record.location_address || null),
         // Presence only. The key itself is withheld: it would let a recipient
         // construct requests for objects this endpoint never offered them.
         has_checkin_photo: Boolean(record.check_in_photo_key),

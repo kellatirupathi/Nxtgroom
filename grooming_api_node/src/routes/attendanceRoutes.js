@@ -519,6 +519,14 @@ attendanceRouter.post(
       return res.status(409).json({ detail: "This attendance was already checked out" });
     }
 
+    // The check-out has its own coordinates, and nothing was turning them into
+    // a place name — the report showed "Address unavailable" beside a perfectly
+    // good fix. Detached, as at check-in: a slow geocoder must not hold up the
+    // response.
+    if (checkoutCoordinates) {
+      void attachAddressToAttendance(db, attendance._id, checkoutCoordinates, "checkout");
+    }
+
     try {
       await enqueueNotification(db, {
         attendanceId: attendance._id,
