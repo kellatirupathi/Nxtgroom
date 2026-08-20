@@ -31,6 +31,7 @@ test("instructor pages are deterministic and feedback is capped per returned ins
   let instructorLimit;
   let feedbackPipeline;
   let feedbackOptions;
+  let feedbackAggregations = 0;
   const instructorCursor = {
     sort(specification) { instructorSort = specification; return this; },
     skip(value) { instructorOffset = value; return this; },
@@ -54,6 +55,7 @@ test("instructor pages are deterministic and feedback is capped per returned ins
       };
       if (name === "attendance") return {
         aggregate(pipeline, options) {
+          feedbackAggregations += 1;
           feedbackPipeline = pipeline;
           feedbackOptions = options;
           return {
@@ -94,6 +96,7 @@ test("instructor pages are deterministic and feedback is capped per returned ins
   assert.equal(instructorOffset, 3);
   assert.equal(instructorLimit, 2);
   assert.equal(feedbackOptions.allowDiskUse, true);
+  assert.equal(feedbackAggregations, 1);
 
   // $documentNumber only accepts a single-key sortBy; the _id tiebreaker moves
   // to a preceding $sort, whose order $setWindowFields preserves.
@@ -114,9 +117,19 @@ test("instructor pages are deterministic and feedback is capped per returned ins
   );
   assert.equal(feedbackPipeline.at(-1).$limit, 200);
 
+  const compactResponse = await fetch(
+    `${baseUrl}/api/v2/instructors?limit=2&offset=3&include_feedback=false`,
+    { headers: { authorization: `Bearer ${token}`, connection: "close" } }
+  );
+  assert.equal(compactResponse.status, 200);
+  const compactBody = await compactResponse.json();
+  assert.equal(compactBody.length, 2);
+  assert.deepEqual(compactBody.map((instructor) => instructor.daily_feedbacks), [[], []]);
+  assert.equal(feedbackAggregations, 1, "compact roster requests must skip feedback aggregation");
+
   for (const query of [
     "limit=0",
-    "limit=101",
+    "limit=1001",
     "limit=01",
     "limit=1.5",
     "limit=1&limit=2",
@@ -124,11 +137,13 @@ test("instructor pages are deterministic and feedback is capped per returned ins
     "offset=1000001",
     "offset=01",
     "offset=0&offset=1",
+    "include_feedback=1",
+    "include_feedback=true&include_feedback=false",
   ]) {
     const invalid = await fetch(`${baseUrl}/api/v2/instructors?${query}`, {
       headers: { authorization: `Bearer ${token}`, connection: "close" },
     });
     assert.equal(invalid.status, 422, query);
   }
-  assert.equal(instructorFinds, 1);
+  assert.equal(instructorFinds, 2);
 });

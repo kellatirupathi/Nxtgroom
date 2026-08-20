@@ -8,7 +8,7 @@ import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import type { College, Instructor } from '../types';
 
-const INSTRUCTORS_PATH = '/api/v2/instructors';
+const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 
 interface InstructorForm {
   name: string;
@@ -52,11 +52,16 @@ export default function InstructorManagement() {
   });
 
   const fetchData = useCallback(async ({ signal }: { signal?: AbortSignal } = {}) => {
-    // Skip the blank state when cached rows are already rendered.
-    setLoading(true);
+    // Initial state already shows the loader when no cached roster exists.
+    // During background revalidation keep visible rows mounted; replacing
+    // them with a second full-page loader caused the reload flash.
     try {
       const [instructorData, collegeData] = await Promise.all([
-        apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, { pageSize: 100, signal }),
+        apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, {
+          pageSize: 1_000,
+          cacheMs: 15_000,
+          signal,
+        }),
         apiFetchCached<College[]>('/api/v2/colleges', { signal }),
       ]);
       if (signal?.aborted) return;

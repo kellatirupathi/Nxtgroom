@@ -371,6 +371,7 @@ export async function apiFetchAllPages<T = unknown>(
     pageSize = 100,
     maxItems = MAX_PAGINATED_ITEMS,
     idKey = '_id',
+    cacheMs,
     signal,
     ...requestOptions
   } = options;
@@ -387,10 +388,10 @@ export async function apiFetchAllPages<T = unknown>(
   let offset = 0;
 
   for (;;) {
-    const page = await apiFetch<unknown>(paginatedPath(path, pageSize, offset), {
-      ...requestOptions,
-      signal,
-    });
+    const pagePath = paginatedPath(path, pageSize, offset);
+    const page = cacheMs === undefined
+      ? await apiFetch<unknown>(pagePath, { ...requestOptions, signal })
+      : await apiFetchCached<unknown>(pagePath, { ...requestOptions, signal, cacheMs });
     if (!Array.isArray(page)) {
       throw new ApiError('The server returned an invalid paginated response. Please try again.');
     }

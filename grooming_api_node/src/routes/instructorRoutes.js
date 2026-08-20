@@ -23,7 +23,7 @@ function openCheckInTodayFilter(instructorId) {
     check_in_time: { $gte: start, $lt: end },
   };
 }
-const INSTRUCTOR_PAGE_LIMIT = 100;
+const INSTRUCTOR_PAGE_LIMIT = 1000;
 const DAILY_FEEDBACK_LIMIT = 100;
 
 function activeFilter(extra = {}) {
@@ -272,11 +272,17 @@ instructorRouter.get(
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
     let pagination;
+    let includeFeedback = true;
     try {
       pagination = parsePagination(req.query, {
         defaultLimit: INSTRUCTOR_PAGE_LIMIT,
         maxLimit: INSTRUCTOR_PAGE_LIMIT,
       });
+      if (req.query.include_feedback !== undefined) {
+        if (req.query.include_feedback === "true") includeFeedback = true;
+        else if (req.query.include_feedback === "false") includeFeedback = false;
+        else throw new RangeError("include_feedback must be true or false");
+      }
     } catch (error) {
       if (error instanceof RangeError) {
         return res.status(422).json({ detail: error.message });
@@ -290,7 +296,12 @@ instructorRouter.get(
       .limit(pagination.limit)
       .toArray();
     const instructorIds = instructors.map((row) => String(row._id));
-    const attendances = await loadRecentInstructorFeedbacks(db, instructorIds);
+    // The attendance and management screens use only roster/profile fields.
+    // Avoid a windowed scan over attendance for every page unless a legacy
+    // caller explicitly needs the embedded history.
+    const attendances = includeFeedback
+      ? await loadRecentInstructorFeedbacks(db, instructorIds)
+      : [];
     const grouped = new Map();
     for (const attendance of attendances) {
       const rows = grouped.get(String(attendance.instructor_id)) || [];

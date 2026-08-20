@@ -51,6 +51,7 @@ interface SessionState {
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
 const ADMIN_TABS = new Set(['boa-management', 'settings', 'instructor-management']);
+const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 
 function initialSession(): SessionState {
   try {
@@ -86,7 +87,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>(currentTabFromLocation);
   const [instructors, setInstructors] = useState<Instructor[]>(() => {
     // Render the attendance list from the last session's data on first paint.
-    const cached = readStale<Instructor[]>('/api/v2/instructors');
+    const cached = readStale<Instructor[]>(INSTRUCTORS_PATH);
     return Array.isArray(cached) ? cached : [];
   });
   const [selectedAttendanceRecord, setSelectedAttendanceRecord] = useState<AttendanceRecord | null>(null);
@@ -144,10 +145,14 @@ export default function App() {
   const fetchInstructors = useCallback(async ({ signal }: { signal?: AbortSignal } = {}) => {
     if (!session.token || !session.validated) return;
     try {
-      const data = await apiFetchAllPages<Instructor>('/api/v2/instructors', { pageSize: 100, signal });
+      const data = await apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, {
+        pageSize: 1_000,
+        cacheMs: 15_000,
+        signal,
+      });
       if (signal?.aborted) return;
       // Cache the assembled list so the next load paints without waiting.
-      if (Array.isArray(data)) primeCache('/api/v2/instructors', data);
+      if (Array.isArray(data)) primeCache(INSTRUCTORS_PATH, data);
       setInstructors(Array.isArray(data) ? data : []);
       setLoadError('');
     } catch (error) {

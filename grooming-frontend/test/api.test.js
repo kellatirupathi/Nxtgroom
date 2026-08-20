@@ -78,3 +78,32 @@ test('forwards caller cancellation across paginated requests', async (t) => {
 
   await assert.rejects(request, /timed out or was cancelled/i);
 });
+
+test('deduplicates concurrent cached pagination requests', async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let calls = 0;
+  let releaseFetch;
+  const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
+  globalThis.fetch = async () => {
+    calls += 1;
+    await fetchGate;
+    return new Response(JSON.stringify([{ _id: 'shared' }]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  const path = '/api/v2/instructors?include_feedback=false&request=dedupe-test';
+  const options = { auth: false, pageSize: 2, cacheMs: 15_000 };
+  const first = apiFetchAllPages(path, options);
+  const second = apiFetchAllPages(path, options);
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  releaseFetch();
+  const [firstRecords, secondRecords] = await Promise.all([first, second]);
+  assert.deepEqual(firstRecords, [{ _id: 'shared' }]);
+  assert.deepEqual(secondRecords, firstRecords);
+  assert.equal(calls, 1);
+});

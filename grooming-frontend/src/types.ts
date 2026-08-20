@@ -217,4 +217,6 @@ export interface LoginResponse {
 export interface PaginatedOptions extends ApiRequestOptions {
   pageSize?: number;
   maxItems?: number;
+  /** Optional per-page GET cache; also deduplicates concurrent pagination. */
+  cacheMs?: number;
 }
