@@ -3,6 +3,12 @@ const MAX_EXAMPLES = 20;
 
 export const DATABASE_INDEX_APPLY_CONFIRMATION = "CREATE_INDEXES";
 
+export const EVALUATION_IDENTITY_INDEX = {
+  collection: "evaluations",
+  key: { attendance_id: 1, kind: 1 },
+  options: { unique: true, name: "attendance_id_1_kind_1" },
+};
+
 export const REQUIRED_DATABASE_INDEXES = [
   { collection: "users", key: { email: 1 }, options: { unique: true, name: "email_1" } },
   {
@@ -94,11 +100,7 @@ export const REQUIRED_DATABASE_INDEXES = [
     key: { "_private_checkout_outbox.created_at": 1 },
     options: { sparse: true, name: "pending_checkout_outbox" },
   },
-  {
-    collection: "evaluations",
-    key: { attendance_id: 1 },
-    options: { unique: true, name: "attendance_id_1" },
-  },
+  EVALUATION_IDENTITY_INDEX,
   {
     collection: "evaluation_jobs",
     key: { status: 1, available_at: 1, created_at: 1 },
@@ -230,6 +232,62 @@ async function listIndexes(collection) {
   }
 }
 
+/**
+ * Replaces the original one-evaluation-per-attendance index.
+ *
+ * Check-out analysis added a second evaluation document identified by `kind`,
+ * but production databases still carry the unique `{ attendance_id: 1 }`
+ * index. Creating the compound index before dropping the legacy one preserves
+ * uniqueness throughout the migration. Every historical document is a
+ * check-in, so missing kinds can be backfilled without guessing.
+ *
+ * This runs before workers start and is intentionally narrow: when the known
+ * legacy unique index is absent, it makes no changes and leaves the general
+ * database preflight responsible for reporting any other index state.
+ */
+export async function migrateLegacyEvaluationIdentityIndex(db) {
+  const collection = db.collection("evaluations");
+  const indexes = await listIndexes(collection);
+  const legacyIndexes = indexes.filter((index) => (
+    index.unique === true && sameObject(index.key, { attendance_id: 1 })
+  ));
+  if (legacyIndexes.length === 0) {
+    return { migrated: false, backfilled: 0, created: false, dropped: [] };
+  }
+
+  const backfill = await collection.updateMany(
+    { kind: { $exists: false } },
+    { $set: { kind: "checkin" } }
+  );
+  const targetExists = indexes.some((index) => (
+    sameObject(index.key, EVALUATION_IDENTITY_INDEX.key)
+    && indexOptionsMatch(index, EVALUATION_IDENTITY_INDEX.options)
+  ));
+  if (!targetExists) {
+    await collection.createIndex(
+      EVALUATION_IDENTITY_INDEX.key,
+      EVALUATION_IDENTITY_INDEX.options
+    );
+  }
+
+  const dropped = [];
+  for (const legacy of legacyIndexes) {
+    try {
+      await collection.dropIndex(legacy.name);
+      dropped.push(legacy.name);
+    } catch (error) {
+      // A concurrent startup may have completed the same idempotent migration.
+      if (error?.code !== 27 && error?.codeName !== "IndexNotFound") throw error;
+    }
+  }
+  return {
+    migrated: true,
+    backfilled: backfill.modifiedCount || 0,
+    created: !targetExists,
+    dropped,
+  };
+}
+
 export async function verifyDatabaseIndexes(db) {
   const collections = [...new Set(REQUIRED_DATABASE_INDEXES.map((index) => index.collection))];
   const indexLists = new Map(await Promise.all(collections.map(async (name) => [
@@ -312,7 +370,7 @@ async function loadPreflightRows(db) {
     ).toArray(),
     db.collection("evaluations").find(
       {},
-      { projection: { _id: 1, attendance_id: 1 } }
+      { projection: { _id: 1, attendance_id: 1, kind: 1 } }
     ).toArray(),
   ]);
 }
@@ -562,14 +620,16 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
   }
   const evaluationCollisionGroups = [...groupRows(
     evaluations.filter((evaluation) => referenceKey(evaluation.attendance_id) != null),
-    (evaluation) => referenceKey(evaluation.attendance_id)
+    (evaluation) => `${referenceKey(evaluation.attendance_id)}:${
+      evaluation.kind === "checkout" ? "checkout" : "checkin"
+    }`
   ).values()].filter((group) => group.length > 1);
   if (evaluationCollisionGroups.length) {
     findings.push(finding(
-      "EVALUATION_ATTENDANCE_ID_COLLISION",
+      "EVALUATION_IDENTITY_COLLISION",
       evaluationCollisionGroups.reduce((total, group) => total + group.length, 0),
       collisionExamples(evaluationCollisionGroups),
-      "Choose the authoritative evaluation for each attendance, preserve any needed audit data, and remove or relink duplicates before index creation."
+      "Choose the authoritative evaluation for each attendance and kind, preserve any needed audit data, and remove or relink duplicates before index creation."
     ));
   }
 
@@ -613,6 +673,7 @@ export async function applyDatabaseIndexes(db, { confirmation } = {}) {
       `Index apply requires DATABASE_PREFLIGHT_APPLY=${DATABASE_INDEX_APPLY_CONFIRMATION}`
     );
   }
+  await migrateLegacyEvaluationIdentityIndex(db);
   const report = await auditDatabasePreflight(db);
   assertDatabasePreflightSafe(report);
 

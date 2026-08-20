@@ -5,6 +5,7 @@ import {
   auditDatabasePreflight,
   DATABASE_INDEX_APPLY_CONFIRMATION,
   DatabasePreflightError,
+  migrateLegacyEvaluationIdentityIndex,
 } from "./databasePreflight.js";
 import { isProduction, runtimeConfig } from "./env.js";
 
@@ -52,6 +53,12 @@ export async function connectToMongo() {
     db = client.db(config.dbName);
     await db.command({ ping: 1 });
 
+    const evaluationIndexMigration = await migrateLegacyEvaluationIdentityIndex(db);
+    if (evaluationIndexMigration.migrated) {
+      console.log(
+        `Migrated evaluation identity index; backfilled ${evaluationIndexMigration.backfilled} legacy evaluation(s).`
+      );
+    }
     const preflight = await auditDatabasePreflight(db);
     assertDatabasePreflightSafe(preflight);
     if (isProduction()) {

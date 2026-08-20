@@ -6,15 +6,22 @@ import {
   auditDatabasePreflight,
   DATABASE_INDEX_APPLY_CONFIRMATION,
   DatabasePreflightError,
+  EVALUATION_IDENTITY_INDEX,
   formatDatabasePreflightReport,
+  migrateLegacyEvaluationIdentityIndex,
   REQUIRED_DATABASE_INDEXES,
 } from "../src/config/databasePreflight.js";
 
 function preflightDb(rows = {}, initialIndexes = {}) {
   const indexes = new Map(Object.entries(initialIndexes));
   const createCalls = [];
+  const dropCalls = [];
+  const updateCalls = [];
   return {
     createCalls,
+    dropCalls,
+    updateCalls,
+    rows,
     collection(name) {
       return {
         find() {
@@ -29,6 +36,22 @@ function preflightDb(rows = {}, initialIndexes = {}) {
           existing.push({ key, ...options });
           indexes.set(name, existing);
           return options.name;
+        },
+        async dropIndex(indexName) {
+          dropCalls.push({ collection: name, index: indexName });
+          indexes.set(name, (indexes.get(name) || []).filter((index) => index.name !== indexName));
+          return { ok: 1 };
+        },
+        async updateMany(filter, update) {
+          updateCalls.push({ collection: name, filter, update });
+          let modifiedCount = 0;
+          for (const row of rows[name] || []) {
+            if (filter.kind?.$exists === false && !("kind" in row)) {
+              row.kind = update.$set.kind;
+              modifiedCount += 1;
+            }
+          }
+          return { matchedCount: modifiedCount, modifiedCount };
         },
       };
     },
@@ -86,12 +109,61 @@ test("read-only preflight detects semantic collisions without exposing email val
     "INSTRUCTOR_EMPLOYEE_ID_COLLISION",
     "INSTRUCTOR_EMAIL_INVALID",
     "ACTIVE_ATTENDANCE_COLLISION",
-    "EVALUATION_ATTENDANCE_ID_COLLISION",
+    "EVALUATION_IDENTITY_COLLISION",
   ]);
   assert.equal(db.createCalls.length, 0);
   const serialized = JSON.stringify(report);
   assert.doesNotMatch(serialized, /Admin@Example\.com|admin@example\.com|not-an-email/);
   assert.match(formatDatabasePreflightReport(report), /Choose the authoritative active attendance/);
+});
+
+test("check-in and checkout evaluations are distinct identities", async () => {
+  const db = preflightDb({
+    evaluations: [
+      { _id: "evaluation-checkin", attendance_id: "attendance-1", kind: "checkin" },
+      { _id: "evaluation-checkout", attendance_id: "attendance-1", kind: "checkout" },
+    ],
+  });
+
+  const report = await auditDatabasePreflight(db);
+  assert.equal(
+    report.findings.some((item) => item.code === "EVALUATION_IDENTITY_COLLISION"),
+    false
+  );
+});
+
+test("legacy evaluation index migration backfills kinds before replacing uniqueness", async () => {
+  const db = preflightDb(
+    {
+      evaluations: [{ _id: "evaluation-1", attendance_id: "attendance-1" }],
+    },
+    {
+      evaluations: [
+        { name: "_id_", key: { _id: 1 }, unique: true },
+        { name: "attendance_id_1", key: { attendance_id: 1 }, unique: true },
+      ],
+    }
+  );
+
+  const first = await migrateLegacyEvaluationIdentityIndex(db);
+  assert.deepEqual(first, {
+    migrated: true,
+    backfilled: 1,
+    created: true,
+    dropped: ["attendance_id_1"],
+  });
+  assert.equal(db.rows.evaluations[0].kind, "checkin");
+  assert.deepEqual(db.createCalls, [{
+    collection: "evaluations",
+    key: EVALUATION_IDENTITY_INDEX.key,
+    options: EVALUATION_IDENTITY_INDEX.options,
+  }]);
+  assert.deepEqual(db.dropCalls, [{ collection: "evaluations", index: "attendance_id_1" }]);
+
+  const second = await migrateLegacyEvaluationIdentityIndex(db);
+  assert.deepEqual(second, { migrated: false, backfilled: 0, created: false, dropped: [] });
+  assert.equal(db.createCalls.length, 1);
+  assert.equal(db.dropCalls.length, 1);
 });
 
 test("safe apply requires explicit confirmation and creates only missing indexes idempotently", async () => {
