@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Image as ImageIcon, TriangleAlert, XCircle } from 'lucide-react';
 import { apiFetch } from '../api';
+import { formatAttendanceTime, localDateValue } from '../attendanceFilters';
 import GroomingReport from './GroomingReport';
 import { AiSummary, ReportFlags, VisibleRegions, WeeklyRotationCard } from './ReportMeta';
 import BrandedLoader from './BrandedLoader';
@@ -98,11 +99,6 @@ function StatusPill({ status }: { status: string | null }) {
       <Icon size={12} aria-hidden="true" /> {text}
     </span>
   );
-}
-
-function formatTime(value: string | null) {
-  if (!value) return '--';
-  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatDay(value: string) {
@@ -213,7 +209,11 @@ export default function PublicReportPage({ token, kind, date, half = 'checkin' }
           </p>
           <p className="mt-3 text-sm font-semibold text-slate-700">
             {kind === 'day'
-              ? formatDay(date)
+              ? formatDay(
+                half === 'checkout' && day?.attendance.check_out_time
+                  ? localDateValue(new Date(day.attendance.check_out_time))
+                  : date,
+              )
               : `${formatDay(week?.week.week_start ?? date)} to ${formatDay(week?.week.week_end ?? date)}`}
           </p>
         </section>
@@ -238,7 +238,7 @@ export default function PublicReportPage({ token, kind, date, half = 'checkin' }
                     {half === 'checkout' ? 'Check-out' : 'Check-in'}
                   </dt>
                   <dd className="mt-0.5 font-semibold text-slate-700">
-                    {formatTime(half === 'checkout' ? day.attendance.check_out_time : day.attendance.check_in_time)}
+                    {formatAttendanceTime(half === 'checkout' ? day.attendance.check_out_time : day.attendance.check_in_time)}
                   </dd>
                 </div>
                 {day.attendance.location_address && (
@@ -303,8 +303,8 @@ export default function PublicReportPage({ token, kind, date, half = 'checkin' }
                     {week.week.days.map((row) => (
                       <tr key={row.date} className={row.present ? '' : 'bg-slate-50/60'}>
                         <td className="whitespace-nowrap p-3 font-semibold text-slate-700">{formatDay(row.date)}</td>
-                        <td className="whitespace-nowrap p-3 text-slate-600">{formatTime(row.check_in_time)}</td>
-                        <td className="whitespace-nowrap p-3 text-slate-600">{formatTime(row.check_out_time)}</td>
+                        <td className="whitespace-nowrap p-3 text-slate-600">{formatAttendanceTime(row.check_in_time)}</td>
+                        <td className="whitespace-nowrap p-3 text-slate-600">{formatAttendanceTime(row.check_out_time)}</td>
                         <td className="p-3">
                           {row.present ? <StatusPill status={row.status} /> : <span className="text-xs text-slate-400">No check-in</span>}
                         </td>

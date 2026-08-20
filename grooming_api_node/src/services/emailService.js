@@ -2,7 +2,6 @@ import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { runtimeConfig } from "../config/env.js";
 import { incrementMetric, observeDuration } from "./telemetry.js";
 
-const DEFAULT_TIME_ZONE = "Asia/Kolkata";
 let sesClient = null;
 
 function escapeHtml(value) {
@@ -21,7 +20,7 @@ function formatDateTime(value) {
   return new Intl.DateTimeFormat("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
-    timeZone: process.env.APP_TIME_ZONE || DEFAULT_TIME_ZONE,
+    timeZone: runtimeConfig().appTimeZone,
   }).format(parsed);
 }
 
@@ -51,6 +50,7 @@ export function buildEvaluationEmail({
   aiSummary,
   checkInTime,
   imageQuality,
+  reportUrl,
 }) {
   const name = instructorName || "Instructor";
   const status = displayStatus(overallStatus);
@@ -74,6 +74,7 @@ export function buildEvaluationEmail({
       `Appearance status: ${status}`,
       `Summary: ${summary}`,
       ...(qualityLine ? [qualityLine] : []),
+      ...(reportUrl ? ["", "Full report:", reportUrl] : []),
       notice,
       "",
       "Regards,",
@@ -88,6 +89,7 @@ export function buildEvaluationEmail({
         <strong>Summary:</strong> ${escapeHtml(summary)}
       </p>
       ${qualityLine ? `<p>${escapeHtml(qualityLine)}</p>` : ""}
+      ${reportUrl ? `<p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View check-in report</a></p>` : ""}
       <p>${escapeHtml(notice)}</p>
       <p>Regards,<br>NxtWave Administration</p>
     `,
@@ -101,6 +103,7 @@ export function buildCheckoutEmail({
   status,
   remarks,
   imageQuality,
+  reportUrl,
 }) {
   const name = instructorName || "Instructor";
   const reportStatus = displayStatus(status);
@@ -123,6 +126,7 @@ export function buildCheckoutEmail({
       `Appearance status: ${reportStatus}`,
       `Summary: ${summary}`,
       ...(qualityLine ? [qualityLine] : []),
+      ...(reportUrl ? ["", "Full report:", reportUrl] : []),
       notice,
       "",
       "Regards,",
@@ -138,6 +142,7 @@ export function buildCheckoutEmail({
         <strong>Summary:</strong> ${escapeHtml(summary)}
       </p>
       ${qualityLine ? `<p>${escapeHtml(qualityLine)}</p>` : ""}
+      ${reportUrl ? `<p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View checkout report</a></p>` : ""}
       <p>${escapeHtml(notice)}</p>
       <p>Regards,<br>NxtWave Administration</p>
     `,
@@ -421,8 +426,17 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
 }
 
 /** Sent as soon as an analysis finishes badly, to the instructor and the RPs. */
-export function buildGroomingAlertEmail({ name, status, summary, dateLabel, reportUrl, forReviewer = false }) {
+export function buildGroomingAlertEmail({
+  name,
+  status,
+  summary,
+  dateLabel,
+  reportUrl,
+  forReviewer = false,
+  kind = "checkin",
+}) {
   const person = name || "Instructor";
+  const eventLabel = kind === "checkout" ? "check-out" : "check-in";
   // Alerts only fire on a failure now that manual review is gone, but the
   // wording still handles the other case rather than asserting a status that
   // an older queued job might not have.
@@ -430,12 +444,12 @@ export function buildGroomingAlertEmail({ name, status, summary, dateLabel, repo
     ? "did not meet the appearance standards"
     : "needs attention";
   const subject = forReviewer
-    ? `Appearance alert: ${person} - ${dateLabel}`
-    : `Your check-in on ${dateLabel} ${heading}`;
+    ? `${kind === "checkout" ? "Check-out" : "Check-in"} appearance alert: ${person} - ${dateLabel}`
+    : `Your ${eventLabel} on ${dateLabel} ${heading}`;
 
   const opening = forReviewer
-    ? `${person}'s check-in on ${dateLabel} ${heading}.`
-    : `Your check-in on ${dateLabel} ${heading}.`;
+    ? `${person}'s ${eventLabel} on ${dateLabel} ${heading}.`
+    : `Your ${eventLabel} on ${dateLabel} ${heading}.`;
 
   return {
     subject,

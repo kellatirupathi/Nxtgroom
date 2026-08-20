@@ -65,6 +65,7 @@ async function sendGroomingAlerts(db, {
   status,
   summary,
   checkInTime,
+  eventTime = checkInTime,
   kind = "checkin",
 }) {
   // idMatch, not the raw value: attendance stores instructor_id as a string,
@@ -91,8 +92,11 @@ async function sendGroomingAlerts(db, {
     name: instructorName || instructor.name,
     status,
     summary,
-    dateLabel: dayKey,
+    // The link remains keyed to the attendance session day, while the email
+    // names the actual event day (important for a checkout after midnight).
+    dateLabel: localDateKey(new Date(eventTime || checkInTime || Date.now())),
     reportUrl,
+    kind,
   };
 
   const deliveries = [];
@@ -161,7 +165,7 @@ function publicEvaluation(report, job, now) {
     // Derived from the failing checkpoints here rather than in the browser, so
     // the report page and the emails cannot advise different things.
     improvement_tips: improvementTips(report),
-    model: process.env.GEMINI_MODEL || "gemini-3.7-flash",
+    model: runtimeConfig().geminiModel,
     prompt_version: PROMPT_VERSION,
     processed_at: now,
     attempts: job.attempts,
@@ -390,6 +394,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
           status: attendanceStatus,
           summary: evaluation.ai_summary || "",
           checkInTime: job.check_in_time,
+          eventTime: job.check_out_time || job.check_in_time,
           kind: "checkout",
         });
       } catch (error) {
@@ -529,6 +534,7 @@ export async function evaluateCheckoutNow(db, {
   imageBuffer,
   mimeType = "image/jpeg",
   checkOutTime,
+  checkInTime,
 }) {
   const target = { attendance_id: attendanceId, kind: "checkout", photo_key: photoKey };
   if (!(await evaluationTargetExists(db, target))) {
@@ -549,7 +555,11 @@ export async function evaluateCheckoutNow(db, {
     attendance_id: attendanceId,
     kind: "checkout",
     instructor,
-    check_in_time: checkOutTime,
+    // Reports are addressed by the attendance session's check-in day. Keep
+    // the actual checkout timestamp separate so a session crossing midnight
+    // does not create a link to a day where no check-in record exists.
+    check_in_time: checkInTime || checkOutTime,
+    check_out_time: checkOutTime,
     attempts: 1,
   };
   if (!(await evaluationTargetExists(db, { ...job, photo_key: photoKey }))) {

@@ -11,8 +11,6 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
 const GEMINI_INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
-const DEFAULT_GEMINI_MODEL = "gemini-3.7-flash";
-
 let referenceCachePromise = null;
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
@@ -123,7 +121,7 @@ async function requestGeminiStructured({
 
   const config = runtimeConfig();
   const requestBody = {
-    model: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
+    model: config.geminiModel,
     store: false,
     system_instruction: systemInstruction,
     input,

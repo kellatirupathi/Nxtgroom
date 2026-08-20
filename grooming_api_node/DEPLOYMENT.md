@@ -206,14 +206,14 @@ with an insecure fallback.
 | --- | --- | --- |
 | `NODE_ENV` | Required | `production` |
 | `PORT` | Optional | `8000` (container default) |
-| `PROCESS_ROLE` | Required | `all` for one service; otherwise `api` or `worker` as described above |
+| `PROCESS_ROLE` | Optional | Defaults to `all`; set only when API and worker run separately |
 | `MONGODB_URI` | Required, secret | Rotated Atlas connection URI |
-| `DB_NAME` | Required | `grooming_standards` |
+| `DB_NAME` | Optional | Defaults to `grooming_standards` |
 | `DATABASE_PREFLIGHT_APPLY` | One-off only | Leave unset on the API service. Set to `CREATE_INDEXES` only for the confirmed migration job, then remove it. |
 | `SECRET_KEY` | Required, secret | Unique random value, at least 32 characters |
-| `JWT_EXPIRE_MINUTES` | Required | `480`; permitted range is 5–10080 |
-| `JWT_ISSUER` | Required | `facultytrack-api` |
-| `JWT_AUDIENCE` | Required | `facultytrack-web` |
+| `JWT_EXPIRE_MINUTES` | Optional | Defaults to `480`; permitted range is 5–43200 |
+| `JWT_ISSUER` | Optional | Defaults to `facultytrack-api` |
+| `JWT_AUDIENCE` | Optional | Defaults to `facultytrack-web` |
 | `ADMIN_EMAIL` | Required | Production superadmin email |
 | `ADMIN_PASSWORD` | Required, secret | Unique password of at least 12 characters |
 | `ADMIN_PASSWORD_VERSION` | Required | Start at `1`; change whenever the password rotates |
@@ -221,14 +221,14 @@ with an insecure fallback.
 | `APP_URL` | Required | Canonical public Vercel HTTPS origin used in emailed links; must appear in `CORS_ORIGINS` |
 | `CRON_SECRET` | Required, secret | Random secret sent only in the scheduler request header |
 | `GEMINI_API_KEY` | Required, secret | Project-scoped Gemini API key |
-| `GEMINI_MODEL` | Required | `gemini-3.7-flash` |
-| `GEMINI_TIMEOUT_MS` | Required | `120000`; permitted range is 10000–600000 |
-| `GEMINI_MAX_RETRIES` | Required | `2`; permitted range is 0–2 |
-| `EVALUATION_POLL_MS` | Required | `2000`; permitted range is 250–60000 |
-| `EVALUATION_LEASE_MS` | Required | `600000`; range 60000–3600000 and must cover all Gemini attempts plus 60000 |
-| `EVALUATION_MAX_ATTEMPTS` | Required | `3`; permitted range is 1–10 |
-| `EVALUATION_CONCURRENCY` | Required | Bounded check-in AI worker concurrency; start with `2` |
-| `CHECKIN_CONCURRENCY_LIMIT` | Required | Simultaneous check-in image-processing requests per API replica; start with `5` |
+| `GEMINI_MODEL` | Optional | Defaults to pinned `gemini-3.7-flash` |
+| `GEMINI_TIMEOUT_MS` | Optional | Defaults to `120000`; permitted range is 10000–600000 |
+| `GEMINI_MAX_RETRIES` | Optional | Defaults to `2`; permitted range is 0–2 |
+| `EVALUATION_POLL_MS` | Optional | Defaults to `2000`; permitted range is 250–60000 |
+| `EVALUATION_LEASE_MS` | Optional | Defaults to `600000`; must cover all Gemini attempts plus 60000 |
+| `EVALUATION_MAX_ATTEMPTS` | Optional | Defaults to `3`; permitted range is 1–10 |
+| `EVALUATION_CONCURRENCY` | Optional | Defaults to `2` |
+| `CHECKIN_CONCURRENCY_LIMIT` | Optional | Defaults to `5` per API replica |
 | `R2_ENDPOINT` | Required | Cloudflare R2 HTTPS S3 endpoint without a path |
 | `R2_BUCKET` | Required | Private attendance-photo bucket name |
 | `R2_ACCESS_KEY_ID` | Required, secret | R2 object read/write/delete credential |
@@ -239,44 +239,23 @@ with an insecure fallback.
 | `AWS_SESSION_TOKEN` | Conditional, secret | Required only when using temporary AWS credentials |
 | `SES_FROM_EMAIL` | Required | Verified sender address |
 | `SES_CONFIGURATION_SET` | Optional | SES configuration set name |
-| `SES_TIMEOUT_MS` | Required | `30000`; aborts a hung SES request |
-| `SES_MAX_ATTEMPTS` | Required | `2`; SDK attempts per delivery try |
-| `NOTIFICATION_LEASE_MS` | Required | `300000`; must exceed the SES timeout by at least 60000 |
-| `NOTIFICATION_MAX_ATTEMPTS` | Required | `5`; durable worker delivery attempts |
-| `NOTIFICATION_CONCURRENCY` | Required | Bounded notification worker concurrency; start with `2` |
-| `APP_TIME_ZONE` | Required | IANA zone for email timestamps, such as `Asia/Kolkata` |
-| `TIMEZONE_OFFSET_MINUTES` | Required | Attendance-day offset; use `330` for IST |
+| `SES_TIMEOUT_MS` | Optional | Defaults to `30000`; aborts a hung SES request |
+| `SES_MAX_ATTEMPTS` | Optional | Defaults to `2`; SDK attempts per delivery try |
+| `NOTIFICATION_LEASE_MS` | Optional | Defaults to `300000`; must exceed the SES timeout by at least 60000 |
+| `NOTIFICATION_MAX_ATTEMPTS` | Optional | Defaults to `5`; durable worker delivery attempts |
+| `NOTIFICATION_CONCURRENCY` | Optional | Defaults to `2` |
+| `APP_TIME_ZONE` | Optional | Defaults to `Asia/Kolkata` |
 
 Example non-secret values (replace both origins with real domains):
 
 ```dotenv
 NODE_ENV=production
 PORT=8000
-PROCESS_ROLE=all
-DB_NAME=grooming_standards
 # DATABASE_PREFLIGHT_APPLY is intentionally unset on the API service.
-JWT_EXPIRE_MINUTES=480
-JWT_ISSUER=facultytrack-api
-JWT_AUDIENCE=facultytrack-web
 ADMIN_PASSWORD_VERSION=1
 CORS_ORIGINS=https://facultytrack.example.com,https://facultytrack.vercel.app
 APP_URL=https://facultytrack.example.com
-GEMINI_MODEL=gemini-3.7-flash
-GEMINI_TIMEOUT_MS=120000
-GEMINI_MAX_RETRIES=2
-EVALUATION_POLL_MS=2000
-EVALUATION_LEASE_MS=600000
-EVALUATION_MAX_ATTEMPTS=3
-EVALUATION_CONCURRENCY=2
-CHECKIN_CONCURRENCY_LIMIT=5
 AWS_REGION=ap-south-1
-SES_TIMEOUT_MS=30000
-SES_MAX_ATTEMPTS=2
-NOTIFICATION_LEASE_MS=300000
-NOTIFICATION_MAX_ATTEMPTS=5
-NOTIFICATION_CONCURRENCY=2
-APP_TIME_ZONE=Asia/Kolkata
-TIMEZONE_OFFSET_MINUTES=330
 ```
 
 Do not copy placeholders or secrets from `.env.example` into source control.

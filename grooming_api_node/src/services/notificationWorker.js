@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { runtimeConfig } from "../config/env.js";
+import { appUrl, runtimeConfig } from "../config/env.js";
+import { idMatch } from "../middleware/auth.js";
 import { sendCheckoutEmail, sendEvaluationEmail } from "./emailService.js";
+import { ensureReportToken, localDateKey } from "./instructorReports.js";
 import { getNotificationSettings, shouldSendNotification } from "./notificationSettings.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 
@@ -266,6 +268,40 @@ async function deferCheckoutNotification(db, job) {
   return updated(result);
 }
 
+async function reportUrlForAttendance(db, attendance, type) {
+  const instructor = await db.collection("instructors").findOne({
+    _id: idMatch(String(attendance.instructor_id)),
+  });
+  if (!instructor) {
+    const error = new Error("Instructor unavailable for report link");
+    error.name = "INSTRUCTOR_NOT_FOUND";
+    throw error;
+  }
+  const token = await ensureReportToken(db, instructor);
+  const sessionTime = new Date(attendance.check_in_time || attendance.date);
+  if (Number.isNaN(sessionTime.getTime())) {
+    const error = new Error("Attendance session date unavailable for report link");
+    error.name = "ATTENDANCE_DATE_INVALID";
+    throw error;
+  }
+  return `${appUrl()}/reports/${encodeURIComponent(token)}/day/${localDateKey(sessionTime)}/${
+    type === "checkout" ? "check-out" : "check-in"
+  }`;
+}
+
+export async function prepareCheckinReport(db, job) {
+  if (job.type !== "checkin") return job;
+  const attendance = await db.collection("attendance").findOne({ _id: job.attendance_id });
+  if (!attendance) {
+    const error = new Error("Attendance record unavailable");
+    error.name = "ATTENDANCE_NOT_FOUND";
+    throw error;
+  }
+  const reportUrl = job.report?.reportUrl
+    || await reportUrlForAttendance(db, attendance, "checkin");
+  return { ...job, report: { ...job.report, reportUrl } };
+}
+
 export async function prepareCheckoutReport(db, job) {
   if (job.type !== "checkout") return job;
   const attendance = await db.collection("attendance").findOne({ _id: job.attendance_id });
@@ -289,6 +325,8 @@ export async function prepareCheckoutReport(db, job) {
     await deferCheckoutNotification(db, job);
     return null;
   }
+  const reportUrl = job.report?.reportUrl
+    || await reportUrlForAttendance(db, attendance, "checkout");
 
   return {
     ...job,
@@ -306,6 +344,7 @@ export async function prepareCheckoutReport(db, job) {
       imageQuality: hasCheckoutPhoto
         ? attendance.checkout_image_quality || null
         : attendance.image_quality || null,
+      reportUrl,
     },
   };
 }
@@ -330,7 +369,9 @@ async function deliverNotification(db, job) {
     });
     return false;
   }
-  const preparedJob = await prepareCheckoutReport(db, job);
+  const preparedJob = job.type === "checkout"
+    ? await prepareCheckoutReport(db, job)
+    : await prepareCheckinReport(db, job);
   if (!preparedJob) return false;
   if (!(await renewNotificationLease(db, preparedJob))) return false;
   const stillPresent = await db.collection("attendance").findOne(

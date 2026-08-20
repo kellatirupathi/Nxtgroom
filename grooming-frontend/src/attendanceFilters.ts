@@ -1,10 +1,76 @@
 import type { AttendanceRecord } from './types.ts';
 
+export const BUSINESS_TIME_ZONE = 'Asia/Kolkata';
+
 export function localDateValue(date: Date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+export function formatAttendanceTime(value?: string | Date | null): string {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: BUSINESS_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+export function formatAttendanceDate(value?: string | Date | null): string {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: BUSINESS_TIME_ZONE,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(date);
+}
+
+/** Makes a session that crosses midnight explicit without moving its check-in day. */
+export function attendanceSessionDateLabel(
+  checkIn?: string | Date | null,
+  checkOut?: string | Date | null,
+  fallbackDate?: string | Date | null,
+): string {
+  const start = checkIn || fallbackDate;
+  if (!start) return '--';
+  if (checkOut && localDateValue(new Date(start)) !== localDateValue(new Date(checkOut))) {
+    return `${formatAttendanceDate(start)} – ${formatAttendanceDate(checkOut)}`;
+  }
+  return formatAttendanceDate(start);
+}
+
+/** Shows the checkout calendar date when it differs from the check-in date. */
+export function checkoutDateTimeLabel(
+  checkIn?: string | Date | null,
+  checkOut?: string | Date | null,
+): string {
+  if (!checkOut) return '--';
+  if (checkIn) {
+    const checkInKey = localDateValue(new Date(checkIn));
+    const checkOutKey = localDateValue(new Date(checkOut));
+    if (checkInKey !== checkOutKey) {
+      const [startYear, startMonth, startDay] = checkInKey.split('-').map(Number);
+      const [endYear, endMonth, endDay] = checkOutKey.split('-').map(Number);
+      const dayDifference = Math.round(
+        (Date.UTC(endYear, endMonth - 1, endDay) - Date.UTC(startYear, startMonth - 1, startDay))
+        / 86_400_000,
+      );
+      const differenceLabel = dayDifference > 0
+        ? `+${dayDifference} ${dayDifference === 1 ? 'day' : 'days'}`
+        : `${dayDifference} ${dayDifference === -1 ? 'day' : 'days'}`;
+      return `${formatAttendanceDate(checkOut)}, ${formatAttendanceTime(checkOut)} (${differenceLabel})`;
+    }
+  }
+  return formatAttendanceTime(checkOut);
 }
 
 export function attendancePath(date?: string | null): string {
@@ -32,7 +98,7 @@ export const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 /** Shifts a calendar date by whole days without crossing into UTC. */
 function shiftDays(value: string, days: number): string {
   const [year, month, day] = value.split('-').map(Number);
-  return localDateValue(new Date(year, month - 1, day + days));
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
 /**

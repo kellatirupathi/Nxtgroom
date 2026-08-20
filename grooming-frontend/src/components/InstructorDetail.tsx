@@ -6,6 +6,7 @@ import PhotoViewer from './PhotoViewer';
 import AttendancePhotoCircle from './AttendancePhotoCircle';
 import { useToast } from './useToast';
 import { normalizeAttendanceStatus } from '../status';
+import { formatAttendanceDate, formatAttendanceTime } from '../attendanceFilters';
 import GroomingReport from './GroomingReport';
 import LocationPanel from './LocationPanel';
 import type { AttendanceRecord, Evaluation } from '../types';
@@ -34,16 +35,6 @@ function StatusBadge({ status }: { status?: string }) {
     default:
       return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-amber-50 text-amber-600 border border-amber-200"><Clock size={16} aria-hidden="true" /> Pending AI</span>;
   }
-}
-
-function formatTime(isoString?: string | null) {
-  if (!isoString) return '--';
-  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDate(isoString?: string | null) {
-  if (!isoString) return '--';
-  return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, onDeleted }: InstructorDetailProps) {
@@ -302,8 +293,8 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
             </div>
             <h3 className="text-base sm:text-lg font-extrabold text-slate-800">No check-out recorded</h3>
             <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
-              {record.instructor_name || 'This instructor'} checked in at {formatTime(record.check_in_time)} on{' '}
-              {formatDate(record.date)} and has not checked out. Please follow up with them.
+              {record.instructor_name || 'This instructor'} checked in at {formatAttendanceTime(record.check_in_time)} on{' '}
+              {formatAttendanceDate(record.date)} and has not checked out. Please follow up with them.
             </p>
             <p className="mt-4 text-xs font-medium text-slate-400">
               The check-out time, location and photo appear here once they do.
@@ -350,7 +341,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 space-y-5 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">Session Details</h4>
-            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatDate(record.date)}</p></div></div>
+            <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatAttendanceDate(tab === 'checkout' ? record.check_out_time : (record.check_in_time || record.date))}</p></div></div>
             {/* Only this tab's half. Showing the other one's time here put an
                 empty check-out row on a report about the check-in. */}
             <div className="flex items-start gap-4">
@@ -360,7 +351,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                   {tab === 'checkin' ? 'Check-in time' : 'Check-out time'}
                 </p>
                 <p className="text-sm font-semibold text-slate-800">
-                  {formatTime(tab === 'checkin' ? record.check_in_time : record.check_out_time)}
+                  {formatAttendanceTime(tab === 'checkin' ? record.check_in_time : record.check_out_time)}
                 </p>
               </div>
             </div>
@@ -477,7 +468,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           attendanceId={String(record._id)}
           kind={photoKind}
           title={record.instructor_name || 'Attendance photo'}
-          subtitle={`${photoKind === 'checkin' ? 'Check-in' : 'Check-out'} · ${formatDate(record.date)}`}
+          subtitle={`${photoKind === 'checkin' ? 'Check-in' : 'Check-out'} · ${formatAttendanceDate(photoKind === 'checkout' ? record.check_out_time : (record.check_in_time || record.date))}`}
           onClose={() => setPhotoKind(null)}
         />
       )}
@@ -487,7 +478,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         destructive
         busy={deleting}
         title="Delete this attendance record?"
-        message={`This removes the check-in for ${record?.instructor_name || 'this instructor'} on ${formatDate(record?.date)}.`}
+        message={`This removes the check-in for ${record?.instructor_name || 'this instructor'} on ${formatAttendanceDate(record?.date)}.`}
         detail="A record cannot exist without its check-in, so the check-out, both appearance reports and both photographs go with it. This cannot be undone."
         confirmLabel="Delete record"
         onConfirm={handleDelete}
@@ -499,7 +490,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         destructive
         busy={deleting}
         title="Delete this check-out?"
-        message={`This removes the check-out for ${record?.instructor_name || 'this instructor'} on ${formatDate(record?.date)}.`}
+        message={`This removes the check-out for ${record?.instructor_name || 'this instructor'} on ${formatAttendanceDate(record?.check_out_time || record?.date)}.`}
         detail="Its time, photograph and appearance report are deleted. The check-in and its report are untouched, and the instructor will be checked in again."
         confirmLabel="Delete check-out"
         onConfirm={handleDeleteCheckout}

@@ -615,6 +615,7 @@ attendanceRouter.post(
           imageBuffer: checkOutPhoto?.buffer,
           mimeType: checkOutPhoto?.mimeType || "image/jpeg",
           checkOutTime,
+          checkInTime: attendance.check_in_time,
         });
 
         checkoutPayload.report = {
@@ -942,6 +943,7 @@ attendanceRouter.post(
         imageBuffer: normalized.buffer,
         mimeType: normalized.mimeType,
         checkOutTime: attendance.check_out_time,
+        checkInTime: attendance.check_in_time,
       });
 
       if (recipient) {
@@ -1160,6 +1162,7 @@ attendanceRouter.post(
           photoKey,
           mimeType: "image/jpeg",
           checkOutTime: attendance.check_out_time,
+          checkInTime: attendance.check_in_time,
         });
         return res.json({
           message: "Re-analysis completed.",

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { app } from "../server.js";
 import { createAccessToken, getPasswordHash } from "../src/middleware/auth.js";
-import { buildCheckoutEmail, buildEvaluationEmail } from "../src/services/emailService.js";
+import {
+  buildCheckoutEmail,
+  buildEvaluationEmail,
+  buildGroomingAlertEmail,
+} from "../src/services/emailService.js";
 import { todayBounds } from "../src/utils.js";
 
 let server;
@@ -204,12 +208,15 @@ test("SES check-in report is concise and escapes instructor data", () => {
     overallStatus: "NON_COMPLIANT",
     aiSummary: "ID card is missing.",
     checkInTime: "2026-08-14T03:30:00.000Z",
+    reportUrl: "https://facultytrack.example/reports/check-in",
   });
   assert.equal(email.subject, "Your check-in appearance report");
   assert.match(email.text, /Appearance status: NON-COMPLIANT/);
   assert.match(email.text, /ID card is missing\./);
   assert.match(email.html, /A &lt;Instructor&gt;/);
   assert.doesNotMatch(email.html, /A <Instructor>/);
+  assert.match(email.text, /https:\/\/facultytrack\.example\/reports\/check-in/);
+  assert.match(email.html, /View check-in report/);
 });
 
 test("SES checkout report includes attendance times and latest appearance status", () => {
@@ -219,10 +226,27 @@ test("SES checkout report includes attendance times and latest appearance status
     checkOutTime: "2026-08-14T11:30:00.000Z",
     status: "done",
     remarks: "All checks passed.",
+    reportUrl: "https://facultytrack.example/reports/check-out",
   });
   assert.match(email.subject, /Checkout confirmation/);
   assert.match(email.text, /Appearance status: COMPLIANT/);
   assert.match(email.text, /All checks passed\./);
+  assert.match(email.text, /https:\/\/facultytrack\.example\/reports\/check-out/);
+  assert.match(email.html, /View checkout report/);
+});
+
+test("checkout grooming alerts identify the correct event", () => {
+  const email = buildGroomingAlertEmail({
+    name: "Test Instructor",
+    status: "non_compliant",
+    summary: "ID card missing.",
+    dateLabel: "2026-08-20",
+    reportUrl: "https://facultytrack.example/reports/check-out",
+    kind: "checkout",
+  });
+  assert.match(email.subject, /Your check-out on 2026-08-20/);
+  assert.match(email.text, /Your check-out on 2026-08-20/);
+  assert.doesNotMatch(email.text, /Your check-in/);
 });
 
 test("SES report asks for a retake when the photo could not be assessed", () => {

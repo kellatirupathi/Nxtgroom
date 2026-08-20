@@ -11,6 +11,7 @@ import {
 } from "../src/services/evaluationWorker.js";
 import {
   enqueueNotification,
+  prepareCheckinReport,
   prepareCheckoutReport,
   reconcileCheckoutOutbox,
   reconcileExpiredNotificationJobs,
@@ -405,6 +406,7 @@ test("checkout waits for its own report and emails the checkout assessment", asy
   const readyDb = fakeDb({
     attendance: {
       findOne: async () => ({
+        instructor_id: "instructor-5",
         instructor_name: "Current Name",
         check_out_photo_key: "attendance/checkout.jpg",
         status: "non_compliant",
@@ -418,12 +420,49 @@ test("checkout waits for its own report and emails the checkout assessment", asy
         checkout_image_quality: "ADEQUATE",
       }),
     },
+    instructors: {
+      findOne: async () => ({
+        _id: "instructor-5",
+        report_token: "checkout-report-token",
+      }),
+    },
   });
   const prepared = await prepareCheckoutReport(readyDb, job);
   assert.equal(prepared.report.status, "COMPLIANT");
   assert.equal(prepared.report.remarks, "Checkout standards met.");
   assert.equal(prepared.report.checkOutTime, exactCheckout);
   assert.equal(prepared.report.imageQuality, "ADEQUATE");
+  assert.match(prepared.report.reportUrl, /\/checkout-report-token\/day\/2026-08-14\/check-out$/);
+});
+
+test("cross-midnight notification links remain on the check-in session day", async () => {
+  const attendance = {
+    _id: "attendance-midnight",
+    instructor_id: "instructor-midnight",
+    check_in_time: new Date("2026-08-20T18:03:42.000Z"),
+    check_out_time: new Date("2026-08-20T19:02:53.000Z"),
+  };
+  const db = fakeDb({
+    attendance: { findOne: async () => attendance },
+    instructors: {
+      findOne: async () => ({
+        _id: "instructor-midnight",
+        report_token: "midnight-report-token",
+      }),
+    },
+  });
+  const checkin = await prepareCheckinReport(db, {
+    attendance_id: attendance._id,
+    type: "checkin",
+    report: {},
+  });
+  const checkout = await prepareCheckoutReport(db, {
+    attendance_id: attendance._id,
+    type: "checkout",
+    report: {},
+  });
+  assert.match(checkin.report.reportUrl, /\/day\/2026-08-20\/check-in$/);
+  assert.match(checkout.report.reportUrl, /\/day\/2026-08-20\/check-out$/);
 });
 
 test("expired final notification attempts become delivery_unknown and clear PII", async () => {

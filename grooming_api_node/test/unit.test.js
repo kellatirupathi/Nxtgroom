@@ -100,6 +100,19 @@ test("production configuration accepts an exact secure contract", () => {
   process.env.SECRET_KEY = "x".repeat(64);
   process.env.ADMIN_PASSWORD = "replace-with-a-unique-password-of-at-least-12-characters";
   assert.throws(() => validateEnvironment(), /ADMIN_PASSWORD must be at least 12 characters/);
+  process.env.ADMIN_PASSWORD = "test-only-password-123";
+  for (const name of [
+    "DB_NAME", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES",
+    "EVALUATION_POLL_MS", "EVALUATION_LEASE_MS", "EVALUATION_MAX_ATTEMPTS",
+    "EVALUATION_CONCURRENCY", "CHECKIN_CONCURRENCY_LIMIT", "JWT_EXPIRE_MINUTES",
+    "JWT_ISSUER", "JWT_AUDIENCE", "SES_TIMEOUT_MS", "SES_MAX_ATTEMPTS",
+    "NOTIFICATION_LEASE_MS", "NOTIFICATION_MAX_ATTEMPTS", "NOTIFICATION_CONCURRENCY",
+    "APP_TIME_ZONE", "TIMEZONE_OFFSET_MINUTES",
+  ]) delete process.env[name];
+  const compact = validateEnvironment();
+  assert.equal(compact.dbName, "grooming_standards");
+  assert.equal(compact.geminiModel, "gemini-3.7-flash");
+  assert.equal(compact.appTimeZone, "Asia/Kolkata");
 });
 
 test("access tokens carry the configured issuer, audience, and algorithm", () => {

@@ -78,6 +78,7 @@ export function runtimeConfig() {
     // exists in the database; anything else leaves the stored one alone.
     adminPasswordReset: process.env.ADMIN_PASSWORD_RESET === "true",
     origins: corsOrigins(),
+    geminiModel: process.env.GEMINI_MODEL || "gemini-3.7-flash",
     geminiTimeoutMs: parseInteger("GEMINI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
     geminiMaxRetries: parseInteger("GEMINI_MAX_RETRIES", 2, { min: 0, max: 2 }),
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
@@ -92,7 +93,6 @@ export function runtimeConfig() {
     notificationConcurrency: parseInteger("NOTIFICATION_CONCURRENCY", 2, { min: 1, max: 20 }),
     processRole: process.env.PROCESS_ROLE || "all",
     appTimeZone: process.env.APP_TIME_ZONE || "Asia/Kolkata",
-    timezoneOffsetMinutes: parseInteger("TIMEZONE_OFFSET_MINUTES", 330, { min: -720, max: 840 }),
   };
 }
 
@@ -106,25 +106,8 @@ export function validateEnvironment() {
   const errors = [];
   const required = [
     "MONGODB_URI",
-    "DB_NAME",
     "GEMINI_API_KEY",
-    "GEMINI_MODEL",
-    "GEMINI_TIMEOUT_MS",
-    "GEMINI_MAX_RETRIES",
-    "EVALUATION_POLL_MS",
-    "EVALUATION_LEASE_MS",
-    "EVALUATION_MAX_ATTEMPTS",
-    "EVALUATION_CONCURRENCY",
-    "CHECKIN_CONCURRENCY_LIMIT",
-    "SES_TIMEOUT_MS",
-    "SES_MAX_ATTEMPTS",
-    "NOTIFICATION_LEASE_MS",
-    "NOTIFICATION_MAX_ATTEMPTS",
-    "NOTIFICATION_CONCURRENCY",
     "SECRET_KEY",
-    "JWT_EXPIRE_MINUTES",
-    "JWT_ISSUER",
-    "JWT_AUDIENCE",
     "ADMIN_EMAIL",
     "ADMIN_PASSWORD",
     "ADMIN_PASSWORD_VERSION",
@@ -139,8 +122,6 @@ export function validateEnvironment() {
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "SES_FROM_EMAIL",
-    "APP_TIME_ZONE",
-    "TIMEZONE_OFFSET_MINUTES",
   ];
   for (const name of required) {
     if (!process.env[name]?.trim()) errors.push(`${name} is required`);
@@ -226,7 +207,7 @@ export function validateEnvironment() {
       errors.push("MONGODB_URI is invalid");
     }
   }
-  if (process.env.GEMINI_MODEL !== "gemini-3.7-flash") {
+  if (config.geminiModel !== "gemini-3.7-flash") {
     errors.push("GEMINI_MODEL must be gemini-3.7-flash");
   }
   const minimumEvaluationLease = config.geminiTimeoutMs * (config.geminiMaxRetries + 1) + 60000;
@@ -245,7 +226,7 @@ export function validateEnvironment() {
     errors.push("SES_FROM_EMAIL must be a valid email address");
   }
   try {
-    new Intl.DateTimeFormat("en", { timeZone: process.env.APP_TIME_ZONE }).format();
+    new Intl.DateTimeFormat("en", { timeZone: config.appTimeZone }).format();
   } catch {
     errors.push("APP_TIME_ZONE must be a valid IANA time zone");
   }

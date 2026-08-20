@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   attendancePath,
+  attendanceSessionDateLabel,
+  checkoutDateTimeLabel,
   filterAttendanceRecords,
   localDateValue,
   uniqueRecordValues,
@@ -19,6 +21,20 @@ test('builds a date-keyed attendance endpoint and local date value', () => {
   assert.equal(attendancePath('2026-08-14'), '/api/v2/attendance/today?date=2026-08-14');
   assert.equal(attendancePath(''), '/api/v2/attendance/today');
   assert.equal(localDateValue(new Date(2026, 7, 4)), '2026-08-04');
+});
+
+test('cross-midnight sessions show the checkout on its actual calendar date', () => {
+  const checkIn = '2026-08-20T18:03:42.000Z';
+  const checkOut = '2026-08-20T19:02:53.000Z';
+  assert.equal(attendanceSessionDateLabel(checkIn, checkOut), '20 Aug 2026 – 21 Aug 2026');
+  assert.equal(checkoutDateTimeLabel(checkIn, checkOut), '21 Aug 2026, 12:32 am (+1 day)');
+});
+
+test('same-day sessions keep the compact checkout time', () => {
+  const checkIn = '2026-08-20T03:00:00.000Z';
+  const checkOut = '2026-08-20T11:00:00.000Z';
+  assert.equal(attendanceSessionDateLabel(checkIn, checkOut), '20 Aug 2026');
+  assert.equal(checkoutDateTimeLabel(checkIn, checkOut), '04:30 pm');
 });
 
 test('filters attendance by role, college, and searchable visible fields', () => {

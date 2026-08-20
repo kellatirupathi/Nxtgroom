@@ -4,7 +4,10 @@ import { apiFetchAllPages } from '../api';
 import PhotoViewer from './PhotoViewer';
 import DateRangeFilter from './DateRangeFilter';
 import {
+  attendanceSessionDateLabel,
   attendanceRangePath,
+  checkoutDateTimeLabel,
+  formatAttendanceTime,
   rangeForPreset,
   type DatePreset,
   type DateRange,
@@ -51,16 +54,6 @@ function AttireTag({ attire }: { attire?: string | null }) {
       {match.text}
     </span>
   );
-}
-
-function formatTime(isoString?: string | null) {
-  if (!isoString) return '--';
-  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatDate(isoString?: string | null) {
-  if (!isoString) return '--';
-  return new Date(isoString).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTableProps) {
@@ -308,9 +301,13 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                     <td className="p-4 font-bold text-slate-800 truncate" title={record.instructor_name || ''}>{record.instructor_name}</td>
                     <td className="p-4 text-sm font-medium text-slate-500 truncate" title={record.instructor_role || ''}>{record.instructor_role || '--'}</td>
                     <td className="p-4 text-sm font-medium text-slate-600 truncate" title={record.college_name || ''}>{record.college_name || 'Unknown'}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600 whitespace-nowrap">{formatDate(record.date)}</td>
-                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">{formatTime(record.check_in_time)}</td>
-                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">{formatTime(record.check_out_time)}</td>
+                    <td className="p-4 text-sm font-medium text-slate-600 whitespace-nowrap">
+                      {attendanceSessionDateLabel(record.check_in_time, record.check_out_time, record.date)}
+                    </td>
+                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">{formatAttendanceTime(record.check_in_time)}</td>
+                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">
+                      {checkoutDateTimeLabel(record.check_in_time, record.check_out_time)}
+                    </td>
                     <td className="p-4 text-sm text-slate-500 truncate">
                       {record.location_coordinates ? (
                         <span className="flex items-center gap-1.5 text-indigo-600 font-medium whitespace-nowrap" title="Latitude, longitude">
@@ -399,7 +396,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
           attendanceId={String(photoTarget.record._id)}
           kind={photoTarget.kind}
           title={photoTarget.record.instructor_name || 'Instructor'}
-          subtitle={formatTime(
+          subtitle={formatAttendanceTime(
             photoTarget.kind === 'checkin'
               ? photoTarget.record.check_in_time
               : photoTarget.record.check_out_time,
