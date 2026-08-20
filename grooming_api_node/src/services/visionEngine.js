@@ -99,6 +99,31 @@ function toOrderedRows(sections, parsed) {
 }
 
 /**
+ * Settles an ID card row that abstained while describing a violation.
+ *
+ * The checkpoint asks one thing — is a card being worn — so the photograph can
+ * only fail to answer it when the chest is not shown. Asked directly, the model
+ * still returned N/A for a clearly visible chest with no card on it, giving as
+ * its reason "the upper body is visible, but no ID card is present": the FAIL
+ * condition, stated in full, filed as an abstention. Every rewording of the
+ * instruction left some version of that contradiction, so the two visibility
+ * regions decide it here instead of the wording.
+ *
+ * Only this direction is corrected. A PASS is the model reporting a card it can
+ * see, which no region flag contradicts, and turning an abstention into a FAIL
+ * needs both regions to agree that the chest is shown and the card is not.
+ */
+export function resolveIdCardAbstention(rows, visibleRegions) {
+  const row = (rows.general_idcard_check || []).find((item) => item.code === "ID_PRESENT");
+  if (!row || row.status !== "N/A") return rows;
+  if (visibleRegions?.upper_body !== "VISIBLE") return rows;
+  if (visibleRegions?.id_card !== "NOT_VISIBLE") return rows;
+  row.status = "FAIL";
+  row.reason = "The upper body is visible and no ID card is being worn.";
+  return rows;
+}
+
+/**
  * The compliance verdict, computed from the checkpoints rather than asked for.
  *
  * The model used to be asked for overall_status and then checked against the
@@ -297,6 +322,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   }
 
   const rows = toOrderedRows(sections, message.parsed);
+  resolveIdCardAbstention(rows, message.parsed.visible_regions);
   const verdict = deriveVerdict(rows, { imageQuality: message.parsed.image_quality });
 
   return {

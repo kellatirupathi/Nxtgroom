@@ -27,7 +27,7 @@ export const ID_CARD_CHECKS = [
   {
     code: "ID_PRESENT",
     name: "ID Card Present",
-    rule: "An instructor ID card is visibly being worn. PASS when a card is visible, FAIL when the chest and upper body are visible and no card is. N/A when the framing does not show enough of the upper body to tell. Do not judge the card's position, condition, readability or lanyard.",
+    rule: "Is the instructor wearing an ID card? That is the whole question. PASS whenever a card or badge can be seen on the person, however it happens to hang: turned, flipped, reversed, angled, swinging, creased, dim, small, low-resolution, partly behind an arm or a lanyard, or too blurred to read. None of that is a violation. FAIL only when the chest and upper body are clearly visible and there is no card on the person at all. N/A only when the framing does not show enough of the upper body to tell. Never read, quote or judge what is printed on the card, and never judge its position, orientation, readability, condition or lanyard.",
   },
 ];
 

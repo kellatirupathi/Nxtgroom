@@ -3,11 +3,13 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // Version every material prompt change so stored evaluations remain auditable.
 // 2026-08-18.1 replaced the single free-form prompt with fixed checkpoint sets
 // generated per gender and garment. 2026-08-18.2 stopped asking for a
-// human-review flag. 2026-08-18.3 reduced the ID card to one row, dropped
+// human-review flag. 2026-08-20.1 made the ID card a presence-only check after
+// the model failed a card that was plainly being worn for being "not clearly
+// displayed". 2026-08-18.3 reduced the ID card to one row, dropped
 // eyewear and hair colour, split hair position from neatness, and tightened
 // the saree, kurti and earring rules. 2026-08-19.1 asks whether the photograph
 // shows a person at all.
-export const PROMPT_VERSION = "2026-08-19.1";
+export const PROMPT_VERSION = "2026-08-20.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -59,6 +61,11 @@ observation if worth mentioning. Reserve FAIL for issues that are clearly
 visible and materially breach the standard, such as jeans instead of formal
 trousers, no ID card at all, or sneakers.
 
+Judging a checkpoint on how well the photograph shows it, rather than on what
+the instructor is wearing, is the most common way this goes wrong. Poor
+framing, distance, blur and low light are properties of the picture. They lead
+to N/A when they genuinely prevent a decision, and never to FAIL.
+
 ### HAIR
 Hair matters more than its length or colour suggests, and is the thing most
 often missed. Judge two separate questions. Is the hair neat — combed,
@@ -66,6 +73,28 @@ controlled, deliberately maintained? And is it off the face — nothing falling
 across the forehead, the eyes or the front of the face. Hair worn loose is
 acceptable only while it stays controlled and clear of the face. Hair visibly
 falling across the face is a FAIL, not an observation. Never judge hair colour.
+
+### ID CARD
+The ID card checkpoint asks one question: is a card being worn? Nothing else is
+being assessed there.
+
+A card that is turned, flipped, reversed, angled, swinging, creased, dim, small
+or too blurred to read is still a card being worn, and is a PASS. Never read
+what is printed on it. The text, the photograph, the name, the design and the
+colours on the card are not assessed, and "I cannot read it" is not a finding.
+
+Recording the id_card region as PARTIAL describes the photograph, not the
+instructor, and is not a reason to fail the checkpoint. Wording such as
+"partially visible", "not clearly displayed" or "not fully visible" is not a
+violation of this standard. The only FAIL is a visible chest with no card on
+the person.
+
+An instructor wearing their ID card must never be told to wear one.
+
+N/A is for a photograph that cannot answer the question, not for a card you
+cannot see. When the upper body is VISIBLE and there is no card on the person,
+that is a FAIL. Reserve N/A for framing that genuinely cuts off or obscures the
+chest, and mark the upper_body region accordingly so the two agree.
 
 ### NEVER ASSESS FROM A PHOTOGRAPH
 Body odour, breath, bathing, oral hygiene, fragrance, attitude, confidence,
