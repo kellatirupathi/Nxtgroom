@@ -620,6 +620,23 @@ export async function syncFailedEvaluationOutcome(db, job) {
 
 async function markEvaluationFailed(db, job, error, ownedStatus = "processing") {
   const now = new Date();
+  if (jobKind(job) === "checkout") {
+    // Only the check-out fields: the check-in half keeps its own report and
+    // its own status, which this failure says nothing about.
+    await db.collection("attendance").updateOne(
+      { _id: job.attendance_id },
+      {
+        $set: {
+          checkout_evaluation_queue_status: "failed",
+          checkout_analysis_error_code: errorCode(error, "ANALYSIS_ERROR"),
+          updated_at: now,
+        },
+      }
+    ).catch(() => {
+      // The job is already being marked failed; losing this note must not
+      // stop that.
+    });
+  }
   const failureNotification = buildFailureNotification(job, now);
   const result = await db.collection("evaluation_jobs").findOneAndUpdate(
     { _id: job._id, worker_id: WORKER_ID, status: ownedStatus },
@@ -860,7 +877,8 @@ export function startEvaluationWorker(db) {
           } catch (error) {
             monitor.recordJobError(errorCode(error));
             console.error(
-              `Evaluation job ${job._id} attempt ${job.attempts} failed (${errorCode(error)})`
+              `Evaluation job ${job._id} attempt ${job.attempts} failed (${errorCode(error)}): `
+              + `${error?.name || "Error"} ${String(error?.message || "").slice(0, 300)}`
             );
             await retryEvaluation(db, job, error);
           }

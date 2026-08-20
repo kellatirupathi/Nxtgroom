@@ -67,7 +67,12 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const queueStatus = tab === 'checkout'
     ? record?.checkout_evaluation_queue_status
     : record?.evaluation_queue_status;
-  const analysisRunning = queuedNow || queueStatus === 'queued' || queueStatus === 'processing';
+  // "failed" is a terminal state, not a slow one. Treating it as running left
+  // the page showing "analysing" indefinitely for work that had already given
+  // up, which is the least useful thing it could say.
+  const analysisFailed = queueStatus === 'failed';
+  const analysisRunning = !analysisFailed
+    && (queuedNow || queueStatus === 'queued' || queueStatus === 'processing');
   // Only worth offering when the photograph it would read is still there.
   const canReanalyse = Boolean(tab === 'checkout' ? record?.check_out_photo_key : record?.check_in_photo_key);
 
@@ -395,7 +400,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
               ) : (
                 <>
                   <XCircle size={32} className="text-slate-300" aria-hidden="true" />
-                  <p>No appearance report was produced for this {tab === 'checkout' ? 'check-out' : 'check-in'}.</p>
+                  <p>
+                    {analysisFailed
+                      ? `The analysis of this ${tab === 'checkout' ? 'check-out' : 'check-in'} photo did not complete.`
+                      : `No appearance report was produced for this ${tab === 'checkout' ? 'check-out' : 'check-in'}.`}
+                  </p>
                   {/* The photograph is still in storage, so the analysis can
                       simply be run again. Without this a record left without a
                       report could only be fixed by checking in afresh. */}
