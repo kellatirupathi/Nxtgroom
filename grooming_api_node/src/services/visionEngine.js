@@ -1,8 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import OpenAI from "openai";
-import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
 import { ATTIRE_CLASSIFIER_PROMPT, buildSystemPrompt } from "../prompts.js";
@@ -10,22 +9,10 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
+const GEMINI_INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const DEFAULT_GEMINI_MODEL = "gemini-3.7-flash";
 
-let client = null;
 let referenceCachePromise = null;
-
-function getClient() {
-  if (!client) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
-    client = new OpenAI({
-      apiKey,
-      timeout: runtimeConfig().openAiTimeoutMs,
-      maxRetries: runtimeConfig().openAiMaxRetries,
-    });
-  }
-  return client;
-}
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
 
@@ -45,6 +32,172 @@ const Entry = z.object({
 const AttireClassification = z.object({
   attire_type: z.enum(["FORMAL", "SAREE", "KURTI_WITH_DUPATTA", "UNKNOWN"]),
 });
+
+const ENTRY_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: { type: "string", enum: ["PASS", "FAIL", "N/A"] },
+    observation: { type: "string" },
+    reason: { type: "string" },
+  },
+  required: ["status", "observation", "reason"],
+};
+
+const ATTIRE_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    attire_type: { type: "string", enum: ["FORMAL", "SAREE", "KURTI_WITH_DUPATTA", "UNKNOWN"] },
+  },
+  required: ["attire_type"],
+};
+
+function createGeminiError(message, code, { retryable = false } = {}) {
+  const error = new Error(message);
+  error.name = code;
+  error.code = code;
+  error.retryable = retryable;
+  return error;
+}
+
+function geminiHttpError(status, providerMessage = "") {
+  const safeMessage = String(providerMessage).replace(/\s+/g, " ").slice(0, 300);
+  if (status === 429) {
+    return createGeminiError(
+      `Gemini rate limit exceeded${safeMessage ? `: ${safeMessage}` : ""}`,
+      "RATE_LIMIT_EXCEEDED",
+      { retryable: true }
+    );
+  }
+  if (status === 401 || status === 403) {
+    return createGeminiError("Gemini authentication failed", "GEMINI_AUTH_ERROR");
+  }
+  if (status === 408) {
+    return createGeminiError("Gemini request timed out", "GEMINI_TIMEOUT", { retryable: true });
+  }
+  if (status >= 500) {
+    return createGeminiError(
+      `Gemini service error (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
+      "GEMINI_SERVER_ERROR",
+      { retryable: true }
+    );
+  }
+  return createGeminiError(
+    `Gemini request failed (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
+    "GEMINI_REQUEST_ERROR"
+  );
+}
+
+function retryAfterMilliseconds(response, attempt) {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 60000);
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 0), 60000);
+  }
+  return Math.min(1000 * (2 ** attempt), 10000);
+}
+
+function extractGeminiText(interaction) {
+  return (interaction?.steps || [])
+    .filter((step) => step?.type === "model_output")
+    .flatMap((step) => step.content || [])
+    .filter((content) => content?.type === "text" && typeof content.text === "string")
+    .map((content) => content.text)
+    .join("")
+    .trim();
+}
+
+async function requestGeminiStructured({
+  systemInstruction,
+  input,
+  jsonSchema,
+  validator,
+  maxOutputTokens,
+}) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
+
+  const config = runtimeConfig();
+  const requestBody = {
+    model: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
+    store: false,
+    system_instruction: systemInstruction,
+    input,
+    response_format: {
+      type: "text",
+      mime_type: "application/json",
+      schema: jsonSchema,
+    },
+    generation_config: {
+      max_output_tokens: maxOutputTokens,
+      thinking_level: "medium",
+      thinking_summaries: "none",
+    },
+  };
+
+  for (let attempt = 0; attempt <= config.geminiMaxRetries; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(GEMINI_INTERACTIONS_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(config.geminiTimeoutMs),
+      });
+    } catch (cause) {
+      const timedOut = cause?.name === "TimeoutError" || cause?.name === "AbortError";
+      const error = createGeminiError(
+        timedOut ? "Gemini request timed out" : "Gemini request could not reach the service",
+        timedOut ? "GEMINI_TIMEOUT" : "GEMINI_NETWORK_ERROR",
+        { retryable: true }
+      );
+      if (attempt === config.geminiMaxRetries) throw error;
+      await delay(Math.min(1000 * (2 ** attempt), 10000));
+      continue;
+    }
+
+    const bodyText = await response.text();
+    let body;
+    try {
+      body = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      throw createGeminiError("Gemini returned an unreadable response", "GEMINI_INVALID_RESPONSE");
+    }
+
+    if (!response.ok) {
+      const error = geminiHttpError(response.status, body?.error?.message);
+      if (!error.retryable || attempt === config.geminiMaxRetries) throw error;
+      await delay(retryAfterMilliseconds(response, attempt));
+      continue;
+    }
+    if (body.status !== "completed") {
+      throw createGeminiError(
+        `Gemini did not complete the evaluation (status: ${body.status || "unknown"})`,
+        "GEMINI_INCOMPLETE_RESPONSE"
+      );
+    }
+
+    const text = extractGeminiText(body);
+    if (!text) {
+      throw createGeminiError("Gemini returned no structured evaluation", "GEMINI_INVALID_RESPONSE");
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw createGeminiError("Gemini returned invalid structured JSON", "GEMINI_INVALID_RESPONSE");
+    }
+    return validator.parse(parsed);
+  }
+
+  throw createGeminiError("Gemini evaluation failed", "GEMINI_REQUEST_ERROR");
+}
 
 /**
  * A schema whose keys are exactly this instructor's checkpoint codes.
@@ -78,6 +231,36 @@ function buildReportSchema(sections) {
     );
   }
   return z.object(shape);
+}
+
+function buildReportJsonSchema(sections) {
+  const properties = {
+    subject_visible: { type: "boolean" },
+    image_quality: { type: "string", enum: ["ADEQUATE", "RETAKE_RECOMMENDED"] },
+    ai_summary: { type: "string" },
+    visible_regions: {
+      type: "object",
+      additionalProperties: false,
+      properties: Object.fromEntries([
+        "face", "upper_body", "lower_body", "footwear", "id_card", "hands",
+      ].map((key) => [key, { type: "string", enum: ["VISIBLE", "PARTIAL", "NOT_VISIBLE"] }])),
+      required: ["face", "upper_body", "lower_body", "footwear", "id_card", "hands"],
+    },
+  };
+  for (const key of SECTION_KEYS) {
+    properties[key] = {
+      type: "object",
+      additionalProperties: false,
+      properties: Object.fromEntries(sections[key].map((item) => [item.code, ENTRY_JSON_SCHEMA])),
+      required: sections[key].map((item) => item.code),
+    };
+  }
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties,
+    required: ["subject_visible", "image_quality", "ai_summary", "visible_regions", ...SECTION_KEYS],
+  };
 }
 
 /** Rebuilds the ordered rows the report renders, from the checkpoint table. */
@@ -172,7 +355,7 @@ async function loadReferenceImages() {
   console.log(`Loaded ${filenames.length} grooming reference images.`);
   return Promise.all(filenames.map(async (filename) => ({
     filename,
-    dataUrl: `data:image/jpeg;base64,${(await fs.readFile(path.join(REFERENCE_DIR, filename))).toString("base64")}`,
+    data: (await fs.readFile(path.join(REFERENCE_DIR, filename))).toString("base64"),
   })));
 }
 
@@ -188,11 +371,10 @@ export async function verifyVisionAssets() {
 
 function instructorImagePart(imageBuffer, mimeType) {
   return {
-    type: "image_url",
-    image_url: {
-      url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
-      detail: "high",
-    },
+    type: "image",
+    data: imageBuffer.toString("base64"),
+    mime_type: mimeType,
+    resolution: "high",
   };
 }
 
@@ -248,17 +430,14 @@ export function unknownGenderEvaluation() {
  * inferring the garment from the person would hide it.
  */
 async function classifyAttire(imageBuffer, mimeType) {
-  const response = await getClient().beta.chat.completions.parse({
-    model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
-    messages: [
-      { role: "system", content: ATTIRE_CLASSIFIER_PROMPT },
-      { role: "user", content: [instructorImagePart(imageBuffer, mimeType)] },
-    ],
-    response_format: zodResponseFormat(AttireClassification, "attire_classification"),
-    temperature: 0,
-    max_completion_tokens: 100,
+  const parsed = await requestGeminiStructured({
+    systemInstruction: ATTIRE_CLASSIFIER_PROMPT,
+    input: [instructorImagePart(imageBuffer, mimeType)],
+    jsonSchema: ATTIRE_JSON_SCHEMA,
+    validator: AttireClassification,
+    maxOutputTokens: 512,
   });
-  return response.choices?.[0]?.message?.parsed?.attire_type || "UNKNOWN";
+  return parsed.attire_type;
 }
 
 export async function evaluateImage(imageBuffer, mimeType, gender = null) {
@@ -285,35 +464,27 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   for (const reference of references) {
     if (!isReferenceRelevant(reference.filename, normalizedGender)) continue;
     content.push({
-      type: "image_url",
-      image_url: { url: reference.dataUrl, detail: "high" },
+      type: "image",
+      data: reference.data,
+      mime_type: "image/jpeg",
+      resolution: "high",
     });
   }
   content.push({ type: "text", text: "Now assess the instructor in the final image." });
   content.push(instructorImagePart(imageBuffer, mimeType));
 
-  const response = await getClient().beta.chat.completions.parse({
-    model: process.env.OPENAI_MODEL || "gpt-4o-2024-11-20",
-    messages: [
-      { role: "system", content: buildSystemPrompt(normalizedGender, attireType) },
-      { role: "user", content },
-    ],
-    response_format: zodResponseFormat(
-      buildReportSchema(sections),
-      "appearance_report"
-    ),
-    temperature: 0,
-    max_completion_tokens: 6000,
+  const parsed = await requestGeminiStructured({
+    systemInstruction: buildSystemPrompt(normalizedGender, attireType),
+    input: content,
+    jsonSchema: buildReportJsonSchema(sections),
+    validator: buildReportSchema(sections),
+    maxOutputTokens: 6000,
   });
-
-  const message = response.choices?.[0]?.message;
-  if (message?.refusal) throw new Error("The image evaluation was refused by the model");
-  if (!message?.parsed) throw new Error("The model returned no structured evaluation");
 
   // Nothing to tabulate when the photograph does not show the person. The
   // checkpoints are dropped rather than returned as twenty N/A rows, and no
   // verdict is recorded against the instructor for a picture of a wall.
-  if (message.parsed.subject_visible === false) {
+  if (parsed.subject_visible === false) {
     return unassessedEvaluation(
       "NO_PERSON_VISIBLE",
       "The photograph does not show the instructor, so no appearance assessment could be made. Retake it as a clear, full-length photo of the person checking in.",
@@ -321,15 +492,15 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     );
   }
 
-  const rows = toOrderedRows(sections, message.parsed);
-  resolveIdCardAbstention(rows, message.parsed.visible_regions);
-  const verdict = deriveVerdict(rows, { imageQuality: message.parsed.image_quality });
+  const rows = toOrderedRows(sections, parsed);
+  resolveIdCardAbstention(rows, parsed.visible_regions);
+  const verdict = deriveVerdict(rows, { imageQuality: parsed.image_quality });
 
   return {
     ...verdict,
     attire_type: attireType,
-    ai_summary: String(message.parsed.ai_summary || "").slice(0, 1500),
-    visible_regions: message.parsed.visible_regions,
+    ai_summary: String(parsed.ai_summary || "").slice(0, 1500),
+    visible_regions: parsed.visible_regions,
     ...rows,
   };
 }

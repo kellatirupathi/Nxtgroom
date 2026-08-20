@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { checkpointSet, SECTION_KEYS } from "../src/checkpoints.js";
 
 /**
  * Mirrors the consistency rules applied to a parsed grooming report. Kept in
  * step with visionEngine.js by hand: the real function performs a network call
- * to OpenAI, which cannot run in a unit test.
+ * to Gemini, which cannot run in a unit test.
  */
 function reconcile(report) {
   const checks = [
@@ -117,5 +118,77 @@ test("the reference set is whatever is on disk, not a fixed count", async () => 
       prefixes.some((prefix) => name.toLowerCase().startsWith(prefix)),
       `${name} starts with no prefix the gender filter recognises`
     );
+  }
+});
+
+test("vision evaluation sends images and structured output to Gemini 3.7 Flash", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalGemini = {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL,
+    timeout: process.env.GEMINI_TIMEOUT_MS,
+    retries: process.env.GEMINI_MAX_RETRIES,
+  };
+  const sections = checkpointSet("MALE", "FORMAL");
+  const report = {
+    subject_visible: true,
+    image_quality: "ADEQUATE",
+    ai_summary: "All visible requirements pass.",
+    visible_regions: {
+      face: "VISIBLE",
+      upper_body: "VISIBLE",
+      lower_body: "VISIBLE",
+      footwear: "VISIBLE",
+      id_card: "VISIBLE",
+      hands: "VISIBLE",
+    },
+  };
+  for (const key of SECTION_KEYS) {
+    report[key] = Object.fromEntries(sections[key].map((item) => [item.code, {
+      status: "PASS",
+      observation: "Visible and acceptable.",
+      reason: "Meets the checkpoint.",
+    }]));
+  }
+
+  let captured;
+  process.env.GEMINI_API_KEY = "test-only-gemini-key";
+  process.env.GEMINI_MODEL = "gemini-3.7-flash";
+  process.env.GEMINI_TIMEOUT_MS = "120000";
+  process.env.GEMINI_MAX_RETRIES = "0";
+  globalThis.fetch = async (url, options) => {
+    captured = { url, options, body: JSON.parse(options.body) };
+    return new Response(JSON.stringify({
+      status: "completed",
+      steps: [{ type: "model_output", content: [{ type: "text", text: JSON.stringify(report) }] }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const { evaluateImage } = await import("../src/services/visionEngine.js");
+    const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "MALE");
+    assert.equal(result.overall_status, "COMPLIANT");
+    assert.equal(captured.url, "https://generativelanguage.googleapis.com/v1beta/interactions");
+    assert.equal(captured.options.headers["x-goog-api-key"], "test-only-gemini-key");
+    assert.equal(captured.body.model, "gemini-3.7-flash");
+    assert.equal(captured.body.store, false);
+    assert.equal(captured.body.response_format.mime_type, "application/json");
+    assert.equal(captured.body.generation_config.thinking_level, "medium");
+    const images = captured.body.input.filter((part) => part.type === "image");
+    assert.ok(images.length > 1, "reference images and the instructor image must be sent");
+    assert.ok(images.every((part) => part.resolution === "high"));
+    assert.ok(images.every((part) => part.data && part.mime_type === "image/jpeg"));
+    assert.equal(captured.body.input.some((part) => part.type === "image_url"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries({
+      GEMINI_API_KEY: originalGemini.apiKey,
+      GEMINI_MODEL: originalGemini.model,
+      GEMINI_TIMEOUT_MS: originalGemini.timeout,
+      GEMINI_MAX_RETRIES: originalGemini.retries,
+    })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
