@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type FormEvent } from 'react';
+import { useCallback, useState, useEffect, useMemo, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
@@ -51,9 +51,9 @@ export default function InstructorManagement() {
     phone_no: ''
   });
 
-  const fetchData = async ({ signal }: { signal?: AbortSignal } = {}) => {
+  const fetchData = useCallback(async ({ signal }: { signal?: AbortSignal } = {}) => {
     // Skip the blank state when cached rows are already rendered.
-    if (instructors.length === 0) setLoading(true);
+    setLoading(true);
     try {
       const [instructorData, collegeData] = await Promise.all([
         apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, { pageSize: 100, signal }),
@@ -71,13 +71,13 @@ export default function InstructorManagement() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
     fetchData({ signal: controller.signal });
     return () => controller.abort();
-  }, []);
+  }, [fetchData]);
 
   const handleCreateOrUpdate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();

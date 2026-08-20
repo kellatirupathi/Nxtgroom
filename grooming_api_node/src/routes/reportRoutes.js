@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
-import { asyncRoute } from "../utils.js";
+import { asyncRoute, dateBoundsInTimeZone } from "../utils.js";
 import { idMatch } from "../middleware/auth.js";
 import { appUrl, runtimeConfig } from "../config/env.js";
 import {
@@ -22,10 +22,7 @@ const PHOTO_RETENTION_MONTHS = 2;
 const PHOTO_PURGE_BATCH = 200;
 import { evaluationFilter } from "../services/evaluationWorker.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
-import {
-  sendAttendanceReminderEmail,
-  sendWeeklyReportEmail,
-} from "../services/emailService.js";
+import { enqueueMailJob } from "../services/mailWorker.js";
 
 export const reportRouter = Router();
 
@@ -52,9 +49,7 @@ function requireCronSecret(req, res, next) {
   if (!expected) {
     return res.status(503).json({ detail: "CRON_SECRET is not configured on the server" });
   }
-  const supplied = String(
-    req.get("x-cron-secret") || req.query.secret || ""
-  );
+  const supplied = String(req.get("x-cron-secret") || "");
   const expectedBuffer = Buffer.from(expected);
   const suppliedBuffer = Buffer.from(supplied);
   const matches = expectedBuffer.length === suppliedBuffer.length
@@ -92,23 +87,32 @@ async function loadInstructorWeek(db, instructor, startKey) {
 }
 
 async function loadInstructorMonth(db, instructor, monthKey) {
-  const from = new Date(`${monthKey}-01T00:00:00.000Z`);
-  const to = new Date(from);
-  to.setUTCMonth(to.getUTCMonth() + 1);
+  const [year, month] = monthKey.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month, 1));
+  const nextKey = next.toISOString().slice(0, 7);
+  const zone = runtimeConfig().appTimeZone;
+  const from = dateBoundsInTimeZone(`${monthKey}-01`, zone).start;
+  const to = dateBoundsInTimeZone(`${nextKey}-01`, zone).start;
   const records = await db.collection("attendance")
     .find({ instructor_id: String(instructor._id), check_in_time: { $gte: from, $lt: to } })
+    .sort({ check_in_time: 1 })
     .toArray();
 
-  const present = records.length;
+  const uniqueDays = new Map();
+  for (const record of records) {
+    const key = localDateKey(new Date(record.check_in_time || record.date), zone);
+    if (key.startsWith(`${monthKey}-`) && !uniqueDays.has(key)) uniqueDays.set(key, record);
+  }
+  const counted = [...uniqueDays.values()];
   return {
     month: monthKey,
-    present_days: present,
-    compliant_days: records.filter((r) => r.status === "compliant").length,
-    non_compliant_days: records.filter((r) => r.status === "non_compliant").length,
-    saree_days: records.filter((r) => r.attire_type === "SAREE").length,
-    kurti_days: records.filter((r) => r.attire_type === "KURTI_WITH_DUPATTA").length,
-    formal_days: records.filter((r) => r.attire_type === "FORMAL").length,
-    missed_checkouts: records.filter((r) => !r.check_out_time).length,
+    present_days: counted.length,
+    compliant_days: counted.filter((r) => r.status === "compliant").length,
+    non_compliant_days: counted.filter((r) => r.status === "non_compliant").length,
+    saree_days: counted.filter((r) => r.attire_type === "SAREE").length,
+    kurti_days: counted.filter((r) => r.attire_type === "KURTI_WITH_DUPATTA").length,
+    formal_days: counted.filter((r) => r.attire_type === "FORMAL").length,
+    missed_checkouts: counted.filter((r) => !r.check_out_time).length,
   };
 }
 
@@ -315,7 +319,8 @@ async function deliverWeeklyReports(db, startKey) {
     check_in_time: { $gte: from, $lte: to },
   });
 
-  let sent = 0;
+  const runId = `weekly:${startKey}`;
+  let queued = 0;
   let skipped = 0;
   const failures = [];
   for (const instructorId of instructorIds) {
@@ -331,36 +336,48 @@ async function deliverWeeklyReports(db, startKey) {
         continue;
       }
       const reportToken = await ensureReportToken(db, instructor);
-      const result = await sendWeeklyReportEmail(instructor.email, {
-        name: instructor.name,
-        summary,
-        reportUrl: `${appUrl()}/reports/${reportToken}/week/${startKey}`,
+      await enqueueMailJob(db, {
+        id: `${runId}:${String(instructor._id)}`,
+        type: "weekly_report",
+        toEmail: instructor.email,
+        runId,
+        payload: {
+          name: instructor.name,
+          summary,
+          reportUrl: `${appUrl()}/reports/${reportToken}/week/${startKey}`,
+        },
       });
-      if (result.sent) sent += 1;
-      else failures.push({ email: instructor.email, reason: result.reason });
+      queued += 1;
     } catch (error) {
       // One bad record must not abandon the rest of the roster.
       failures.push({ instructor: String(instructorId), reason: error?.name || "error" });
     }
   }
 
-  await db.collection("app_settings").updateOne(
-    { _id: "weekly_report_run" },
+  await db.collection("report_delivery_runs").updateOne(
+    { _id: runId },
     {
       $set: {
-        _id: "weekly_report_run",
+        type: "weekly_report",
         week_start: startKey,
-        finished_at: new Date(),
+        production_finished_at: new Date(),
         considered: instructorIds.length,
-        sent,
+        queued,
         skipped,
-        failures: failures.slice(0, 20),
+        producer_failures: failures.slice(0, 20),
+        status: queued ? "queued" : "completed",
+        updated_at: new Date(),
       },
+      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
     },
     { upsert: true }
   );
-  console.log(`Weekly reports for ${startKey}: ${sent} sent, ${skipped} skipped, ${failures.length} failed`);
-  return { sent, skipped, failures };
+  await db.collection("report_delivery_runs").updateOne(
+    { _id: runId, $expr: { $gte: ["$terminal", "$queued"] } },
+    { $set: { status: "completed", finished_at: new Date(), updated_at: new Date() } }
+  );
+  console.log(`Weekly reports for ${startKey}: ${queued} queued, ${skipped} skipped, ${failures.length} producer failures`);
+  return { queued, skipped, failures };
 }
 
 reportRouter.post(
@@ -372,23 +389,12 @@ reportRouter.post(
     // week being reported on without any date arithmetic here.
     const startKey = weekStartKey(new Date());
 
-    // Claim the run before answering, so a scheduler retry after a timeout
-    // cannot start a second pass and send everyone two copies.
-    const claim = await db.collection("app_settings").updateOne(
-      { _id: "weekly_report_claim", week_start: { $ne: startKey } },
-      { $set: { _id: "weekly_report_claim", week_start: startKey, claimed_at: new Date() } },
-      { upsert: true }
-    );
-    const alreadyRun = !(claim.upsertedCount || claim.modifiedCount);
-    if (alreadyRun && req.query.force !== "1") {
-      return res.json({ week_start: startKey, status: "already_sent_this_week" });
-    }
-
-    void deliverWeeklyReports(db, startKey);
+    const result = await deliverWeeklyReports(db, startKey);
     return res.status(202).json({
       week_start: startKey,
-      status: "started",
-      note: "Delivery continues in the background; see the weekly_report_run record for the outcome.",
+      status: "queued",
+      ...result,
+      note: "Each recipient is stored as an idempotent delivery job with retries.",
     });
   })
 );
@@ -416,7 +422,8 @@ async function deliverAttendanceReminders(db) {
     localDateKey(new Date(record.check_in_time || record.date), timeZone) === today
   ));
 
-  let sent = 0;
+  const runId = `attendance-reminders:${today}`;
+  let queued = 0;
   const failures = [];
   for (const record of todays) {
     try {
@@ -426,32 +433,45 @@ async function deliverAttendanceReminders(db) {
       const email = instructor?.email;
       if (!email) continue;
 
-      const result = await sendAttendanceReminderEmail(email, {
-        name: record.instructor_name || instructor?.name,
-        kind: "checkout",
-        dateLabel: today,
+      await enqueueMailJob(db, {
+        id: `${runId}:${String(record._id)}`,
+        type: "attendance_reminder",
+        toEmail: email,
+        attendanceId: record._id,
+        runId,
+        payload: {
+          name: record.instructor_name || instructor?.name,
+          kind: "checkout",
+          dateLabel: today,
+        },
       });
-      if (result.sent) {
-        sent += 1;
-        await db.collection("attendance").updateOne(
-          { _id: record._id },
-          { $set: { checkout_reminder_sent_at: new Date() } }
-        );
-      } else {
-        failures.push({ email, reason: result.reason });
-      }
+      queued += 1;
     } catch (error) {
       failures.push({ attendance: String(record._id), reason: error?.name || "error" });
     }
   }
 
-  await db.collection("app_settings").updateOne(
-    { _id: "attendance_reminder_run" },
-    { $set: { _id: "attendance_reminder_run", date: today, finished_at: new Date(), checked: todays.length, sent, failures: failures.slice(0, 20) } },
+  await db.collection("report_delivery_runs").updateOne(
+    { _id: runId },
+    {
+      $set: { type: "attendance_reminder", date: today, production_finished_at: new Date(), checked: todays.length, queued, producer_failures: failures.slice(0, 20), updated_at: new Date() },
+      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+    },
     { upsert: true }
   );
-  console.log(`Attendance reminders for ${today}: ${sent} sent of ${todays.length} open check-ins`);
-  return { sent, failures };
+  if (!queued) {
+    await db.collection("report_delivery_runs").updateOne(
+      { _id: runId },
+      { $set: { status: "completed", finished_at: new Date() } }
+    );
+  } else {
+    await db.collection("report_delivery_runs").updateOne(
+      { _id: runId },
+      { $set: { status: "queued" } }
+    );
+  }
+  console.log(`Attendance reminders for ${today}: ${queued} queued of ${todays.length} open check-ins`);
+  return { queued, failures };
 }
 
 reportRouter.post(
@@ -459,11 +479,12 @@ reportRouter.post(
   requireCronSecret,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
-    void deliverAttendanceReminders(db);
+    const result = await deliverAttendanceReminders(db);
     return res.status(202).json({
       date: localDateKey(new Date()),
-      status: "started",
-      note: "Delivery continues in the background; see the attendance_reminder_run record for the outcome.",
+      status: "queued",
+      ...result,
+      note: "Each reminder is stored as an idempotent delivery job with retries.",
     });
   })
 );

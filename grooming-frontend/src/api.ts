@@ -8,6 +8,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 export const MAX_PAGINATED_ITEMS = 50_000;
 const MAX_PAGE_SIZE = 1_000;
 const ROLES: readonly Role[] = ['SUPER_ADMIN', 'ADMIN', 'BOA'];
+const COOKIE_SESSION_MARKER = 'cookie-session';
 
 export interface ApiErrorInit {
   status?: number;
@@ -70,10 +71,10 @@ function notifySessionExpired(): void {
 }
 
 /**
- * Sessions persist in localStorage so closing the browser no longer signs the
- * user out. Token lifetime is enforced server-side by the JWT `exp` claim and
- * revoked instantly by `session_version`, so long-lived local storage cannot
- * outlive the server's own expiry rules.
+ * Web and Capacitor sessions use the Secure, HttpOnly cookie issued by the
+ * API. Storage keeps only a non-secret marker and role so a reload can render
+ * the session while /me verifies the cookie. No bearer credential is exposed
+ * to JavaScript or written into WebView storage.
  */
 function readStorage(key: string): string | null {
   try {
@@ -97,10 +98,10 @@ export function getSessionRole(): Role | null {
   return ROLES.includes(role as Role) ? (role as Role) : null;
 }
 
-export function saveSession(token: string, role: string): void {
+export function saveSession(_token: string, role: string): void {
   try {
     if (typeof localStorage === 'undefined') throw new Error('Local storage is unavailable');
-    localStorage.setItem(SESSION_TOKEN_KEY, token);
+    localStorage.setItem(SESSION_TOKEN_KEY, COOKIE_SESSION_MARKER);
     localStorage.setItem(SESSION_ROLE_KEY, role);
   } catch (error) {
     throw new ApiError(
@@ -259,7 +260,7 @@ export async function apiFetch<T = unknown>(path: string, options: ApiRequestOpt
       notifySessionExpired();
       throw new ApiError('Your session has expired. Please sign in again.', { status: 401 });
     }
-    headers.set('Authorization', `Bearer ${token}`);
+    if (token !== COOKIE_SESSION_MARKER) headers.set('Authorization', `Bearer ${token}`);
   }
 
   const controller = new AbortController();
@@ -285,6 +286,7 @@ export async function apiFetch<T = unknown>(path: string, options: ApiRequestOpt
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...requestOptions,
+      credentials: 'include',
       headers,
       body: body as BodyInit | null | undefined,
       signal: controller.signal,

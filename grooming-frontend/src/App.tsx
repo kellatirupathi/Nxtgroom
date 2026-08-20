@@ -1,8 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Sidebar';
 import BottomNav from './components/BottomNav';
-import EvaluateCard from './components/EvaluateCard';
-import InstructorDetail from './components/InstructorDetail';
 import Login from './components/Login';
 import ResetPassword from './components/ResetPassword';
 import BrandedLoader from './components/BrandedLoader';
@@ -15,15 +13,11 @@ import {
   RESET_PASSWORD_PATH,
   type PublicReportRoute,
 } from './routes';
-import PublicReportPage from './components/PublicReportPage';
-import DailyAttendanceTable from './components/DailyAttendanceTable';
-import UserManagement from './components/UserManagement';
-import SettingsPage from './components/SettingsPage';
 import { ChangePasswordModal, ProfileModal } from './components/AccountModals';
 import ForgotPasswordDialog from './components/ForgotPasswordDialog';
-import InstructorManagement from './components/InstructorManagement';
 import {
   apiFetch,
+  apiJson,
   apiFetchAllPages,
   clearSession,
   getSessionRole,
@@ -34,6 +28,14 @@ import {
   SESSION_EXPIRED_EVENT,
 } from './api';
 import { isElevatedRole, type AttendanceRecord, type CurrentUser, type Instructor, type Role } from './types';
+
+const EvaluateCard = lazy(() => import('./components/EvaluateCard'));
+const InstructorDetail = lazy(() => import('./components/InstructorDetail'));
+const PublicReportPage = lazy(() => import('./components/PublicReportPage'));
+const DailyAttendanceTable = lazy(() => import('./components/DailyAttendanceTable'));
+const UserManagement = lazy(() => import('./components/UserManagement'));
+const SettingsPage = lazy(() => import('./components/SettingsPage'));
+const InstructorManagement = lazy(() => import('./components/InstructorManagement'));
 
 interface SessionState {
   token: string | null;
@@ -104,6 +106,7 @@ export default function App() {
   };
 
   const handleLogout = useCallback(() => {
+    void apiJson('/api/v2/auth/logout', { method: 'POST', auth: false }).catch(() => {});
     clearSession();
     setSession({ token: null, role: null, email: null, collegeId: null, validated: true });
     setInstructors([]);
@@ -239,11 +242,13 @@ export default function App() {
   // own browser must see the report rather than the dashboard.
   if (publicReport) {
     return (
-      <PublicReportPage
-        token={publicReport.token}
-        kind={publicReport.kind}
-        date={publicReport.date}
-      />
+      <Suspense fallback={<BrandedLoader label="Loading report" />}>
+        <PublicReportPage
+          token={publicReport.token}
+          kind={publicReport.kind}
+          date={publicReport.date}
+        />
+      </Suspense>
     );
   }
 
@@ -324,6 +329,7 @@ export default function App() {
         )}
 
         <div className="flex flex-col xl:flex-row gap-6 items-start flex-1 min-h-0 w-full">
+          <Suspense fallback={<div className="w-full"><BrandedLoader label="Loading screen" /></div>}>
           {activeTab === 'overview' && (
             <div className="w-full h-full flex justify-center items-start pt-10">
               <div className="w-full max-w-2xl shrink-0">
@@ -367,6 +373,7 @@ export default function App() {
           {activeTab === 'instructor-management' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><InstructorManagement /></div>
           )}
+          </Suspense>
         </div>
       </main>
 

@@ -1,0 +1,10 @@
+[
+  { "id": "male-clear-formal", "gender": "MALE", "attire": "FORMAL", "lighting": "good", "framing": "full_body", "people": 1, "mirror": false, "occlusion": "none", "expected": "ASSESSED" },
+  { "id": "female-saree", "gender": "FEMALE", "attire": "SAREE", "lighting": "good", "framing": "full_body", "people": 1, "mirror": false, "occlusion": "none", "expected": "ASSESSED" },
+  { "id": "female-kurti", "gender": "FEMALE", "attire": "KURTI_WITH_DUPATTA", "lighting": "good", "framing": "full_body", "people": 1, "mirror": false, "occlusion": "none", "expected": "ASSESSED" },
+  { "id": "low-light", "gender": "MALE", "attire": "FORMAL", "lighting": "poor", "framing": "full_body", "people": 1, "mirror": false, "occlusion": "partial", "expected": "RETAKE_OR_PARTIAL" },
+  { "id": "partial-body", "gender": "FEMALE", "attire": "SAREE", "lighting": "good", "framing": "upper_body", "people": 1, "mirror": false, "occlusion": "lower_body", "expected": "PARTIAL" },
+  { "id": "group-photo", "gender": "MALE", "attire": "FORMAL", "lighting": "good", "framing": "full_body", "people": 4, "mirror": false, "occlusion": "partial", "expected": "UNASSESSED" },
+  { "id": "mirror-photo", "gender": "FEMALE", "attire": "KURTI_WITH_DUPATTA", "lighting": "good", "framing": "full_body", "people": 1, "mirror": true, "occlusion": "phone", "expected": "RETAKE_OR_PARTIAL" },
+  { "id": "no-person", "gender": "MALE", "attire": "UNKNOWN", "lighting": "good", "framing": "none", "people": 0, "mirror": false, "occlusion": "complete", "expected": "UNASSESSED" }
+]

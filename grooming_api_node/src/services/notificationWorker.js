@@ -275,18 +275,17 @@ export async function prepareCheckoutReport(db, job) {
     throw error;
   }
 
-  // review_required is retained here alone: records evaluated before the
-  // review flag was removed still carry it, and their notifications must
-  // still be recognised as finished work.
-  const analysisTerminal = new Set(["compliant", "non_compliant", "unassessed", "review_required", "error"])
-    .has(attendance.status);
-  const checkinNotificationTerminal = new Set([
-    "sent",
-    "skipped_no_email",
-    "failed",
-    "delivery_unknown",
-  ]).has(attendance.checkin_email_status);
-  if (!analysisTerminal || !checkinNotificationTerminal) {
+  const hasCheckoutPhoto = Boolean(attendance.check_out_photo_key);
+  // New photographed check-outs are queued for email only after direct
+  // analysis completes. Retain this guard for notification jobs created by an
+  // older deployment while their checkout evaluation was still pending.
+  const checkoutAnalysisTerminal = new Set([
+    "COMPLIANT",
+    "NON_COMPLIANT",
+    "UNASSESSED",
+    "REVIEW_REQUIRED",
+  ]).has(String(attendance.checkout_compliance_status || "").toUpperCase());
+  if (hasCheckoutPhoto && !checkoutAnalysisTerminal) {
     await deferCheckoutNotification(db, job);
     return null;
   }
@@ -298,17 +297,61 @@ export async function prepareCheckoutReport(db, job) {
       instructorName: attendance.instructor_name || job.report?.instructorName || "Instructor",
       checkInTime: attendance.check_in_time || job.report?.checkInTime,
       checkOutTime: attendance.check_out_time || job.report?.checkOutTime,
-      status: attendance.status,
-      remarks: attendance.remarks,
-      imageQuality: attendance.image_quality || null,
+      status: hasCheckoutPhoto
+        ? attendance.checkout_compliance_status
+        : attendance.status,
+      remarks: hasCheckoutPhoto
+        ? attendance.checkout_remarks
+        : attendance.remarks,
+      imageQuality: hasCheckoutPhoto
+        ? attendance.checkout_image_quality || null
+        : attendance.image_quality || null,
     },
   };
 }
 
 async function deliverNotification(db, job) {
+  const target = await db.collection("attendance").findOne(
+    {
+      _id: job.attendance_id,
+      deleting_at: { $exists: false },
+      ...(job.type === "checkout" ? {
+        checkout_deleting_at: { $exists: false },
+        check_out_time: { $ne: null },
+      } : {}),
+    },
+    { projection: { _id: 1 } }
+  );
+  if (!target) {
+    await db.collection("notification_jobs").deleteOne({
+      _id: job._id,
+      status: "processing",
+      worker_id: WORKER_ID,
+    });
+    return false;
+  }
   const preparedJob = await prepareCheckoutReport(db, job);
   if (!preparedJob) return false;
   if (!(await renewNotificationLease(db, preparedJob))) return false;
+  const stillPresent = await db.collection("attendance").findOne(
+    {
+      _id: job.attendance_id,
+      deleting_at: { $exists: false },
+      ...(job.type === "checkout" ? {
+        checkout_deleting_at: { $exists: false },
+        check_out_time: { $ne: null },
+      } : {}),
+    },
+    { projection: { _id: 1 } }
+  );
+  if (!stillPresent) {
+    await db.collection("notification_jobs").deleteOne({
+      _id: job._id,
+      status: "processing",
+      worker_id: WORKER_ID,
+    });
+    return false;
+  }
 
   const result = preparedJob.type === "checkout"
     ? await sendCheckoutEmail(preparedJob.to_email, preparedJob.report)
@@ -525,9 +568,21 @@ export function startNotificationWorker(db) {
   const schedule = (delay = interval) => {
     if (!stopped) timer = setTimeout(tick, delay);
   };
+  const processJob = async (job) => {
+    try {
+      monitor.progress("ses_delivery_started");
+      await deliverNotification(db, job);
+      monitor.progress("ses_delivery_completed");
+    } catch (error) {
+      monitor.recordJobError(errorCode(error));
+      console.error(`Notification job ${job._id} failed (${errorCode(error)})`);
+      await retryNotification(db, job, error);
+    }
+  };
   const tick = () => {
     monitor.cycleStarted();
     let loopErrorCode = null;
+    let processedCount = 0;
     inFlight = (async () => {
       try {
         await reconcileCheckinOutbox(db);
@@ -540,25 +595,18 @@ export function startNotificationWorker(db) {
         monitor.progress("expired_leases_reconciled");
         await reconcileNotificationOutcome(db);
         monitor.progress("terminal_outcomes_reconciled");
-        const job = await claimNotification(db);
-        monitor.progress(job ? "job_claimed" : "queue_idle");
-        if (job) {
-          try {
-            monitor.progress("ses_delivery_started");
-            await deliverNotification(db, job);
-            monitor.progress("ses_delivery_completed");
-          } catch (error) {
-            monitor.recordJobError(errorCode(error));
-            console.error(`Notification job ${job._id} failed (${errorCode(error)})`);
-            await retryNotification(db, job, error);
-          }
-        }
+        const jobs = (await Promise.all(
+          Array.from({ length: config.notificationConcurrency }, () => claimNotification(db))
+        )).filter(Boolean);
+        processedCount = jobs.length;
+        monitor.progress(jobs.length ? "jobs_claimed" : "queue_idle");
+        await Promise.all(jobs.map(processJob));
       } catch (error) {
         loopErrorCode = errorCode(error);
         console.error(`Notification worker error (${loopErrorCode})`);
       } finally {
         monitor.cycleCompleted(loopErrorCode);
-        schedule();
+        schedule(processedCount ? 0 : interval);
       }
     })();
   };

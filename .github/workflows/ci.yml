@@ -45,7 +45,7 @@ jobs:
           cache-dependency-path: grooming_api_node/package-lock.json
       - run: npm ci
       - run: npm run check
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --omit=dev --audit-level=moderate
 
   frontend:
     runs-on: ubuntu-latest
@@ -66,4 +66,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: npm audit --audit-level=high
+      - run: npm run check:bundle
+      - run: npm audit --audit-level=moderate
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

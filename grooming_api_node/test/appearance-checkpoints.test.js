@@ -240,7 +240,7 @@ test("a photo showing nothing assessable asks for a retake, not a verdict", () =
     attire_check: [{ status: "N/A" }],
     footwear_check: [{ status: "N/A" }],
   }, { imageQuality: "ADEQUATE" });
-  assert.equal(verdict.overall_status, "COMPLIANT");
+  assert.equal(verdict.overall_status, "UNASSESSED");
   assert.equal(verdict.image_quality, "RETAKE_RECOMMENDED");
 });
 

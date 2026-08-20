@@ -83,10 +83,14 @@ export function runtimeConfig() {
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
     evaluationLeaseMs: parseInteger("EVALUATION_LEASE_MS", 600000, { min: 60000, max: 3600000 }),
     evaluationMaxAttempts: parseInteger("EVALUATION_MAX_ATTEMPTS", 3, { min: 1, max: 10 }),
+    evaluationConcurrency: parseInteger("EVALUATION_CONCURRENCY", 2, { min: 1, max: 20 }),
+    checkInConcurrencyLimit: parseInteger("CHECKIN_CONCURRENCY_LIMIT", 5, { min: 1, max: 50 }),
     sesTimeoutMs: parseInteger("SES_TIMEOUT_MS", 30000, { min: 5000, max: 120000 }),
     sesMaxAttempts: parseInteger("SES_MAX_ATTEMPTS", 2, { min: 1, max: 3 }),
     notificationLeaseMs: parseInteger("NOTIFICATION_LEASE_MS", 300000, { min: 60000, max: 600000 }),
     notificationMaxAttempts: parseInteger("NOTIFICATION_MAX_ATTEMPTS", 5, { min: 1, max: 10 }),
+    notificationConcurrency: parseInteger("NOTIFICATION_CONCURRENCY", 2, { min: 1, max: 20 }),
+    processRole: process.env.PROCESS_ROLE || "all",
     appTimeZone: process.env.APP_TIME_ZONE || "Asia/Kolkata",
     timezoneOffsetMinutes: parseInteger("TIMEZONE_OFFSET_MINUTES", 330, { min: -720, max: 840 }),
   };
@@ -110,10 +114,13 @@ export function validateEnvironment() {
     "EVALUATION_POLL_MS",
     "EVALUATION_LEASE_MS",
     "EVALUATION_MAX_ATTEMPTS",
+    "EVALUATION_CONCURRENCY",
+    "CHECKIN_CONCURRENCY_LIMIT",
     "SES_TIMEOUT_MS",
     "SES_MAX_ATTEMPTS",
     "NOTIFICATION_LEASE_MS",
     "NOTIFICATION_MAX_ATTEMPTS",
+    "NOTIFICATION_CONCURRENCY",
     "SECRET_KEY",
     "JWT_EXPIRE_MINUTES",
     "JWT_ISSUER",
@@ -122,6 +129,12 @@ export function validateEnvironment() {
     "ADMIN_PASSWORD",
     "ADMIN_PASSWORD_VERSION",
     "CORS_ORIGINS",
+    "APP_URL",
+    "CRON_SECRET",
+    "R2_ENDPOINT",
+    "R2_BUCKET",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
     "AWS_REGION",
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
@@ -161,6 +174,23 @@ export function validateEnvironment() {
   }
   if (config.origins.includes("*")) {
     errors.push("CORS_ORIGINS cannot contain * in production");
+  }
+  if (!config.origins.includes((process.env.APP_URL || "").trim().replace(/\/$/, ""))) {
+    errors.push("APP_URL must be one of the exact CORS_ORIGINS values");
+  }
+  try {
+    const r2Endpoint = new URL(process.env.R2_ENDPOINT || "");
+    if (r2Endpoint.protocol !== "https:" || r2Endpoint.pathname !== "/") {
+      errors.push("R2_ENDPOINT must be an HTTPS origin without a path");
+    }
+  } catch {
+    errors.push("R2_ENDPOINT must be a valid HTTPS URL");
+  }
+  if (!/^[A-Za-z0-9._-]{3,255}$/.test(process.env.R2_BUCKET || "")) {
+    errors.push("R2_BUCKET is invalid");
+  }
+  if (!config.processRole || !["all", "api", "worker"].includes(config.processRole)) {
+    errors.push("PROCESS_ROLE must be all, api, or worker");
   }
   if (config.origins.length === 0) {
     errors.push("CORS_ORIGINS must contain at least one exact HTTPS origin");

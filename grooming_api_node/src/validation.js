@@ -72,6 +72,14 @@ export const instructorGenderSchema = z.object({
 
 export const checkoutSchema = z.object({
   instructor_id: z.string().trim().min(1).max(100),
+  location_coordinates: z.string().trim().max(100).optional().refine(
+    (value) => !value || Boolean(parseCoordinates(value)),
+    "location_coordinates must be valid latitude,longitude"
+  ),
+  location_accuracy_m: z.preprocess(
+    (value) => value === "" || value == null ? undefined : Number(value),
+    z.number().finite().min(0).max(100_000).optional()
+  ),
 });
 
 export function parseCoordinates(value) {

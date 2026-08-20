@@ -16,11 +16,26 @@ const TOKEN_BYTES = 24;
 export async function ensureReportToken(db, instructor) {
   if (instructor?.report_token) return instructor.report_token;
   const token = crypto.randomBytes(TOKEN_BYTES).toString("base64url");
-  await db.collection("instructors").updateOne(
-    { _id: instructor._id },
+  const result = await db.collection("instructors").findOneAndUpdate(
+    {
+      _id: instructor._id,
+      $or: [
+        { report_token: { $exists: false } },
+        { report_token: null },
+        { report_token: "" },
+      ],
+    },
     { $set: { report_token: token, updated_at: new Date() } }
+    , { returnDocument: "after", projection: { report_token: 1 } }
   );
-  return token;
+  const claimed = result?.value || result;
+  if (claimed?.report_token) return claimed.report_token;
+  const authoritative = await db.collection("instructors").findOne(
+    { _id: instructor._id },
+    { projection: { report_token: 1 } }
+  );
+  if (!authoritative?.report_token) throw new Error("Report token could not be persisted");
+  return authoritative.report_token;
 }
 
 export async function findInstructorByReportToken(db, token) {
@@ -68,8 +83,12 @@ export function workingWeekDates(startKey) {
 }
 
 export function isValidDateKey(value) {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime());
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
 }
 
 export const REQUIRED_SAREE_DAYS = 3;

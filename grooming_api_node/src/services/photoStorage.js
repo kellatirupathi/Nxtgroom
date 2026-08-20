@@ -4,8 +4,11 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadBucketCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { incrementMetric } from "./telemetry.js";
 
 /**
  * Check-in and check-out photos live in Cloudflare R2, not MongoDB.
@@ -35,6 +38,16 @@ function config() {
 export function isPhotoStorageConfigured() {
   const { endpoint, bucket, accessKeyId, secretAccessKey } = config();
   return Boolean(endpoint && bucket && accessKeyId && secretAccessKey);
+}
+
+export async function checkPhotoStorageConnection() {
+  if (!isPhotoStorageConfigured()) return false;
+  try {
+    await getClient().send(new HeadBucketCommand({ Bucket: config().bucket }));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -102,8 +115,10 @@ export async function uploadPhoto({ key, body, mimeType, metadata = {} }) {
         ),
       })
     );
+    incrementMetric("r2_upload_success_total");
     return { stored: true, key };
   } catch (error) {
+    incrementMetric("r2_upload_failures_total");
     console.error(`R2 upload failed for ${key}: ${error?.name || "Error"}`);
     return { stored: false, reason: error?.name || "upload_failed" };
   }
@@ -156,4 +171,21 @@ export async function deletePhoto(key) {
     console.error(`R2 delete failed for ${key}: ${error?.name || "Error"}`);
     return { deleted: false, reason: error?.name || "delete_failed" };
   }
+}
+
+export async function listPhotoObjects({ continuationToken, maxKeys = 200 } = {}) {
+  if (!isPhotoStorageConfigured()) return { objects: [], nextToken: null };
+  const response = await getClient().send(new ListObjectsV2Command({
+    Bucket: config().bucket,
+    Prefix: "attendance/",
+    MaxKeys: Math.max(1, Math.min(1000, maxKeys)),
+    ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
+  }));
+  return {
+    objects: (response.Contents || []).map((item) => ({
+      key: item.Key,
+      lastModified: item.LastModified || null,
+    })).filter((item) => item.key),
+    nextToken: response.IsTruncated ? response.NextContinuationToken || null : null,
+  };
 }

@@ -10,6 +10,7 @@
   },
   "scripts": {
     "start": "node server.js",
+    "start:worker": "node worker.js",
     "dev": "node --watch server.js",
     "db:preflight": "node scripts/database-preflight.js",
     "db:preflight:json": "node scripts/database-preflight.js --json",
@@ -34,5 +35,8 @@
     "multer": "^2.2.0",
     "sharp": "^0.35.3",
     "zod": "^3.23.8"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

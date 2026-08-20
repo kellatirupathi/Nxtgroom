@@ -58,7 +58,7 @@ test("two check-ins on one day count once", () => {
 
 test("date keys are validated before they reach a query", () => {
   assert.equal(isValidDateKey("2026-08-17"), true);
-  for (const bad of ["2026-8-17", "17-08-2026", "not-a-date", "", null, "2026-13-45"]) {
+  for (const bad of ["2026-8-17", "17-08-2026", "not-a-date", "", null, "2026-13-45", "2026-02-31"]) {
     assert.equal(isValidDateKey(bad), false, `${JSON.stringify(bad)} must be rejected`);
   }
 });

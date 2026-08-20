@@ -1,5 +1,11 @@
 # Production deployment: Northflank + Vercel
 
+`PROCESS_ROLE=all` preserves the current single-service deployment. To scale
+independently, run the public service with `PROCESS_ROLE=api` and `npm start`,
+then run a private worker service with `PROCESS_ROLE=worker` and
+`npm run start:worker`. Check-out image analysis remains direct in the HTTP
+request and is never placed on an evaluation queue.
+
 This guide deploys the Express API as a Northflank container and the Vite
 frontend as a Vercel project. It assumes the repository has been committed and
 pushed to a Git provider visible to both platforms.
@@ -133,9 +139,11 @@ startup may create missing indexes automatically after the same audit passes.
 4. Optionally attach an SES configuration set for delivery, bounce, and
    complaint telemetry.
 
-The API queues check-in mail after AI analysis completes and queues checkout
-mail after checkout is recorded. Sending is retried from MongoDB, so the
-Northflank service must keep at least one replica running.
+The API queues check-in mail after AI analysis completes. A photographed
+checkout is analysed directly in its HTTP request and its report mail is
+queued only after that report is stored; a checkout without a photo queues a
+plain confirmation. Sending is retried from MongoDB, so the Northflank service
+must keep at least one worker replica running (`PROCESS_ROLE=all` also counts).
 
 SES `SendEmail` does not provide an idempotency key. The worker is durable and
 records an explicit `delivery_unknown` state after an ambiguous final attempt,
@@ -198,6 +206,7 @@ with an insecure fallback.
 | --- | --- | --- |
 | `NODE_ENV` | Required | `production` |
 | `PORT` | Optional | `8000` (container default) |
+| `PROCESS_ROLE` | Required | `all` for one service; otherwise `api` or `worker` as described above |
 | `MONGODB_URI` | Required, secret | Rotated Atlas connection URI |
 | `DB_NAME` | Required | `grooming_standards` |
 | `DATABASE_PREFLIGHT_APPLY` | One-off only | Leave unset on the API service. Set to `CREATE_INDEXES` only for the confirmed migration job, then remove it. |
@@ -209,6 +218,8 @@ with an insecure fallback.
 | `ADMIN_PASSWORD` | Required, secret | Unique password of at least 12 characters |
 | `ADMIN_PASSWORD_VERSION` | Required | Start at `1`; change whenever the password rotates |
 | `CORS_ORIGINS` | Required | Exact comma-separated HTTPS Vercel origins, no `*` |
+| `APP_URL` | Required | Canonical public Vercel HTTPS origin used in emailed links; must appear in `CORS_ORIGINS` |
+| `CRON_SECRET` | Required, secret | Random secret sent only in the scheduler request header |
 | `GEMINI_API_KEY` | Required, secret | Project-scoped Gemini API key |
 | `GEMINI_MODEL` | Required | `gemini-3.7-flash` |
 | `GEMINI_TIMEOUT_MS` | Required | `120000`; permitted range is 10000–600000 |
@@ -216,6 +227,12 @@ with an insecure fallback.
 | `EVALUATION_POLL_MS` | Required | `2000`; permitted range is 250–60000 |
 | `EVALUATION_LEASE_MS` | Required | `600000`; range 60000–3600000 and must cover all Gemini attempts plus 60000 |
 | `EVALUATION_MAX_ATTEMPTS` | Required | `3`; permitted range is 1–10 |
+| `EVALUATION_CONCURRENCY` | Required | Bounded check-in AI worker concurrency; start with `2` |
+| `CHECKIN_CONCURRENCY_LIMIT` | Required | Simultaneous check-in image-processing requests per API replica; start with `5` |
+| `R2_ENDPOINT` | Required | Cloudflare R2 HTTPS S3 endpoint without a path |
+| `R2_BUCKET` | Required | Private attendance-photo bucket name |
+| `R2_ACCESS_KEY_ID` | Required, secret | R2 object read/write/delete credential |
+| `R2_SECRET_ACCESS_KEY` | Required, secret | Matching R2 secret credential |
 | `AWS_REGION` | Required | SES region, for example `ap-south-1` |
 | `AWS_ACCESS_KEY_ID` | Required, secret | Rotated dedicated IAM access key |
 | `AWS_SECRET_ACCESS_KEY` | Required, secret | Matching IAM secret key |
@@ -226,6 +243,7 @@ with an insecure fallback.
 | `SES_MAX_ATTEMPTS` | Required | `2`; SDK attempts per delivery try |
 | `NOTIFICATION_LEASE_MS` | Required | `300000`; must exceed the SES timeout by at least 60000 |
 | `NOTIFICATION_MAX_ATTEMPTS` | Required | `5`; durable worker delivery attempts |
+| `NOTIFICATION_CONCURRENCY` | Required | Bounded notification worker concurrency; start with `2` |
 | `APP_TIME_ZONE` | Required | IANA zone for email timestamps, such as `Asia/Kolkata` |
 | `TIMEZONE_OFFSET_MINUTES` | Required | Attendance-day offset; use `330` for IST |
 
@@ -234,6 +252,7 @@ Example non-secret values (replace both origins with real domains):
 ```dotenv
 NODE_ENV=production
 PORT=8000
+PROCESS_ROLE=all
 DB_NAME=grooming_standards
 # DATABASE_PREFLIGHT_APPLY is intentionally unset on the API service.
 JWT_EXPIRE_MINUTES=480
@@ -241,17 +260,21 @@ JWT_ISSUER=facultytrack-api
 JWT_AUDIENCE=facultytrack-web
 ADMIN_PASSWORD_VERSION=1
 CORS_ORIGINS=https://facultytrack.example.com,https://facultytrack.vercel.app
+APP_URL=https://facultytrack.example.com
 GEMINI_MODEL=gemini-3.7-flash
 GEMINI_TIMEOUT_MS=120000
 GEMINI_MAX_RETRIES=2
 EVALUATION_POLL_MS=2000
 EVALUATION_LEASE_MS=600000
 EVALUATION_MAX_ATTEMPTS=3
+EVALUATION_CONCURRENCY=2
+CHECKIN_CONCURRENCY_LIMIT=5
 AWS_REGION=ap-south-1
 SES_TIMEOUT_MS=30000
 SES_MAX_ATTEMPTS=2
 NOTIFICATION_LEASE_MS=300000
 NOTIFICATION_MAX_ATTEMPTS=5
+NOTIFICATION_CONCURRENCY=2
 APP_TIME_ZONE=Asia/Kolkata
 TIMEZONE_OFFSET_MINUTES=330
 ```

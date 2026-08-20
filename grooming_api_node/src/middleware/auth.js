@@ -4,6 +4,8 @@ import { ObjectId } from "mongodb";
 import { runtimeConfig } from "../config/env.js";
 
 const ALGORITHM = "HS256";
+export const SESSION_COOKIE = "facultytrack_session";
+const DUMMY_PASSWORD_HASH = "$2a$12$bghTrM835YAcVNiZAKbf1epxJ8GXHIZsplcAo.3RCPzxQ2W7x.hYa";
 
 export const ROLES = {
   SUPER_ADMIN: "SUPER_ADMIN",
@@ -29,8 +31,9 @@ export async function getPasswordHash(password) {
 }
 
 export async function verifyPassword(plainPassword, hashedPassword) {
-  if (!hashedPassword) return false;
-  return bcrypt.compare(plainPassword, hashedPassword);
+  const candidate = hashedPassword || DUMMY_PASSWORD_HASH;
+  const matched = await bcrypt.compare(plainPassword, candidate);
+  return Boolean(hashedPassword) && matched;
 }
 
 export function createAccessToken(data, expiresMinutes = runtimeConfig().jwtExpiresMinutes) {
@@ -57,9 +60,19 @@ export function createAccessToken(data, expiresMinutes = runtimeConfig().jwtExpi
  */
 export async function getCurrentUser(req, res, next) {
   const header = req.headers.authorization || "";
-  const [scheme, token] = header.split(" ");
+  const [scheme, bearerToken] = header.split(" ");
+  const cookies = Object.fromEntries(
+    String(req.headers.cookie || "").split(";").map((part) => {
+      const index = part.indexOf("=");
+      if (index < 0) return ["", ""];
+      return [part.slice(0, index).trim(), decodeURIComponent(part.slice(index + 1))];
+    }).filter(([name]) => name)
+  );
+  const token = scheme === "Bearer" && bearerToken
+    ? bearerToken
+    : cookies[SESSION_COOKIE];
 
-  if (scheme !== "Bearer" || !token) {
+  if (!token) {
     res.set("WWW-Authenticate", "Bearer");
     return res.status(401).json({ detail: "Could not validate credentials" });
   }

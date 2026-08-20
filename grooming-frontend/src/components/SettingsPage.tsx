@@ -25,7 +25,7 @@ const TOGGLES: { key: keyof NotificationSettings; label: string; description: st
   {
     key: 'checkout_email_enabled',
     label: 'Check-out report to instructor',
-    description: 'Send a summary email when an instructor checks out.',
+    description: 'Send the appearance report after checkout photo analysis completes.',
   },
   {
     key: 'only_when_non_compliant',

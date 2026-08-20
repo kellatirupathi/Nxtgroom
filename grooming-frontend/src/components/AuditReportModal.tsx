@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, RefreshCw, TriangleAlert, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2, RefreshCw, TriangleAlert, X, XCircle } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import GroomingReport from './GroomingReport';
 import { useToast } from './useToast';
@@ -13,6 +13,8 @@ interface AuditReportModalProps {
   saveError?: string;
   /** Which half was just submitted. Both are assessed the same way. */
   kind?: 'checkin' | 'checkout';
+  /** Available only when checkout was saved but its photo upload failed. */
+  onRetryPhoto?: () => Promise<void>;
   onClose: () => void;
 }
 
@@ -54,17 +56,32 @@ function ProgressStep({ label, state }: { label: string; state: 'pending' | 'act
 }
 
 function Verdict({ status }: { status: StatusPayload }) {
-  if (status.compliance_status === 'COMPLIANT') {
+  const verdict = String(status.compliance_status || status.status || '').toUpperCase();
+  if (verdict === 'COMPLIANT' || verdict === 'DONE') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
         <CheckCircle2 size={14} aria-hidden="true" /> Compliant
       </span>
     );
   }
-  if (status.status === 'error') {
+  if (verdict === 'UNASSESSED') {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+        <TriangleAlert size={14} aria-hidden="true" /> Not assessed—new photo required
+      </span>
+    );
+  }
+  if (verdict === 'ERROR') {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
         <TriangleAlert size={14} aria-hidden="true" /> Analysis error
+      </span>
+    );
+  }
+  if (verdict === 'PENDING' || !verdict) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+        <Clock size={14} aria-hidden="true" /> Pending AI
       </span>
     );
   }
@@ -85,6 +102,7 @@ export default function AuditReportModal({
   instructorName,
   saveError,
   kind = 'checkin',
+  onRetryPhoto,
   onClose,
 }: AuditReportModalProps) {
   // Both halves have their own report and their own queue, so every request
@@ -95,6 +113,7 @@ export default function AuditReportModal({
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [error, setError] = useState('');
   const [reanalysing, setReanalysing] = useState(false);
+  const [retryingPhoto, setRetryingPhoto] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
   const toast = useToast();
 
@@ -169,16 +188,23 @@ export default function AuditReportModal({
       // check-in and discard its report.
       await apiJson(`/api/v2/attendance/${encodeURIComponent(attendanceId)}/reanalyse${kindQuery}`, {
         method: 'POST',
+        timeoutMs: kind === 'checkout' ? 150_000 : undefined,
       });
       setEvaluation(null);
       setTimedOut(false);
-      setStatus({
-        status: 'pending',
-        compliance_status: null,
-        remarks: null,
-        settled: false,
-      });
-      toast.info('Re-analysis queued', { detail: 'The same photo is being analysed again.' });
+      if (kind === 'checkout') {
+        setStatus(null);
+        await loadEvaluation();
+        toast.success('Re-analysis completed', { detail: 'The checkout report has been updated.' });
+      } else {
+        setStatus({
+          status: 'pending',
+          compliance_status: null,
+          remarks: null,
+          settled: false,
+        });
+        toast.info('Re-analysis queued', { detail: 'The same photo is being analysed again.' });
+      }
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : String(requestError);
       setError(message);
@@ -188,11 +214,34 @@ export default function AuditReportModal({
     }
   };
 
+  const handleRetryPhoto = async () => {
+    if (!onRetryPhoto || !attendanceId) return;
+    setRetryingPhoto(true);
+    setError('');
+    try {
+      await onRetryPhoto();
+      setTimedOut(false);
+      setEvaluation(null);
+      const next = await apiFetch<StatusPayload>(
+        `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status${kindQuery}`,
+      );
+      setStatus(next);
+      if (next.settled) await loadEvaluation();
+      toast.success('Photo uploaded', { detail: 'The checkout report has been generated.' });
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      toast.error('Could not upload the photo', { detail: message });
+    } finally {
+      setRetryingPhoto(false);
+    }
+  };
+
   // Still working while the record is saving, or while analysis runs — but
   // not once the save has failed. A refused check-out never got as far as a
   // photo or an analysis, so showing both steps spinning under the refusal
   // said work was happening that had already stopped.
-  const running = !saveError && (!attendanceId || (!status?.settled && !timedOut));
+  const running = retryingPhoto || (!saveError && (!attendanceId || (!status?.settled && !timedOut)));
   // Nothing to re-run when there is no record: the request was refused before
   // one existed.
   const failedToSave = Boolean(saveError) && !attendanceId;
@@ -288,7 +337,18 @@ export default function AuditReportModal({
           >
             Close
           </button>
-          {!failedToSave && (
+          {onRetryPhoto && saveError && attendanceId && (
+            <button
+              type="button"
+              onClick={handleRetryPhoto}
+              disabled={retryingPhoto}
+              className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+            >
+              <RefreshCw size={15} className={retryingPhoto ? 'animate-spin' : ''} aria-hidden="true" />
+              {retryingPhoto ? 'Uploading and analysing…' : 'Retry photo upload'}
+            </button>
+          )}
+          {!failedToSave && !saveError && (
           <button
             type="button"
             onClick={handleReanalyse}
@@ -296,7 +356,7 @@ export default function AuditReportModal({
             className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
           >
             <RefreshCw size={15} className={reanalysing ? 'animate-spin' : ''} aria-hidden="true" />
-            {reanalysing ? 'Queueing…' : 'Re-analyse'}
+            {reanalysing ? (kind === 'checkout' ? 'Analysing…' : 'Queueing…') : 'Re-analyse'}
           </button>
           )}
         </div>

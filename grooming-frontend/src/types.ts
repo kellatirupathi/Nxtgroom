@@ -97,10 +97,12 @@ export interface AttendanceRecord {
   location_address_full?: string | null;
   /** Where the check-out happened, captured separately from the check-in fix. */
   check_out_coordinates?: string | null;
+  check_out_location_accuracy_m?: number | null;
   /** Its own reverse-geocoded name: the two halves can be different places. */
   check_out_location_address?: string | null;
   /** The check-out's own verdict. The fields above hold the check-in's. */
   checkout_compliance_status?: string | null;
+  checkout_remarks?: string | null;
   /** queued or processing while a job is outstanding; cleared when it ends. */
   evaluation_queue_status?: string | null;
   checkout_evaluation_queue_status?: string | null;

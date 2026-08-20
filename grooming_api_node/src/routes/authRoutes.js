@@ -5,6 +5,7 @@ import {
   getCurrentUser,
   getPasswordHash,
   ROLES,
+  SESSION_COOKIE,
   userSessionVersion,
   verifyPassword,
 } from "../middleware/auth.js";
@@ -18,10 +19,12 @@ import {
 import {
   consumeResetToken,
   issueResetToken,
+  hashResetToken,
   peekResetToken,
   RESET_TTL_MS,
 } from "../services/passwordResetService.js";
-import { sendPasswordResetEmail } from "../services/emailService.js";
+import { enqueueMailJob } from "../services/mailWorker.js";
+import { withMongoTransaction } from "../config/db.js";
 import rateLimit from "express-rate-limit";
 
 // Credential verification is a network call to Google; rate limit it so a
@@ -63,6 +66,32 @@ async function displayNameForUser(db, user) {
 
 export const authRouter = Router();
 
+function setSessionCookie(res, token) {
+  const production = runtimeConfig().nodeEnv === "production";
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: production,
+    sameSite: production ? "none" : "lax",
+    path: "/",
+    maxAge: runtimeConfig().jwtExpiresMinutes * 60_000,
+  });
+}
+
+function clearSessionCookie(res) {
+  const production = runtimeConfig().nodeEnv === "production";
+  res.clearCookie(SESSION_COOKIE, {
+    httpOnly: true,
+    secure: production,
+    sameSite: production ? "none" : "lax",
+    path: "/",
+  });
+}
+
+authRouter.post("/logout", (_req, res) => {
+  clearSessionCookie(res);
+  return res.status(204).end();
+});
+
 authRouter.get("/me", getCurrentUser, asyncRoute(async (req, res) => {
   const settings = await getAccessSettings(req.app.locals.db);
   res.json({
@@ -86,21 +115,19 @@ authRouter.post(
     }
 
     const user = await req.app.locals.db.collection("users").findOne({ email });
-    if (
-      !user
-      || user.disabled_at
-      || !Object.values(ROLES).includes(user.role)
-      || !(await verifyPassword(password, user.password_hash))
-    ) {
+    const passwordMatches = await verifyPassword(password, user?.password_hash);
+    if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role) || !passwordMatches) {
       return res.status(401).json({ detail: "Incorrect email or password" });
     }
 
-    return res.json({
-      access_token: createAccessToken({
+    const accessToken = createAccessToken({
         sub: user.email,
         role: user.role,
         sessionVersion: userSessionVersion(user),
-      }),
+      });
+    setSessionCookie(res, accessToken);
+    return res.json({
+      access_token: accessToken,
       token_type: "bearer",
       role: user.role,
       expires_in: 60 * runtimeConfig().jwtExpiresMinutes,
@@ -112,6 +139,7 @@ authRouter.post(
   "/change-password",
   getCurrentUser,
   asyncRoute(async (req, res) => {
+    const minimumResponse = new Promise((resolve) => setTimeout(resolve, 300));
     const currentPassword = String(req.body?.current_password || "");
     const newPassword = String(req.body?.new_password || "");
 
@@ -163,7 +191,10 @@ authRouter.post(
     const genericResponse = {
       message: "If that email has an account, a reset link is on its way.",
     };
-    if (!email || email.length > 254) return res.json(genericResponse);
+    if (!email || email.length > 254) {
+      await minimumResponse;
+      return res.json(genericResponse);
+    }
 
     const db = req.app.locals.db;
     const user = await db.collection("users").findOne({ email });
@@ -172,18 +203,24 @@ authRouter.post(
     if (user && !user.disabled_at && Object.values(ROLES).includes(user.role)) {
       const token = await issueResetToken(db, { email, kind: "reset", ttlMs: RESET_TTL_MS });
       const name = await displayNameForUser(db, user);
-      const result = await sendPasswordResetEmail(email, {
-        name,
-        appUrl: appUrl(),
-        token,
-        expiresInMinutes: Math.round(RESET_TTL_MS / 60000),
+      await db.collection("mail_jobs").deleteMany({
+        type: "password_reset",
+        to_email: email,
+        status: { $in: ["queued", "processing"] },
       });
-      if (!result.sent) {
-        // Surfaced in logs only: the caller still gets the generic message.
-        console.error(`Password reset email not sent (${result.reason}) for ${email}`);
-      }
+      await enqueueMailJob(db, {
+        id: `password-reset:${email}:${hashResetToken(token)}`,
+        type: "password_reset",
+        toEmail: email,
+        payload: {
+          name,
+          appUrl: appUrl(),
+          token,
+          expiresInMinutes: Math.round(RESET_TTL_MS / 60000),
+        },
+      });
     }
-
+    await minimumResponse;
     return res.json(genericResponse);
   })
 );
@@ -223,9 +260,35 @@ authRouter.post(
     }
 
     const db = req.app.locals.db;
-    // Consuming first makes the token single-use even if the update below
-    // fails, so a leaked link cannot be retried.
-    const outcome = await consumeResetToken(db, token);
+    const passwordHash = await getPasswordHash(newPassword);
+    const outcome = await withMongoTransaction(async (session) => {
+      const consumed = await consumeResetToken(db, token, { session });
+      if (consumed.error) return consumed;
+      const user = await db.collection("users").findOne(
+        { email: consumed.email },
+        { session }
+      );
+      if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role)) {
+        return { error: "account_unavailable" };
+      }
+      const changed = await db.collection("users").updateOne(
+        { _id: user._id, disabled_at: { $exists: false } },
+        {
+          $set: {
+            password_hash: passwordHash,
+            password_changed_at: new Date(),
+            updated_at: new Date(),
+          },
+          $inc: { session_version: 1 },
+        },
+        { session }
+      );
+      if (!changed.matchedCount) throw new Error("Password update lost its account target");
+      return consumed;
+    });
+    if (outcome.error === "account_unavailable") {
+      return res.status(400).json({ detail: "This account can no longer be activated." });
+    }
     if (outcome.error) {
       return res.status(400).json({
         detail: outcome.error === "expired"
@@ -233,24 +296,6 @@ authRouter.post(
           : "This link is not valid. Request a new one.",
       });
     }
-
-    const user = await db.collection("users").findOne({ email: outcome.email });
-    if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role)) {
-      return res.status(400).json({ detail: "This account can no longer be activated." });
-    }
-
-    await db.collection("users").updateOne(
-      { _id: user._id },
-      {
-        $set: {
-          password_hash: await getPasswordHash(newPassword),
-          password_changed_at: new Date(),
-          updated_at: new Date(),
-        },
-        // Invalidate any session that existed before the reset.
-        $inc: { session_version: 1 },
-      }
-    );
 
     return res.json({ message: "Password set successfully. You can sign in now." });
   })
@@ -291,12 +336,14 @@ authRouter.post(
       });
     }
 
-    return res.json({
-      access_token: createAccessToken({
+    const accessToken = createAccessToken({
         sub: user.email,
         role: user.role,
         sessionVersion: userSessionVersion(user),
-      }),
+      });
+    setSessionCookie(res, accessToken);
+    return res.json({
+      access_token: accessToken,
       token_type: "bearer",
       role: user.role,
       expires_in: 60 * runtimeConfig().jwtExpiresMinutes,

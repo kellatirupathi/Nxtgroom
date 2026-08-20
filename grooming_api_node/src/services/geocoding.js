@@ -19,12 +19,18 @@ const REQUEST_TIMEOUT_MS = 8000;
 const MIN_INTERVAL_MS = 1100;
 
 let lastRequestAt = 0;
+let throttleTail = Promise.resolve();
 
 /** Serialises calls so bursts of check-ins cannot exceed the rate limit. */
 async function throttle() {
-  const wait = lastRequestAt + MIN_INTERVAL_MS - Date.now();
-  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
-  lastRequestAt = Date.now();
+  const turn = throttleTail.then(async () => {
+    const wait = lastRequestAt + MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastRequestAt = Date.now();
+  });
+  // Keep the chain usable even when a future implementation of a turn throws.
+  throttleTail = turn.catch(() => {});
+  await turn;
 }
 
 /**

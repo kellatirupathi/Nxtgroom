@@ -375,11 +375,14 @@ test("checkout outbox reconciliation creates a deterministic notification and cl
   assert.equal(attendanceWrites[0][1].$unset._private_checkout_outbox, "");
 });
 
-test("checkout waits for analysis and the check-in email, then uses current attendance values", async () => {
+test("checkout waits for its own report and emails the checkout assessment", async () => {
   let deferUpdate;
   const pendingDb = fakeDb({
     attendance: {
-      findOne: async () => ({ status: "pending", checkin_email_status: "waiting_for_analysis" }),
+      findOne: async () => ({
+        check_out_photo_key: "attendance/checkout.jpg",
+        checkout_evaluation_queue_status: "processing",
+      }),
     },
     notification_jobs: {
       updateOne: async (...args) => {
@@ -403,20 +406,24 @@ test("checkout waits for analysis and the check-in email, then uses current atte
     attendance: {
       findOne: async () => ({
         instructor_name: "Current Name",
+        check_out_photo_key: "attendance/checkout.jpg",
         status: "non_compliant",
         remarks: "ID card missing.",
+        checkout_compliance_status: "COMPLIANT",
+        checkout_remarks: "Checkout standards met.",
         check_in_time: new Date("2026-08-14T03:30:00.000Z"),
         check_out_time: exactCheckout,
-        checkin_email_status: "sent",
+        checkin_email_status: "waiting_for_analysis",
         image_quality: "RETAKE_RECOMMENDED",
+        checkout_image_quality: "ADEQUATE",
       }),
     },
   });
   const prepared = await prepareCheckoutReport(readyDb, job);
-  assert.equal(prepared.report.status, "non_compliant");
-  assert.equal(prepared.report.remarks, "ID card missing.");
+  assert.equal(prepared.report.status, "COMPLIANT");
+  assert.equal(prepared.report.remarks, "Checkout standards met.");
   assert.equal(prepared.report.checkOutTime, exactCheckout);
-  assert.equal(prepared.report.imageQuality, "RETAKE_RECOMMENDED");
+  assert.equal(prepared.report.imageQuality, "ADEQUATE");
 });
 
 test("expired final notification attempts become delivery_unknown and clear PII", async () => {
@@ -494,6 +501,8 @@ test("attendance serialization never exposes embedded image or email outboxes", 
 });
 
 test("check-in concurrency gate admits two decodes and releases each slot exactly once", () => {
+  const previousLimit = process.env.CHECKIN_CONCURRENCY_LIMIT;
+  process.env.CHECKIN_CONCURRENCY_LIMIT = "2";
   function response() {
     const value = new EventEmitter();
     value.set = () => value;
@@ -525,6 +534,8 @@ test("check-in concurrency gate admits two decodes and releases each slot exactl
   assert.equal(admitted, 3);
   second.emit("close");
   replacement.emit("finish");
+  if (previousLimit === undefined) delete process.env.CHECKIN_CONCURRENCY_LIMIT;
+  else process.env.CHECKIN_CONCURRENCY_LIMIT = previousLimit;
 });
 
 test("notification enqueue is idempotent for the same attendance and type", async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Building2, Edit2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
@@ -25,28 +25,31 @@ export default function CollegeManagement() {
   const [formData, setFormData] = useState(EMPTY_FORM);
   const [confirmTarget, setConfirmTarget] = useState<College | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const hasRowsRef = useRef(colleges.length > 0);
   const toast = useToast();
 
   const isEditMode = Boolean(editingId);
 
-  const fetchColleges = async () => {
+  const fetchColleges = useCallback(async () => {
     // Only show the loading state when there is nothing to display; with
     // cached rows on screen a spinner would be a step backwards.
-    if (colleges.length === 0) setLoading(true);
+    if (!hasRowsRef.current) setLoading(true);
     try {
       const data = await apiFetchCached<College[]>(COLLEGES_PATH);
-      setColleges(Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? data : [];
+      hasRowsRef.current = rows.length > 0;
+      setColleges(rows);
       setError('');
     } catch (requestError) {
       if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchColleges();
-  }, []);
+  }, [fetchColleges]);
 
   const resetModal = () => {
     setShowModal(false);

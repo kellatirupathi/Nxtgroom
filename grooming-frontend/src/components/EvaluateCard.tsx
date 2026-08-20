@@ -52,6 +52,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       attendanceId: string | null;
       instructorName: string;
       saveError?: string;
+      retryFile?: File;
       kind: 'checkin' | 'checkout';
     } | null
   >(null);
@@ -165,10 +166,18 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     }
 
     try {
-      const result = await apiFetch<{ message?: string; attendance_id?: string }>(
-        '/api/v2/attendance/check-in',
-        { method: 'POST', body: formData, timeoutMs: 75_000 },
-      );
+      let result: { message?: string; attendance_id?: string };
+      try {
+        result = await apiFetch('/api/v2/attendance/check-in', {
+          method: 'POST', body: formData, timeoutMs: 75_000,
+        });
+      } catch (requestError) {
+        if (!(requestError instanceof ApiError) || requestError.status !== 503) throw requestError;
+        await new Promise((resolve) => window.setTimeout(resolve, 5_000));
+        result = await apiFetch('/api/v2/attendance/check-in', {
+          method: 'POST', body: formData, timeoutMs: 75_000,
+        });
+      }
       resetPhoto();
       setSelectedUuid('');
       if (result?.attendance_id) {
@@ -231,26 +240,46 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       if (file) formData.append('file', file);
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
-      if (coordinates) formData.append('location_coordinates', coordinates);
+      if (coordinates) {
+        formData.append('location_coordinates', coordinates);
+        formData.append('location_accuracy_m', String(currentFix?.accuracyMetres ?? ''));
+      }
 
-      const result = await apiFetch<{ message?: string; attendance_id?: string }>(
+      const result = await apiFetch<{
+        message?: string;
+        attendance_id?: string;
+        analysis_completed?: boolean;
+        analysis_failed?: boolean;
+        photo_status?: 'stored' | 'failed' | 'not_provided';
+        photo_warning?: string | null;
+      }>(
         '/api/v2/attendance/check-out',
-        { method: 'POST', body: formData },
+        // Checkout analysis is completed by this request, so allow the API's
+        // configured Gemini timeout plus transport overhead.
+        { method: 'POST', body: formData, timeoutMs: 150_000 },
       );
-      toast.success('Check-out recorded', {
-        detail: hasPhoto ? 'The photo is being analysed.' : undefined,
-      });
-      resetPhoto();
-      setSelectedUuid('');
       if (hasPhoto && result?.attendance_id) {
         // Hand the id over: the dialog marks saving complete and starts
         // following the analysis.
         setReportTarget((current) => (
-          current ? { ...current, attendanceId: result.attendance_id as string } : current
+          current ? {
+            ...current,
+            attendanceId: result.attendance_id as string,
+            ...(result.photo_status === 'failed'
+              ? {
+                saveError: result.photo_warning || 'The photo could not be stored.',
+                retryFile: file || undefined,
+              }
+              : {}),
+          } : current
         ));
       } else {
         // Without a photo there is nothing to analyse, so no report follows.
         setReportTarget(null);
+      }
+      if (result.photo_status !== 'failed') {
+        resetPhoto();
+        setSelectedUuid('');
       }
       void fetchInstructors();
     } catch (error) {
@@ -265,6 +294,25 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     } finally {
       setCheckoutLoading(false);
     }
+  };
+
+  const retryCheckoutPhoto = async () => {
+    const target = reportTarget;
+    if (!target?.attendanceId || !target.retryFile) return;
+    const body = new FormData();
+    body.append('file', target.retryFile);
+    await apiFetch(
+      `/api/v2/attendance/${encodeURIComponent(target.attendanceId)}/checkout-photo`,
+      { method: 'POST', body, timeoutMs: 150_000 },
+    );
+    setReportTarget((current) => (current ? {
+      ...current,
+      saveError: undefined,
+      retryFile: undefined,
+    } : current));
+    resetPhoto();
+    setSelectedUuid('');
+    void fetchInstructors();
   };
 
   return (
@@ -420,6 +468,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           instructorName={reportTarget.instructorName}
           saveError={reportTarget.saveError}
           kind={reportTarget.kind}
+          onRetryPhoto={reportTarget.retryFile ? retryCheckoutPhoto : undefined}
           onClose={() => {
             // Closing clears everything, so the page returns to a clean state
             // rather than keeping a stale result behind the dialog.

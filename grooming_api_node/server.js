@@ -25,9 +25,13 @@ import { instructorRouter } from "./src/routes/instructorRoutes.js";
 import { reportRouter } from "./src/routes/reportRoutes.js";
 import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
+import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
+import { startMailWorker } from "./src/services/mailWorker.js";
+import { checkPhotoStorageConnection } from "./src/services/photoStorage.js";
 import { verifyVisionAssets } from "./src/services/visionEngine.js";
 import { getWorkerReadiness } from "./src/services/workerHealth.js";
 import { createDocument } from "./src/utils.js";
+import { telemetrySnapshot } from "./src/services/telemetry.js";
 
 const config = runtimeConfig();
 
@@ -36,9 +40,20 @@ app.disable("x-powered-by");
 if (isProduction()) app.set("trust proxy", 1);
 
 app.use((req, res, next) => {
+  const startedAt = Date.now();
   req.requestId = randomUUID();
   res.set("X-Request-ID", req.requestId);
   if (req.path.startsWith("/api/")) res.set("Cache-Control", "no-store");
+  res.once("finish", () => {
+    console.log(JSON.stringify({
+      event: "http_request",
+      request_id: req.requestId,
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      duration_ms: Date.now() - startedAt,
+    }));
+  });
   next();
 });
 app.use(helmet());
@@ -53,6 +68,7 @@ app.use(cors({
   },
   methods: CORS_METHODS,
   allowedHeaders: ["Authorization", "Content-Type"],
+  credentials: true,
   maxAge: 86400,
 }));
 app.use(rateLimit({
@@ -81,6 +97,7 @@ app.get("/", (_req, res) => {
 app.get("/health/live", (_req, res) => {
   res.json({ status: "ok" });
 });
+app.get("/health/metrics", (_req, res) => res.json(telemetrySnapshot()));
 
 async function readinessStatus() {
   const databaseReady = Boolean(app.locals.db) && await checkMongoConnection();
@@ -93,7 +110,21 @@ async function readinessStatus() {
       queues: [],
     };
   }
-  return getWorkerReadiness(app.locals.db);
+  const storageReady = await checkPhotoStorageConnection();
+  if (!storageReady) {
+    return {
+      ready: false,
+      status: "degraded",
+      reasons: ["PHOTO_STORAGE_UNAVAILABLE"],
+      workers: [],
+      queues: [],
+    };
+  }
+  return getWorkerReadiness(app.locals.db, {
+    expectedWorkers: config.processRole === "api"
+      ? []
+      : ["evaluation", "notification", "storage_cleanup", "mail"],
+  });
 }
 
 async function readinessHandler(_req, res) {
@@ -270,7 +301,12 @@ export async function startServer() {
     const listener = app.listen(currentConfig.port, "0.0.0.0", () => resolve(listener));
     listener.once("error", reject);
   });
-  const workers = [startEvaluationWorker(db), startNotificationWorker(db)];
+  const workers = currentConfig.processRole === "api" ? [] : [
+    startEvaluationWorker(db),
+    startNotificationWorker(db),
+    startStorageCleanupWorker(db),
+    startMailWorker(db),
+  ];
   server.requestTimeout = 60_000;
   server.headersTimeout = 65_000;
   server.keepAliveTimeout = 5_000;

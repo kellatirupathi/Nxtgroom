@@ -17,6 +17,16 @@ function fakeDb() {
     collection(name) {
       assert.equal(name, RESET_COLLECTION);
       return {
+        async updateOne(filter, update, options = {}) {
+          let row = rows.find((item) => item.email === filter.email);
+          if (!row && options.upsert) {
+            row = { ...(update.$setOnInsert || {}), _id: `id-${rows.length + 1}` };
+            rows.push(row);
+          }
+          if (!row) return { matchedCount: 0, modifiedCount: 0 };
+          Object.assign(row, update.$set || {});
+          return { matchedCount: 1, modifiedCount: 1, upsertedCount: options.upsert ? 1 : 0 };
+        },
         async insertOne(doc) {
           rows.push({ ...doc, _id: `id-${rows.length + 1}` });
           return { insertedId: `id-${rows.length}` };

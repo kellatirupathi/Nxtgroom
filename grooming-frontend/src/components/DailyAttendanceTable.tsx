@@ -81,12 +81,15 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let activeController: AbortController | null = null;
+    let syncCursor: string | null = null;
+    let currentRows: AttendanceRecord[] = [];
     const endpoint = attendanceRangePath(range);
     setRecords([]);
     setLoading(true);
 
-    // Poll quickly while AI evaluations are still running so finished results
-    // surface within seconds, then fall back to a slow idle cadence.
+    // Poll quickly during analysis and slowly while idle. After the first
+    // complete range load, every poll asks only for rows updated since the
+    // previous request, so an all-time view does not re-download every page.
     const schedule = (hasPendingWork: boolean) => {
       clearTimeout(timer);
       if (!disposed && document.visibilityState === 'visible') {
@@ -101,20 +104,36 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
         return;
       }
       const controller = new AbortController();
+      const requestStartedAt = new Date().toISOString();
       activeController = controller;
       if (showLoading) setLoading(true);
       let pendingWork = false;
       try {
-        const data = await apiFetchAllPages<AttendanceRecord>(endpoint, {
+        const deltaEndpoint = syncCursor
+          ? `${endpoint}${endpoint.includes('?') ? '&' : '?'}updated_since=${encodeURIComponent(syncCursor)}`
+          : endpoint;
+        const data = await apiFetchAllPages<AttendanceRecord>(deltaEndpoint, {
           pageSize: 1_000,
           signal: controller.signal,
         });
         const rows = Array.isArray(data) ? data : [];
-        pendingWork = rows.some(
+        if (syncCursor) {
+          const merged = new Map(currentRows.map((row) => [String(row._id), row]));
+          for (const row of rows) merged.set(String(row._id), row);
+          currentRows = [...merged.values()].sort((left, right) => (
+            new Date(right.check_in_time || right.date || 0).getTime()
+            - new Date(left.check_in_time || left.date || 0).getTime()
+          ));
+        } else {
+          currentRows = rows;
+        }
+        syncCursor = requestStartedAt;
+        pendingWork = currentRows.some(
           (row) => normalizeAttendanceStatus(row.status) === 'pending'
+            || ['queued', 'processing', 'outbox_pending'].includes(String(row.checkout_evaluation_queue_status || ''))
         );
         if (!disposed) {
-          setRecords(rows);
+          setRecords(currentRows);
           setError('');
         }
       } catch (requestError) {

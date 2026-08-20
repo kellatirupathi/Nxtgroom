@@ -4,6 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
+import { incrementMetric, observeDuration } from "./telemetry.js";
 import { ATTIRE_CLASSIFIER_PROMPT, buildSystemPrompt } from "../prompts.js";
 import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints.js";
 
@@ -139,6 +140,9 @@ async function requestGeminiStructured({
   };
 
   for (let attempt = 0; attempt <= config.geminiMaxRetries; attempt += 1) {
+    const requestStartedAt = Date.now();
+    incrementMetric("gemini_requests_total");
+    if (attempt > 0) incrementMetric("gemini_retries_total");
     let response;
     try {
       response = await fetch(GEMINI_INTERACTIONS_URL, {
@@ -150,7 +154,10 @@ async function requestGeminiStructured({
         body: JSON.stringify(requestBody),
         signal: AbortSignal.timeout(config.geminiTimeoutMs),
       });
+      observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
     } catch (cause) {
+      observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
+      incrementMetric("gemini_request_failures_total");
       const timedOut = cause?.name === "TimeoutError" || cause?.name === "AbortError";
       const error = createGeminiError(
         timedOut ? "Gemini request timed out" : "Gemini request could not reach the service",
@@ -171,6 +178,7 @@ async function requestGeminiStructured({
     }
 
     if (!response.ok) {
+      incrementMetric("gemini_request_failures_total");
       const error = geminiHttpError(response.status, body?.error?.message);
       if (!error.retryable || attempt === config.geminiMaxRetries) throw error;
       await delay(retryAfterMilliseconds(response, attempt));
@@ -193,6 +201,7 @@ async function requestGeminiStructured({
     } catch {
       throw createGeminiError("Gemini returned invalid structured JSON", "GEMINI_INVALID_RESPONSE");
     }
+    incrementMetric("gemini_request_success_total");
     return validator.parse(parsed);
   }
 
@@ -328,7 +337,12 @@ export function deriveVerdict(rows, { imageQuality } = {}) {
     && checks.every((item) => item.status === "N/A");
 
   return {
-    overall_status: anyFail ? "NON_COMPLIANT" : "COMPLIANT",
+    // No assessed checkpoint is not evidence of compliance. Treat an empty
+    // or all-N/A result as unassessed so a ceiling, group shot, or occluded
+    // person can never receive a clean verdict merely because nothing failed.
+    overall_status: nothingAssessed || checks.length === 0
+      ? "UNASSESSED"
+      : anyFail ? "NON_COMPLIANT" : "COMPLIANT",
     image_quality: nothingAssessed ? "RETAKE_RECOMMENDED" : (imageQuality || "ADEQUATE"),
   };
 }
@@ -485,6 +499,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   // checkpoints are dropped rather than returned as twenty N/A rows, and no
   // verdict is recorded against the instructor for a picture of a wall.
   if (parsed.subject_visible === false) {
+    incrementMetric("evaluations_unassessed_total");
     return unassessedEvaluation(
       "NO_PERSON_VISIBLE",
       "The photograph does not show the instructor, so no appearance assessment could be made. Retake it as a clear, full-length photo of the person checking in.",
@@ -495,6 +510,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   const rows = toOrderedRows(sections, parsed);
   resolveIdCardAbstention(rows, parsed.visible_regions);
   const verdict = deriveVerdict(rows, { imageQuality: parsed.image_quality });
+  if (verdict.overall_status === "UNASSESSED") incrementMetric("evaluations_unassessed_total");
 
   return {
     ...verdict,

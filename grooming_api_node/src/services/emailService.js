@@ -1,5 +1,6 @@
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
 import { runtimeConfig } from "../config/env.js";
+import { incrementMetric, observeDuration } from "./telemetry.js";
 
 const DEFAULT_TIME_ZONE = "Asia/Kolkata";
 let sesClient = null;
@@ -173,6 +174,7 @@ async function sendEmail(toEmail, content) {
   }
 
   try {
+    const startedAt = Date.now();
     const input = {
       Source: config.fromEmail,
       Destination: { ToAddresses: [toEmail] },
@@ -189,9 +191,12 @@ async function sendEmail(toEmail, content) {
       new SendEmailCommand(input),
       { abortSignal: AbortSignal.timeout(runtimeConfig().sesTimeoutMs) }
     );
+    observeDuration("ses_delivery_latency", Date.now() - startedAt);
+    incrementMetric("ses_delivery_success_total");
     console.log(`AWS SES email accepted. Message ID: ${response.MessageId || "unavailable"}`);
     return { sent: true, messageId: response.MessageId };
   } catch (error) {
+    incrementMetric("ses_delivery_failures_total");
     console.error(`AWS SES email failed: ${error.name || "Error"}`);
     return { sent: false, reason: error.name || "ses_error" };
   }

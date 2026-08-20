@@ -6,7 +6,7 @@ import { runtimeConfig } from "../config/env.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
-import { enqueueEvaluation, evaluationFilter } from "../services/evaluationWorker.js";
+import { enqueueEvaluation, evaluateCheckoutNow, evaluationFilter } from "../services/evaluationWorker.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
 import { buildPhotoKey, deletePhoto, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
 import { canDeleteAttendance, canDeleteCheckout, getAccessSettings } from "../services/accessSettings.js";
@@ -44,7 +44,7 @@ const checkInLimiter = rateLimit({
 
 let activeCheckIns = 0;
 export function checkInConcurrencyGate(_req, res, next) {
-  if (activeCheckIns >= 2) {
+  if (activeCheckIns >= runtimeConfig().checkInConcurrencyLimit) {
     res.set("Retry-After", "5");
     return res.status(503).json({
       detail: "Image processing is busy. Please retry in a few seconds.",
@@ -70,6 +70,8 @@ const INTERNAL_ATTENDANCE_FIELDS = new Set([
   "_private_evaluation_outbox",
   "_private_checkin_outbox",
   "_private_checkout_outbox",
+  "deleting_at",
+  "checkout_deleting_at",
 ]);
 
 export const attendanceRouter = Router();
@@ -106,18 +108,63 @@ function attendanceScope(currentUser) {
  * try again, whereas the reverse would leave images nothing points at.
  */
 async function purgeAttendance(db, attendance) {
+  const marked = await db.collection("attendance").updateOne(
+    { _id: attendance._id, deleting_at: { $exists: false } },
+    {
+      $set: { deleting_at: new Date(), updated_at: new Date() },
+      $unset: {
+        _private_evaluation_outbox: "",
+        _private_checkin_outbox: "",
+        _private_checkout_outbox: "",
+      },
+    }
+  );
+  if (!marked.matchedCount) {
+    const current = await db.collection("attendance").findOne({ _id: attendance._id });
+    if (!current) return;
+  }
+  // Cancel both halves before touching storage. Workers also re-check the
+  // tombstone immediately before external work, covering already-claimed jobs.
+  await Promise.all([
+    db.collection("evaluation_jobs").deleteMany({ attendance_id: attendance._id }),
+    db.collection("notification_jobs").deleteMany({ attendance_id: attendance._id }),
+    db.collection("mail_jobs").deleteMany({ attendance_id: attendance._id }),
+  ]);
   const keys = [attendance.check_in_photo_key, attendance.check_out_photo_key].filter(Boolean);
   for (const key of keys) {
-    try {
-      await deletePhoto(key);
-    } catch {
-      // A photo already gone, or storage briefly unavailable, must not strand
-      // the record: the caller asked for it to be removed.
+    const result = await deletePhoto(key);
+    if (!result.deleted) {
+      const error = new Error(`Photo ${key} could not be removed`);
+      error.code = "PHOTO_DELETE_FAILED";
+      throw error;
     }
   }
-  await db.collection("evaluation_jobs").deleteOne({ _id: `${attendance._id}:evaluation` });
   await db.collection("evaluations").deleteMany({ attendance_id: String(attendance._id) });
-  await db.collection("attendance").deleteOne({ _id: attendance._id });
+  await db.collection("attendance").deleteOne({ _id: attendance._id, deleting_at: { $exists: true } });
+}
+
+async function compensateUploadedPhoto(db, key, reason) {
+  if (!key) return;
+  const result = await deletePhoto(key);
+  if (result.deleted) return;
+  // A transient R2 outage must not turn the original conflict into a 500.
+  // Persist a durable cleanup request so storage reconciliation can retry it.
+  await db.collection("storage_cleanup_jobs").updateOne(
+    { _id: key },
+    {
+      $setOnInsert: {
+        _id: key,
+        key,
+        reason,
+        status: "queued",
+        attempts: 0,
+        available_at: new Date(),
+        created_at: new Date(),
+      },
+      $set: { updated_at: new Date(), last_error: result.reason || "delete_failed" },
+    },
+    { upsert: true }
+  );
 }
 
 /**
@@ -372,6 +419,7 @@ attendanceRouter.post(
         capturedAt: now,
       });
     } catch (error) {
+      await compensateUploadedPhoto(db, photoKey, "checkin_commit_failed");
       if (error.code === 11000) {
         return res.status(409).json({
           detail: "This instructor already has an active check-in",
@@ -381,14 +429,17 @@ attendanceRouter.post(
       throw error;
     }
     if (committed.outcome === "instructor_not_found") {
+      await compensateUploadedPhoto(db, photoKey, "instructor_not_found");
       return res.status(404).json({ detail: "Instructor not found" });
     }
     if (committed.outcome === "invalid_email") {
+      await compensateUploadedPhoto(db, photoKey, "invalid_email");
       return res.status(422).json({
         detail: "This instructor needs a valid email address before check-in reports can be sent.",
       });
     }
     if (committed.outcome === "already_active") {
+      await compensateUploadedPhoto(db, photoKey, "duplicate_checkin");
       return res.status(409).json({
         detail: "This instructor already has an active check-in",
         attendance_id: await activeAttendanceId(db, instructor._id),
@@ -465,6 +516,7 @@ attendanceRouter.post(
     // logged and skipped rather than blocking the check-out itself, which is
     // the record that actually matters for attendance.
     let checkOutPhotoKey = null;
+    let checkOutPhoto = null;
     if (req.file) {
       const validation = validateImageUpload(req.file);
       if (!validation.valid) return res.status(400).json({ detail: validation.detail });
@@ -484,23 +536,38 @@ attendanceRouter.post(
             instructor_id: String(candidate.instructor_id),
             kind: "checkout",
             captured_at: checkOutTime.toISOString(),
-            coordinates: parseCoordinates(req.body?.location_coordinates) || "",
+            coordinates: parseCoordinates(req.validatedBody.location_coordinates) || "",
+            accuracy_m: req.validatedBody.location_accuracy_m ?? "",
           },
         });
-        if (upload.stored) checkOutPhotoKey = key;
+        if (upload.stored) {
+          checkOutPhotoKey = key;
+          checkOutPhoto = normalized;
+        }
       } catch (error) {
         console.error(`Check-out photo not stored: ${error?.name || "Error"}`);
       }
     }
 
-    const checkoutCoordinates = parseCoordinates(req.body?.location_coordinates);
+    const checkoutCoordinates = parseCoordinates(req.validatedBody.location_coordinates);
     const checkoutSet = {
       check_out_time: checkOutTime,
       ...(checkOutPhotoKey ? { check_out_photo_key: checkOutPhotoKey } : {}),
       ...(checkoutCoordinates ? { check_out_coordinates: checkoutCoordinates } : {}),
+      ...(req.validatedBody.location_accuracy_m != null
+        ? { check_out_location_accuracy_m: req.validatedBody.location_accuracy_m }
+        : {}),
       updated_at: checkOutTime,
-      checkout_email_status: recipient ? "outbox_pending" : "skipped_no_email",
-      ...(recipient ? { _private_checkout_outbox: checkoutPayload } : {}),
+      checkout_email_status: recipient
+        ? (req.file
+          ? (checkOutPhotoKey ? "waiting_for_analysis" : "not_sent_analysis_failed")
+          : "outbox_pending")
+        : "skipped_no_email",
+      ...(req.file ? {
+        checkout_evaluation_queue_status: checkOutPhotoKey ? "processing" : "failed",
+        ...(!checkOutPhotoKey ? { checkout_analysis_error_code: "PHOTO_STORAGE_FAILED" } : {}),
+      } : {}),
+      ...(recipient && !req.file ? { _private_checkout_outbox: checkoutPayload } : {}),
     };
     const result = await db.collection("attendance").findOneAndUpdate(
       {
@@ -516,6 +583,7 @@ attendanceRouter.post(
     );
     const attendance = result?.value || result;
     if (!attendance) {
+      await compensateUploadedPhoto(db, checkOutPhotoKey, "duplicate_checkout");
       return res.status(409).json({ detail: "This attendance was already checked out" });
     }
 
@@ -527,27 +595,16 @@ attendanceRouter.post(
       void attachAddressToAttendance(db, attendance._id, checkoutCoordinates, "checkout");
     }
 
-    try {
-      await enqueueNotification(db, {
-        attendanceId: attendance._id,
-        type: "checkout",
-        toEmail: checkoutPayload.to_email,
-        report: checkoutPayload.report,
-        deadlineAt: checkoutPayload.deadline_at,
-      });
-    } catch (error) {
-      console.error(`Checkout outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
-    }
+    let checkoutEvaluation = null;
+    let checkoutAnalysisFailed = Boolean(req.file && !checkOutPhotoKey);
 
-    // The check-out photo is assessed the same way the check-in one is, when
-    // there is one. Queued after the record is committed and failures are
-    // swallowed: the check-out itself is the thing that matters for
-    // attendance, and it has already succeeded by this point.
+    // A photographed check-out is analysed in this request. Its email outbox
+    // is created only after the detailed report is stored, so the email can
+    // never race ahead carrying the morning/check-in assessment.
     if (checkOutPhotoKey) {
       try {
-        await enqueueEvaluation(db, {
+        checkoutEvaluation = await evaluateCheckoutNow(db, {
           attendanceId: attendance._id,
-          kind: "checkout",
           instructor: {
             id: String(candidate.instructor_id),
             name: attendance.instructor_name || instructor?.name || "Instructor",
@@ -555,26 +612,79 @@ attendanceRouter.post(
             gender: instructor?.gender || null,
           },
           photoKey: checkOutPhotoKey,
-          mimeType: "image/jpeg",
-          checkInTime: checkOutTime,
+          imageBuffer: checkOutPhoto?.buffer,
+          mimeType: checkOutPhoto?.mimeType || "image/jpeg",
+          checkOutTime,
         });
+
+        checkoutPayload.report = {
+          ...checkoutPayload.report,
+          status: checkoutEvaluation.overall_status,
+          remarks: checkoutEvaluation.ai_summary || "",
+          imageQuality: checkoutEvaluation.image_quality || null,
+        };
+        checkoutPayload.created_at = new Date();
+        if (recipient) {
+          await db.collection("attendance").updateOne(
+            { _id: attendance._id },
+            {
+              $set: {
+                checkout_email_status: "outbox_pending",
+                _private_checkout_outbox: checkoutPayload,
+              },
+            }
+          );
+        }
+      } catch (error) {
+        checkoutAnalysisFailed = true;
+        const code = String(error?.code || error?.name || "EVALUATION_ERROR").toUpperCase();
         await db.collection("attendance").updateOne(
           { _id: attendance._id },
-          { $set: { checkout_evaluation_queue_status: "queued" } }
+          {
+            $set: {
+              checkout_evaluation_queue_status: "failed",
+              checkout_analysis_error_code: code,
+              checkout_email_status: recipient ? "not_sent_analysis_failed" : "skipped_no_email",
+              updated_at: new Date(),
+            },
+            $unset: { _private_checkout_outbox: "" },
+          }
         );
+        console.error(`Checkout evaluation failed for ${attendance._id} (${code})`);
+      }
+    }
+
+    // Without a photo this remains a plain checkout confirmation. With a
+    // photo, this point is reached only after the checkout evaluation and its
+    // detailed report have been committed.
+    if (recipient && (!req.file || checkoutEvaluation)) {
+      try {
+        await enqueueNotification(db, {
+          attendanceId: attendance._id,
+          type: "checkout",
+          toEmail: checkoutPayload.to_email,
+          report: checkoutPayload.report,
+          deadlineAt: checkoutPayload.deadline_at,
+        });
       } catch (error) {
-        console.error(`Checkout evaluation not queued for ${attendance._id} (${error.name || "ERROR"})`);
+        console.error(`Checkout outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
       }
     }
 
     return res.json({
-      message: recipient
-        ? "Check-out successful. Email confirmation is queued."
-        : "Check-out successful, but no email was sent because the instructor email is missing or invalid.",
-      // Returned so the caller can follow the check-out analysis, the same way
-      // it follows the check-in one.
+      message: checkoutAnalysisFailed
+        ? "Check-out successful, but the appearance report could not be generated and no report email was sent."
+        : recipient
+          ? "Check-out successful. Email confirmation is queued."
+          : "Check-out successful, but no email was sent because the instructor email is missing or invalid.",
       attendance_id: String(attendance._id),
-      analysis_queued: Boolean(checkOutPhotoKey),
+      analysis_queued: false,
+      analysis_completed: Boolean(checkoutEvaluation),
+      analysis_failed: checkoutAnalysisFailed,
+      photo_status: req.file ? (checkOutPhotoKey ? "stored" : "failed") : "not_provided",
+      photo_warning: req.file && !checkOutPhotoKey
+        ? "The check-out was saved, but its photo could not be stored."
+        : null,
     });
   })
 );
@@ -584,6 +694,7 @@ attendanceRouter.get(
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
     let dateFilter;
+    let updatedSince = null;
     let pagination;
     try {
       const zone = runtimeConfig().appTimeZone;
@@ -611,6 +722,15 @@ attendanceRouter.get(
         defaultLimit: 200,
         maxLimit: 1000,
       });
+      if (req.query.updated_since !== undefined) {
+        if (typeof req.query.updated_since !== "string" || req.query.updated_since.length > 40) {
+          throw new RangeError("updated_since must be an ISO timestamp");
+        }
+        updatedSince = new Date(req.query.updated_since);
+        if (Number.isNaN(updatedSince.getTime()) || updatedSince > new Date(Date.now() + 60_000)) {
+          throw new RangeError("updated_since must be a valid past ISO timestamp");
+        }
+      }
     } catch (error) {
       if (error instanceof RangeError) {
         return res.status(422).json({ detail: error.message });
@@ -622,6 +742,7 @@ attendanceRouter.get(
       // used; $exists alone would fall back to a collection scan.
       .find({
         ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
+        ...(updatedSince ? { updated_at: { $gt: updatedSince } } : {}),
         ...attendanceScope(req.currentUser),
       })
       .project({
@@ -716,6 +837,160 @@ attendanceRouter.get(
   })
 );
 
+/**
+ * Recovers a checkout whose optional photo could not be stored. The attendance
+ * already exists, so calling /check-out again can never work; this narrowly
+ * attaches the missing photo, runs checkout analysis directly, and only then
+ * creates the report email job.
+ */
+attendanceRouter.post(
+  "/:attendanceId/checkout-photo",
+  upload.single("file"),
+  asyncRoute(async (req, res) => {
+    const validation = validateImageUpload(req.file);
+    if (!validation.valid) return res.status(400).json({ detail: validation.detail });
+
+    const db = req.app.locals.db;
+    const scope = attendanceScope(req.currentUser);
+    const attendance = await db.collection("attendance").findOne({
+      _id: idMatch(req.params.attendanceId),
+      check_out_time: { $ne: null },
+      deleting_at: { $exists: false },
+      checkout_deleting_at: { $exists: false },
+      ...scope,
+    });
+    if (!attendance) return res.status(404).json({ detail: "Checkout record not found" });
+    if (attendance.check_out_photo_key) {
+      return res.status(409).json({ detail: "This checkout already has a stored photo" });
+    }
+
+    let normalized;
+    try {
+      normalized = await normalizeInstructorImage(req.file.buffer);
+    } catch {
+      return res.status(400).json({
+        detail: "Image could not be decoded; upload a clear JPEG, PNG, or WebP",
+      });
+    }
+
+    const now = new Date();
+    const photoKey = buildPhotoKey({
+      instructorId: String(attendance.instructor_id),
+      kind: "checkout",
+      mimeType: normalized.mimeType,
+      now,
+    });
+    const stored = await uploadPhoto({
+      key: photoKey,
+      body: normalized.buffer,
+      mimeType: normalized.mimeType,
+      metadata: {
+        instructor_id: String(attendance.instructor_id),
+        kind: "checkout",
+        captured_at: now.toISOString(),
+        coordinates: attendance.check_out_coordinates || "",
+        accuracy_m: attendance.check_out_location_accuracy_m ?? "",
+      },
+    });
+    if (!stored.stored) {
+      return res.status(503).json({
+        detail: "Photo storage is unavailable right now. Please retry without recording checkout again.",
+      });
+    }
+
+    const claimed = await db.collection("attendance").updateOne(
+      {
+        _id: attendance._id,
+        deleting_at: { $exists: false },
+        checkout_deleting_at: { $exists: false },
+        $or: [
+          { check_out_photo_key: null },
+          { check_out_photo_key: { $exists: false } },
+        ],
+      },
+      {
+        $set: {
+          check_out_photo_key: photoKey,
+          check_out_photo_captured_at: now,
+          checkout_evaluation_queue_status: "processing",
+          checkout_email_status: "waiting_for_analysis",
+          updated_at: now,
+        },
+        $unset: { checkout_analysis_error_code: "", _private_checkout_outbox: "" },
+      }
+    );
+    if (!claimed.matchedCount) {
+      await compensateUploadedPhoto(db, photoKey, "concurrent_checkout_photo_retry");
+      return res.status(409).json({ detail: "A checkout photo was already attached" });
+    }
+
+    const instructor = await db.collection("instructors").findOne({
+      _id: idMatch(String(attendance.instructor_id)),
+    });
+    const recipient = isValidEmail(instructor?.email) ? instructor.email : null;
+    try {
+      const evaluation = await evaluateCheckoutNow(db, {
+        attendanceId: attendance._id,
+        instructor: {
+          id: String(attendance.instructor_id),
+          name: attendance.instructor_name || instructor?.name || "Instructor",
+          email: recipient || instructor?.email || null,
+          gender: instructor?.gender || null,
+          collegeId: String(attendance.college_id || instructor?.college_id || ""),
+        },
+        photoKey,
+        imageBuffer: normalized.buffer,
+        mimeType: normalized.mimeType,
+        checkOutTime: attendance.check_out_time,
+      });
+
+      if (recipient) {
+        const report = {
+          instructorName: attendance.instructor_name || instructor?.name || "Instructor",
+          checkInTime: attendance.check_in_time,
+          checkOutTime: attendance.check_out_time,
+          status: evaluation.overall_status,
+          remarks: evaluation.ai_summary || "",
+          imageQuality: evaluation.image_quality || null,
+        };
+        await db.collection("attendance").updateOne(
+          { _id: attendance._id, deleting_at: { $exists: false } },
+          { $set: { checkout_email_status: "outbox_pending", updated_at: new Date() } }
+        );
+        await enqueueNotification(db, {
+          attendanceId: attendance._id,
+          type: "checkout",
+          toEmail: recipient,
+          report,
+          deadlineAt: new Date(Date.now() + OUTBOX_DEADLINE_MS),
+        });
+      }
+
+      return res.json({
+        message: "Checkout photo stored and analysis completed.",
+        attendance_id: String(attendance._id),
+        analysis_queued: false,
+        analysis_completed: true,
+        photo_status: "stored",
+      });
+    } catch (error) {
+      const code = String(error?.code || error?.name || "EVALUATION_ERROR").toUpperCase();
+      await db.collection("attendance").updateOne(
+        { _id: attendance._id },
+        {
+          $set: {
+            checkout_evaluation_queue_status: "failed",
+            checkout_analysis_error_code: code,
+            checkout_email_status: recipient ? "not_sent_analysis_failed" : "skipped_no_email",
+            updated_at: new Date(),
+          },
+        }
+      );
+      throw error;
+    }
+  })
+);
+
 attendanceRouter.get(
   "/:attendanceId/evaluation",
   asyncRoute(async (req, res) => {
@@ -783,7 +1058,9 @@ attendanceRouter.get(
         compliance_status: attendance.checkout_compliance_status || null,
         remarks: attendance.checkout_remarks || null,
         queue_status: queueStatus,
-        settled: queueStatus === "completed" || !attendance.check_out_photo_key,
+        settled: queueStatus === "completed"
+          || queueStatus === "failed"
+          || !attendance.check_out_photo_key,
         updated_at: attendance.updated_at || null,
       });
     }
@@ -836,8 +1113,8 @@ attendanceRouter.post(
     });
 
     const now = new Date();
-    // Clear the finished job so the worker treats this as fresh work; the
-    // upsert in enqueueEvaluation only writes on insert.
+    // Clear any older job for this half before starting fresh work. Checkout
+    // is direct; check-in continues through the durable evaluation worker.
     await db.collection("evaluation_jobs").deleteOne({
       _id: kind === "checkout"
         ? `${attendance._id}:evaluation:checkout`
@@ -856,7 +1133,7 @@ attendanceRouter.post(
           ? {
             checkout_compliance_status: null,
             checkout_remarks: "AI analysis is in progress.",
-            checkout_evaluation_queue_status: "queued",
+            checkout_evaluation_queue_status: "processing",
             updated_at: now,
           }
           : {
@@ -869,9 +1146,44 @@ attendanceRouter.post(
       }
     );
 
+    if (kind === "checkout") {
+      try {
+        await evaluateCheckoutNow(db, {
+          attendanceId: attendance._id,
+          instructor: {
+            id: String(attendance.instructor_id),
+            name: attendance.instructor_name || instructor?.name || "Instructor",
+            email: instructor?.email || null,
+            gender: instructor?.gender || null,
+            collegeId: String(attendance.college_id || instructor?.college_id || ""),
+          },
+          photoKey,
+          mimeType: "image/jpeg",
+          checkOutTime: attendance.check_out_time,
+        });
+        return res.json({
+          message: "Re-analysis completed.",
+          attendance_id: String(attendance._id),
+        });
+      } catch (error) {
+        const code = String(error?.code || error?.name || "EVALUATION_ERROR").toUpperCase();
+        await db.collection("attendance").updateOne(
+          { _id: attendance._id },
+          {
+            $set: {
+              checkout_evaluation_queue_status: "failed",
+              checkout_analysis_error_code: code,
+              updated_at: new Date(),
+            },
+          }
+        );
+        throw error;
+      }
+    }
+
     await enqueueEvaluation(db, {
       attendanceId: attendance._id,
-      kind,
+      kind: "checkin",
       instructor: {
         id: String(attendance.instructor_id),
         name: attendance.instructor_name || instructor?.name || "Instructor",
@@ -881,7 +1193,7 @@ attendanceRouter.post(
       },
       photoKey,
       mimeType: "image/jpeg",
-      checkInTime: kind === "checkout" ? attendance.check_out_time : attendance.check_in_time,
+      checkInTime: attendance.check_in_time,
       deadlineAt: new Date(now.getTime() + OUTBOX_DEADLINE_MS),
     });
 
@@ -943,7 +1255,14 @@ attendanceRouter.delete(
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 
-    await purgeAttendance(db, attendance);
+    try {
+      await purgeAttendance(db, attendance);
+    } catch (error) {
+      if (error.code === "PHOTO_DELETE_FAILED") {
+        return res.status(503).json({ detail: "The photo could not be removed. Please retry deletion." });
+      }
+      throw error;
+    }
     return res.json({ message: "Attendance record deleted" });
   })
 );
@@ -979,12 +1298,34 @@ attendanceRouter.delete(
     // The photograph goes first. If it fails the record is untouched and the
     // delete can be retried, where the reverse would leave an image in storage
     // that nothing points at.
+    await db.collection("attendance").updateOne(
+      { _id: attendance._id, checkout_deleting_at: { $exists: false } },
+      {
+        $set: { checkout_deleting_at: new Date(), updated_at: new Date() },
+        $unset: { _private_checkout_outbox: "" },
+      }
+    );
+    await Promise.all([
+      db.collection("evaluation_jobs").deleteMany({
+        attendance_id: attendance._id,
+        $or: [
+          { kind: "checkout" },
+          { _id: `${attendance._id}:evaluation:checkout` },
+        ],
+      }),
+      db.collection("notification_jobs").deleteMany({
+        attendance_id: attendance._id,
+        type: "checkout",
+      }),
+      db.collection("mail_jobs").deleteMany({
+        attendance_id: attendance._id,
+        type: "attendance_reminder",
+      }),
+    ]);
     if (attendance.check_out_photo_key) {
-      try {
-        await deletePhoto(attendance.check_out_photo_key);
-      } catch {
-        // Already gone, or storage briefly unavailable; neither should strand
-        // the check-out the caller asked to remove.
+      const removed = await deletePhoto(attendance.check_out_photo_key);
+      if (!removed.deleted) {
+        return res.status(503).json({ detail: "The check-out photo could not be removed. Please retry deletion." });
       }
     }
     await db.collection("evaluation_jobs").deleteOne({
@@ -1000,6 +1341,8 @@ attendanceRouter.delete(
         $unset: {
           check_out_photo_key: "",
           check_out_coordinates: "",
+          check_out_location_accuracy_m: "",
+          checkout_deleting_at: "",
           checkout_compliance_status: "",
           checkout_remarks: "",
           checkout_image_quality: "",

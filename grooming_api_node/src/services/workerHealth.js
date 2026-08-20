@@ -1,5 +1,6 @@
 const workerStates = new Map();
 const EXPECTED_WORKERS = ["evaluation", "notification"];
+const KNOWN_WORKERS = [...EXPECTED_WORKERS, "storage_cleanup", "mail"];
 const DEFAULT_STALE_AFTER_MS = 60000;
 const DEFAULT_BUSY_STALE_AFTER_MS = 15 * 60 * 1000;
 const DEFAULT_QUEUE_WARNING_AGE_MS = 15 * 60 * 1000;
@@ -18,7 +19,7 @@ export function createWorkerMonitor(name, {
   busyStaleAfterMs = DEFAULT_BUSY_STALE_AFTER_MS,
   now = () => new Date(),
 } = {}) {
-  if (!EXPECTED_WORKERS.includes(name)) throw new Error(`Unknown worker monitor: ${name}`);
+  if (!KNOWN_WORKERS.includes(name)) throw new Error(`Unknown worker monitor: ${name}`);
   if (!Number.isFinite(busyStaleAfterMs) || busyStaleAfterMs <= 0) {
     throw new Error("busyStaleAfterMs must be a positive number");
   }
@@ -84,8 +85,12 @@ export function createWorkerMonitor(name, {
   };
 }
 
-export function getWorkerHeartbeatSnapshot({ now = new Date(), staleAfterMs = DEFAULT_STALE_AFTER_MS } = {}) {
-  return EXPECTED_WORKERS.map((name) => {
+export function getWorkerHeartbeatSnapshot({
+  now = new Date(),
+  staleAfterMs = DEFAULT_STALE_AFTER_MS,
+  expectedWorkers = EXPECTED_WORKERS,
+} = {}) {
+  return expectedWorkers.map((name) => {
     const state = workerStates.get(name);
     if (!state) {
       return { name, running: false, stale: true, state: "missing" };
@@ -120,7 +125,7 @@ function nestedValue(document, path) {
   return path.split(".").reduce((value, key) => value?.[key], document);
 }
 
-function queueMetric(name, document, datePath, now, warningAgeMs, criticalAgeMs) {
+function queueMetric(name, document, datePath, now, warningAgeMs, criticalAgeMs, depth = null) {
   const rawDate = nestedValue(document, datePath);
   const parsed = rawDate ? new Date(rawDate) : null;
   const validDate = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
@@ -129,6 +134,7 @@ function queueMetric(name, document, datePath, now, warningAgeMs, criticalAgeMs)
   return {
     name,
     has_pending_work: Boolean(document),
+    depth,
     oldest_created_at: validDate?.toISOString() || null,
     oldest_age_ms: ageMs,
     invalid_timestamp: invalidTimestamp,
@@ -146,6 +152,12 @@ async function oldest(db, collectionName, filter, sortField) {
       maxTimeMS: 1500,
     }
   );
+}
+
+async function queueDepth(db, collectionName, filter) {
+  const collection = db.collection(collectionName);
+  if (typeof collection.countDocuments !== "function") return null;
+  return collection.countDocuments(filter, { maxTimeMS: 1500 });
 }
 
 export async function getQueueAgeMetrics(db, {
@@ -180,6 +192,18 @@ export async function getQueueAgeMetrics(db, {
       datePath: "created_at",
     },
     {
+      name: "mail_jobs",
+      collection: "mail_jobs",
+      filter: { status: { $in: ["queued", "processing"] } },
+      datePath: "created_at",
+    },
+    {
+      name: "storage_cleanup_jobs",
+      collection: "storage_cleanup_jobs",
+      filter: { status: { $in: ["queued", "processing"] } },
+      datePath: "created_at",
+    },
+    {
       name: "evaluation_outbox",
       collection: "attendance",
       filter: { "_private_evaluation_outbox": { $exists: true } },
@@ -201,13 +225,17 @@ export async function getQueueAgeMetrics(db, {
   const documents = await Promise.all(specs.map((spec) => (
     oldest(db, spec.collection, spec.filter, spec.datePath)
   )));
+  const depths = await Promise.all(specs.map((spec) => (
+    queueDepth(db, spec.collection, spec.filter)
+  )));
   return specs.map((spec, index) => queueMetric(
     spec.name,
     documents[index],
     spec.datePath,
     now,
     warningAgeMs,
-    criticalAgeMs
+    criticalAgeMs,
+    depths[index]
   ));
 }
 
@@ -216,6 +244,7 @@ export async function getWorkerReadiness(db, options = {}) {
   const workers = getWorkerHeartbeatSnapshot({
     now,
     staleAfterMs: options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS,
+    expectedWorkers: options.expectedWorkers,
   });
   const reasons = workers
     .filter((worker) => worker.stale)

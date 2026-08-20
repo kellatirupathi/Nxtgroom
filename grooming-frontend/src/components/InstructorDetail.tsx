@@ -47,6 +47,7 @@ function formatDate(isoString?: string | null) {
 }
 
 export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, onDeleted }: InstructorDetailProps) {
+  const [freshRecord, setFreshRecord] = useState<AttendanceRecord | null>(record);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
   const [loading, setLoading] = useState(Boolean(record));
   const [error, setError] = useState('');
@@ -61,20 +62,25 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const [reanalysing, setReanalysing] = useState(false);
   const [queuedNow, setQueuedNow] = useState(false);
   const toast = useToast();
+  const displayRecord = freshRecord || record;
+
+  useEffect(() => {
+    setFreshRecord(record);
+  }, [record]);
 
   // Distinguishes "still working on it" from "there is nothing". The queue
   // status is written when the job is created and cleared when it completes.
   const queueStatus = tab === 'checkout'
-    ? record?.checkout_evaluation_queue_status
-    : record?.evaluation_queue_status;
+    ? displayRecord?.checkout_evaluation_queue_status
+    : displayRecord?.evaluation_queue_status;
   // "failed" is a terminal state, not a slow one. Treating it as running left
   // the page showing "analysing" indefinitely for work that had already given
   // up, which is the least useful thing it could say.
   const analysisFailed = queueStatus === 'failed';
-  const analysisRunning = !analysisFailed
+  const analysisRunning = !analysisFailed && !evaluation
     && (queuedNow || queueStatus === 'queued' || queueStatus === 'processing');
   // Only worth offering when the photograph it would read is still there.
-  const canReanalyse = Boolean(tab === 'checkout' ? record?.check_out_photo_key : record?.check_in_photo_key);
+  const canReanalyse = Boolean(tab === 'checkout' ? displayRecord?.check_out_photo_key : displayRecord?.check_in_photo_key);
 
   const handleReanalyse = async () => {
     if (!record) return;
@@ -83,13 +89,22 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
       const query = tab === 'checkout' ? '?kind=checkout' : '';
       await apiJson(
         `/api/v2/attendance/${encodeURIComponent(String(record._id))}/reanalyse${query}`,
-        { method: 'POST' },
+        { method: 'POST', timeoutMs: tab === 'checkout' ? 150_000 : undefined },
       );
-      toast.success('Analysis queued', { detail: 'The report appears here once it finishes.' });
-      // Shows the spinner immediately rather than waiting for the next poll.
-      setQueuedNow(true);
+      if (tab === 'checkout') {
+        const updated = await apiFetch<Evaluation>(
+          `/api/v2/attendance/${encodeURIComponent(String(record._id))}/evaluation?kind=checkout`,
+        );
+        setEvaluation(updated || null);
+        setQueuedNow(false);
+        toast.success('Analysis completed', { detail: 'The checkout report has been updated.' });
+      } else {
+        toast.success('Analysis queued', { detail: 'The report appears here once it finishes.' });
+        // Shows the spinner immediately rather than waiting for the next poll.
+        setQueuedNow(true);
+      }
     } catch (error) {
-      toast.error('Could not queue the analysis', {
+      toast.error(tab === 'checkout' ? 'Could not complete the analysis' : 'Could not queue the analysis', {
         detail: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -158,6 +173,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
       }
       setError('');
       try {
+        const latestRecord = await apiFetch<AttendanceRecord>(
+          `/api/v2/attendance/${encodeURIComponent(record._id)}`,
+          { signal: controller.signal },
+        );
+        if (!controller.signal.aborted) setFreshRecord(latestRecord);
         // Each half is assessed separately, so the tab decides which report
         // is fetched rather than both halves sharing one.
         const query = tab === 'checkout' ? '?kind=checkout' : '';
@@ -318,10 +338,10 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                 result — or with "Not assessed" when only the check-in was. */}
             <StatusBadge
               status={tab === 'checkout'
-                ? (record.checkout_compliance_status
-                  ? String(record.checkout_compliance_status).toLowerCase()
-                  : (record.check_out_photo_key ? 'pending' : undefined))
-                : record.status}
+                ? (evaluation?.overall_status
+                  || displayRecord?.checkout_compliance_status
+                  || (displayRecord?.check_out_photo_key ? 'pending' : undefined))
+                : (evaluation?.overall_status || displayRecord?.status)}
             />
             {tab === 'checkout' && !record.check_out_photo_key && (
               <p className="mt-4 text-xs font-medium text-slate-400">No photo was taken at check-out.</p>
@@ -356,7 +376,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                 <LocationPanel
                   coordinates={tab === 'checkin' ? record.location_coordinates : record.check_out_coordinates}
                   address={tab === 'checkin' ? record.location_address : record.check_out_location_address}
-                  accuracyMetres={tab === 'checkin' ? record.location_accuracy_m : null}
+                  accuracyMetres={tab === 'checkin' ? record.location_accuracy_m : displayRecord?.check_out_location_accuracy_m}
                 />
               )}
             </div>
@@ -364,7 +384,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">AI Remarks Summary</h4>
-            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">{record.remarks || 'No remarks available.'}</p>
+            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">
+              {(tab === 'checkout'
+                ? (evaluation?.ai_summary || displayRecord?.checkout_remarks)
+                : (evaluation?.ai_summary || displayRecord?.remarks)) || 'No remarks available.'}
+            </p>
             <p className="mt-3 text-xs text-slate-400">AI output is assistive and should be reviewed by an authorized person before adverse action.</p>
           </div>
         </div>
@@ -416,7 +440,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                       className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-50"
                     >
                       <RefreshCw size={15} className={reanalysing ? 'animate-spin' : ''} aria-hidden="true" />
-                      {reanalysing ? 'Queueing…' : 'Analyse this photo'}
+                      {reanalysing ? (tab === 'checkout' ? 'Analysing…' : 'Queueing…') : 'Analyse this photo'}
                     </button>
                   )}
                 </>

@@ -31,6 +31,8 @@ test("production configuration fails closed when secrets are missing", () => {
     "EVALUATION_LEASE_MS", "EVALUATION_MAX_ATTEMPTS", "GEMINI_MAX_RETRIES",
     "SES_TIMEOUT_MS", "SES_MAX_ATTEMPTS", "NOTIFICATION_LEASE_MS",
     "NOTIFICATION_MAX_ATTEMPTS",
+    "EVALUATION_CONCURRENCY", "CHECKIN_CONCURRENCY_LIMIT", "NOTIFICATION_CONCURRENCY",
+    "APP_URL", "CRON_SECRET", "R2_ENDPOINT", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
   ]) delete process.env[name];
   assert.throws(() => validateEnvironment(), /Invalid production environment/);
 });
@@ -47,6 +49,8 @@ test("production configuration accepts an exact secure contract", () => {
     EVALUATION_POLL_MS: "2000",
     EVALUATION_LEASE_MS: "600000",
     EVALUATION_MAX_ATTEMPTS: "3",
+    EVALUATION_CONCURRENCY: "2",
+    CHECKIN_CONCURRENCY_LIMIT: "5",
     SECRET_KEY: "x".repeat(64),
     JWT_EXPIRE_MINUTES: "480",
     JWT_ISSUER: "facultytrack-api",
@@ -55,6 +59,12 @@ test("production configuration accepts an exact secure contract", () => {
     ADMIN_PASSWORD: "test-only-password-123",
     ADMIN_PASSWORD_VERSION: "test-v1",
     CORS_ORIGINS: "https://facultytrack.example.com",
+    APP_URL: "https://facultytrack.example.com",
+    CRON_SECRET: "test-only-cron-secret",
+    R2_ENDPOINT: "https://account.r2.cloudflarestorage.com",
+    R2_BUCKET: "facultytrack-photos",
+    R2_ACCESS_KEY_ID: "test-r2-access",
+    R2_SECRET_ACCESS_KEY: "test-r2-secret",
     AWS_REGION: "ap-south-1",
     AWS_ACCESS_KEY_ID: "test-only-access-key",
     AWS_SECRET_ACCESS_KEY: "test-only-secret-key",
@@ -63,6 +73,7 @@ test("production configuration accepts an exact secure contract", () => {
     SES_MAX_ATTEMPTS: "2",
     NOTIFICATION_LEASE_MS: "300000",
     NOTIFICATION_MAX_ATTEMPTS: "5",
+    NOTIFICATION_CONCURRENCY: "2",
     APP_TIME_ZONE: "Asia/Kolkata",
     TIMEZONE_OFFSET_MINUTES: "330",
   });
@@ -249,7 +260,7 @@ test("emailed links cannot be built from a localhost origin in production", () =
   // is unreachable and nothing in the system notices.
   const withOrigins = (origins) => {
     process.env.NODE_ENV = "production";
-    delete process.env.APP_URL;
+    process.env.APP_URL = origins.split(",")[0];
     Object.assign(process.env, {
       PORT: "8000", MONGODB_URI: "mongodb+srv://u:p@h/?appName=x", DB_NAME: "d",
       SECRET_KEY: "x".repeat(48), JWT_EXPIRE_MINUTES: "480",
@@ -261,8 +272,11 @@ test("emailed links cannot be built from a localhost origin in production", () =
       GEMINI_API_KEY: "p", GEMINI_MODEL: "gemini-3.7-flash",
       GEMINI_TIMEOUT_MS: "120000", GEMINI_MAX_RETRIES: "2",
       EVALUATION_POLL_MS: "2000", EVALUATION_LEASE_MS: "600000", EVALUATION_MAX_ATTEMPTS: "3",
+      EVALUATION_CONCURRENCY: "2", CHECKIN_CONCURRENCY_LIMIT: "5",
       SES_TIMEOUT_MS: "10000", SES_MAX_ATTEMPTS: "3",
-      NOTIFICATION_LEASE_MS: "600000", NOTIFICATION_MAX_ATTEMPTS: "3",
+      NOTIFICATION_LEASE_MS: "600000", NOTIFICATION_MAX_ATTEMPTS: "3", NOTIFICATION_CONCURRENCY: "2",
+      CRON_SECRET: "cron-secret", R2_ENDPOINT: "https://account.r2.cloudflarestorage.com",
+      R2_BUCKET: "photos", R2_ACCESS_KEY_ID: "r2-key", R2_SECRET_ACCESS_KEY: "r2-secret",
       CORS_ORIGINS: origins,
     });
     try {

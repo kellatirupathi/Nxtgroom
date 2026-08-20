@@ -11,6 +11,9 @@ export const EVALUATION_IDENTITY_INDEX = {
 
 export const REQUIRED_DATABASE_INDEXES = [
   { collection: "users", key: { email: 1 }, options: { unique: true, name: "email_1" } },
+  { collection: "password_resets", key: { email: 1 }, options: { unique: true, name: "email_1" } },
+  { collection: "password_resets", key: { token_hash: 1 }, options: { unique: true, name: "token_hash_1" } },
+  { collection: "password_resets", key: { expires_at: 1 }, options: { expireAfterSeconds: 0, name: "expires_at_1" } },
   {
     collection: "users",
     key: { email: 1 },
@@ -33,6 +36,15 @@ export const REQUIRED_DATABASE_INDEXES = [
       unique: true,
       name: "employee_id_string_unique",
       partialFilterExpression: { employee_id: { $type: "string" } },
+    },
+  },
+  {
+    collection: "instructors",
+    key: { report_token: 1 },
+    options: {
+      unique: true,
+      name: "report_token_unique",
+      partialFilterExpression: { report_token: { $type: "string" } },
     },
   },
   {
@@ -128,6 +140,26 @@ export const REQUIRED_DATABASE_INDEXES = [
   },
   {
     collection: "notification_jobs",
+    key: { status: 1, available_at: 1, created_at: 1 },
+    options: { name: "status_1_available_at_1_created_at_1" },
+  },
+  {
+    collection: "mail_jobs",
+    key: { status: 1, available_at: 1, created_at: 1 },
+    options: { name: "status_1_available_at_1_created_at_1" },
+  },
+  {
+    collection: "mail_jobs",
+    key: { status: 1, lease_until: 1 },
+    options: { name: "status_1_lease_until_1" },
+  },
+  {
+    collection: "mail_jobs",
+    key: { expires_at: 1 },
+    options: { expireAfterSeconds: 0, name: "expires_at_1" },
+  },
+  {
+    collection: "storage_cleanup_jobs",
     key: { status: 1, available_at: 1, created_at: 1 },
     options: { name: "status_1_available_at_1_created_at_1" },
   },

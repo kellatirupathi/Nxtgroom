@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { runtimeConfig } from "../config/env.js";
 import { PROMPT_VERSION } from "../prompts.js";
 import { evaluateImage } from "./visionEngine.js";
@@ -6,7 +6,7 @@ import { improvementTips } from "../checkpoints.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { downloadPhoto } from "./photoStorage.js";
-import { sendGroomingAlertEmail } from "./emailService.js";
+import { enqueueMailJob } from "./mailWorker.js";
 import { idMatch } from "../middleware/auth.js";
 import { reportRecipientsFor } from "./reportRecipients.js";
 import { ensureReportToken, localDateKey } from "./instructorReports.js";
@@ -98,7 +98,7 @@ async function sendGroomingAlerts(db, {
   const deliveries = [];
   const to = instructorEmail || instructor.email;
   if (to) {
-    deliveries.push({ to, role: "instructor", ...(await sendGroomingAlertEmail(to, payload)) });
+    deliveries.push({ to, role: "instructor", payload });
   }
 
   // Reporting partners are copied per half, each behind its own switch: an
@@ -109,42 +109,31 @@ async function sendGroomingAlerts(db, {
     deliveries.push({
       to: recipient,
       role: "reporting_partner",
-      ...(await sendGroomingAlertEmail(recipient, { ...payload, forReviewer: true })),
+      payload: { ...payload, forReviewer: true },
     });
   }
 
-  // Recorded per recipient, because the last time these stopped arriving there
-  // was nothing to look at: the send was fire-and-forget, so a refusal by SES
-  // and an alert that was never attempted were indistinguishable afterwards.
-  const failed = deliveries.filter((delivery) => !delivery.sent);
-  if (failed.length) {
-    console.error(
-      `Appearance alert not delivered for ${attendanceId}: ${failed
-        .map((delivery) => `${delivery.role}=${delivery.reason || "unknown"}`)
-        .join(", ")}`
-    );
+  for (const delivery of deliveries) {
+    const recipientKey = createHash("sha256")
+      .update(String(delivery.to).trim().toLowerCase())
+      .digest("hex")
+      .slice(0, 20);
+    await enqueueMailJob(db, {
+      id: `${attendanceId}:grooming-alert:${kind}:${delivery.role}:${recipientKey}`,
+      type: "grooming_alert",
+      toEmail: delivery.to,
+      attendanceId,
+      payload: {
+        ...delivery.payload,
+        kind,
+        role: delivery.role,
+      },
+    });
   }
   if (!recipients.length) {
     console.warn("No reporting partners are configured; only the instructor was alerted.");
   }
-  await db.collection("attendance").updateOne(
-    { _id: attendanceId },
-    {
-      $set: {
-        alert_deliveries: deliveries.map(({ to: address, role, sent, reason }) => ({
-          to: address,
-          role,
-          sent: Boolean(sent),
-          ...(reason ? { reason } : {}),
-        })),
-        alert_sent_at: new Date(),
-      },
-    }
-  ).catch(() => {
-    // The alert itself already went out; failing to record that must not undo
-    // it or fail the evaluation.
-  });
-  return deliveries;
+  return deliveries.length;
 }
 
 function publicEvaluation(report, job, now) {
@@ -304,6 +293,22 @@ async function claimEvaluation(db) {
   return result?.value || result;
 }
 
+async function evaluationTargetExists(db, job) {
+  const checkout = jobKind(job) === "checkout";
+  const filter = {
+    _id: job.attendance_id,
+    deleting_at: { $exists: false },
+    ...(checkout ? {
+      checkout_deleting_at: { $exists: false },
+      check_out_time: { $ne: null },
+    } : {}),
+  };
+  if (job.photo_key) {
+    filter[checkout ? "check_out_photo_key" : "check_in_photo_key"] = job.photo_key;
+  }
+  return Boolean(await db.collection("attendance").findOne(filter, { projection: { _id: 1 } }));
+}
+
 async function renewEvaluationLease(db, job) {
   const now = new Date();
   const result = await db.collection("evaluation_jobs").updateOne(
@@ -354,8 +359,12 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   // would rewrite the morning's verdict with the evening's photograph, and the
   // weekly counts read those fields.
   if (jobKind(job) === "checkout") {
-    await db.collection("attendance").updateOne(
-      { _id: job.attendance_id },
+    const attendanceUpdate = await db.collection("attendance").updateOne(
+      {
+        _id: job.attendance_id,
+        deleting_at: { $exists: false },
+        checkout_deleting_at: { $exists: false },
+      },
       {
         $set: {
           checkout_compliance_status: overallStatus,
@@ -367,6 +376,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         },
       }
     );
+    if (!attendanceUpdate.matchedCount) return false;
     // The check-out gets its own report email, built from its own evaluation
     // and linking to its own half. Previously nothing was sent for it, so the
     // only report anybody ever received described the morning.
@@ -387,15 +397,17 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
       }
     }
 
-    await db.collection("evaluation_jobs").deleteOne({
-      _id: job._id,
-      worker_id: WORKER_ID,
-      status: ownedStatus,
-    });
-    return;
+    if (job._id) {
+      await db.collection("evaluation_jobs").deleteOne({
+        _id: job._id,
+        worker_id: WORKER_ID,
+        status: ownedStatus,
+      });
+    }
+    return true;
   }
-  await db.collection("attendance").updateOne(
-    { _id: job.attendance_id },
+  const attendanceUpdate = await db.collection("attendance").updateOne(
+    { _id: job.attendance_id, deleting_at: { $exists: false } },
     {
       $set: {
         status: attendanceStatus,
@@ -415,6 +427,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
       },
     }
   );
+  if (!attendanceUpdate.matchedCount) return false;
   await enqueueNotification(db, {
     attendanceId: job.attendance_id,
     type: "checkin",
@@ -428,10 +441,10 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
     },
   });
 
-  // A failed result is sent immediately to the instructor and the reporting
-  // partners, rather than waiting for the weekly summary. Failures here are
+  // A failed result is durably queued for the instructor and reporting
+  // partners rather than waiting for the weekly summary. Enqueue failures are
   // logged and swallowed: the evaluation itself is already committed and must
-  // not be retried just because an alert could not be delivered.
+  // not be retried (and paid for again) because an alert could not be queued.
   if (attendanceStatus === "non_compliant") {
     try {
       await sendGroomingAlerts(db, {
@@ -453,6 +466,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
     worker_id: WORKER_ID,
     status: ownedStatus,
   });
+  return true;
 }
 
 /**
@@ -470,6 +484,14 @@ export function evaluationFilter(attendanceId, kind = "checkin") {
 
 async function completeEvaluation(db, job, report) {
   if (!(await renewEvaluationLease(db, job))) return false;
+  if (!(await evaluationTargetExists(db, job))) {
+    await db.collection("evaluation_jobs").deleteOne({
+      _id: job._id,
+      status: "processing",
+      worker_id: WORKER_ID,
+    });
+    return false;
+  }
 
   const now = new Date();
   // Tagged before it is written or synced, so the half it belongs to travels
@@ -483,8 +505,75 @@ async function completeEvaluation(db, job, report) {
     },
     { upsert: true }
   );
-  await syncStoredEvaluation(db, job, evaluation, "processing");
+  const synced = await syncStoredEvaluation(db, job, evaluation, "processing");
+  if (!synced) {
+    await db.collection("evaluations").deleteOne(
+      evaluationFilter(job.attendance_id, jobKind(job))
+    );
+    return false;
+  }
   return true;
+}
+
+/**
+ * Analyses a check-out photo in the request that saved it.
+ *
+ * Check-ins deliberately retain the durable evaluation worker. Check-outs use
+ * this direct path so their detailed report is persisted before the route
+ * creates the checkout-email outbox. No evaluation_jobs document is created.
+ */
+export async function evaluateCheckoutNow(db, {
+  attendanceId,
+  instructor,
+  photoKey,
+  imageBuffer,
+  mimeType = "image/jpeg",
+  checkOutTime,
+}) {
+  const target = { attendance_id: attendanceId, kind: "checkout", photo_key: photoKey };
+  if (!(await evaluationTargetExists(db, target))) {
+    const error = new Error("Checkout was removed before analysis started");
+    error.code = "ATTENDANCE_NOT_FOUND";
+    throw error;
+  }
+  const source = imageBuffer
+    ? { buffer: asBuffer(imageBuffer), mimeType }
+    : await downloadPhoto(photoKey);
+  const report = await evaluateImage(
+    source.buffer,
+    source.mimeType || mimeType,
+    instructor?.gender
+  );
+  const now = new Date();
+  const job = {
+    attendance_id: attendanceId,
+    kind: "checkout",
+    instructor,
+    check_in_time: checkOutTime,
+    attempts: 1,
+  };
+  if (!(await evaluationTargetExists(db, { ...job, photo_key: photoKey }))) {
+    const error = new Error("Checkout was removed while analysis was running");
+    error.code = "ATTENDANCE_NOT_FOUND";
+    throw error;
+  }
+  const evaluation = { ...publicEvaluation(report, job, now), kind: "checkout" };
+  await db.collection("evaluations").updateOne(
+    evaluationFilter(attendanceId, "checkout"),
+    {
+      $set: evaluation,
+      $setOnInsert: { _id: randomUUID(), created_at: now },
+    },
+    { upsert: true }
+  );
+  const synced = await syncStoredEvaluation(db, job, evaluation, null);
+  if (!synced || !(await evaluationTargetExists(db, { ...job, photo_key: photoKey }))) {
+    await db.collection("evaluations").deleteOne(evaluationFilter(attendanceId, "checkout"));
+    const error = new Error("Checkout was removed before the report was committed");
+    error.code = "ATTENDANCE_NOT_FOUND";
+    throw error;
+  }
+  return evaluation;
 }
 
 export async function recoverClaimedEvaluation(db, job) {
@@ -838,9 +927,47 @@ export function startEvaluationWorker(db) {
   const schedule = (delay = interval) => {
     if (!stopped) timer = setTimeout(tick, delay);
   };
+  const processJob = async (job) => {
+    try {
+      if (!(await evaluationTargetExists(db, job))) {
+        await db.collection("evaluation_jobs").deleteOne({
+          _id: job._id,
+          status: "processing",
+          worker_id: WORKER_ID,
+        });
+        monitor.progress("deleted_target_cancelled");
+        return;
+      }
+      const recovered = await recoverClaimedEvaluation(db, job);
+      if (recovered === null) {
+        monitor.progress("vision_request_started");
+        const source = job.photo_key
+          ? await downloadPhoto(job.photo_key)
+          : { buffer: asBuffer(job.image), mimeType: job.mime_type };
+        const report = await evaluateImage(
+          source.buffer,
+          source.mimeType || job.mime_type,
+          job.instructor.gender
+        );
+        monitor.progress("vision_request_completed");
+        await completeEvaluation(db, job, report);
+        monitor.progress("evaluation_completed");
+      } else {
+        monitor.progress("stored_evaluation_recovered");
+      }
+    } catch (error) {
+      monitor.recordJobError(errorCode(error));
+      console.error(
+        `Evaluation job ${job._id} attempt ${job.attempts} failed (${errorCode(error)}): `
+        + `${error?.name || "Error"} ${String(error?.message || "").slice(0, 300)}`
+      );
+      await retryEvaluation(db, job, error);
+    }
+  };
   const tick = () => {
     monitor.cycleStarted();
     let loopErrorCode = null;
+    let processedCount = 0;
     inFlight = (async () => {
       try {
         await reconcileEvaluationOutbox(db);
@@ -851,44 +978,20 @@ export function startEvaluationWorker(db) {
         monitor.progress("expired_leases_reconciled");
         await reconcileFailedEvaluationOutcomes(db);
         monitor.progress("failed_outcomes_reconciled");
-        const job = await claimEvaluation(db);
-        monitor.progress(job ? "job_claimed" : "queue_idle");
-        if (job) {
-          try {
-            const recovered = await recoverClaimedEvaluation(db, job);
-            if (recovered === null) {
-              monitor.progress("vision_request_started");
-              // Fetch from R2 at analysis time. Older jobs queued before this
-              // change still carry inline bytes, so honour those too.
-              const source = job.photo_key
-                ? await downloadPhoto(job.photo_key)
-                : { buffer: asBuffer(job.image), mimeType: job.mime_type };
-              const report = await evaluateImage(
-                source.buffer,
-                source.mimeType || job.mime_type,
-                job.instructor.gender
-              );
-              monitor.progress("vision_request_completed");
-              await completeEvaluation(db, job, report);
-              monitor.progress("evaluation_completed");
-            } else {
-              monitor.progress("stored_evaluation_recovered");
-            }
-          } catch (error) {
-            monitor.recordJobError(errorCode(error));
-            console.error(
-              `Evaluation job ${job._id} attempt ${job.attempts} failed (${errorCode(error)}): `
-              + `${error?.name || "Error"} ${String(error?.message || "").slice(0, 300)}`
-            );
-            await retryEvaluation(db, job, error);
-          }
-        }
+        const jobs = (await Promise.all(
+          Array.from({ length: config.evaluationConcurrency }, () => claimEvaluation(db))
+        )).filter(Boolean);
+        processedCount = jobs.length;
+        monitor.progress(jobs.length ? "jobs_claimed" : "queue_idle");
+        await Promise.all(jobs.map(processJob));
       } catch (error) {
         loopErrorCode = errorCode(error);
         console.error(`Evaluation worker error (${loopErrorCode})`);
       } finally {
         monitor.cycleCompleted(loopErrorCode);
-        schedule();
+        // Drain immediately while work exists; use the configured delay only
+        // when idle so consecutive jobs never wait for an arbitrary poll gap.
+        schedule(processedCount ? 0 : interval);
       }
     })();
   };
