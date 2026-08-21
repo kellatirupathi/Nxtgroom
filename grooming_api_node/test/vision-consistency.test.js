@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkpointSet, SECTION_KEYS } from "../src/checkpoints.js";
+import { telemetrySnapshot } from "../src/services/telemetry.js";
 
 /**
  * Mirrors the consistency rules applied to a parsed grooming report. Kept in
@@ -152,6 +153,7 @@ test("vision evaluation sends images and structured output to GPT-4o mini", asyn
   }
 
   let captured;
+  const metricsBefore = telemetrySnapshot().counters;
   process.env.OPENAI_API_KEY = "test-only-openai-key";
   process.env.OPENAI_MODEL = "gpt-4o-mini-2024-07-18";
   process.env.OPENAI_TIMEOUT_MS = "120000";
@@ -160,6 +162,12 @@ test("vision evaluation sends images and structured output to GPT-4o mini", asyn
     captured = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({
       status: "completed",
+      usage: {
+        input_tokens: 5000,
+        output_tokens: 500,
+        total_tokens: 5500,
+        input_tokens_details: { cached_tokens: 4096 },
+      },
       output: [{
         type: "message",
         role: "assistant",
@@ -184,12 +192,34 @@ test("vision evaluation sends images and structured output to GPT-4o mini", asyn
     assert.equal(captured.body.text.format.schema.additionalProperties, false);
     assert.equal(captured.body.max_output_tokens, 6000);
     assert.equal(captured.body.temperature, 0);
+    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v1:male:formal");
+    assert.equal("prompt_cache_retention" in captured.body, false);
     assert.equal(captured.body.input.length, 1);
     assert.equal(captured.body.input[0].role, "user");
     const images = captured.body.input[0].content.filter((part) => part.type === "input_image");
     assert.ok(images.length > 1, "reference images and the instructor image must be sent");
     assert.ok(images.every((part) => part.detail === "high"));
     assert.ok(images.every((part) => part.image_url.startsWith("data:image/jpeg;base64,")));
+    assert.equal(
+      images.at(-1).image_url,
+      "data:image/jpeg;base64,/9j/4A==",
+      "the changing instructor image must remain after the reusable reference images",
+    );
+    const metricsAfter = telemetrySnapshot().counters;
+    assert.equal(
+      metricsAfter.openai_input_tokens_total - (metricsBefore.openai_input_tokens_total || 0),
+      5000,
+    );
+    assert.equal(
+      metricsAfter.openai_cached_input_tokens_total
+        - (metricsBefore.openai_cached_input_tokens_total || 0),
+      4096,
+    );
+    assert.equal(
+      metricsAfter.openai_prompt_cache_hits_total
+        - (metricsBefore.openai_prompt_cache_hits_total || 0),
+      1,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries({

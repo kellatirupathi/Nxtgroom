@@ -11,6 +11,10 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+// Increment when the stable instructions, reference set contract or report
+// schema changes materially. The exact-prefix hash still prevents an invalid
+// match; the version makes the routing intent explicit in telemetry/debugging.
+const GROOMING_PROMPT_CACHE_VERSION = "v1";
 let referenceCachePromise = null;
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
@@ -109,6 +113,37 @@ function extractOpenAIText(responseBody) {
     .trim();
 }
 
+/** Records provider-reported usage without logging prompts, images or people. */
+function recordOpenAICacheUsage(responseBody, cacheRouted) {
+  const inputTokens = Number(responseBody?.usage?.input_tokens || 0);
+  const cachedTokens = Number(responseBody?.usage?.input_tokens_details?.cached_tokens || 0);
+  if (Number.isFinite(inputTokens) && inputTokens > 0) {
+    incrementMetric("openai_input_tokens_total", inputTokens);
+  }
+  if (Number.isFinite(cachedTokens) && cachedTokens > 0) {
+    incrementMetric("openai_cached_input_tokens_total", cachedTokens);
+  }
+  if (!cacheRouted) return;
+  incrementMetric("openai_prompt_cache_requests_total");
+  incrementMetric(cachedTokens > 0
+    ? "openai_prompt_cache_hits_total"
+    : "openai_prompt_cache_misses_total");
+}
+
+/**
+ * Stable, non-personal routing key for requests with the same reusable prefix.
+ * Gender and attire change both the instructions and structured-output schema,
+ * so they must not be grouped as though their prefixes were interchangeable.
+ */
+export function groomingPromptCacheKey(gender, attireType) {
+  return [
+    "grooming-evaluation",
+    GROOMING_PROMPT_CACHE_VERSION,
+    String(gender).toLowerCase(),
+    String(attireType).toLowerCase(),
+  ].join(":");
+}
+
 async function requestOpenAIStructured({
   systemInstruction,
   input,
@@ -116,6 +151,7 @@ async function requestOpenAIStructured({
   validator,
   maxOutputTokens,
   schemaName,
+  promptCacheKey,
 }) {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey) throw createOpenAIError("OPENAI_API_KEY is not configured", "OPENAI_AUTH_ERROR");
@@ -139,6 +175,10 @@ async function requestOpenAIStructured({
     },
     max_output_tokens: maxOutputTokens,
     temperature: 0,
+    // GPT-4o mini performs automatic exact-prefix caching. A stable key helps
+    // requests sharing the same instructions, references and schema reach the
+    // same cache. The changing instructor image remains at the end of input.
+    ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
   };
 
   for (let attempt = 0; attempt <= config.openaiMaxRetries; attempt += 1) {
@@ -186,6 +226,7 @@ async function requestOpenAIStructured({
       await delay(retryAfterMilliseconds(response, attempt));
       continue;
     }
+    recordOpenAICacheUsage(body, Boolean(promptCacheKey));
     if (body.status !== "completed") {
       throw createOpenAIError(
         `OpenAI did not complete the evaluation (status: ${body.status || "unknown"})`,
@@ -495,6 +536,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     validator: buildReportSchema(sections),
     maxOutputTokens: 6000,
     schemaName: "grooming_evaluation",
+    promptCacheKey: groomingPromptCacheKey(normalizedGender, attireType),
   });
 
   // Nothing to tabulate when the photograph does not show the person. The
