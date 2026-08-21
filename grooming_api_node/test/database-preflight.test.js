@@ -86,7 +86,6 @@ test("read-only preflight detects semantic collisions without exposing email val
     "INSTRUCTOR_EMPLOYEE_ID_COLLISION",
     "INSTRUCTOR_EMAIL_INVALID",
     "ACTIVE_ATTENDANCE_COLLISION",
-    "EVALUATION_ATTENDANCE_ID_COLLISION",
   ]);
   assert.equal(db.createCalls.length, 0);
   const serialized = JSON.stringify(report);

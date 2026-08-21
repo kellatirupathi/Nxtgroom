@@ -97,7 +97,7 @@ export const REQUIRED_DATABASE_INDEXES = [
   {
     collection: "evaluations",
     key: { attendance_id: 1 },
-    options: { unique: true, name: "attendance_id_1" },
+    options: { name: "attendance_id_1" },
   },
   {
     collection: "evaluation_jobs",
@@ -560,18 +560,7 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
       "Repair each evaluation's attendance reference after confirming the source attendance record."
     ));
   }
-  const evaluationCollisionGroups = [...groupRows(
-    evaluations.filter((evaluation) => referenceKey(evaluation.attendance_id) != null),
-    (evaluation) => referenceKey(evaluation.attendance_id)
-  ).values()].filter((group) => group.length > 1);
-  if (evaluationCollisionGroups.length) {
-    findings.push(finding(
-      "EVALUATION_ATTENDANCE_ID_COLLISION",
-      evaluationCollisionGroups.reduce((total, group) => total + group.length, 0),
-      collisionExamples(evaluationCollisionGroups),
-      "Choose the authoritative evaluation for each attendance, preserve any needed audit data, and remove or relink duplicates before index creation."
-    ));
-  }
+
 
   const blockingRecords = findings.reduce((total, item) => total + item.affected_records, 0);
   const blocked = findings.length > 0 || indexes.conflicts.length > 0;

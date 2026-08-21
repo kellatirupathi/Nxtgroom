@@ -44,9 +44,10 @@ app.use((req, res, next) => {
 app.use(helmet());
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || config.origins.includes(origin.replace(/\/$/, ""))) {
+    if (!origin || !isProduction() || config.origins.includes(origin.replace(/\/$/, ""))) {
       return callback(null, true);
     }
+    console.error(`CORS Blocked: ${origin}`);
     const error = new Error("Origin is not allowed by CORS");
     error.statusCode = 403;
     return callback(error);

@@ -195,6 +195,41 @@ function renderSection(key, items) {
   return `## ${SECTION_TITLES[key]}\nReturn these ${items.length} checkpoints in "${key}", in this order:\n${lines.join("\n")}`;
 }
 
+const VISUAL_REFERENCE_GUIDE = `
+### VISUAL REFERENCE GUIDE (DOs and DON'Ts)
+You must strictly apply the following visual boundaries when evaluating instructors. These replace visual examples, so interpret these boundaries literally.
+
+#### 1. HAIR & BEARD (MEN)
+- **DO (Hair):** Short, neatly trimmed, combed, and professional. Hair must NOT touch the shirt collar or ears. 
+- **DON'T (Hair):** Spikes, unnatural colors (e.g., bright red, blue), excessively long hair covering the forehead, uncombed/messy hair.
+- **DO (Beard):** Must be a clean shave, OR a uniformly trimmed short beard (stubble or corporate beard).
+- **DON'T (Beard):** Patchy, uneven, wild, or untrimmed beards. A beard that extends wildly from the face without a clear boundary is UNKEMPT. Handlebar mustaches or excessive goatees are violations.
+
+#### 2. HAIR (WOMEN)
+- **DO:** Neat, controlled, and professional. Hair tied back (ponytail, bun, or braid) is always compliant.
+- **DON'T:** Hair falling across the face, eyes, or forehead. If hair is worn loose, it must be neatly styled behind the shoulders. Frizzy, uncombed, or wildly unkempt hair is a violation.
+
+#### 3. FORMAL ATTIRE (MEN & WOMEN)
+- **DO:** Solid colors or subtle, faint stripes. Shirts MUST have collars. Buttons must be fastened (except the top collar button). Trousers must be formal dress pants in neutral or solid colors (black, navy, grey, beige).
+- **DON'T:** No t-shirts, no polo shirts. No jeans, no denim, no cargo pants, no track pants. No visible chest hair. No massive brand logos printed across the chest (a small chest pocket logo under 1.5 inches is acceptable).
+
+#### 4. KURTI & DUPATTA (WOMEN)
+- **DO:** Kurti must have 3/4 sleeves or full sleeves. A Dupatta must be worn properly draped over the shoulder(s) across the chest. The fabric must be opaque.
+- **DON'T:** No short sleeves, half sleeves, cap sleeves, or sleeveless kurtis. If the sleeves end above the elbow, it is a FAIL. No sheer or see-through fabric. A dupatta bunched up like a scarf or carried in the hand is a FAIL.
+
+#### 5. SAREE (WOMEN)
+- **DO:** Neatly draped, opaque fabric, professional blouse.
+- **DON'T:** No sleeveless blouses. No plunging necklines or excessively deep backs. The drape must be pinned and controlled, not trailing or falling off.
+
+#### 6. FOOTWEAR
+- **DO:** Formal leather shoes, oxfords, derbies, or formal loafers for men. Professional closed flats, formal sandals, or modest heels for women.
+- **DON'T:** No sneakers, no sports shoes, no running shoes (even if they are black). No flip-flops, no casual slippers, no Crocs. If laces are neon or sporty, it is a FAIL.
+
+#### 7. ACCESSORIES
+- **DO:** Simple watches, a single simple ring, standard cultural wear (mangalsutra, bindi). Small stud earrings or hoops for women (under 2 cm).
+- **DON'T:** Heavy, flashy, multi-colored, or dangling jewelry. Huge chandelier earrings are a FAIL. Caps, hats, and sunglasses worn indoors are strict violations.
+`.trim();
+
 /**
  * The full system prompt for one instructor.
  *
@@ -213,6 +248,7 @@ export function buildSystemPrompt(gender, attireType) {
   return [
     COMMON_ANALYSIS_RULES,
     genderRules,
+    VISUAL_REFERENCE_GUIDE,
     `### CHECKPOINTS
 Return every checkpoint listed below and no others: ${total} in total, each
 exactly once, in the order given, in the section named. Copy each code and
