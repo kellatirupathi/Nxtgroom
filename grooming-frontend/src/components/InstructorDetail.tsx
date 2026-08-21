@@ -10,6 +10,11 @@ import { formatAttendanceDate, formatAttendanceTime } from '../attendanceFilters
 import GroomingReport from './GroomingReport';
 import LocationPanel from './LocationPanel';
 import type { AttendanceRecord, Evaluation } from '../types';
+import {
+  aiRemarksForHalf,
+  evaluationForHalf,
+  type EvaluationSnapshot,
+} from '../reportSelection';
 
 interface InstructorDetailProps {
   record: AttendanceRecord | null;
@@ -39,7 +44,7 @@ function StatusBadge({ status }: { status?: string }) {
 
 export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, onDeleted }: InstructorDetailProps) {
   const [freshRecord, setFreshRecord] = useState<AttendanceRecord | null>(record);
-  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
+  const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationSnapshot | null>(null);
   const [loading, setLoading] = useState(Boolean(record));
   const [error, setError] = useState('');
   const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
@@ -54,6 +59,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const [queuedNow, setQueuedNow] = useState(false);
   const toast = useToast();
   const displayRecord = freshRecord || record;
+  const attendanceId = record ? String(record._id) : null;
+  // Never expose one half's report while the other half is loading. The
+  // snapshot remains cached, but it is readable only for the record and tab
+  // that produced it.
+  const evaluation = evaluationForHalf(evaluationSnapshot, attendanceId, tab);
 
   useEffect(() => {
     setFreshRecord(record);
@@ -86,7 +96,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         const updated = await apiFetch<Evaluation>(
           `/api/v2/attendance/${encodeURIComponent(String(record._id))}/evaluation?kind=checkout`,
         );
-        setEvaluation(updated || null);
+        setEvaluationSnapshot({
+          attendanceId: String(record._id),
+          half: 'checkout',
+          evaluation: updated || null,
+        });
         setQueuedNow(false);
         toast.success('Analysis completed', { detail: 'The checkout report has been updated.' });
       } else {
@@ -160,7 +174,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
       // every three seconds.
       if (showSpinner) {
         setLoading(true);
-        setEvaluation(null);
+        setEvaluationSnapshot({
+          attendanceId: String(record._id),
+          half: tab,
+          evaluation: null,
+        });
       }
       setError('');
       try {
@@ -173,7 +191,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         // is fetched rather than both halves sharing one.
         const query = tab === 'checkout' ? '?kind=checkout' : '';
         const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation${query}`, { signal: controller.signal });
-        setEvaluation(data);
+        setEvaluationSnapshot({
+          attendanceId: String(record._id),
+          half: tab,
+          evaluation: data,
+        });
         if (data) setQueuedNow(false);
       } catch (requestError) {
         if (controller.signal.aborted) return;
@@ -184,7 +206,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         // check-out that simply had no photo. Treated as empty either way, so
         // the page explains itself rather than repeating the server.
         if (status === 404) {
-          setEvaluation(null);
+          setEvaluationSnapshot({
+            attendanceId: String(record._id),
+            half: tab,
+            evaluation: null,
+          });
           return;
         }
         if (status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -376,9 +402,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">AI Remarks Summary</h4>
             <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">
-              {(tab === 'checkout'
-                ? (evaluation?.ai_summary || displayRecord?.checkout_remarks)
-                : (evaluation?.ai_summary || displayRecord?.remarks)) || 'No remarks available.'}
+              {aiRemarksForHalf(tab, displayRecord, evaluation) || 'No remarks available.'}
             </p>
             <p className="mt-3 text-xs text-slate-400">AI output is assistive and should be reviewed by an authorized person before adverse action.</p>
           </div>
