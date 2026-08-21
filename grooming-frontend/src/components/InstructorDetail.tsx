@@ -12,9 +12,65 @@ import LocationPanel from './LocationPanel';
 import type { AttendanceRecord, Evaluation } from '../types';
 import {
   aiRemarksForHalf,
+  beginReportLoad,
   evaluationForHalf,
-  type EvaluationSnapshot,
+  reportPanelStateForHalf,
+  type ReportHalf,
+  type ReportPanelStates,
 } from '../reportSelection';
+
+interface ReportStatusPayload {
+  attendance_id: string;
+  status: string;
+  compliance_status: string | null;
+  remarks: string | null;
+  queue_status: string | null;
+  settled: boolean;
+}
+
+function reportQuery(half: ReportHalf): string {
+  return half === 'checkout' ? '?kind=checkout' : '';
+}
+
+async function fetchStoredEvaluation(
+  attendanceId: string,
+  half: ReportHalf,
+  signal: AbortSignal,
+): Promise<Evaluation | null> {
+  try {
+    return await apiFetch<Evaluation | null>(
+      `/api/v2/attendance/${encodeURIComponent(attendanceId)}/evaluation${reportQuery(half)}`,
+      { signal },
+    );
+  } catch (requestError) {
+    // Older API deployments returned 404 while an evaluation was absent.
+    if ((requestError as { status?: number })?.status === 404) return null;
+    throw requestError;
+  }
+}
+
+function applyReportStatus(
+  record: AttendanceRecord | null,
+  attendanceId: string,
+  half: ReportHalf,
+  status: ReportStatusPayload,
+): AttendanceRecord | null {
+  if (!record || String(record._id) !== attendanceId) return record;
+  if (half === 'checkout') {
+    return {
+      ...record,
+      checkout_compliance_status: status.compliance_status || status.status,
+      checkout_remarks: status.remarks,
+      checkout_evaluation_queue_status: status.queue_status,
+    };
+  }
+  return {
+    ...record,
+    status: status.status,
+    remarks: status.remarks,
+    evaluation_queue_status: status.queue_status,
+  };
+}
 
 interface InstructorDetailProps {
   record: AttendanceRecord | null;
@@ -44,9 +100,7 @@ function StatusBadge({ status }: { status?: string }) {
 
 export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, onDeleted }: InstructorDetailProps) {
   const [freshRecord, setFreshRecord] = useState<AttendanceRecord | null>(record);
-  const [evaluationSnapshot, setEvaluationSnapshot] = useState<EvaluationSnapshot | null>(null);
-  const [loading, setLoading] = useState(Boolean(record));
-  const [error, setError] = useState('');
+  const [reportStates, setReportStates] = useState<ReportPanelStates>({});
   const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
   // Check-in opens first: it is the half that carries the appearance report,
   // and on most records the only half that has happened yet.
@@ -56,14 +110,16 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const [confirmDelete, setConfirmDelete] = useState<'record' | 'checkout' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reanalysing, setReanalysing] = useState(false);
-  const [queuedNow, setQueuedNow] = useState(false);
+  const [queuedHalf, setQueuedHalf] = useState<ReportHalf | null>(null);
   const toast = useToast();
   const displayRecord = freshRecord || record;
   const attendanceId = record ? String(record._id) : null;
-  // Never expose one half's report while the other half is loading. The
-  // snapshot remains cached, but it is readable only for the record and tab
-  // that produced it.
-  const evaluation = evaluationForHalf(evaluationSnapshot, attendanceId, tab);
+  // Each half keeps its own snapshot. A snapshot belonging to another record
+  // is ignored, so navigating between records can never leak stale details.
+  const reportState = reportPanelStateForHalf(reportStates, attendanceId, tab);
+  const evaluation = evaluationForHalf(reportState, attendanceId, tab);
+  const loading = !reportState || reportState.loading;
+  const error = reportState?.error || '';
 
   useEffect(() => {
     setFreshRecord(record);
@@ -79,7 +135,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   // up, which is the least useful thing it could say.
   const analysisFailed = queueStatus === 'failed';
   const analysisRunning = !analysisFailed && !evaluation
-    && (queuedNow || queueStatus === 'queued' || queueStatus === 'processing');
+    && (queuedHalf === tab
+      || reportState?.settled === false
+      || queueStatus === 'queued'
+      || queueStatus === 'processing');
+  const shouldPoll = queuedHalf === tab || reportState?.settled === false;
   // Only worth offering when the photograph it would read is still there.
   const canReanalyse = Boolean(tab === 'checkout' ? displayRecord?.check_out_photo_key : displayRecord?.check_in_photo_key);
 
@@ -87,7 +147,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     if (!record) return;
     setReanalysing(true);
     try {
-      const query = tab === 'checkout' ? '?kind=checkout' : '';
+      const query = reportQuery(tab);
       await apiJson(
         `/api/v2/attendance/${encodeURIComponent(String(record._id))}/reanalyse${query}`,
         { method: 'POST', timeoutMs: tab === 'checkout' ? 150_000 : undefined },
@@ -96,17 +156,23 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         const updated = await apiFetch<Evaluation>(
           `/api/v2/attendance/${encodeURIComponent(String(record._id))}/evaluation?kind=checkout`,
         );
-        setEvaluationSnapshot({
-          attendanceId: String(record._id),
-          half: 'checkout',
-          evaluation: updated || null,
-        });
-        setQueuedNow(false);
+        setReportStates((current) => ({
+          ...current,
+          checkout: {
+            attendanceId: String(record._id),
+            half: 'checkout',
+            evaluation: updated || null,
+            loading: false,
+            error: '',
+            settled: true,
+          },
+        }));
+        setQueuedHalf(null);
         toast.success('Analysis completed', { detail: 'The checkout report has been updated.' });
       } else {
         toast.success('Analysis queued', { detail: 'The report appears here once it finishes.' });
         // Shows the spinner immediately rather than waiting for the next poll.
-        setQueuedNow(true);
+        setQueuedHalf('checkin');
       }
     } catch (error) {
       toast.error(tab === 'checkout' ? 'Could not complete the analysis' : 'Could not queue the analysis', {
@@ -166,70 +232,130 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     }
   };
 
+  // Load only when the attendance id or selected half actually changes. A
+  // replacement record object from a parent refresh must not restart this
+  // request or clear a report that has already rendered.
   useEffect(() => {
-    if (!record) return undefined;
+    if (!attendanceId) return undefined;
     const controller = new AbortController();
-    const fetchEvaluation = async (showSpinner = true) => {
-      // A poll must not blank the report it already has, or the panel flickers
-      // every three seconds.
-      if (showSpinner) {
-        setLoading(true);
-        setEvaluationSnapshot({
-          attendanceId: String(record._id),
-          half: tab,
-          evaluation: null,
-        });
-      }
-      setError('');
+    setReportStates((current) => beginReportLoad(current, attendanceId, tab));
+
+    const load = async () => {
       try {
-        const latestRecord = await apiFetch<AttendanceRecord>(
-          `/api/v2/attendance/${encodeURIComponent(record._id)}`,
-          { signal: controller.signal },
-        );
-        if (!controller.signal.aborted) setFreshRecord(latestRecord);
-        // Each half is assessed separately, so the tab decides which report
-        // is fetched rather than both halves sharing one.
-        const query = tab === 'checkout' ? '?kind=checkout' : '';
-        const data = await apiFetch<Evaluation>(`/api/v2/attendance/${encodeURIComponent(record._id)}/evaluation${query}`, { signal: controller.signal });
-        setEvaluationSnapshot({
-          attendanceId: String(record._id),
-          half: tab,
-          evaluation: data,
-        });
-        if (data) setQueuedNow(false);
+        const [status, storedEvaluation] = await Promise.all([
+          apiFetch<ReportStatusPayload>(
+            `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status${reportQuery(tab)}`,
+            { signal: controller.signal },
+          ),
+          fetchStoredEvaluation(attendanceId, tab, controller.signal),
+        ]);
+        if (controller.signal.aborted) return;
+        setFreshRecord((current) => applyReportStatus(current, attendanceId, tab, status));
+        setReportStates((current) => ({
+          ...current,
+          [tab]: {
+            attendanceId,
+            half: tab,
+            evaluation: storedEvaluation,
+            loading: false,
+            error: '',
+            settled: status.settled,
+          },
+        }));
+        if (status.settled) {
+          setQueuedHalf((current) => (current === tab ? null : current));
+        }
       } catch (requestError) {
         if (controller.signal.aborted) return;
         const status = (requestError as { status?: number })?.status;
-        // A missing evaluation is not an error. The endpoint answers 204 now,
-        // but an older one replies 404 with a message, and surfacing that
-        // painted "Evaluation is still pending or unavailable" in red for a
-        // check-out that simply had no photo. Treated as empty either way, so
-        // the page explains itself rather than repeating the server.
-        if (status === 404) {
-          setEvaluationSnapshot({
-            attendanceId: String(record._id),
-            half: tab,
-            evaluation: null,
-          });
-          return;
-        }
-        if (status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (status === 401) return;
+        setReportStates((current) => {
+          const cached = reportPanelStateForHalf(current, attendanceId, tab);
+          // A failed background refresh is not allowed to replace a report
+          // the user can already read with a transient error panel.
+          if (cached && !cached.loading) return current;
+          return {
+            ...current,
+            [tab]: {
+              attendanceId,
+              half: tab,
+              evaluation: null,
+              loading: false,
+              error: requestError instanceof Error ? requestError.message : String(requestError),
+              settled: null,
+            },
+          };
+        });
       }
     };
-    fetchEvaluation();
-    // Keep looking while a job is outstanding, so the spinner resolves into
-    // the report instead of sitting there until the page is reloaded. The
-    // endpoint answers 204 until there is something to show.
-    const poll = analysisRunning
-      ? window.setInterval(() => { if (!controller.signal.aborted) void fetchEvaluation(false); }, 3000)
-      : undefined;
+
+    void load();
+    return () => controller.abort();
+  }, [attendanceId, tab]);
+
+  // Once the initial request says analysis is outstanding, poll only the
+  // lightweight status endpoint. The full evaluation is fetched exactly once
+  // after the job settles, and polling never touches the visible loader.
+  useEffect(() => {
+    if (!attendanceId || !shouldPoll) return undefined;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof window.setTimeout> | undefined;
+
+    const poll = async () => {
+      try {
+        const status = await apiFetch<ReportStatusPayload>(
+          `/api/v2/attendance/${encodeURIComponent(attendanceId)}/status${reportQuery(tab)}`,
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setFreshRecord((current) => applyReportStatus(current, attendanceId, tab, status));
+
+        if (status.settled) {
+          const storedEvaluation = await fetchStoredEvaluation(attendanceId, tab, controller.signal);
+          if (controller.signal.aborted) return;
+          setReportStates((current) => ({
+            ...current,
+            [tab]: {
+              attendanceId,
+              half: tab,
+              evaluation: storedEvaluation,
+              loading: false,
+              error: '',
+              settled: true,
+            },
+          }));
+          setQueuedHalf((current) => (current === tab ? null : current));
+          return;
+        }
+
+        setReportStates((current) => {
+          const existing = reportPanelStateForHalf(current, attendanceId, tab);
+          return {
+            ...current,
+            [tab]: {
+              attendanceId,
+              half: tab,
+              evaluation: existing?.evaluation || null,
+              loading: false,
+              error: '',
+              settled: false,
+            },
+          };
+        });
+      } catch {
+        // A transient polling failure should neither blank the report nor stop
+        // later attempts. Authentication expiry is handled centrally.
+      }
+
+      if (!controller.signal.aborted) timer = window.setTimeout(poll, 3000);
+    };
+
+    timer = window.setTimeout(poll, 3000);
     return () => {
       controller.abort();
-      if (poll) window.clearInterval(poll);
+      if (timer) window.clearTimeout(timer);
     };
-  }, [record, tab, analysisRunning]);
+  }, [attendanceId, shouldPoll, tab]);
 
   if (!record) {
     return (

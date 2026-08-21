@@ -13,6 +13,53 @@ export interface EvaluationSnapshot {
   evaluation: Evaluation | null;
 }
 
+/**
+ * One report panel's request state. Keeping one entry per half lets a user
+ * switch back to a report that has already rendered without replacing it with
+ * another full-screen loading state while the live copy is revalidated.
+ */
+export interface ReportPanelState extends EvaluationSnapshot {
+  loading: boolean;
+  error: string;
+  settled: boolean | null;
+}
+
+export type ReportPanelStates = Partial<Record<ReportHalf, ReportPanelState>>;
+
+export function reportPanelStateForHalf(
+  states: ReportPanelStates,
+  attendanceId: string | null,
+  half: ReportHalf,
+): ReportPanelState | null {
+  if (!attendanceId) return null;
+  const state = states[half];
+  return state?.attendanceId === attendanceId && state.half === half ? state : null;
+}
+
+/**
+ * Marks a genuinely new record/half as loading. A matching cached panel is
+ * deliberately returned unchanged so a background revalidation cannot blank
+ * a report that is already on screen.
+ */
+export function beginReportLoad(
+  states: ReportPanelStates,
+  attendanceId: string,
+  half: ReportHalf,
+): ReportPanelStates {
+  if (reportPanelStateForHalf(states, attendanceId, half)) return states;
+  return {
+    ...states,
+    [half]: {
+      attendanceId,
+      half,
+      evaluation: null,
+      loading: true,
+      error: '',
+      settled: null,
+    },
+  };
+}
+
 export function evaluationForHalf(
   snapshot: EvaluationSnapshot | null,
   attendanceId: string | null,

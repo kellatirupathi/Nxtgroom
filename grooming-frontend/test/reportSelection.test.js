@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiRemarksForHalf, evaluationForHalf } from '../src/reportSelection.ts';
+import {
+  aiRemarksForHalf,
+  beginReportLoad,
+  evaluationForHalf,
+  reportPanelStateForHalf,
+} from '../src/reportSelection.ts';
 
 const record = {
   _id: 'attendance-1',
@@ -36,4 +41,33 @@ test('an evaluation from another attendance record is not displayed', () => {
   };
 
   assert.equal(evaluationForHalf(snapshot, 'attendance-1', 'checkout'), null);
+});
+
+test('background revalidation preserves an already rendered report', () => {
+  const states = {
+    checkin: {
+      attendanceId: 'attendance-1',
+      half: 'checkin',
+      evaluation: { ai_summary: 'Rendered report' },
+      loading: false,
+      error: '',
+      settled: true,
+    },
+  };
+
+  const next = beginReportLoad(states, 'attendance-1', 'checkin');
+
+  assert.equal(next, states);
+  assert.equal(
+    reportPanelStateForHalf(next, 'attendance-1', 'checkin')?.evaluation?.ai_summary,
+    'Rendered report',
+  );
+});
+
+test('each report half keeps its own cached loading and evaluation state', () => {
+  const checkinStates = beginReportLoad({}, 'attendance-1', 'checkin');
+  const bothStates = beginReportLoad(checkinStates, 'attendance-1', 'checkout');
+
+  assert.equal(reportPanelStateForHalf(bothStates, 'attendance-1', 'checkin')?.loading, true);
+  assert.equal(reportPanelStateForHalf(bothStates, 'attendance-1', 'checkout')?.loading, true);
 });
