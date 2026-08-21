@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { runtimeConfig } from "../config/env.js";
+import { appUrl, runtimeConfig } from "../config/env.js";
 import {
   sendAttendanceReminderEmail,
   sendGroomingAlertEmail,
@@ -15,6 +15,33 @@ const SUPPORTED_TYPES = new Set([
   "attendance_reminder",
   "grooming_alert",
 ]);
+
+/**
+ * Mail jobs are durable and can be delivered after APP_URL changes. Replace
+ * only the origin of an existing report link, retaining its token, date and
+ * report half, so no queued check-in/check-out email can leak a development
+ * localhost origin into production.
+ */
+export function canonicalReportUrl(reportUrl) {
+  if (!reportUrl) return reportUrl;
+  const canonicalOrigin = appUrl();
+  if (!canonicalOrigin) return reportUrl;
+  try {
+    const parsed = new URL(reportUrl, `${canonicalOrigin}/`);
+    if (!parsed.pathname.startsWith("/reports/")) return reportUrl;
+    return `${canonicalOrigin}${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return reportUrl;
+  }
+}
+
+function deliveryPayload(job) {
+  if (!job.payload?.reportUrl) return job.payload;
+  return {
+    ...job.payload,
+    reportUrl: canonicalReportUrl(job.payload.reportUrl),
+  };
+}
 
 export async function enqueueMailJob(db, { id, type, toEmail, payload, attendanceId = null, runId = null }) {
   if (!SUPPORTED_TYPES.has(type)) throw new Error(`Unsupported mail job type: ${type}`);
@@ -68,8 +95,8 @@ async function claimMail(db) {
 
 async function deliver(job) {
   if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, job.payload);
-  if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, job.payload);
-  if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, job.payload);
+  if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, deliveryPayload(job));
+  if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, deliveryPayload(job));
   return sendAttendanceReminderEmail(job.to_email, job.payload);
 }
 

@@ -17,6 +17,7 @@ import {
   reconcileExpiredNotificationJobs,
   reconcileOverdueNotificationJobs,
 } from "../src/services/notificationWorker.js";
+import { canonicalReportUrl } from "../src/services/mailWorker.js";
 import {
   checkInConcurrencyGate,
   serializeAttendance,
@@ -463,6 +464,58 @@ test("cross-midnight notification links remain on the check-in session day", asy
   });
   assert.match(checkin.report.reportUrl, /\/day\/2026-08-20\/check-in$/);
   assert.match(checkout.report.reportUrl, /\/day\/2026-08-20\/check-out$/);
+});
+
+test("notification retries replace persisted localhost report URLs", async () => {
+  const originalAppUrl = process.env.APP_URL;
+  const originalCorsOrigins = process.env.CORS_ORIGINS;
+  process.env.APP_URL = "https://facultytrack.example.com";
+  process.env.CORS_ORIGINS = "https://facultytrack.example.com,https://localhost";
+  try {
+    const attendance = {
+      _id: "attendance-stale-url",
+      instructor_id: "instructor-stale-url",
+      check_in_time: new Date("2026-08-21T03:30:00.000Z"),
+      check_out_time: new Date("2026-08-21T11:30:00.000Z"),
+      checkout_compliance_status: "COMPLIANT",
+    };
+    const db = fakeDb({
+      attendance: { findOne: async () => attendance },
+      instructors: {
+        findOne: async () => ({
+          _id: attendance.instructor_id,
+          report_token: "stale-url-token",
+        }),
+      },
+    });
+    const checkin = await prepareCheckinReport(db, {
+      attendance_id: attendance._id,
+      type: "checkin",
+      report: { reportUrl: "http://localhost:5173/reports/old/day/2026-08-21/check-in" },
+    });
+    const checkout = await prepareCheckoutReport(db, {
+      attendance_id: attendance._id,
+      type: "checkout",
+      report: { reportUrl: "http://localhost:5173/reports/old/day/2026-08-21/check-out" },
+    });
+    assert.equal(
+      checkin.report.reportUrl,
+      "https://facultytrack.example.com/reports/stale-url-token/day/2026-08-21/check-in"
+    );
+    assert.equal(
+      checkout.report.reportUrl,
+      "https://facultytrack.example.com/reports/stale-url-token/day/2026-08-21/check-out"
+    );
+    assert.equal(
+      canonicalReportUrl("http://localhost:5173/reports/stale-url-token/day/2026-08-21/check-in"),
+      "https://facultytrack.example.com/reports/stale-url-token/day/2026-08-21/check-in"
+    );
+  } finally {
+    if (originalAppUrl === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = originalAppUrl;
+    if (originalCorsOrigins === undefined) delete process.env.CORS_ORIGINS;
+    else process.env.CORS_ORIGINS = originalCorsOrigins;
+  }
 });
 
 test("expired final notification attempts become delivery_unknown and clear PII", async () => {

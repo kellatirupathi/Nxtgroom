@@ -297,8 +297,11 @@ export async function prepareCheckinReport(db, job) {
     error.name = "ATTENDANCE_NOT_FOUND";
     throw error;
   }
-  const reportUrl = job.report?.reportUrl
-    || await reportUrlForAttendance(db, attendance, "checkin");
+  // Always rebuild the URL at delivery time. Jobs can survive deployments and
+  // may contain the localhost APP_URL that was active when they were queued.
+  // Keeping that persisted value would send a recipient to their own machine
+  // even after production has been configured with the public frontend URL.
+  const reportUrl = await reportUrlForAttendance(db, attendance, "checkin");
   return { ...job, report: { ...job.report, reportUrl } };
 }
 
@@ -325,8 +328,9 @@ export async function prepareCheckoutReport(db, job) {
     await deferCheckoutNotification(db, job);
     return null;
   }
-  const reportUrl = job.report?.reportUrl
-    || await reportUrlForAttendance(db, attendance, "checkout");
+  // See prepareCheckinReport: retries must use today's canonical production
+  // origin, not an origin captured in a previously persisted job payload.
+  const reportUrl = await reportUrlForAttendance(db, attendance, "checkout");
 
   return {
     ...job,
