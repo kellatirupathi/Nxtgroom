@@ -364,7 +364,9 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">AI Remarks Summary</h4>
-            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">{record.remarks || 'No remarks available.'}</p>
+            <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">
+              {tab === 'checkout' ? (record.checkout_remarks || 'No remarks available.') : (record.remarks || 'No remarks available.')}
+            </p>
             <p className="mt-3 text-xs text-slate-400">AI output is assistive and should be reviewed by an authorized person before adverse action.</p>
           </div>
         </div>
