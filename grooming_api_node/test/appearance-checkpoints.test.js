@@ -302,6 +302,25 @@ test("a photograph with nobody in it is not a compliant check-in", async () => {
   assert.deepEqual(improvementTips(evaluation), []);
 });
 
+test("the text-only prompt contains the standards formerly conveyed by reference images", () => {
+  const male = buildSystemPrompt("MALE", "FORMAL");
+  const saree = buildSystemPrompt("FEMALE", "SAREE");
+  const kurti = buildSystemPrompt("FEMALE", "KURTI_WITH_DUPATTA");
+
+  for (const prompt of [male, saree, kurti]) {
+    assert.match(prompt, /There are no reference images/i);
+    assert.doesNotMatch(prompt, /official NxtWave visual manual/i);
+  }
+  for (const rule of [/plain solid professional colour/i, /light stubble/i, /rugged biker boots/i, /novelty.*ties/i]) {
+    assert.match(male, rule);
+  }
+  for (const rule of [/colourful.*scrunchies/i, /glittery.*decorated nail/i, /oversized.*layered jewellery/i]) {
+    assert.match(saree, rule);
+  }
+  assert.match(saree, /Plain, solid or subtle designs/i);
+  assert.match(kurti, /crop top.*one-piece dress/i);
+});
+
 test("an unassessed result counts as neither compliant nor a violation", () => {
   // The mapping the worker applies. Left out of both counts rather than
   // pushed into one of them.

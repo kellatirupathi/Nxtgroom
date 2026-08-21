@@ -99,30 +99,7 @@ test("partial visibility is judged on what was actually assessed", () => {
   assert.equal(reconcile(report).overall_status, "COMPLIANT");
 });
 
-test("the reference set is whatever is on disk, not a fixed count", async () => {
-  const { verifyVisionAssets } = await import("../src/services/visionEngine.js");
-  // This asserted exactly eight images. Removing one that no longer had a
-  // checkpoint — spectacles, once eyewear was dropped — crash-looped the API
-  // on boot instead of sending one picture fewer.
-  await assert.doesNotReject(() => verifyVisionAssets());
-
-  const { readdir } = await import("node:fs/promises");
-  const dir = new URL("../reference_images/", import.meta.url);
-  const images = (await readdir(dir)).filter((name) => name.toLowerCase().endsWith(".jpg"));
-  assert.ok(images.length > 0, "the model needs something to compare against");
-
-  // Filtering is by filename prefix, so a rename is what silently sends a
-  // woman men's references. Every image must still start with a known prefix.
-  const prefixes = ["accessories", "beard", "footwear", "hair", "id_card", "men", "women", "spectacles"];
-  for (const name of images) {
-    assert.ok(
-      prefixes.some((prefix) => name.toLowerCase().startsWith(prefix)),
-      `${name} starts with no prefix the gender filter recognises`
-    );
-  }
-});
-
-test("vision evaluation sends images and structured output to GPT-4o mini", async () => {
+test("vision evaluation sends only the instructor image and structured output to GPT-4o mini", async () => {
   const originalFetch = globalThis.fetch;
   const originalOpenAI = {
     apiKey: process.env.OPENAI_API_KEY,
@@ -192,19 +169,25 @@ test("vision evaluation sends images and structured output to GPT-4o mini", asyn
     assert.equal(captured.body.text.format.schema.additionalProperties, false);
     assert.equal(captured.body.max_output_tokens, 6000);
     assert.equal(captured.body.temperature, 0);
-    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v1:male:formal");
+    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v2:male:formal");
     assert.equal("prompt_cache_retention" in captured.body, false);
     assert.equal(captured.body.input.length, 1);
     assert.equal(captured.body.input[0].role, "user");
     const images = captured.body.input[0].content.filter((part) => part.type === "input_image");
-    assert.ok(images.length > 1, "reference images and the instructor image must be sent");
+    assert.equal(images.length, 1, "only the changing instructor image must be sent");
     assert.ok(images.every((part) => part.detail === "high"));
     assert.ok(images.every((part) => part.image_url.startsWith("data:image/jpeg;base64,")));
     assert.equal(
-      images.at(-1).image_url,
+      images[0].image_url,
       "data:image/jpeg;base64,/9j/4A==",
-      "the changing instructor image must remain after the reusable reference images",
+      "the single image must be the instructor photograph",
     );
+    const inputText = captured.body.input[0].content
+      .filter((part) => part.type === "input_text")
+      .map((part) => part.text)
+      .join(" ");
+    assert.match(inputText, /written NxtWave Grooming Standard/i);
+    assert.doesNotMatch(inputText, /reference image/i);
     const metricsAfter = telemetrySnapshot().counters;
     assert.equal(
       metricsAfter.openai_input_tokens_total - (metricsBefore.openai_input_tokens_total || 0),

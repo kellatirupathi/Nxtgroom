@@ -39,28 +39,28 @@ export const ID_CARD_CHECKS = [
  * is not judged at all.
  */
 export const MEN_GROOMING_CHECKS = [
-  { code: "M_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is combed and looks deliberately maintained. FAIL clearly messy, uncombed, dishevelled or uncontrolled hair. Do not judge hair colour." },
+  { code: "M_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, combed, controlled and deliberately maintained. Classic side parts, tapers, short back-and-sides and crew cuts are acceptable. FAIL clearly messy, uncombed, dishevelled, shaggy, uncontrolled or visibly over-spiked hair. Do not judge hair colour or infer whether hair products were used." },
   { code: "M_HAIR_POSITION", name: "Hair Position / Away From Face", rule: "Hair is kept back and away from the face. FAIL when strands clearly fall across the forehead, eyes or face. Hair should stay behind or away from the face throughout a session." },
   { code: "M_HAIR_LENGTH", name: "Hair Length", rule: "Hair does not extend past the shirt collar." },
-  { code: "M_FACIAL_HAIR", name: "Facial Hair", rule: "Either cleanly shaven, or a beard that is trimmed and shaped with defined edges. FAIL a messy, overgrown or unshaped beard, and FAIL a neck beard where clearly visible. Judge all of this together rather than as separate rows." },
+  { code: "M_FACIAL_HAIR", name: "Facial Hair", rule: "A clean shave, maintained light stubble, a short trimmed beard, or a defined shaped beard all pass. Beard growth must look even, combed and tidy at the cheeks and neckline. FAIL a messy, overgrown, uneven or unshaped beard, and FAIL a neck beard where clearly visible. Judge all of this together rather than as separate rows." },
   { code: "M_MOUSTACHE", name: "Moustache", rule: "Neatly maintained and trimmed clear of the lip line. FAIL a clearly excessive or untidy moustache." },
 ];
 
 export const MEN_ATTIRE_CHECKS = [
-  { code: "M_ATTIRE_TYPE", name: "Attire Type", rule: "Classifies the overall visible combination. A formal full-sleeve shirt with formal trousers is expected." },
-  { code: "M_SHIRT_TYPE", name: "Shirt Type", rule: "A formal collared FULL-SLEEVE shirt is required. FAIL a t-shirt, a polo shirt, a casual shirt, and FAIL a half-sleeve or short-sleeve shirt of any kind. Sleeve length is part of this checkpoint: say explicitly when sleeves are short." },
+  { code: "M_ATTIRE_TYPE", name: "Attire Type", rule: "Classifies the overall visible combination. A formal full-sleeve shirt with formal trousers is expected. A well-fitted solid navy, grey or black formal blazer is acceptable over that combination. FAIL t-shirts, polo shirts, jeans, casual combinations and obviously informal outerwear." },
+  { code: "M_SHIRT_TYPE", name: "Shirt Type", rule: "A formal collared FULL-SLEEVE shirt in a plain solid professional colour is required. FAIL a t-shirt, a polo shirt, a casual shirt, loud prints, novelty designs, conspicuous checks or stripes, and FAIL a half-sleeve or short-sleeve shirt of any kind. Sleeve length is part of this checkpoint: say explicitly when sleeves are short." },
   { code: "M_SHIRT_FIT", name: "Shirt Fit", rule: "FAIL major pulling at the buttons, severe tightness or heavy bunching. Ordinary folds are fine." },
   { code: "M_SHIRT_CONDITION", name: "Shirt Condition", rule: "Covers cleanliness, stains, tears and heavy wrinkling or an obviously unpressed shirt, judged together." },
   { code: "M_SHIRT_COLLAR_TUCK", name: "Shirt Collar / Tuck", rule: "Covers collar presentation, no more than one button open, and tucking. If the waist is not visible, say so rather than guessing." },
   { code: "M_TROUSERS_TYPE", name: "Trousers Type", rule: "Formal trousers. FAIL jeans, denim, joggers and obviously casual trousers." },
   { code: "M_TROUSERS_FIT_CONDITION", name: "Trousers Fit & Condition", rule: "Covers fit, visible condition, tears or fraying, heavy creasing and hem length together." },
-  { code: "M_BELT", name: "Belt", rule: "Presence and formality, judged only when the waist is clearly visible. Otherwise N/A." },
+  { code: "M_BELT", name: "Belt", rule: "A simple formal belt in good condition, coordinated with the shoes, is expected. FAIL a clearly casual, flashy, damaged or mismatched belt. Judge only when the waist and belt are clearly visible; otherwise N/A." },
 ];
 
 export const MEN_ACCESSORIES_CHECKS = [
   { code: "M_RINGS", name: "Rings", rule: "At most one visible ring per hand. N/A when the hands are not visible." },
-  { code: "M_CHAIN", name: "Chain / Necklace", rule: "No distracting chain visible above the collar." },
-  { code: "M_DISTRACTING_ACCESSORIES", name: "Bracelets / Distracting Accessories", rule: "Bracelets and other clearly distracting statement pieces, judged together." },
+  { code: "M_CHAIN", name: "Chain / Necklace", rule: "No distracting chain, thick necklace or prominent pendant should be visible above the collar. A chain fully concealed beneath the shirt is not assessed." },
+  { code: "M_DISTRACTING_ACCESSORIES", name: "Bracelets / Distracting Accessories", rule: "FAIL clearly flashy bracelets, casual fabric or rubber wristbands, novelty or funky pins and badges, loud pocket squares, novelty or heavily printed ties, or other prominent statement pieces. Simple cufflinks, a plain tie clip and a pen are acceptable." },
   {
     code: "M_WATCH",
     name: "Watch",
@@ -70,16 +70,16 @@ export const MEN_ACCESSORIES_CHECKS = [
 ];
 
 export const MEN_FOOTWEAR_CHECKS = [
-  { code: "M_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Formal leather or formal synthetic shoes pass — Oxfords, Derbys, leather loafers, monk straps, formal boots. FAIL sneakers, sports shoes, sandals, chappals, floaters and casual driving shoes." },
+  { code: "M_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Formal leather or formal synthetic shoes pass: Oxfords, Derbys, leather loafers, monk straps, sleek Chelsea boots and other dress boots. FAIL sneakers, sports shoes, sandals, chappals, floaters, casual driving shoes, rugged biker boots, bulky casual boots and clearly flashy or trendy footwear." },
   { code: "M_FOOTWEAR_CONDITION", name: "Footwear Condition", rule: "Covers cleanliness, polish, visible damage and worn-out state together." },
 ];
 
 export const WOMEN_GROOMING_CHECKS = [
-  { code: "W_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is neat and deliberately maintained, whether tied, braided, pinned or worn loose. FAIL clearly messy, uncontrolled or dishevelled hair. Do not judge hair colour." },
+  { code: "W_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, neat, controlled and deliberately maintained. A neat ponytail, bun, braid, half pony, or loose hair tucked back are acceptable. FAIL clearly messy, frizzy, unkempt, uncontrolled or dishevelled hair, including a visibly casual messy bun or uncontrolled high ponytail. Do not judge hair colour or infer whether hair products were used." },
   { code: "W_HAIR_POSITION", name: "Hair Position / Away From Face", rule: "Hair is kept back, away from the face, and preferably toward the back of the head. FAIL when strands clearly fall across the front of the face, the forehead or the eyes. Loose hair is acceptable only while it stays controlled and off the face." },
-  { code: "W_HAIR_ACCESSORIES", name: "Hair Accessories", rule: "Plain, simple accessories. FAIL only clearly oversized or decorative ones." },
+  { code: "W_HAIR_ACCESSORIES", name: "Hair Accessories", rule: "Only plain, simple and unobtrusive hair accessories pass. FAIL clearly oversized, colourful, casual or decorative bands, clips and scrunchies." },
   { code: "W_MAKEUP", name: "Makeup", rule: "Natural, professional appearance judged as one thing. If lighting or colour rendering is unreliable, answer N/A rather than guessing." },
-  { code: "W_NAILS", name: "Nails", rule: "Trimmed and clean. N/A whenever the hands are not clearly visible, which is most photographs." },
+  { code: "W_NAILS", name: "Nails", rule: "Nails must look trimmed, clean and understated. FAIL clearly long nails or clearly bright, dark, glittery or decorated nail styling. N/A whenever the hands and nails are not clearly visible, which is most photographs." },
 ];
 
 /**
@@ -90,7 +90,7 @@ export const WOMEN_GROOMING_CHECKS = [
  * creased one draped well, and one row could not say both.
  */
 export const SAREE_ATTIRE_CHECKS = [
-  { code: "W_SAREE_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a saree is the visible garment." },
+  { code: "W_SAREE_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a professional saree is the visible garment. Plain, solid or subtle designs pass. FAIL loud, conspicuous or strongly distracting prints and patterns." },
   { code: "W_SAREE_WEARING", name: "Saree Wearing / Drape", rule: "The saree is properly and professionally draped: secure at the waist and shoulder, sitting where it should, not slipping or loosely thrown on. FAIL a saree that is visibly worn incorrectly or carelessly." },
   { code: "W_SAREE_PLEATS_PALLU", name: "Saree Pleats & Pallu", rule: "Pleats are even and tidy, and the pallu is pinned or managed neatly at an appropriate length. FAIL bunched or disordered pleats, and FAIL a pallu that hangs loose, drags or is left unmanaged." },
   { code: "W_SAREE_BLOUSE", name: "Blouse Fit & Coverage", rule: "Covers fit, neckline and sleeve coverage together. A SLEEVELESS BLOUSE IS NOT PERMITTED and is always a FAIL — say explicitly that the blouse is sleeveless. Also FAIL exposed straps or visible safety pins." },
@@ -99,7 +99,7 @@ export const SAREE_ATTIRE_CHECKS = [
 ];
 
 export const KURTI_ATTIRE_CHECKS = [
-  { code: "W_KURTI_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a kurti is the visible garment." },
+  { code: "W_KURTI_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a professional kurti is the visible garment. FAIL a t-shirt, crop top, one-piece dress, jeans-based casual outfit or another clearly non-kurti casual garment." },
   { code: "W_KURTI_FIT_LENGTH", name: "Kurti Fit & Length", rule: "Covers fit, length and side slit height together." },
   {
     code: "W_KURTI_NECKLINE_SLEEVES",
@@ -132,7 +132,7 @@ export const WOMEN_ACCESSORIES_CHECKS = [
   },
   { code: "W_BANGLES", name: "Bangles", rule: "Judge the number and prominence of visible bangles against a modest limit. Bangles are cultural wear and are never a violation merely by existing; FAIL only a clearly excessive or distracting quantity." },
   { code: "W_BINDI", name: "Bindi", rule: "A small, plain bindi passes. Wearing none is not a violation." },
-  { code: "W_DISTRACTING_ACCESSORIES", name: "Distracting Accessories", rule: "Other clearly distracting statement pieces." },
+  { code: "W_DISTRACTING_ACCESSORIES", name: "Distracting Accessories", rule: "Small earrings, thin chains, simple rings and other subtle pieces in neutral or pastel tones are acceptable. FAIL oversized or heavy earrings or necklaces, chunky or layered jewellery, too many rings or bracelets, flashy bright stones, prominent trendy pieces, or an oversized, informal, party-style or highly decorative bag when clearly visible." },
   {
     code: "W_WATCH",
     name: "Watch",
@@ -142,7 +142,7 @@ export const WOMEN_ACCESSORIES_CHECKS = [
 ];
 
 export const WOMEN_FOOTWEAR_CHECKS = [
-  { code: "W_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Closed-toe pumps, kitten heels, ballet flats, loafers and formal open-toe sandals with a back or ankle strap all pass. FAIL flip-flops, slippers, sneakers, sports shoes, wedges, platforms and strappy casual styles. Do not estimate heel height." },
+  { code: "W_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Neutral professional closed-toe pumps, modest low heels, ballet flats, loafers and formal open-toe sandals with a back or ankle strap all pass. FAIL flip-flops, slippers, sneakers, sports shoes, wedges, platforms, casual open-toe or strappy styles, clearly excessive high heels, and flashy or heavily decorated footwear. Do not estimate an exact heel height from the photograph." },
   { code: "W_FOOTWEAR_CONDITION", name: "Footwear Condition", rule: "Covers cleanliness, upkeep and visible damage together." },
 ];
 

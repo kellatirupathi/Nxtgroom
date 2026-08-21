@@ -1,21 +1,15 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
 import { incrementMetric, observeDuration } from "./telemetry.js";
 import { ATTIRE_CLASSIFIER_PROMPT, buildSystemPrompt } from "../prompts.js";
 import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-// Increment when the stable instructions, reference set contract or report
-// schema changes materially. The exact-prefix hash still prevents an invalid
-// match; the version makes the routing intent explicit in telemetry/debugging.
-const GROOMING_PROMPT_CACHE_VERSION = "v1";
-let referenceCachePromise = null;
+// Increment when the stable instructions or report schema changes materially.
+// The exact-prefix hash still prevents an invalid match; the version makes the
+// routing intent explicit in telemetry/debugging.
+const GROOMING_PROMPT_CACHE_VERSION = "v2";
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
 
@@ -176,8 +170,8 @@ async function requestOpenAIStructured({
     max_output_tokens: maxOutputTokens,
     temperature: 0,
     // GPT-4o mini performs automatic exact-prefix caching. A stable key helps
-    // requests sharing the same instructions, references and schema reach the
-    // same cache. The changing instructor image remains at the end of input.
+    // requests sharing the same written standards and schema reach the same
+    // cache. The changing instructor image remains at the end of input.
     ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
   };
 
@@ -390,42 +384,6 @@ export function deriveVerdict(rows, { imageQuality } = {}) {
   };
 }
 
-function isReferenceRelevant(filename, gender) {
-  const name = filename.toLowerCase();
-  if (gender === "MALE" && name.startsWith("women")) return false;
-  if (gender === "FEMALE" && (name.startsWith("men") || name.startsWith("beard"))) return false;
-  return true;
-}
-
-async function loadReferenceImages() {
-  const filenames = (await fs.readdir(REFERENCE_DIR))
-    .filter((filename) => filename.toLowerCase().endsWith(".jpg"))
-    .sort();
-  // Whatever is in the folder is the reference set. This asserted a count of
-  // exactly eight, so removing an image that no longer had a checkpoint —
-  // spectacles, once eyewear was dropped — took the whole API down on boot
-  // rather than simply sending one picture fewer. An empty folder is still a
-  // real failure: the standards are what the model compares against.
-  if (filenames.length === 0) {
-    throw new Error(`No grooming reference images were found in ${REFERENCE_DIR}`);
-  }
-  console.log(`Loaded ${filenames.length} grooming reference images.`);
-  return Promise.all(filenames.map(async (filename) => ({
-    filename,
-    data: (await fs.readFile(path.join(REFERENCE_DIR, filename))).toString("base64"),
-  })));
-}
-
-function getReferenceImages() {
-  referenceCachePromise ||= loadReferenceImages();
-  return referenceCachePromise;
-}
-
-export async function verifyVisionAssets() {
-  await getReferenceImages();
-  return true;
-}
-
 function instructorImagePart(imageBuffer, mimeType) {
   return {
     type: "input_image",
@@ -513,20 +471,10 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     : "FORMAL";
 
   const sections = checkpointSet(normalizedGender, attireType);
-  const references = await getReferenceImages();
   const content = [{
     type: "input_text",
-    text: "Here are the reference images for the NxtWave Grooming Standards (DOs and DON'Ts).",
+    text: "Assess the instructor in the following image against every applicable written NxtWave Grooming Standard in the instructions.",
   }];
-  for (const reference of references) {
-    if (!isReferenceRelevant(reference.filename, normalizedGender)) continue;
-    content.push({
-      type: "input_image",
-      image_url: `data:image/jpeg;base64,${reference.data}`,
-      detail: "high",
-    });
-  }
-  content.push({ type: "input_text", text: "Now assess the instructor in the final image." });
   content.push(instructorImagePart(imageBuffer, mimeType));
 
   const parsed = await requestOpenAIStructured({

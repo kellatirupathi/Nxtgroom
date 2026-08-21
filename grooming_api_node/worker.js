@@ -5,7 +5,6 @@ import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
 import { startMailWorker } from "./src/services/mailWorker.js";
-import { verifyVisionAssets } from "./src/services/visionEngine.js";
 
 async function startWorkers() {
   const config = validateEnvironment();
@@ -14,7 +13,6 @@ async function startWorkers() {
   }
   const db = await connectToMongo();
   if (!db) throw new Error("MongoDB is required to start workers");
-  await verifyVisionAssets();
   const workers = [
     startEvaluationWorker(db),
     startNotificationWorker(db),

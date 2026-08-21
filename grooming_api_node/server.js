@@ -28,7 +28,6 @@ import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
 import { startMailWorker } from "./src/services/mailWorker.js";
 import { checkPhotoStorageConnection } from "./src/services/photoStorage.js";
-import { verifyVisionAssets } from "./src/services/visionEngine.js";
 import { getWorkerReadiness } from "./src/services/workerHealth.js";
 import { createDocument } from "./src/utils.js";
 import { telemetrySnapshot } from "./src/services/telemetry.js";
@@ -294,7 +293,6 @@ export async function startServer() {
   const db = await connectToMongo();
   if (!db) throw new Error("MongoDB is required to start the API");
   app.locals.db = db;
-  await verifyVisionAssets();
   await seedAdmin(db);
 
   const server = await new Promise((resolve, reject) => {
