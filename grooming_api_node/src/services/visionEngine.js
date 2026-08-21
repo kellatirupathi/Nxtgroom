@@ -10,7 +10,7 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REFERENCE_DIR = path.join(__dirname, "..", "..", "reference_images");
-const GEMINI_INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 let referenceCachePromise = null;
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
@@ -52,7 +52,7 @@ const ATTIRE_JSON_SCHEMA = {
   required: ["attire_type"],
 };
 
-function createGeminiError(message, code, { retryable = false } = {}) {
+function createOpenAIError(message, code, { retryable = false } = {}) {
   const error = new Error(message);
   error.name = code;
   error.code = code;
@@ -60,31 +60,31 @@ function createGeminiError(message, code, { retryable = false } = {}) {
   return error;
 }
 
-function geminiHttpError(status, providerMessage = "") {
+function openaiHttpError(status, providerMessage = "") {
   const safeMessage = String(providerMessage).replace(/\s+/g, " ").slice(0, 300);
   if (status === 429) {
-    return createGeminiError(
-      `Gemini rate limit exceeded${safeMessage ? `: ${safeMessage}` : ""}`,
+    return createOpenAIError(
+      `OpenAI rate limit exceeded${safeMessage ? `: ${safeMessage}` : ""}`,
       "RATE_LIMIT_EXCEEDED",
       { retryable: true }
     );
   }
   if (status === 401 || status === 403) {
-    return createGeminiError("Gemini authentication failed", "GEMINI_AUTH_ERROR");
+    return createOpenAIError("OpenAI authentication failed", "OPENAI_AUTH_ERROR");
   }
   if (status === 408) {
-    return createGeminiError("Gemini request timed out", "GEMINI_TIMEOUT", { retryable: true });
+    return createOpenAIError("OpenAI request timed out", "OPENAI_TIMEOUT", { retryable: true });
   }
   if (status >= 500) {
-    return createGeminiError(
-      `Gemini service error (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
-      "GEMINI_SERVER_ERROR",
+    return createOpenAIError(
+      `OpenAI service error (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
+      "OPENAI_SERVER_ERROR",
       { retryable: true }
     );
   }
-  return createGeminiError(
-    `Gemini request failed (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
-    "GEMINI_REQUEST_ERROR"
+  return createOpenAIError(
+    `OpenAI request failed (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
+    "OPENAI_REQUEST_ERROR"
   );
 }
 
@@ -99,70 +99,74 @@ function retryAfterMilliseconds(response, attempt) {
   return Math.min(1000 * (2 ** attempt), 10000);
 }
 
-function extractGeminiText(interaction) {
-  return (interaction?.steps || [])
-    .filter((step) => step?.type === "model_output")
-    .flatMap((step) => step.content || [])
-    .filter((content) => content?.type === "text" && typeof content.text === "string")
+function extractOpenAIText(responseBody) {
+  return (responseBody?.output || [])
+    .filter((item) => item?.type === "message")
+    .flatMap((item) => item.content || [])
+    .filter((content) => content?.type === "output_text" && typeof content.text === "string")
     .map((content) => content.text)
     .join("")
     .trim();
 }
 
-async function requestGeminiStructured({
+async function requestOpenAIStructured({
   systemInstruction,
   input,
   jsonSchema,
   validator,
   maxOutputTokens,
+  schemaName,
 }) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) throw createOpenAIError("OPENAI_API_KEY is not configured", "OPENAI_AUTH_ERROR");
 
   const config = runtimeConfig();
   const requestBody = {
-    model: config.geminiModel,
+    model: config.openaiModel,
     store: false,
-    system_instruction: systemInstruction,
-    input,
-    response_format: {
-      type: "text",
-      mime_type: "application/json",
-      schema: jsonSchema,
+    instructions: systemInstruction,
+    input: [{
+      role: "user",
+      content: input,
+    }],
+    text: {
+      format: {
+        type: "json_schema",
+        name: schemaName,
+        strict: true,
+        schema: jsonSchema,
+      },
     },
-    generation_config: {
-      max_output_tokens: maxOutputTokens,
-      thinking_level: "medium",
-      thinking_summaries: "none",
-    },
+    max_output_tokens: maxOutputTokens,
+    temperature: 0,
   };
 
-  for (let attempt = 0; attempt <= config.geminiMaxRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= config.openaiMaxRetries; attempt += 1) {
     const requestStartedAt = Date.now();
-    incrementMetric("gemini_requests_total");
-    if (attempt > 0) incrementMetric("gemini_retries_total");
+    incrementMetric("openai_requests_total");
+    if (attempt > 0) incrementMetric("openai_retries_total");
     let response;
     try {
-      response = await fetch(GEMINI_INTERACTIONS_URL, {
+      response = await fetch(OPENAI_RESPONSES_URL, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          "x-goog-api-key": apiKey,
+          authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(config.geminiTimeoutMs),
+        signal: AbortSignal.timeout(config.openaiTimeoutMs),
       });
-      observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
+      observeDuration("openai_request_latency", Date.now() - requestStartedAt);
     } catch (cause) {
-      observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
-      incrementMetric("gemini_request_failures_total");
+      observeDuration("openai_request_latency", Date.now() - requestStartedAt);
+      incrementMetric("openai_request_failures_total");
       const timedOut = cause?.name === "TimeoutError" || cause?.name === "AbortError";
-      const error = createGeminiError(
-        timedOut ? "Gemini request timed out" : "Gemini request could not reach the service",
-        timedOut ? "GEMINI_TIMEOUT" : "GEMINI_NETWORK_ERROR",
+      const error = createOpenAIError(
+        timedOut ? "OpenAI request timed out" : "OpenAI request could not reach the service",
+        timedOut ? "OPENAI_TIMEOUT" : "OPENAI_NETWORK_ERROR",
         { retryable: true }
       );
-      if (attempt === config.geminiMaxRetries) throw error;
+      if (attempt === config.openaiMaxRetries) throw error;
       await delay(Math.min(1000 * (2 ** attempt), 10000));
       continue;
     }
@@ -172,38 +176,38 @@ async function requestGeminiStructured({
     try {
       body = bodyText ? JSON.parse(bodyText) : {};
     } catch {
-      throw createGeminiError("Gemini returned an unreadable response", "GEMINI_INVALID_RESPONSE");
+      throw createOpenAIError("OpenAI returned an unreadable response", "OPENAI_INVALID_RESPONSE");
     }
 
     if (!response.ok) {
-      incrementMetric("gemini_request_failures_total");
-      const error = geminiHttpError(response.status, body?.error?.message);
-      if (!error.retryable || attempt === config.geminiMaxRetries) throw error;
+      incrementMetric("openai_request_failures_total");
+      const error = openaiHttpError(response.status, body?.error?.message);
+      if (!error.retryable || attempt === config.openaiMaxRetries) throw error;
       await delay(retryAfterMilliseconds(response, attempt));
       continue;
     }
     if (body.status !== "completed") {
-      throw createGeminiError(
-        `Gemini did not complete the evaluation (status: ${body.status || "unknown"})`,
-        "GEMINI_INCOMPLETE_RESPONSE"
+      throw createOpenAIError(
+        `OpenAI did not complete the evaluation (status: ${body.status || "unknown"})`,
+        "OPENAI_INCOMPLETE_RESPONSE"
       );
     }
 
-    const text = extractGeminiText(body);
+    const text = extractOpenAIText(body);
     if (!text) {
-      throw createGeminiError("Gemini returned no structured evaluation", "GEMINI_INVALID_RESPONSE");
+      throw createOpenAIError("OpenAI returned no structured evaluation", "OPENAI_INVALID_RESPONSE");
     }
     let parsed;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw createGeminiError("Gemini returned invalid structured JSON", "GEMINI_INVALID_RESPONSE");
+      throw createOpenAIError("OpenAI returned invalid structured JSON", "OPENAI_INVALID_RESPONSE");
     }
-    incrementMetric("gemini_request_success_total");
+    incrementMetric("openai_request_success_total");
     return validator.parse(parsed);
   }
 
-  throw createGeminiError("Gemini evaluation failed", "GEMINI_REQUEST_ERROR");
+  throw createOpenAIError("OpenAI evaluation failed", "OPENAI_REQUEST_ERROR");
 }
 
 /**
@@ -383,10 +387,9 @@ export async function verifyVisionAssets() {
 
 function instructorImagePart(imageBuffer, mimeType) {
   return {
-    type: "image",
-    data: imageBuffer.toString("base64"),
-    mime_type: mimeType,
-    resolution: "high",
+    type: "input_image",
+    image_url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
+    detail: "high",
   };
 }
 
@@ -442,12 +445,13 @@ export function unknownGenderEvaluation() {
  * inferring the garment from the person would hide it.
  */
 async function classifyAttire(imageBuffer, mimeType) {
-  const parsed = await requestGeminiStructured({
+  const parsed = await requestOpenAIStructured({
     systemInstruction: ATTIRE_CLASSIFIER_PROMPT,
     input: [instructorImagePart(imageBuffer, mimeType)],
     jsonSchema: ATTIRE_JSON_SCHEMA,
     validator: AttireClassification,
     maxOutputTokens: 512,
+    schemaName: "attire_classification",
   });
   return parsed.attire_type;
 }
@@ -470,27 +474,27 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   const sections = checkpointSet(normalizedGender, attireType);
   const references = await getReferenceImages();
   const content = [{
-    type: "text",
+    type: "input_text",
     text: "Here are the reference images for the NxtWave Grooming Standards (DOs and DON'Ts).",
   }];
   for (const reference of references) {
     if (!isReferenceRelevant(reference.filename, normalizedGender)) continue;
     content.push({
-      type: "image",
-      data: reference.data,
-      mime_type: "image/jpeg",
-      resolution: "high",
+      type: "input_image",
+      image_url: `data:image/jpeg;base64,${reference.data}`,
+      detail: "high",
     });
   }
-  content.push({ type: "text", text: "Now assess the instructor in the final image." });
+  content.push({ type: "input_text", text: "Now assess the instructor in the final image." });
   content.push(instructorImagePart(imageBuffer, mimeType));
 
-  const parsed = await requestGeminiStructured({
+  const parsed = await requestOpenAIStructured({
     systemInstruction: buildSystemPrompt(normalizedGender, attireType),
     input: content,
     jsonSchema: buildReportJsonSchema(sections),
     validator: buildReportSchema(sections),
     maxOutputTokens: 6000,
+    schemaName: "grooming_evaluation",
   });
 
   // Nothing to tabulate when the photograph does not show the person. The

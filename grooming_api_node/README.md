@@ -1,11 +1,11 @@
 # FacultyTrack API
 
-Production Node.js 24 and Express API for instructor attendance, Gemini vision
+Production Node.js 24 and Express API for instructor attendance, OpenAI vision
 evaluation, and Amazon SES check-in/checkout notifications.
 
 ## Local development
 
-Prerequisites: Node.js 24, npm 11, MongoDB, a Gemini API key, and (to test
+Prerequisites: Node.js 24, npm 11, MongoDB, an OpenAI API key, and (to test
 email delivery) an Amazon SES identity.
 
 ```powershell
@@ -53,5 +53,5 @@ zero. Photos waiting for analysis and notification jobs are stored in MongoDB;
 no persistent filesystem volume is required.
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for the exact Northflank, Vercel, MongoDB,
-Gemini, and Amazon SES settings and the complete production environment
+OpenAI, and Amazon SES settings and the complete production environment
 contract.

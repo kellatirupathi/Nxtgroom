@@ -5,7 +5,7 @@ import { checkpointSet, SECTION_KEYS } from "../src/checkpoints.js";
 /**
  * Mirrors the consistency rules applied to a parsed grooming report. Kept in
  * step with visionEngine.js by hand: the real function performs a network call
- * to Gemini, which cannot run in a unit test.
+ * to OpenAI, which cannot run in a unit test.
  */
 function reconcile(report) {
   const checks = [
@@ -121,13 +121,13 @@ test("the reference set is whatever is on disk, not a fixed count", async () => 
   }
 });
 
-test("vision evaluation sends images and structured output to Gemini 3.7 Flash", async () => {
+test("vision evaluation sends images and structured output to GPT-4o mini", async () => {
   const originalFetch = globalThis.fetch;
-  const originalGemini = {
-    apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.GEMINI_MODEL,
-    timeout: process.env.GEMINI_TIMEOUT_MS,
-    retries: process.env.GEMINI_MAX_RETRIES,
+  const originalOpenAI = {
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL,
+    timeout: process.env.OPENAI_TIMEOUT_MS,
+    retries: process.env.OPENAI_MAX_RETRIES,
   };
   const sections = checkpointSet("MALE", "FORMAL");
   const report = {
@@ -152,15 +152,20 @@ test("vision evaluation sends images and structured output to Gemini 3.7 Flash",
   }
 
   let captured;
-  process.env.GEMINI_API_KEY = "test-only-gemini-key";
-  process.env.GEMINI_MODEL = "gemini-3.7-flash";
-  process.env.GEMINI_TIMEOUT_MS = "120000";
-  process.env.GEMINI_MAX_RETRIES = "0";
+  process.env.OPENAI_API_KEY = "test-only-openai-key";
+  process.env.OPENAI_MODEL = "gpt-4o-mini-2024-07-18";
+  process.env.OPENAI_TIMEOUT_MS = "120000";
+  process.env.OPENAI_MAX_RETRIES = "0";
   globalThis.fetch = async (url, options) => {
     captured = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({
       status: "completed",
-      steps: [{ type: "model_output", content: [{ type: "text", text: JSON.stringify(report) }] }],
+      output: [{
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: JSON.stringify(report), annotations: [] }],
+      }],
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
 
@@ -168,24 +173,30 @@ test("vision evaluation sends images and structured output to Gemini 3.7 Flash",
     const { evaluateImage } = await import("../src/services/visionEngine.js");
     const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "MALE");
     assert.equal(result.overall_status, "COMPLIANT");
-    assert.equal(captured.url, "https://generativelanguage.googleapis.com/v1beta/interactions");
-    assert.equal(captured.options.headers["x-goog-api-key"], "test-only-gemini-key");
-    assert.equal(captured.body.model, "gemini-3.7-flash");
+    assert.equal(captured.url, "https://api.openai.com/v1/responses");
+    assert.equal(captured.options.headers.authorization, "Bearer test-only-openai-key");
+    assert.equal(captured.body.model, "gpt-4o-mini-2024-07-18");
     assert.equal(captured.body.store, false);
-    assert.equal(captured.body.response_format.mime_type, "application/json");
-    assert.equal(captured.body.generation_config.thinking_level, "medium");
-    const images = captured.body.input.filter((part) => part.type === "image");
+    assert.equal(typeof captured.body.instructions, "string");
+    assert.equal(captured.body.text.format.type, "json_schema");
+    assert.equal(captured.body.text.format.name, "grooming_evaluation");
+    assert.equal(captured.body.text.format.strict, true);
+    assert.equal(captured.body.text.format.schema.additionalProperties, false);
+    assert.equal(captured.body.max_output_tokens, 6000);
+    assert.equal(captured.body.temperature, 0);
+    assert.equal(captured.body.input.length, 1);
+    assert.equal(captured.body.input[0].role, "user");
+    const images = captured.body.input[0].content.filter((part) => part.type === "input_image");
     assert.ok(images.length > 1, "reference images and the instructor image must be sent");
-    assert.ok(images.every((part) => part.resolution === "high"));
-    assert.ok(images.every((part) => part.data && part.mime_type === "image/jpeg"));
-    assert.equal(captured.body.input.some((part) => part.type === "image_url"), false);
+    assert.ok(images.every((part) => part.detail === "high"));
+    assert.ok(images.every((part) => part.image_url.startsWith("data:image/jpeg;base64,")));
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries({
-      GEMINI_API_KEY: originalGemini.apiKey,
-      GEMINI_MODEL: originalGemini.model,
-      GEMINI_TIMEOUT_MS: originalGemini.timeout,
-      GEMINI_MAX_RETRIES: originalGemini.retries,
+      OPENAI_API_KEY: originalOpenAI.apiKey,
+      OPENAI_MODEL: originalOpenAI.model,
+      OPENAI_TIMEOUT_MS: originalOpenAI.timeout,
+      OPENAI_MAX_RETRIES: originalOpenAI.retries,
     })) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

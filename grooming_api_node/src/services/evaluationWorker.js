@@ -165,7 +165,7 @@ function publicEvaluation(report, job, now) {
     // Derived from the failing checkpoints here rather than in the browser, so
     // the report page and the emails cannot advise different things.
     improvement_tips: improvementTips(report),
-    model: runtimeConfig().geminiModel,
+    model: runtimeConfig().openaiModel,
     prompt_version: PROMPT_VERSION,
     processed_at: now,
     attempts: job.attempts,

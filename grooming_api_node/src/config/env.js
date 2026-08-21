@@ -78,9 +78,9 @@ export function runtimeConfig() {
     // exists in the database; anything else leaves the stored one alone.
     adminPasswordReset: process.env.ADMIN_PASSWORD_RESET === "true",
     origins: corsOrigins(),
-    geminiModel: process.env.GEMINI_MODEL || "gemini-3.7-flash",
-    geminiTimeoutMs: parseInteger("GEMINI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
-    geminiMaxRetries: parseInteger("GEMINI_MAX_RETRIES", 2, { min: 0, max: 2 }),
+    openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini-2024-07-18",
+    openaiTimeoutMs: parseInteger("OPENAI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
+    openaiMaxRetries: parseInteger("OPENAI_MAX_RETRIES", 2, { min: 0, max: 2 }),
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
     evaluationLeaseMs: parseInteger("EVALUATION_LEASE_MS", 600000, { min: 60000, max: 3600000 }),
     evaluationMaxAttempts: parseInteger("EVALUATION_MAX_ATTEMPTS", 3, { min: 1, max: 10 }),
@@ -106,7 +106,7 @@ export function validateEnvironment() {
   const errors = [];
   const required = [
     "MONGODB_URI",
-    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
     "SECRET_KEY",
     "ADMIN_EMAIL",
     "ADMIN_PASSWORD",
@@ -207,13 +207,13 @@ export function validateEnvironment() {
       errors.push("MONGODB_URI is invalid");
     }
   }
-  if (config.geminiModel !== "gemini-3.7-flash") {
-    errors.push("GEMINI_MODEL must be gemini-3.7-flash");
+  if (config.openaiModel !== "gpt-4o-mini-2024-07-18") {
+    errors.push("OPENAI_MODEL must use the pinned GPT-4o mini snapshot gpt-4o-mini-2024-07-18");
   }
-  const minimumEvaluationLease = config.geminiTimeoutMs * (config.geminiMaxRetries + 1) + 60000;
+  const minimumEvaluationLease = config.openaiTimeoutMs * (config.openaiMaxRetries + 1) + 60000;
   if (config.evaluationLeaseMs < minimumEvaluationLease) {
     errors.push(
-      `EVALUATION_LEASE_MS must be at least ${minimumEvaluationLease} for the configured Gemini timeout and retries`
+      `EVALUATION_LEASE_MS must be at least ${minimumEvaluationLease} for the configured OpenAI timeout and retries`
     );
   }
   if (config.notificationLeaseMs < config.sesTimeoutMs + 60000) {
