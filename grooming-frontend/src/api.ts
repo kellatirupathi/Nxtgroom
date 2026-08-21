@@ -71,10 +71,15 @@ function notifySessionExpired(): void {
 }
 
 /**
- * Web and Capacitor sessions use the Secure, HttpOnly cookie issued by the
- * API. Storage keeps only a non-secret marker and role so a reload can render
- * the session while /me verifies the cookie. No bearer credential is exposed
- * to JavaScript or written into WebView storage.
+ * The API issues both a Secure, HttpOnly cookie and a bearer token. Keep the
+ * token as a compatibility fallback because the deployed frontend and API are
+ * on different sites, and some tablet/mobile browsers reject that cookie as a
+ * third-party cookie. apiFetch still sends the cookie whenever the browser
+ * accepts it, while the Authorization header prevents a successful login from
+ * being followed immediately by an unauthenticated /me request.
+ *
+ * COOKIE_SESSION_MARKER remains supported so sessions created by the previous
+ * cookie-only frontend continue to work on browsers that accepted the cookie.
  */
 function readStorage(key: string): string | null {
   try {
@@ -98,10 +103,10 @@ export function getSessionRole(): Role | null {
   return ROLES.includes(role as Role) ? (role as Role) : null;
 }
 
-export function saveSession(_token: string, role: string): void {
+export function saveSession(token: string, role: string): void {
   try {
     if (typeof localStorage === 'undefined') throw new Error('Local storage is unavailable');
-    localStorage.setItem(SESSION_TOKEN_KEY, COOKIE_SESSION_MARKER);
+    localStorage.setItem(SESSION_TOKEN_KEY, token);
     localStorage.setItem(SESSION_ROLE_KEY, role);
   } catch (error) {
     throw new ApiError(

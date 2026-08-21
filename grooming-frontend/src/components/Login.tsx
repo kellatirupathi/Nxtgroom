@@ -68,7 +68,6 @@ export default function Login({ onLogin }: LoginProps) {
             <img src="/logo.png" alt="FacultyTrack" className="w-full h-full object-contain drop-shadow-sm" />
           </div>
           <h1 className="text-xl sm:text-2xl font-extrabold text-slate-800">FacultyTrack</h1>
-          <p className="text-sm font-medium text-slate-400 mt-1 uppercase tracking-widest">Management Suite</p>
         </div>
 
         {error && (

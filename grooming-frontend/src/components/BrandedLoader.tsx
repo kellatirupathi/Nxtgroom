@@ -26,10 +26,6 @@ export default function BrandedLoader({ label = 'Loading' }: { label?: string })
         </div>
 
         <h1 className="mt-5 text-xl font-extrabold tracking-tight text-slate-800">FacultyTrack</h1>
-        <p className="mt-1 text-[11px] font-medium uppercase tracking-[0.2em] text-slate-400">
-          Management Suite
-        </p>
-
         {/* Indeterminate sweep: the wait has no measurable progress, so a bar
             that filled to a percentage would be inventing one. */}
         <div className="mt-6 h-1 w-40 overflow-hidden rounded-full bg-slate-200">

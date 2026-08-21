@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiFetchAllPages, normalizeApiError } from '../src/api.ts';
+import {
+  apiFetch,
+  apiFetchAllPages,
+  clearSession,
+  normalizeApiError,
+  saveSession,
+  SESSION_ROLE_KEY,
+  SESSION_TOKEN_KEY,
+} from '../src/api.ts';
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() { return values.size; },
+  };
+}
 
 test('normalizes string and structured validation errors', () => {
   assert.equal(normalizeApiError({ detail: 'Not authorized' }), 'Not authorized');
@@ -8,6 +27,41 @@ test('normalizes string and structured validation errors', () => {
     normalizeApiError({ detail: [{ loc: ['body', 'email'], msg: 'Invalid email' }] }),
     'body.email: Invalid email',
   );
+});
+
+test('persists the bearer fallback and authenticates when cross-site cookies are blocked', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalLocalStorage = globalThis.localStorage;
+  const originalSessionStorage = globalThis.sessionStorage;
+  const local = memoryStorage();
+  globalThis.localStorage = local;
+  globalThis.sessionStorage = memoryStorage();
+  t.after(() => {
+    clearSession();
+    globalThis.fetch = originalFetch;
+    if (originalLocalStorage === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalLocalStorage;
+    if (originalSessionStorage === undefined) delete globalThis.sessionStorage;
+    else globalThis.sessionStorage = originalSessionStorage;
+  });
+
+  const accessToken = 'header.payload.signature';
+  saveSession(accessToken, 'ADMIN');
+  assert.equal(local.getItem(SESSION_TOKEN_KEY), accessToken);
+  assert.equal(local.getItem(SESSION_ROLE_KEY), 'ADMIN');
+
+  let request;
+  globalThis.fetch = async (_input, init) => {
+    request = init;
+    return new Response(JSON.stringify({ email: 'admin@example.com', role: 'ADMIN' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  await apiFetch('/api/v2/auth/me');
+  assert.equal(new Headers(request.headers).get('Authorization'), `Bearer ${accessToken}`);
+  assert.equal(request.credentials, 'include');
 });
 
 test('collects every page, preserves query parameters, and deduplicates IDs', async (t) => {
