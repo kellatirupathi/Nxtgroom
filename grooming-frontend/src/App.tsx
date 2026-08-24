@@ -345,13 +345,16 @@ export default function App() {
 
           {activeTab === 'daily-records' && (
             <div className="w-full h-full">
-              <DailyAttendanceTable onRowClick={(record) => {
-                // Set the record first: navigate() refuses the detail tab
-                // when nothing is selected and would bounce back to the list.
-                setSelectedAttendanceRecord(record);
-                pushTabPath('instructor-detail', String(record._id));
-                setActiveTab('instructor-detail');
-              }} />
+              <DailyAttendanceTable
+                canBulkDelete={isElevatedRole(session.role)}
+                onRowClick={(record) => {
+                  // Set the record first: navigate() refuses the detail tab
+                  // when nothing is selected and would bounce back to the list.
+                  setSelectedAttendanceRecord(record);
+                  pushTabPath('instructor-detail', String(record._id));
+                  setActiveTab('instructor-detail');
+                }}
+              />
             </div>
           )}
 

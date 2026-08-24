@@ -353,6 +353,58 @@ export function resolveIdCardAbstention(rows, visibleRegions) {
 }
 
 /**
+ * Enforces the small set of men's visibility rules whose result is otherwise
+ * easy for a vision model to contradict in its own prose.
+ *
+ * Tuck and belt are required capture checks: an image that does not show them
+ * has not demonstrated compliance, so their checkpoint contract deliberately
+ * treats an abstention as a failure. Rings and chains work in the opposite
+ * direction: when the relevant area is visible and the model explicitly says
+ * the accessory is absent, absence is a PASS rather than N/A.
+ */
+export function resolveMaleAttireVisibility(rows, visibleRegions) {
+  const find = (section, code) => (rows?.[section] || []).find((item) => item.code === code);
+
+  const tuck = find("attire_check", "M_SHIRT_COLLAR_TUCK");
+  if (tuck?.status === "N/A") {
+    tuck.status = "FAIL";
+    tuck.reason = "The submitted photograph does not show the required shirt tuck clearly enough to verify compliance.";
+  }
+
+  const belt = find("attire_check", "M_BELT");
+  if (belt?.status === "N/A") {
+    belt.status = "FAIL";
+    belt.reason = "The submitted photograph does not show the required belt clearly enough to verify compliance.";
+  }
+
+  const explicitlyAbsent = (row, itemPattern) => {
+    const text = `${row?.observation || ""} ${row?.reason || ""}`.toLowerCase();
+    if (/\b(?:cropped|obscured|covered|blurred|unclear|too\s+(?:small|distant)|cannot\s+assess|can't\s+assess|unable\s+to\s+(?:assess|identify|tell))\b/i.test(text)) {
+      return false;
+    }
+    return new RegExp(`(?:no|without)\\s+(?:visible\\s+)?(?:${itemPattern})\\w*\\b|(?:${itemPattern})\\w*[^.]{0,35}\\b(?:not\\s+(?:visible|present|seen|noted)|absent)\\b`, "i").test(text);
+  };
+
+  const rings = find("accessories_check", "M_RINGS");
+  if (rings?.status === "N/A"
+      && visibleRegions?.hands === "VISIBLE"
+      && explicitlyAbsent(rings, "ring")) {
+    rings.status = "PASS";
+    rings.reason = "The hands are clearly visible and no rings are present, which complies with the standard.";
+  }
+
+  const chain = find("accessories_check", "M_CHAIN");
+  if (chain?.status === "N/A"
+      && visibleRegions?.upper_body === "VISIBLE"
+      && explicitlyAbsent(chain, "chain|necklace|pendant")) {
+    chain.status = "PASS";
+    chain.reason = "The neck and collar area are visible and no chain, necklace or pendant is present, which complies with the standard.";
+  }
+
+  return rows;
+}
+
+/**
  * The compliance verdict, computed from the checkpoints rather than asked for.
  *
  * The model used to be asked for overall_status and then checked against the
@@ -501,6 +553,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
 
   const rows = toOrderedRows(sections, parsed);
   resolveIdCardAbstention(rows, parsed.visible_regions);
+  resolveMaleAttireVisibility(rows, parsed.visible_regions);
   const verdict = deriveVerdict(rows, { imageQuality: parsed.image_quality });
   if (verdict.overall_status === "UNASSESSED") incrementMetric("evaluations_unassessed_total");
 

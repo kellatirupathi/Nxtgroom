@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { attendanceOnLocalDay, commitGuardedCheckIn } from "../src/routes/attendanceRoutes.js";
+import {
+  attendanceOnLocalDay,
+  checkoutAvailability,
+  commitGuardedCheckIn,
+} from "../src/routes/attendanceRoutes.js";
 import {
   createInstructorGuarded,
   deleteInstructorGuarded,
@@ -81,6 +85,18 @@ test("daily attendance lookup ignores an unfinished record from a previous local
   assert.equal(filter.$or[1].attendance_day.$exists, false);
   assert.equal(filter.$or[1].check_in_time.$gte.toISOString(), "2026-08-23T18:30:00.000Z");
   assert.equal(filter.$or[1].check_in_time.$lt.toISOString(), "2026-08-24T18:30:00.000Z");
+});
+
+test("checkout permits exactly one checkout on today's attendance", () => {
+  assert.equal(checkoutAvailability(null), "not_checked_in_today");
+  assert.equal(
+    checkoutAvailability({ _id: "today", check_out_time: null }),
+    "available"
+  );
+  assert.equal(
+    checkoutAvailability({ _id: "today", check_out_time: new Date() }),
+    "already_checked_out_today"
+  );
 });
 
 test("guarded instructor update shares the transaction boundary with check-in", async () => {

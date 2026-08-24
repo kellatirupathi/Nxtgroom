@@ -21,6 +21,14 @@ test("photographed checkout analyses directly before creating its email job", as
     false,
     "checkout must not create an evaluation queue job"
   );
+  assert.ok(
+    checkoutRoute.includes("attendanceOnLocalDay(req.validatedBody.instructor_id, checkOutTime)"),
+    "checkout must use today's attendance rather than an older open record"
+  );
+  assert.ok(
+    checkoutRoute.indexOf("checkoutAvailability(candidate)") < checkoutRoute.indexOf("normalizeInstructorImage"),
+    "a duplicate checkout must be refused before its photo is processed"
+  );
 });
 
 test("a failed checkout photo can be retried without adding an AI queue", async () => {
@@ -40,4 +48,17 @@ test("a failed checkout photo can be retried without adding an AI queue", async 
     false,
     "retry must not recreate the removed checkout evaluation queue"
   );
+});
+
+test("bulk attendance deletion is restricted to elevated administrators", async () => {
+  const source = await readFile(new URL("../src/routes/attendanceRoutes.js", import.meta.url), "utf8");
+  const routeName = source.indexOf('"/bulk-delete"');
+  const start = source.lastIndexOf("attendanceRouter.post(", routeName);
+  const end = source.indexOf("attendanceRouter.delete(", routeName);
+  assert.ok(start >= 0 && end > start, "bulk delete route must remain identifiable");
+
+  const bulkRoute = source.slice(start, end);
+  assert.ok(bulkRoute.includes("requireSuperAdmin"));
+  assert.ok(bulkRoute.includes("await purgeAttendance(db, attendance)"));
+  assert.ok(bulkRoute.includes("attendanceIds.length > 100"));
 });

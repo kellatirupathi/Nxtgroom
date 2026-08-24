@@ -12,7 +12,13 @@
  * taken. Blocking attendance is a worse outcome than an unframed photograph.
  */
 
-export type FrameVerdict = 'FULL_BODY' | 'PARTIAL' | 'NO_PERSON' | 'UNAVAILABLE';
+export type FrameVerdict =
+  | 'FULL_BODY'
+  | 'TOO_FAR'
+  | 'PARTIAL'
+  | 'NO_PERSON'
+  | 'MULTIPLE_PEOPLE'
+  | 'UNAVAILABLE';
 
 export interface FrameReading {
   verdict: FrameVerdict;
@@ -22,14 +28,24 @@ export interface FrameReading {
 
 /** Below this a keypoint is a guess, not a sighting. */
 const KEYPOINT_CONFIDENCE = 0.35;
+/**
+ * Nose-to-ankle distance is slightly shorter than the person's true height.
+ * At 68% of the image it corresponds to a roughly 75-85% tall person while
+ * retaining a safe margin above the hair and below the shoes.
+ */
+export const MIN_BODY_SPAN_RATIO = 0.68;
 /** MoveNet's ankle and head keypoints, by the names the model returns. */
 const HEAD_KEYPOINTS = ['nose', 'left_eye', 'right_eye'];
 const ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle'];
 
+type Keypoint = { name?: string; score?: number; x?: number; y?: number };
+type Pose = { keypoints: Keypoint[]; score?: number };
+
 type Detector = {
-  estimatePoses: (input: HTMLVideoElement) => Promise<Array<{
-    keypoints: Array<{ name?: string; score?: number }>;
-  }>>;
+  estimatePoses: (
+    input: HTMLVideoElement,
+    config?: { maxPoses?: number },
+  ) => Promise<Pose[]>;
   dispose?: () => void;
 };
 
@@ -53,7 +69,12 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
       await tf.ready();
       return await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
-        { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING },
+        {
+          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+          enableTracking: true,
+          multiPoseMaxDimension: 320,
+          minPoseScore: 0.15,
+        },
       ) as unknown as Detector;
     } catch {
       // No WebGL, blocked download, unsupported device. The camera still works.
@@ -65,7 +86,8 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
 
 /** Turns one set of keypoints into a verdict and, when needed, an instruction. */
 export function readKeypoints(
-  keypoints: Array<{ name?: string; score?: number }> | undefined,
+  keypoints: Keypoint[] | undefined,
+  frameHeight?: number,
 ): FrameReading {
   if (!keypoints?.length) {
     return { verdict: 'NO_PERSON', guidance: 'Step into the frame' };
@@ -82,6 +104,28 @@ export function readKeypoints(
     return { verdict: 'NO_PERSON', guidance: 'Step into the frame' };
   }
   if (headVisible && anklesVisible) {
+    const visibleHead = keypoints.filter((point) => (
+      point.name != null
+      && HEAD_KEYPOINTS.includes(point.name)
+      && (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+      && Number.isFinite(point.y)
+    ));
+    const visibleAnkles = keypoints.filter((point) => (
+      point.name != null
+      && ANKLE_KEYPOINTS.includes(point.name)
+      && (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+      && Number.isFinite(point.y)
+    ));
+    if (frameHeight && visibleHead.length && visibleAnkles.length) {
+      const headY = Math.min(...visibleHead.map((point) => point.y as number));
+      const ankleY = Math.max(...visibleAnkles.map((point) => point.y as number));
+      if ((ankleY - headY) / frameHeight < MIN_BODY_SPAN_RATIO) {
+        return {
+          verdict: 'TOO_FAR',
+          guidance: 'Move closer - fill the guide from head to feet',
+        };
+      }
+    }
     return { verdict: 'FULL_BODY', guidance: null };
   }
   return {
@@ -90,6 +134,32 @@ export function readKeypoints(
       ? 'Move the camera down — your head is out of frame'
       : 'Step back — your feet are not in frame',
   };
+}
+
+/** A partial face or body is enough evidence that another person is present. */
+function isDetectedPerson(pose: Pose): boolean {
+  const confident = pose.keypoints.filter((point) => (
+    (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+  ));
+  const visibleHeadPoints = confident.filter((point) => (
+    point.name != null && HEAD_KEYPOINTS.includes(point.name)
+  )).length;
+  return visibleHeadPoints >= 2 || confident.length >= 4;
+}
+
+/** Converts all poses in a frame into one capture decision. */
+export function readPoses(
+  poses: Pose[] | undefined,
+  frameHeight?: number,
+): FrameReading {
+  const people = (poses || []).filter(isDetectedPerson);
+  if (people.length > 1) {
+    return {
+      verdict: 'MULTIPLE_PEOPLE',
+      guidance: 'Only one person should be visible',
+    };
+  }
+  return readKeypoints(people[0]?.keypoints, frameHeight);
 }
 
 /**
@@ -104,8 +174,8 @@ export async function readFrame(
     return { verdict: 'UNAVAILABLE', guidance: null };
   }
   try {
-    const poses = await detector.estimatePoses(video);
-    return readKeypoints(poses?.[0]?.keypoints);
+    const poses = await detector.estimatePoses(video, { maxPoses: 6 });
+    return readPoses(poses, video.videoHeight);
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }
@@ -129,6 +199,9 @@ export function shutterEnabled(
   steadyForMs: number,
   overridden: boolean,
 ): boolean {
+  // An override exists for accessibility and difficult rooms, never to permit
+  // another person's face or body in attendance evidence.
+  if (verdict === 'MULTIPLE_PEOPLE') return false;
   if (overridden || verdict === 'UNAVAILABLE') return true;
   return verdict === 'FULL_BODY' && steadyForMs >= STEADY_MS;
 }

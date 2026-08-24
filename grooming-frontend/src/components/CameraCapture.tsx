@@ -229,7 +229,10 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
               className="absolute inset-0 w-full h-full object-cover"
               style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
             />
-            {/* A head-to-toe outline to stand inside. The gate tells people
+            {/* A head-to-toe outline to stand inside. It occupies nearly the
+                full preview height so the instructor, rather than the room,
+                supplies most of the pixels sent for appearance analysis.
+                The gate tells people
                 when they are wrong; this shows them what right looks like,
                 which is what stops the two fighting each other. */}
             {!starting && (
@@ -240,11 +243,17 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
                 aria-hidden="true"
               >
                 <rect
-                  x="24" y="6" width="52" height="88" rx="26"
+                  x="13" y="2" width="74" height="96" rx="37"
                   fill="none"
                   strokeWidth="0.6"
                   strokeDasharray="3 2"
-                  className={ready ? 'stroke-emerald-400/90' : 'stroke-white/45'}
+                  className={
+                    verdict === 'MULTIPLE_PEOPLE'
+                      ? 'stroke-rose-400/95'
+                      : ready
+                        ? 'stroke-emerald-400/90'
+                        : 'stroke-white/55'
+                  }
                 />
               </svg>
             )}
@@ -262,7 +271,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
                 </p>
               ) : ready && verdict === 'FULL_BODY' ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
-                  Full body in frame
+                  One person, full body in frame
                 </p>
               ) : null}
             </div>
@@ -283,7 +292,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
         {/* Offered rather than imposed. A saree hiding the ankles, a
             wheelchair or a small room must not become a missed check-in, so
             nobody is held here indefinitely. */}
-        {canOverride && !overridden && !ready && !error && (
+        {canOverride && !overridden && !ready && !error && verdict !== 'MULTIPLE_PEOPLE' && (
           <button
             type="button"
             onClick={() => setOverridden(true)}

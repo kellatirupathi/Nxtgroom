@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut } from 'lucide-react';
-import { apiFetchAllPages } from '../api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2 } from 'lucide-react';
+import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import DateRangeFilter from './DateRangeFilter';
+import ConfirmDialog from './ConfirmDialog';
+import { useToast } from './useToast';
 import {
   attendanceSessionDateLabel,
   attendanceRangePath,
@@ -21,6 +23,13 @@ import type { AttendanceRecord } from '../types';
 
 interface DailyAttendanceTableProps {
   onRowClick: (record: AttendanceRecord) => void;
+  canBulkDelete?: boolean;
+}
+
+interface BulkDeleteResult {
+  message: string;
+  deleted_ids: string[];
+  failed: Array<{ attendance_id: string; detail: string }>;
 }
 
 function StatusBadge({ status }: { status?: string }) {
@@ -56,8 +65,9 @@ function AttireTag({ attire }: { attire?: string | null }) {
   );
 }
 
-export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTableProps) {
+export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false }: DailyAttendanceTableProps) {
   const today = useMemo(() => localDateValue(), []);
+  const toast = useToast();
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [photoTarget, setPhotoTarget] = useState<
     { record: AttendanceRecord; kind: 'checkin' | 'checkout' } | null
@@ -69,6 +79,11 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
   const [roleFilter, setRoleFilter] = useState('');
   const [collegeFilter, setCollegeFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -157,7 +172,7 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
       activeController?.abort();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [range]);
+  }, [range, reloadVersion]);
 
   const roles = useMemo(
     () => uniqueRecordValues(records, 'instructor_role', roleFilter),
@@ -175,16 +190,79 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
     }),
     [records, search, roleFilter, collegeFilter],
   );
+  const visibleIds = useMemo(
+    () => filteredRecords.map((record) => String(record._id)),
+    [filteredRecords],
+  );
+  const selectedVisibleCount = visibleIds.filter((id) => selectedIds.has(id)).length;
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
+    }
+  }, [selectedVisibleCount, allVisibleSelected]);
 
   const openRecord = (record: AttendanceRecord) => {
     if (canOpenRecord(record.status)) onRowClick(record);
   };
 
   const handleRangeChange = (nextPreset: DatePreset, nextRange: DateRange) => {
+    setSelectedIds(new Set());
     setRecords([]);
     setLoading(true);
     setPreset(nextPreset);
     setRange(nextRange);
+  };
+
+  const toggleRecord = (attendanceId: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(attendanceId)) next.delete(attendanceId);
+      else next.add(attendanceId);
+      return next;
+    });
+  };
+
+  const toggleAllVisible = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const deleteSelectedRecords = async () => {
+    const attendanceIds = [...selectedIds];
+    if (!attendanceIds.length) return;
+    setDeleting(true);
+    try {
+      const result = await apiJson<BulkDeleteResult>('/api/v2/attendance/bulk-delete', {
+        method: 'POST',
+        body: { attendance_ids: attendanceIds },
+        timeoutMs: 120_000,
+      });
+      const deletedCount = result.deleted_ids?.length || 0;
+      const failedCount = result.failed?.length || 0;
+      setSelectedIds(new Set());
+      setConfirmBulkDelete(false);
+      setReloadVersion((current) => current + 1);
+      if (deletedCount) {
+        toast.success(`${deletedCount} attendance record${deletedCount === 1 ? '' : 's'} deleted`);
+      }
+      if (failedCount) {
+        toast.error(`${failedCount} record${failedCount === 1 ? '' : 's'} could not be deleted`, {
+          detail: 'Refresh and retry those records.',
+        });
+      }
+    } catch (deleteError) {
+      toast.error('Could not delete the selected records', {
+        detail: deleteError instanceof Error ? deleteError.message : String(deleteError),
+      });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -200,6 +278,28 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
         </h2>
 
         <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          {canBulkDelete && selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmBulkDelete(true)}
+              className="flex h-9 items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              Delete selected ({selectedIds.size})
+            </button>
+          )}
+          <span className="relative flex-1 min-w-[10rem] sm:flex-none">
+            <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search attendance records"
+              maxLength={120}
+              placeholder="Search name, institute, remarks…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-9 w-full sm:w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            />
+          </span>
           <DateRangeFilter
             preset={preset}
             range={range}
@@ -224,18 +324,6 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             <option value="">All roles</option>
             {roles.map((role) => <option key={role} value={role}>{role}</option>)}
           </select>
-          <span className="relative flex-1 min-w-[10rem] sm:flex-none">
-            <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
-            <input
-              type="search"
-              aria-label="Search attendance records"
-              maxLength={120}
-              placeholder="Search name, institute, remarks…"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="h-9 w-full sm:w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-            />
-          </span>
         </div>
       </div>
 
@@ -256,9 +344,22 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             scroll the row far off screen instead of truncating at 320px.
             1610px is the sum of the column widths below.
           */}
-          <table className="text-left border-collapse table-fixed w-[1780px] max-w-none">
+          <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? 'w-[1828px]' : 'w-[1780px]'}`}>
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                {canBulkDelete && (
+                  <th className="w-12 p-4">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      disabled={!visibleIds.length}
+                      onChange={toggleAllVisible}
+                      aria-label="Select all visible attendance records"
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                  </th>
+                )}
                 <th className="p-4 w-[200px]">Instructor Name</th>
                 <th className="p-4 w-[150px]">Role</th>
                 <th className="p-4 w-[160px]">Institute</th>
@@ -275,13 +376,15 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
-                <tr><td colSpan={12} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+                <tr><td colSpan={canBulkDelete ? 13 : 12} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
               ) : records.length === 0 ? (
-                <tr><td colSpan={12} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
+                <tr><td colSpan={canBulkDelete ? 13 : 12} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
               ) : filteredRecords.length === 0 ? (
-                <tr><td colSpan={12} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+                <tr><td colSpan={canBulkDelete ? 13 : 12} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {
                 const canOpen = canOpenRecord(record.status);
+                const attendanceId = String(record._id);
+                const selected = selectedIds.has(attendanceId);
                 return (
                   <tr
                     key={record._id}
@@ -294,8 +397,19 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
                     }}
                     tabIndex={canOpen ? 0 : undefined}
                     aria-label={canOpen ? `Open evaluation for ${record.instructor_name}` : undefined}
-                    className={`transition-colors ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
+                    className={`transition-colors ${selected ? 'bg-indigo-50/70' : ''} ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
                   >
+                    {canBulkDelete && (
+                      <td className="w-12 p-4" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleRecord(attendanceId)}
+                          aria-label={`Select attendance record for ${record.instructor_name || 'instructor'}`}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </td>
+                    )}
                     {/* truncate on every text cell: one line, an ellipsis when
                         it overflows, and the full value in the tooltip. */}
                     <td className="p-4 font-bold text-slate-800 truncate" title={record.instructor_name || ''}>{record.instructor_name}</td>
@@ -404,6 +518,18 @@ export default function DailyAttendanceTable({ onRowClick }: DailyAttendanceTabl
           onClose={() => setPhotoTarget(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        title="Delete selected attendance records?"
+        message={`This permanently deletes ${selectedIds.size} selected attendance record${selectedIds.size === 1 ? '' : 's'}.`}
+        detail="Their check-ins, check-outs, appearance reports and stored photographs will be removed. This cannot be undone."
+        confirmLabel="Delete selected"
+        destructive
+        busy={deleting}
+        onConfirm={() => void deleteSelectedRecords()}
+        onCancel={() => setConfirmBulkDelete(false)}
+      />
     </section>
   );
 }

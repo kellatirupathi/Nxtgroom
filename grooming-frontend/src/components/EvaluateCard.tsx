@@ -42,8 +42,8 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [facing, setFacing] = useState<'user' | 'environment'>('environment');
   const [preparing, setPreparing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
-  // Set only when a check-in is refused because one is already open, so the
-  // refusal can point at the record instead of just naming it.
+  // Set when a duplicate daily action is refused, so the message can point at
+  // today's existing attendance record instead of only naming the conflict.
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
   // attendanceId is null until the record is saved, so the modal can show the
   // saving step instead of opening empty.
@@ -221,6 +221,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
 
     setCheckoutLoading(true);
     setMessage({ type: '', text: '' });
+    setActiveRecordId(null);
 
     // The check-out photo is assessed the same way the check-in one is, so it
     // gets the same dialog: the saving step is visible from the moment the
@@ -284,6 +285,14 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       void fetchInstructors();
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
+      if (error instanceof ApiError && error.status === 409) {
+        const existingId = (error.details as { attendance_id?: string } | null)?.attendance_id;
+        setReportTarget(null);
+        setActiveRecordId(existingId ?? null);
+        setMessage({ type: 'error', text });
+        toast.error('Already checked out', { detail: text });
+        return;
+      }
       // Reported inside the dialog when one is open, so the failure appears
       // where the user is looking.
       if (hasPhoto) {

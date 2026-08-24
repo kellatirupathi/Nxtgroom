@@ -10,7 +10,10 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // the saree, kurti and earring rules. 2026-08-19.1 asks whether the photograph
 // shows a person at all. 2026-08-21.1 replaces visual reference manuals with a
 // complete, text-only standard embedded in the applicable checkpoints.
-export const PROMPT_VERSION = "2026-08-21.1";
+// 2026-08-24.1 makes the required men's tuck and belt checks fail when the
+// submitted photo does not show them, and makes clearly absent rings/chains a
+// PASS rather than an abstention when the relevant body area is assessable.
+export const PROMPT_VERSION = "2026-08-24.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -64,7 +67,15 @@ trousers, no ID card at all, or sneakers.
 Judging a checkpoint on how well the photograph shows it, rather than on what
 the instructor is wearing, is the most common way this goes wrong. Poor
 framing, distance, blur and low light are properties of the picture. They lead
-to N/A when they genuinely prevent a decision, and never to FAIL.
+to N/A when they genuinely prevent a decision, except for a checkpoint whose
+written standard explicitly requires the submitted photograph to show the
+item (the men's shirt tuck and belt checks). Follow those explicit standards.
+
+For an optional accessory check, clearly seeing the relevant body area and
+seeing no prohibited accessory is evidence of compliance: return PASS. Return
+N/A only when that body area itself cannot be judged reliably. In particular,
+clear hands with no rings and a clear neck/collar area with no chain or
+necklace are PASS, not N/A.
 
 ### HAIR
 Hair matters more than its length or colour suggests, and is the thing most

@@ -1,14 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MIN_BODY_SPAN_RATIO,
   OVERRIDE_AFTER_MS,
   readKeypoints,
+  readPoses,
   shutterEnabled,
   STEADY_MS,
 } from '../src/lib/fullBodyDetector.ts';
 
 const point = (name, score) => ({ name, score });
 const wholePerson = [point('nose', 0.9), point('left_ankle', 0.8), point('right_ankle', 0.8)];
+const framedPerson = [
+  { name: 'nose', score: 0.9, x: 100, y: 80 },
+  { name: 'left_shoulder', score: 0.9, x: 80, y: 180 },
+  { name: 'right_shoulder', score: 0.9, x: 120, y: 180 },
+  { name: 'left_ankle', score: 0.8, x: 90, y: 820 },
+  { name: 'right_ankle', score: 0.8, x: 110, y: 820 },
+];
 
 /**
  * The gate exists because a head-and-shoulders photograph leaves eleven of
@@ -28,6 +37,34 @@ test('one ankle is not a full-body photograph', () => {
   const oneFoot = [point('nose', 0.9), point('left_ankle', 0.8), point('right_ankle', 0.05)];
   assert.equal(readKeypoints(oneFoot).verdict, 'PARTIAL');
   assert.match(readKeypoints(oneFoot).guidance, /step back/i);
+});
+
+test('a distant whole person is asked to fill more of the frame', () => {
+  const distant = framedPerson.map((keypoint) => ({
+    ...keypoint,
+    y: 300 + ((keypoint.y - 80) * 0.5),
+  }));
+  assert.equal(readKeypoints(distant, 1000).verdict, 'TOO_FAR');
+  assert.match(readKeypoints(distant, 1000).guidance, /move closer/i);
+  assert.ok(MIN_BODY_SPAN_RATIO >= 0.65);
+});
+
+test('a large head-to-feet subject is ready', () => {
+  assert.equal(readKeypoints(framedPerson, 1000).verdict, 'FULL_BODY');
+});
+
+test('multiple people are rejected even when one is only partly visible', () => {
+  const backgroundFace = [
+    { name: 'nose', score: 0.8, x: 500, y: 200 },
+    { name: 'left_eye', score: 0.8, x: 490, y: 190 },
+    { name: 'right_eye', score: 0.8, x: 510, y: 190 },
+  ];
+  const reading = readPoses([
+    { score: 0.9, keypoints: framedPerson },
+    { score: 0.6, keypoints: backgroundFace },
+  ], 1000);
+  assert.equal(reading.verdict, 'MULTIPLE_PEOPLE');
+  assert.match(reading.guidance, /only one person/i);
 });
 
 test('a low-confidence keypoint is a guess, not a sighting', () => {
@@ -61,7 +98,13 @@ test('the shutter waits for a frame that holds', () => {
 
 test('a partial frame keeps the shutter shut', () => {
   assert.equal(shutterEnabled('PARTIAL', 10_000, false), false);
+  assert.equal(shutterEnabled('TOO_FAR', 10_000, false), false);
   assert.equal(shutterEnabled('NO_PERSON', 10_000, false), false);
+});
+
+test('multiple people can never be bypassed with the accessibility override', () => {
+  assert.equal(shutterEnabled('MULTIPLE_PEOPLE', STEADY_MS, false), false);
+  assert.equal(shutterEnabled('MULTIPLE_PEOPLE', STEADY_MS, true), false);
 });
 
 test('the shutter opens when the detector cannot run at all', () => {

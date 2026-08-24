@@ -202,6 +202,13 @@ function openCheckInToday(instructorId, now = new Date()) {
   };
 }
 
+/** Pure decision used before any check-out photo is processed or stored. */
+export function checkoutAvailability(attendance) {
+  if (!attendance) return "not_checked_in_today";
+  if (attendance.check_out_time) return "already_checked_out_today";
+  return "available";
+}
+
 /**
  * The id of the instructor's attendance record for today, or null.
  *
@@ -504,14 +511,21 @@ attendanceRouter.post(
     const scope = attendanceScope(req.currentUser);
     const candidate = await db.collection("attendance").findOne(
       {
-        instructor_id: idMatch(req.validatedBody.instructor_id),
-        check_out_time: null,
+        ...attendanceOnLocalDay(req.validatedBody.instructor_id, checkOutTime),
         ...scope,
-      },
-      { sort: { check_in_time: -1 } }
+      }
     );
-    if (!candidate) {
-      return res.status(400).json({ detail: "No active check-in found to check out" });
+    const checkoutState = checkoutAvailability(candidate);
+    if (checkoutState === "not_checked_in_today") {
+      return res.status(400).json({
+        detail: "This instructor has not checked in today",
+      });
+    }
+    if (checkoutState === "already_checked_out_today") {
+      return res.status(409).json({
+        detail: "This instructor has already checked out today",
+        attendance_id: String(candidate._id),
+      });
     }
 
     const instructor = await db.collection("instructors").findOne({
@@ -603,7 +617,10 @@ attendanceRouter.post(
     const attendance = result?.value || result;
     if (!attendance) {
       await compensateUploadedPhoto(db, checkOutPhotoKey, "duplicate_checkout");
-      return res.status(409).json({ detail: "This attendance was already checked out" });
+      return res.status(409).json({
+        detail: "This instructor has already checked out today",
+        attendance_id: String(candidate._id),
+      });
     }
 
     // The check-out has its own coordinates, and nothing was turning them into
@@ -1250,6 +1267,68 @@ attendanceRouter.get(
     if (!url) return res.status(503).json({ detail: "Photo storage is unavailable right now" });
 
     return res.json({ url, expires_in: 900 });
+  })
+);
+
+/**
+ * Deletes a bounded set of complete attendance records for administrators.
+ *
+ * This endpoint deliberately does not inherit the BOA deletion toggle. Bulk
+ * deletion has a wider blast radius than deleting one reviewed detail record,
+ * so only ADMIN and SUPER_ADMIN may use it. Each record still goes through the
+ * same storage/job/evaluation cleanup as the single-record endpoint.
+ */
+attendanceRouter.post(
+  "/bulk-delete",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    if (!Array.isArray(req.body?.attendance_ids)) {
+      return res.status(422).json({ detail: "attendance_ids must be an array" });
+    }
+    const attendanceIds = [...new Set(req.body.attendance_ids.map((value) => String(value).trim()))];
+    if (!attendanceIds.length || attendanceIds.length > 100) {
+      return res.status(422).json({
+        detail: "Select between 1 and 100 attendance records to delete",
+      });
+    }
+    if (attendanceIds.some((value) => !value || value.length > 100)) {
+      return res.status(422).json({ detail: "Every attendance id must be valid" });
+    }
+
+    const db = req.app.locals.db;
+    const records = await db.collection("attendance").find({
+      $or: attendanceIds.map((attendanceId) => ({ _id: idMatch(attendanceId) })),
+    }).toArray();
+    const recordsById = new Map(records.map((record) => [String(record._id), record]));
+    const deletedIds = [];
+    const failed = [];
+
+    for (const attendanceId of attendanceIds) {
+      const attendance = recordsById.get(attendanceId);
+      if (!attendance) {
+        failed.push({ attendance_id: attendanceId, detail: "Attendance record not found" });
+        continue;
+      }
+      try {
+        await purgeAttendance(db, attendance);
+        deletedIds.push(attendanceId);
+      } catch (error) {
+        failed.push({
+          attendance_id: attendanceId,
+          detail: error.code === "PHOTO_DELETE_FAILED"
+            ? "The photo could not be removed. Retry deletion."
+            : "The record could not be deleted. Retry deletion.",
+        });
+      }
+    }
+
+    return res.status(failed.length ? 207 : 200).json({
+      message: failed.length
+        ? `${deletedIds.length} record(s) deleted; ${failed.length} could not be deleted`
+        : `${deletedIds.length} attendance record(s) deleted`,
+      deleted_ids: deletedIds,
+      failed,
+    });
   })
 );
 
