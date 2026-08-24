@@ -54,6 +54,18 @@ test('a large head-to-feet subject is ready', () => {
   assert.equal(readKeypoints(framedPerson, 1000).verdict, 'FULL_BODY');
 });
 
+test('the live check reads each wrist relative to its shoulder', () => {
+  const reading = readKeypoints([
+    ...framedPerson,
+    { name: 'left_wrist', score: 0.9, x: 70, y: 100 },
+    { name: 'right_wrist', score: 0.9, x: 130, y: 400 },
+  ], 1000);
+  assert.deepEqual(reading.poseSignals, {
+    leftWrist: 'RAISED',
+    rightWrist: 'LOWERED',
+  });
+});
+
 test('multiple people are rejected even when one is only partly visible', () => {
   const backgroundFace = [
     { name: 'nose', score: 0.8, x: 500, y: 200 },

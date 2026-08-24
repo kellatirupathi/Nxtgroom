@@ -23,6 +23,15 @@ export interface FrameReading {
   verdict: FrameVerdict;
   /** What to tell the person in front of the camera, or null when nothing is wrong. */
   guidance: string | null;
+  /** Relative arm positions used by the live challenge before capture. */
+  poseSignals?: PoseSignals;
+}
+
+export type WristPosition = 'RAISED' | 'LOWERED' | 'UNKNOWN';
+
+export interface PoseSignals {
+  leftWrist: WristPosition;
+  rightWrist: WristPosition;
 }
 
 /** Below this a keypoint is a guess, not a sighting. */
@@ -86,6 +95,36 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
   return detectorPromise;
 }
 
+function wristPosition(
+  keypoints: Keypoint[],
+  side: 'left' | 'right',
+  frameHeight?: number,
+): WristPosition {
+  const find = (name: string) => keypoints.find((point) => (
+    point.name === name
+    && (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+    && Number.isFinite(point.y)
+  ));
+  const wrist = find(`${side}_wrist`);
+  const shoulder = find(`${side}_shoulder`);
+  if (!wrist || !shoulder) return 'UNKNOWN';
+
+  // The dead zone stops normal detector jitter around shoulder height from
+  // completing a challenge. At full-body scale, 4% of the frame is a clear
+  // movement without requiring a perfectly vertical arm.
+  const margin = Math.max(8, (frameHeight || 0) * 0.04);
+  if ((wrist.y as number) < (shoulder.y as number) - margin) return 'RAISED';
+  if ((wrist.y as number) > (shoulder.y as number) + margin) return 'LOWERED';
+  return 'UNKNOWN';
+}
+
+function poseSignals(keypoints: Keypoint[], frameHeight?: number): PoseSignals {
+  return {
+    leftWrist: wristPosition(keypoints, 'left', frameHeight),
+    rightWrist: wristPosition(keypoints, 'right', frameHeight),
+  };
+}
+
 /** Turns one set of keypoints into a verdict and, when needed, an instruction. */
 export function readKeypoints(
   keypoints: Keypoint[] | undefined,
@@ -125,13 +164,19 @@ export function readKeypoints(
         return {
           verdict: 'TOO_FAR',
           guidance: 'Move closer - fill the guide from head to feet',
+          poseSignals: poseSignals(keypoints, frameHeight),
         };
       }
     }
-    return { verdict: 'FULL_BODY', guidance: null };
+    return {
+      verdict: 'FULL_BODY',
+      guidance: null,
+      poseSignals: poseSignals(keypoints, frameHeight),
+    };
   }
   return {
     verdict: 'PARTIAL',
+    poseSignals: poseSignals(keypoints, frameHeight),
     guidance: anklesVisible
       ? 'Move the camera down — your head is out of frame'
       : 'Step back — your feet are not in frame',

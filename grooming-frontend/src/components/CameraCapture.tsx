@@ -10,7 +10,14 @@ import {
   type StableFrameState,
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
-import { coverSourceRect } from '../lib/cameraGeometry';
+import { BODY_GUIDE_BOUNDS, bodyGuideSourceRect } from '../lib/cameraGeometry';
+import {
+  advanceLiveness,
+  createLivenessState,
+  livenessInstruction,
+  livenessVerified,
+  type LivenessState,
+} from '../lib/livenessChallenge';
 
 type Facing = 'user' | 'environment';
 
@@ -59,6 +66,8 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
   const [steadyForMs, setSteadyForMs] = useState(0);
   const [overridden, setOverridden] = useState(false);
   const [canOverride, setCanOverride] = useState(false);
+  const [liveness, setLiveness] = useState<LivenessState>(() => createLivenessState());
+  const livenessRef = useRef(liveness);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -74,6 +83,9 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     setSteadyForMs(0);
     setOverridden(false);
     setCanOverride(false);
+    const freshLiveness = createLivenessState();
+    livenessRef.current = freshLiveness;
+    setLiveness(freshLiveness);
 
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -150,6 +162,20 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
         const stableReading = stableState.reading;
         setVerdict(stableReading.verdict);
         setGuidance(stableReading.guidance);
+        const previousLiveness = livenessRef.current;
+        const nextLiveness = advanceLiveness(previousLiveness, stableReading);
+        livenessRef.current = nextLiveness;
+        // The detector runs five times a second. Update React only when the
+        // challenge actually changes so the preview remains smooth on modest
+        // tablets instead of repainting for every inference frame.
+        if (
+          nextLiveness.phase !== previousLiveness.phase
+          || nextLiveness.side !== previousLiveness.side
+          || nextLiveness.confirmations !== previousLiveness.confirmations
+          || nextLiveness.deadline !== previousLiveness.deadline
+        ) {
+          setLiveness(nextLiveness);
+        }
         // Held continuously, not merely seen once: a single lucky frame while
         // somebody is still moving is not a steady full-body shot.
         if (stableReading.verdict === 'FULL_BODY') {
@@ -184,7 +210,12 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [stop]);
 
-  const ready = shutterEnabled(verdict, steadyForMs, overridden);
+  const framingReady = shutterEnabled(verdict, steadyForMs, overridden);
+  const liveVerified = livenessVerified(liveness);
+  const ready = framingReady && liveVerified;
+  const liveInstruction = verdict === 'UNAVAILABLE'
+    ? 'Live check unavailable - close and reopen the camera'
+    : livenessInstruction(liveness);
 
   const shoot = async () => {
     const video = videoRef.current;
@@ -193,7 +224,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     try {
       const canvas = document.createElement('canvas');
       const viewport = viewportRef.current;
-      const crop = coverSourceRect(
+      const crop = bodyGuideSourceRect(
         video.videoWidth,
         video.videoHeight,
         viewport?.clientWidth || video.videoWidth,
@@ -284,16 +315,18 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
                 aria-hidden="true"
               >
                 <rect
-                  x="13" y="2" width="74" height="96" rx="37"
+                  x={BODY_GUIDE_BOUNDS.left * 100}
+                  y={BODY_GUIDE_BOUNDS.top * 100}
+                  width={BODY_GUIDE_BOUNDS.width * 100}
+                  height={BODY_GUIDE_BOUNDS.height * 100}
+                  rx={BODY_GUIDE_BOUNDS.width * 50}
                   fill="none"
                   strokeWidth="0.8"
                   className={
                     verdict === 'MULTIPLE_PEOPLE'
                       ? 'stroke-rose-400/95'
-                      : verdict === 'FULL_BODY' && steadyForMs >= STEADY_MS
+                      : verdict === 'FULL_BODY'
                         ? 'stroke-emerald-400/90'
-                        : overridden
-                          ? 'stroke-amber-400/90'
                         : 'stroke-white/55'
                   }
                 />
@@ -303,17 +336,21 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
             {/* One line, only when something needs changing. A running
                 commentary on a correct frame is noise. */}
             <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-6">
-              {guidance && !ready ? (
+              {guidance && !overridden ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
                   {guidance}
+                </p>
+              ) : !liveVerified ? (
+                <p className="rounded-full bg-indigo-600/90 px-4 py-2 text-center text-sm font-bold text-white" role="status">
+                  {liveInstruction}
                 </p>
               ) : verdict === 'FULL_BODY' && steadyForMs < STEADY_MS ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-sm font-semibold text-white" role="status">
                   Hold still…
                 </p>
-              ) : ready && verdict === 'FULL_BODY' ? (
+              ) : ready ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
-                  One person, full body in frame
+                  Live person verified - ready
                 </p>
               ) : null}
             </div>
@@ -349,7 +386,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
           type="button"
           onClick={shoot}
           disabled={Boolean(error) || starting || capturing || !ready}
-          aria-label="Capture photo"
+          aria-label={ready ? 'Capture photo' : 'Complete the live check to capture photo'}
           className="w-[72px] h-[72px] rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 flex items-center justify-center"
         >
           {capturing ? (
