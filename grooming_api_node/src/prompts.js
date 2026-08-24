@@ -13,7 +13,9 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // 2026-08-24.1 makes the required men's tuck and belt checks fail when the
 // submitted photo does not show them, and makes clearly absent rings/chains a
 // PASS rather than an abstention when the relevant body area is assessable.
-export const PROMPT_VERSION = "2026-08-24.1";
+// 2026-08-24.2 makes facial-detail assessment explicit and prevents shirt
+// tuck evidence from being misfiled as a shirt-fit violation.
+export const PROMPT_VERSION = "2026-08-24.2";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -76,6 +78,25 @@ seeing no prohibited accessory is evidence of compliance: return PASS. Return
 N/A only when that body area itself cannot be judged reliably. In particular,
 clear hands with no rings and a clear neck/collar area with no chain or
 necklace are PASS, not N/A.
+
+### LOCAL DETAIL AND CHECKPOINT SEPARATION
+The submitted image is available at high detail. Inspect the relevant local
+area for each checkpoint instead of judging every small feature from the scale
+of the whole person. In particular, inspect the face for facial hair and the
+upper lip for a moustache, and inspect the waistband for shirt tuck and belt.
+Do not return N/A merely because the photograph is full-body when the relevant
+feature remains discernible. N/A requires a real visibility limitation such as
+cropping, occlusion or blur, and that limitation must be stated accurately.
+
+Keep checkpoints independent. Shirt Fit is only about fit on the torso:
+pulling, tightness, excessive looseness or heavy bunching. Shirt tuck belongs
+only to Shirt Collar / Tuck. A shirt must never fail Shirt Fit because it is or
+appears untucked. Natural folds or slight billowing above a visible waistband
+are not evidence that a shirt is untucked.
+
+For every FAIL, observation and reason must identify the concrete visible
+violation. Never manufacture a hem, facial-hair problem, accessory or other
+detail that the image does not show, and never contradict visible evidence.
 
 ### HAIR
 Hair matters more than its length or colour suggests, and is the thing most

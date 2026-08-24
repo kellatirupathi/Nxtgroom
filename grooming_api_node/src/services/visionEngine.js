@@ -365,6 +365,21 @@ export function resolveIdCardAbstention(rows, visibleRegions) {
 export function resolveMaleAttireVisibility(rows, visibleRegions) {
   const find = (section, code) => (rows?.[section] || []).find((item) => item.code === code);
 
+  // Tuck is a separate checkpoint. Correct only the narrow category error in
+  // which an untucked waist is used to fail Shirt Fit; genuine fit violations
+  // such as pulling, tightness, looseness and bunching remain failures.
+  const shirtFit = find("attire_check", "M_SHIRT_FIT");
+  if (shirtFit?.status === "FAIL") {
+    const text = `${shirtFit.observation || ""} ${shirtFit.reason || ""}`.toLowerCase();
+    const mentionsTuck = /\b(?:tuck(?:ed|ing)?|untucked|waist(?:band)?|shirt\s+(?:hem|tail))\b/i.test(text);
+    const mentionsFitViolation = /\b(?:pull(?:ing|s|ed)?|tight(?:ness)?|bunch(?:ing|ed)?|baggy|loose(?:ness)?|ill[-\s]?fitt?ing|poor\s+fit)\b/i.test(text);
+    if (mentionsTuck && !mentionsFitViolation) {
+      shirtFit.status = "PASS";
+      shirtFit.observation = "No shirt-fit violation is identified; shirt tuck is assessed separately.";
+      shirtFit.reason = "Tucking is evaluated only in the Shirt Collar / Tuck checkpoint.";
+    }
+  }
+
   const tuck = find("attire_check", "M_SHIRT_COLLAR_TUCK");
   if (tuck?.status === "N/A") {
     tuck.status = "FAIL";

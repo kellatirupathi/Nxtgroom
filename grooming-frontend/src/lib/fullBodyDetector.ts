@@ -28,12 +28,15 @@ export interface FrameReading {
 
 /** Below this a keypoint is a guess, not a sighting. */
 const KEYPOINT_CONFIDENCE = 0.35;
+
+import { coverSourceRect } from './cameraGeometry.ts';
+
 /**
  * Nose-to-ankle distance is slightly shorter than the person's true height.
- * At 68% of the image it corresponds to a roughly 75-85% tall person while
+ * At 72% of the image it corresponds to a roughly 80-90% tall person while
  * retaining a safe margin above the hair and below the shoes.
  */
-export const MIN_BODY_SPAN_RATIO = 0.68;
+export const MIN_BODY_SPAN_RATIO = 0.72;
 /** MoveNet's ankle and head keypoints, by the names the model returns. */
 const HEAD_KEYPOINTS = ['nose', 'left_eye', 'right_eye'];
 const ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle'];
@@ -43,7 +46,7 @@ type Pose = { keypoints: Keypoint[]; score?: number };
 
 type Detector = {
   estimatePoses: (
-    input: HTMLVideoElement,
+    input: HTMLVideoElement | HTMLCanvasElement,
     config?: { maxPoses?: number },
   ) => Promise<Pose[]>;
   dispose?: () => void;
@@ -169,13 +172,44 @@ export function readPoses(
 export async function readFrame(
   detector: Detector | null,
   video: HTMLVideoElement,
+  viewport?: { width: number; height: number; canvas: HTMLCanvasElement },
 ): Promise<FrameReading> {
   if (!detector || !video.videoWidth) {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }
   try {
-    const poses = await detector.estimatePoses(video, { maxPoses: 6 });
-    return readPoses(poses, video.videoHeight);
+    let input: HTMLVideoElement | HTMLCanvasElement = video;
+    let frameHeight = video.videoHeight;
+    if (viewport?.width && viewport.height) {
+      const crop = coverSourceRect(
+        video.videoWidth,
+        video.videoHeight,
+        viewport.width,
+        viewport.height,
+      );
+      const scale = Math.min(1, 480 / Math.max(crop.width, crop.height));
+      const canvas = viewport.canvas;
+      canvas.width = Math.max(1, Math.round(crop.width * scale));
+      canvas.height = Math.max(1, Math.round(crop.height * scale));
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.drawImage(
+          video,
+          crop.x,
+          crop.y,
+          crop.width,
+          crop.height,
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+        input = canvas;
+        frameHeight = canvas.height;
+      }
+    }
+    const poses = await detector.estimatePoses(input, { maxPoses: 6 });
+    return readPoses(poses, frameHeight);
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }

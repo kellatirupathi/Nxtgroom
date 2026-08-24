@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MEN_ACCESSORIES_CHECKS, MEN_ATTIRE_CHECKS } from "../src/checkpoints.js";
+import { MEN_ACCESSORIES_CHECKS, MEN_ATTIRE_CHECKS, MEN_GROOMING_CHECKS } from "../src/checkpoints.js";
 import { buildSystemPrompt } from "../src/prompts.js";
 import { resolveMaleAttireVisibility } from "../src/services/visionEngine.js";
 
@@ -11,8 +11,9 @@ const row = (code, status, observation = "Not visible.", reason = "Cannot assess
   reason,
 });
 
-const rowsWith = ({ tuck = "PASS", belt = "PASS", rings, chain } = {}) => ({
+const rowsWith = ({ fit = "PASS", tuck = "PASS", belt = "PASS", rings, chain } = {}) => ({
   attire_check: [
+    row("M_SHIRT_FIT", fit),
     row("M_SHIRT_COLLAR_TUCK", tuck),
     row("M_BELT", belt),
   ],
@@ -30,8 +31,8 @@ test("an unshown required shirt tuck and belt are failures, not N/A", () => {
 
   assert.equal(statusOf(rows, "attire_check", "M_SHIRT_COLLAR_TUCK"), "FAIL");
   assert.equal(statusOf(rows, "attire_check", "M_BELT"), "FAIL");
-  assert.match(rows.attire_check[0].reason, /does not show.*shirt tuck/i);
-  assert.match(rows.attire_check[1].reason, /does not show.*belt/i);
+  assert.match(rows.attire_check.find((item) => item.code === "M_SHIRT_COLLAR_TUCK").reason, /does not show.*shirt tuck/i);
+  assert.match(rows.attire_check.find((item) => item.code === "M_BELT").reason, /does not show.*belt/i);
 });
 
 test("existing tuck and belt judgements are never overwritten", () => {
@@ -41,6 +42,29 @@ test("existing tuck and belt judgements are never overwritten", () => {
     assert.equal(statusOf(rows, "attire_check", "M_SHIRT_COLLAR_TUCK"), status);
     assert.equal(statusOf(rows, "attire_check", "M_BELT"), status);
   }
+});
+
+test("a tuck-only finding cannot fail the separate shirt-fit checkpoint", () => {
+  const rows = rowsWith({ fit: "FAIL" });
+  const fit = rows.attire_check.find((item) => item.code === "M_SHIRT_FIT");
+  fit.observation = "The shirt is not fully tucked in at the waist.";
+  fit.reason = "The shirt appears untucked near the belt.";
+
+  resolveMaleAttireVisibility(rows, {});
+
+  assert.equal(fit.status, "PASS");
+  assert.match(fit.reason, /only in the Shirt Collar \/ Tuck checkpoint/i);
+});
+
+test("a real shirt-fit violation remains a failure", () => {
+  const rows = rowsWith({ fit: "FAIL" });
+  const fit = rows.attire_check.find((item) => item.code === "M_SHIRT_FIT");
+  fit.observation = "The shirt is pulling tightly at the buttons.";
+  fit.reason = "Severe tightness is visible across the torso.";
+
+  resolveMaleAttireVisibility(rows, {});
+
+  assert.equal(fit.status, "FAIL");
 });
 
 test("clearly absent rings and chain become PASS when their regions are visible", () => {
@@ -89,14 +113,21 @@ test("accessory PASS and FAIL decisions are left unchanged", () => {
 });
 
 test("the written standards state the required visibility outcomes", () => {
+  const fit = MEN_ATTIRE_CHECKS.find((item) => item.code === "M_SHIRT_FIT").rule;
   const tuck = MEN_ATTIRE_CHECKS.find((item) => item.code === "M_SHIRT_COLLAR_TUCK").rule;
   const belt = MEN_ATTIRE_CHECKS.find((item) => item.code === "M_BELT").rule;
   const rings = MEN_ACCESSORIES_CHECKS.find((item) => item.code === "M_RINGS").rule;
   const chain = MEN_ACCESSORIES_CHECKS.find((item) => item.code === "M_CHAIN").rule;
+  const facialHair = MEN_GROOMING_CHECKS.find((item) => item.code === "M_FACIAL_HAIR").rule;
+  const moustache = MEN_GROOMING_CHECKS.find((item) => item.code === "M_MOUSTACHE").rule;
 
-  assert.match(tuck, /does not show the waist\/tuck area.*FAIL|FAIL when.*does not show the waist\/tuck area/i);
+  assert.match(fit, /tucked are not part of this checkpoint/i);
+  assert.match(tuck, /FAIL only when[\s\S]*does not show the waist\/tuck area/i);
   assert.match(belt, /does not show the waist\/belt area.*FAIL|FAIL when.*does not show the waist\/belt area/i);
   assert.match(rings, /absence of rings.*PASS, not N\/A/i);
   assert.match(chain, /absence of jewellery.*PASS, not N\/A/i);
+  assert.match(facialHair, /when the face, jaw and chin are discernible, make the assessment/i);
+  assert.match(moustache, /when the mouth and upper lip are discernible, make the assessment/i);
   assert.match(buildSystemPrompt("MALE", "FORMAL"), /clear hands with no rings[\s\S]*PASS, not N\/A/i);
+  assert.match(buildSystemPrompt("MALE", "FORMAL"), /shirt must never fail Shirt Fit because it is or[\s\S]*appears untucked/i);
 });

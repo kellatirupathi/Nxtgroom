@@ -8,6 +8,7 @@ import {
   STEADY_MS,
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
+import { coverSourceRect } from '../lib/cameraGeometry';
 
 type Facing = 'user' | 'environment';
 
@@ -43,6 +44,8 @@ function describeCameraError(error: unknown): string {
  */
 export default function CameraCapture({ facing, onFlip, onCapture, onClose }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const analysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(true);
@@ -119,8 +122,13 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
       const tick = async () => {
         if (disposed) return;
         const video = videoRef.current;
+        const viewport = viewportRef.current;
         const reading = video
-          ? await readFrame(detector, video)
+          ? await readFrame(detector, video, viewport ? {
+              width: viewport.clientWidth,
+              height: viewport.clientHeight,
+              canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
+            } : undefined)
           : ({ verdict: 'UNAVAILABLE', guidance: null } as const);
         if (disposed) return;
 
@@ -168,14 +176,31 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     setCapturing(true);
     try {
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      const viewport = viewportRef.current;
+      const crop = coverSourceRect(
+        video.videoWidth,
+        video.videoHeight,
+        viewport?.clientWidth || video.videoWidth,
+        viewport?.clientHeight || video.videoHeight,
+      );
+      canvas.width = Math.max(1, Math.round(crop.width));
+      canvas.height = Math.max(1, Math.round(crop.height));
       const context = canvas.getContext('2d');
       if (!context) throw new Error('no 2d context');
       // The preview is mirrored for the front camera because an unmirrored
       // self-view is disorienting, but the saved photo must not be: a mirrored
       // image reverses text on a lanyard or badge.
-      context.drawImage(video, 0, 0);
+      context.drawImage(
+        video,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob(resolve, 'image/jpeg', 0.92),
       );
@@ -213,7 +238,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
         </button>
       </div>
 
-      <div className="flex-1 relative overflow-hidden">
+      <div ref={viewportRef} className="flex-1 relative overflow-hidden">
         {error ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-8" role="alert">
             <Camera size={40} className="text-white/40 mb-4" aria-hidden="true" />
@@ -250,8 +275,10 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
                   className={
                     verdict === 'MULTIPLE_PEOPLE'
                       ? 'stroke-rose-400/95'
-                      : ready
+                      : verdict === 'FULL_BODY' && steadyForMs >= STEADY_MS
                         ? 'stroke-emerald-400/90'
+                        : overridden
+                          ? 'stroke-amber-400/90'
                         : 'stroke-white/55'
                   }
                 />
