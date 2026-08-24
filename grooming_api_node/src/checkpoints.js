@@ -124,6 +124,23 @@ export const KURTI_ATTIRE_CHECKS = [
   },
 ];
 
+/**
+ * Western formal-wear checkpoints for women.
+ *
+ * This is intentionally its own rule family. Reusing the men's rows would
+ * incorrectly introduce men's belt, shirt and trouser requirements into a
+ * woman's report, while routing FORMAL through the kurti rows would judge the
+ * wrong garment altogether.
+ */
+export const WOMEN_FORMAL_ATTIRE_CHECKS = [
+  { code: "W_FORMAL_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms the visible outfit belongs to the western formal-wear family. A professional shirt or blouse with formal trousers is acceptable. FAIL t-shirts, crop tops, jeans, denim, sportswear and clearly casual combinations." },
+  { code: "W_FORMAL_TOP", name: "Formal Top", rule: "The top must be a professional shirt or blouse with appropriate workplace coverage. FAIL clearly casual tops, loud novelty designs, sheer fabric, exposed straps or an obviously inappropriate neckline." },
+  { code: "W_FORMAL_TOP_FIT_CONDITION", name: "Top Fit & Condition", rule: "Covers fit, cleanliness, stains, tears, damage and heavy wrinkling together. Ordinary folds and normal ease are acceptable." },
+  { code: "W_FORMAL_BOTTOM_TYPE", name: "Formal Bottom Wear", rule: "Formal trousers in an opaque professional fabric are expected. FAIL jeans, denim, leggings worn as outerwear, joggers, shorts and clearly casual bottoms." },
+  { code: "W_FORMAL_BOTTOM_FIT_CONDITION", name: "Bottom Fit & Condition", rule: "Covers fit, opacity, visible condition, tears, fraying, heavy creasing and appropriate hem length together." },
+  { code: "W_FORMAL_PRESENTATION", name: "Overall Formal Presentation", rule: "Judge whether the visible western formal outfit reads as coordinated and professional overall, after the top and bottom checkpoints have been assessed separately." },
+];
+
 export const WOMEN_ACCESSORIES_CHECKS = [
   {
     code: "W_EARRINGS",
@@ -177,10 +194,17 @@ export function checkpointSet(gender, attireType) {
     };
   }
   if (gender === "FEMALE") {
+    const attireChecks = attireType === "SAREE"
+      ? SAREE_ATTIRE_CHECKS
+      : attireType === "KURTI_WITH_DUPATTA"
+        ? KURTI_ATTIRE_CHECKS
+        : attireType === "FORMAL"
+          ? WOMEN_FORMAL_ATTIRE_CHECKS
+          : [];
     return {
       general_idcard_check: ID_CARD_CHECKS,
       grooming_check: WOMEN_GROOMING_CHECKS,
-      attire_check: attireType === "SAREE" ? SAREE_ATTIRE_CHECKS : KURTI_ATTIRE_CHECKS,
+      attire_check: attireChecks,
       accessories_check: WOMEN_ACCESSORIES_CHECKS,
       footwear_check: WOMEN_FOOTWEAR_CHECKS,
     };
@@ -241,6 +265,12 @@ export const IMPROVEMENT_TIPS = {
   W_DUPATTA: "Wear the dupatta properly draped and secured, not loosely placed.",
   W_KURTI_CONDITION: "Wear a clean, pressed, undamaged kurti.",
   W_BOTTOM_WEAR: "Wear palazzos, churidar or formal trousers in an opaque fabric.",
+  W_FORMAL_ATTIRE_TYPE: "Wear a professional formal shirt or blouse with formal trousers.",
+  W_FORMAL_TOP: "Wear a professional, appropriately covered formal top.",
+  W_FORMAL_TOP_FIT_CONDITION: "Wear a clean, pressed formal top that fits well.",
+  W_FORMAL_BOTTOM_TYPE: "Wear formal trousers instead of casual bottom wear.",
+  W_FORMAL_BOTTOM_FIT_CONDITION: "Wear clean, pressed and well-fitted formal trousers.",
+  W_FORMAL_PRESENTATION: "Wear a coordinated professional formal outfit.",
   W_EARRINGS: "Wear simple studs or small earrings, no larger than 2 cm.",
   W_BANGLES: "Reduce the number of bangles worn.",
   W_BINDI: "Wear a small, plain bindi.",

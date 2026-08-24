@@ -9,8 +9,9 @@ import {
   MEN_ATTIRE_CHECKS,
   SAREE_ATTIRE_CHECKS,
   SECTION_KEYS,
+  WOMEN_FORMAL_ATTIRE_CHECKS,
 } from "../src/checkpoints.js";
-import { buildSystemPrompt, PROMPT_VERSION } from "../src/prompts.js";
+import { buildFemaleSystemPrompt, buildSystemPrompt, PROMPT_VERSION } from "../src/prompts.js";
 import { weeklyRotation } from "../src/services/instructorReports.js";
 import { deriveVerdict, unknownGenderEvaluation } from "../src/services/visionEngine.js";
 
@@ -31,10 +32,28 @@ test("each variant returns its agreed number of checkpoints", () => {
   assert.deepEqual(shape("MALE", "FORMAL"), [1, 5, 8, 4, 2]);
   assert.deepEqual(shape("FEMALE", "SAREE"), [1, 5, 6, 5, 2]);
   assert.deepEqual(shape("FEMALE", "KURTI_WITH_DUPATTA"), [1, 5, 7, 5, 2]);
+  assert.deepEqual(shape("FEMALE", "FORMAL"), [1, 5, 6, 5, 2]);
+  assert.deepEqual(shape("FEMALE", "UNKNOWN"), [1, 5, 0, 5, 2]);
 
   assert.equal(codesOf("MALE", "FORMAL").length, 20);
   assert.equal(codesOf("FEMALE", "SAREE").length, 19);
   assert.equal(codesOf("FEMALE", "KURTI_WITH_DUPATTA").length, 20);
+  assert.equal(codesOf("FEMALE", "FORMAL").length, 19);
+});
+
+test("the single-pass female prompt offers each attire family without mixing the stored report", () => {
+  const prompt = buildFemaleSystemPrompt();
+  for (const marker of ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"]) {
+    assert.match(prompt, new RegExp(`\\b${marker}\\b`));
+  }
+  for (const item of [
+    ...SAREE_ATTIRE_CHECKS,
+    ...KURTI_ATTIRE_CHECKS,
+    ...WOMEN_FORMAL_ATTIRE_CHECKS,
+  ]) {
+    assert.match(prompt, new RegExp(`\\b${item.code}\\b`), `${item.code} is missing`);
+  }
+  assert.match(prompt, /Do not merge branches or return unused attire checkpoints/i);
 });
 
 test("no checkpoint appears twice in a report", () => {

@@ -2,14 +2,15 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
 import { incrementMetric, observeDuration } from "./telemetry.js";
-import { ATTIRE_CLASSIFIER_PROMPT, buildSystemPrompt } from "../prompts.js";
+import { buildFemaleSystemPrompt, buildSystemPrompt } from "../prompts.js";
 import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints.js";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 // Increment when the stable instructions or report schema changes materially.
 // The exact-prefix hash still prevents an invalid match; the version makes the
 // routing intent explicit in telemetry/debugging.
-const GROOMING_PROMPT_CACHE_VERSION = "v2";
+const GROOMING_PROMPT_CACHE_VERSION = "v3";
+const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
 
@@ -26,10 +27,6 @@ const Entry = z.object({
   reason: z.string(),
 });
 
-const AttireClassification = z.object({
-  attire_type: z.enum(["FORMAL", "SAREE", "KURTI_WITH_DUPATTA", "UNKNOWN"]),
-});
-
 const ENTRY_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -39,15 +36,6 @@ const ENTRY_JSON_SCHEMA = {
     reason: { type: "string" },
   },
   required: ["status", "observation", "reason"],
-};
-
-const ATTIRE_JSON_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    attire_type: { type: "string", enum: ["FORMAL", "SAREE", "KURTI_WITH_DUPATTA", "UNKNOWN"] },
-  },
-  required: ["attire_type"],
 };
 
 function createOpenAIError(message, code, { retryable = false } = {}) {
@@ -126,8 +114,8 @@ function recordOpenAICacheUsage(responseBody, cacheRouted) {
 
 /**
  * Stable, non-personal routing key for requests with the same reusable prefix.
- * Gender and attire change both the instructions and structured-output schema,
- * so they must not be grouped as though their prefixes were interchangeable.
+ * Male and female-auto requests have different instructions and schemas, so
+ * they must not be grouped as though their prefixes were interchangeable.
  */
 export function groomingPromptCacheKey(gender, attireType) {
   return [
@@ -254,7 +242,7 @@ async function requestOpenAIStructured({
  * duplicated, returned under a foreign code, or returned out of order. The
  * previous array schema could express all four, and did.
  */
-function buildReportSchema(sections) {
+function buildReportSchema(sections, { attireType = null } = {}) {
   const shape = {
     // Asked directly rather than inferred from the checkpoints. "Nothing was
     // examined" and "nothing was wrong" both produce a report with no
@@ -271,6 +259,7 @@ function buildReportSchema(sections) {
       hands: VISIBILITY,
     }),
   };
+  if (attireType) shape.attire_type = z.literal(attireType);
   for (const key of SECTION_KEYS) {
     shape[key] = z.object(
       Object.fromEntries(sections[key].map((item) => [item.code, Entry]))
@@ -279,7 +268,7 @@ function buildReportSchema(sections) {
   return z.object(shape);
 }
 
-function buildReportJsonSchema(sections) {
+function buildReportJsonSchema(sections, { attireType = null } = {}) {
   const properties = {
     subject_visible: { type: "boolean" },
     image_quality: { type: "string", enum: ["ADEQUATE", "RETAKE_RECOMMENDED"] },
@@ -293,6 +282,7 @@ function buildReportJsonSchema(sections) {
       required: ["face", "upper_body", "lower_body", "footwear", "id_card", "hands"],
     },
   };
+  if (attireType) properties.attire_type = { type: "string", enum: [attireType] };
   for (const key of SECTION_KEYS) {
     properties[key] = {
       type: "object",
@@ -305,7 +295,43 @@ function buildReportJsonSchema(sections) {
     type: "object",
     additionalProperties: false,
     properties,
-    required: ["subject_visible", "image_quality", "ai_summary", "visible_regions", ...SECTION_KEYS],
+    required: [
+      "subject_visible",
+      "image_quality",
+      "ai_summary",
+      "visible_regions",
+      ...(attireType ? ["attire_type"] : []),
+      ...SECTION_KEYS,
+    ],
+  };
+}
+
+/**
+ * A strict nested union lets one response choose one female attire family
+ * without returning the unused families' checkpoint rows. Structured Outputs
+ * permits anyOf below the root object, so the outer evaluation key keeps the
+ * schema valid while each branch remains exact and independently validated.
+ */
+function buildFemaleResponseSchema() {
+  return z.object({
+    evaluation: z.union(FEMALE_ATTIRE_TYPES.map((attireType) => (
+      buildReportSchema(checkpointSet("FEMALE", attireType), { attireType })
+    ))),
+  });
+}
+
+function buildFemaleResponseJsonSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      evaluation: {
+        anyOf: FEMALE_ATTIRE_TYPES.map((attireType) => (
+          buildReportJsonSchema(checkpointSet("FEMALE", attireType), { attireType })
+        )),
+      },
+    },
+    required: ["evaluation"],
   };
 }
 
@@ -502,26 +528,6 @@ export function unknownGenderEvaluation() {
   );
 }
 
-/**
- * Names the garment before the main pass.
- *
- * A woman's attire checkpoints depend on the answer, and the garment has to be
- * read from the photograph rather than assumed from her gender: a woman in
- * formal trousers is exactly the case the weekly rotation needs to catch, and
- * inferring the garment from the person would hide it.
- */
-async function classifyAttire(imageBuffer, mimeType) {
-  const parsed = await requestOpenAIStructured({
-    systemInstruction: ATTIRE_CLASSIFIER_PROMPT,
-    input: [instructorImagePart(imageBuffer, mimeType)],
-    jsonSchema: ATTIRE_JSON_SCHEMA,
-    validator: AttireClassification,
-    maxOutputTokens: 512,
-    schemaName: "attire_classification",
-  });
-  return parsed.attire_type;
-}
-
 export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
     throw new Error("Instructor image is empty or invalid");
@@ -531,28 +537,39 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     return unknownGenderEvaluation();
   }
 
-  // Men are assessed against one attire set whatever they are wearing, so only
-  // a woman's report depends on naming the garment first.
-  const attireType = normalizedGender === "FEMALE"
-    ? await classifyAttire(imageBuffer, mimeType)
-    : "FORMAL";
-
-  const sections = checkpointSet(normalizedGender, attireType);
   const content = [{
     type: "input_text",
     text: "Assess the instructor in the following image against every applicable written NxtWave Grooming Standard in the instructions.",
   }];
   content.push(instructorImagePart(imageBuffer, mimeType));
 
-  const parsed = await requestOpenAIStructured({
-    systemInstruction: buildSystemPrompt(normalizedGender, attireType),
-    input: content,
-    jsonSchema: buildReportJsonSchema(sections),
-    validator: buildReportSchema(sections),
-    maxOutputTokens: 6000,
-    schemaName: "grooming_evaluation",
-    promptCacheKey: groomingPromptCacheKey(normalizedGender, attireType),
-  });
+  let attireType = "FORMAL";
+  let parsed;
+  if (normalizedGender === "FEMALE") {
+    const response = await requestOpenAIStructured({
+      systemInstruction: buildFemaleSystemPrompt(),
+      input: content,
+      jsonSchema: buildFemaleResponseJsonSchema(),
+      validator: buildFemaleResponseSchema(),
+      maxOutputTokens: 6000,
+      schemaName: "female_grooming_evaluation",
+      promptCacheKey: groomingPromptCacheKey("FEMALE", "AUTO"),
+    });
+    parsed = response.evaluation;
+    attireType = parsed.attire_type;
+  } else {
+    const maleSections = checkpointSet("MALE", attireType);
+    parsed = await requestOpenAIStructured({
+      systemInstruction: buildSystemPrompt("MALE", attireType),
+      input: content,
+      jsonSchema: buildReportJsonSchema(maleSections),
+      validator: buildReportSchema(maleSections),
+      maxOutputTokens: 6000,
+      schemaName: "grooming_evaluation",
+      promptCacheKey: groomingPromptCacheKey("MALE", attireType),
+    });
+  }
+  const sections = checkpointSet(normalizedGender, attireType);
 
   // Nothing to tabulate when the photograph does not show the person. The
   // checkpoints are dropped rather than returned as twenty N/A rows, and no
@@ -568,8 +585,12 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
 
   const rows = toOrderedRows(sections, parsed);
   resolveIdCardAbstention(rows, parsed.visible_regions);
-  resolveMaleAttireVisibility(rows, parsed.visible_regions);
-  const verdict = deriveVerdict(rows, { imageQuality: parsed.image_quality });
+  if (normalizedGender === "MALE") {
+    resolveMaleAttireVisibility(rows, parsed.visible_regions);
+  }
+  const verdict = attireType === "UNKNOWN"
+    ? { overall_status: "UNASSESSED", image_quality: "RETAKE_RECOMMENDED" }
+    : deriveVerdict(rows, { imageQuality: parsed.image_quality });
   if (verdict.overall_status === "UNASSESSED") incrementMetric("evaluations_unassessed_total");
 
   return {
@@ -577,6 +598,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     attire_type: attireType,
     ai_summary: String(parsed.ai_summary || "").slice(0, 1500),
     visible_regions: parsed.visible_regions,
+    ...(attireType === "UNKNOWN" ? { unassessed_reason: "ATTIRE_NOT_IDENTIFIED" } : {}),
     ...rows,
   };
 }

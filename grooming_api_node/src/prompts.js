@@ -14,8 +14,10 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // submitted photo does not show them, and makes clearly absent rings/chains a
 // PASS rather than an abstention when the relevant body area is assessable.
 // 2026-08-24.2 makes facial-detail assessment explicit and prevents shirt
-// tuck evidence from being misfiled as a shirt-fit violation.
-export const PROMPT_VERSION = "2026-08-24.2";
+// tuck evidence from being misfiled as a shirt-fit violation. 2026-08-24.3
+// classifies a woman's attire and evaluates its matching checkpoints in the
+// same response, removing the duplicate image-analysis request.
+export const PROMPT_VERSION = "2026-08-24.3";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -192,11 +194,6 @@ A mangalsutra, bindi or bangles are ordinary cultural wear. Their presence is
 never a violation in itself, and never a reason to fail a checkpoint. Judge them
 only against the stated limits on size, quantity and prominence.
 
-### WHICH GARMENT
-You have been told which garment to assess, based on what the photograph shows.
-Use the attire checkpoints exactly as given. Do not substitute the other
-garment's checkpoints.
-
 ### WHAT IS MOST OFTEN GOT WRONG
 Look for these specifically rather than assuming compliance:
 
@@ -258,22 +255,60 @@ ${rendered}`,
 }
 
 /**
- * Asks only what garment is visible.
+ * Classifies and evaluates a woman's visible attire in one model response.
  *
- * Runs before the main evaluation because a woman's attire checkpoints depend
- * on the answer, and the garment must be read from the photograph rather than
+ * The garment must be read from the photograph rather than
  * assumed from her gender — a woman in formal trousers is a real case the
- * weekly rotation needs to see.
+ * weekly rotation needs to see. The strict response branch then returns only
+ * the checkpoints that apply to the selected garment.
  */
-export const ATTIRE_CLASSIFIER_PROMPT = `
-Look at the instructor image and name the garment being worn.
+export function buildFemaleSystemPrompt() {
+  const attireTypes = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
+  const commonSections = checkpointSet("FEMALE", "UNKNOWN");
+  const commonKeys = SECTION_KEYS.filter((key) => key !== "attire_check");
+  const commonCount = commonKeys.reduce((sum, key) => sum + commonSections[key].length, 0);
+  const commonRendered = commonKeys
+    .map((key) => renderSection(key, commonSections[key]))
+    .join("\n\n");
+  const attireRendered = attireTypes.map((attireType) => {
+    const items = checkpointSet("FEMALE", attireType).attire_check;
+    if (attireType === "UNKNOWN") {
+      return `## UNKNOWN ATTIRE\nReturn attire_type as UNKNOWN and return an empty "attire_check" object.`;
+    }
+    return `## WHEN attire_type IS ${attireType}\n${renderSection("attire_check", items)}`;
+  }).join("\n\n");
 
-SAREE               - a saree is being worn.
-KURTI_WITH_DUPATTA  - a kurti is being worn, with or without a dupatta. A
-                      missing dupatta does not change the garment.
-FORMAL              - a formal shirt with formal trousers.
-UNKNOWN             - the image does not show enough clothing to tell.
+  return [
+    COMMON_ANALYSIS_RULES,
+    WOMEN_ANALYSIS_RULES,
+    `### IDENTIFY THE VISIBLE ATTIRE FAMILY
+Choose exactly one attire_type from the photograph before applying attire
+checkpoints:
 
-Report only what is visible. Never infer the garment from the person's apparent
-gender. Answer UNKNOWN rather than guessing.
-`.trim();
+- SAREE: a saree is being worn.
+- KURTI_WITH_DUPATTA: a kurti is being worn, with or without a dupatta. A
+  missing dupatta is a failed checkpoint; it does not change the garment type.
+- FORMAL: the outfit belongs to the western formal-wear family. Use this family
+  for a shirt/blouse-and-trousers outfit, including a visibly casual or
+  non-compliant version of that combination so its formal checkpoints can fail.
+- UNKNOWN: the photograph does not show enough clothing to identify the attire
+  family reliably. Do not use UNKNOWN merely because a visible outfit violates
+  its applicable standard.
+
+Identify clothing only from visible evidence. Do not infer it from the person's
+gender. Then return the report branch whose checkpoints match attire_type.
+Never return checkpoints from another attire family.`,
+    `### COMMON CHECKPOINTS
+Return every common checkpoint below and no others: ${commonCount} in total,
+each exactly once, in the order and section named. Copy each code and
+checkpoint_name character for character.
+
+${commonRendered}
+
+### ATTIRE CHECKPOINT BRANCH
+Return exactly one of the following attire branches. The chosen branch must
+match attire_type. Do not merge branches or return unused attire checkpoints.
+
+${attireRendered}`,
+  ].join("\n\n");
+}

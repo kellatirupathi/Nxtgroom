@@ -169,7 +169,7 @@ test("vision evaluation sends only the instructor image and structured output to
     assert.equal(captured.body.text.format.schema.additionalProperties, false);
     assert.equal(captured.body.max_output_tokens, 6000);
     assert.equal(captured.body.temperature, 0);
-    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v2:male:formal");
+    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v3:male:formal");
     assert.equal("prompt_cache_retention" in captured.body, false);
     assert.equal(captured.body.input.length, 1);
     assert.equal(captured.body.input[0].role, "user");
@@ -203,6 +203,100 @@ test("vision evaluation sends only the instructor image and structured output to
         - (metricsBefore.openai_prompt_cache_hits_total || 0),
       1,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries({
+      OPENAI_API_KEY: originalOpenAI.apiKey,
+      OPENAI_MODEL: originalOpenAI.model,
+      OPENAI_TIMEOUT_MS: originalOpenAI.timeout,
+      OPENAI_MAX_RETRIES: originalOpenAI.retries,
+    })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("female attire classification and its matching report use one image request", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalOpenAI = {
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL,
+    timeout: process.env.OPENAI_TIMEOUT_MS,
+    retries: process.env.OPENAI_MAX_RETRIES,
+  };
+  const sections = checkpointSet("FEMALE", "SAREE");
+  const report = {
+    attire_type: "SAREE",
+    subject_visible: true,
+    image_quality: "ADEQUATE",
+    ai_summary: "The visible saree and other assessed requirements pass.",
+    visible_regions: {
+      face: "VISIBLE",
+      upper_body: "VISIBLE",
+      lower_body: "VISIBLE",
+      footwear: "VISIBLE",
+      id_card: "VISIBLE",
+      hands: "VISIBLE",
+    },
+  };
+  for (const key of SECTION_KEYS) {
+    report[key] = Object.fromEntries(sections[key].map((item) => [item.code, {
+      status: "PASS",
+      observation: "Visible and acceptable.",
+      reason: "Meets the checkpoint.",
+    }]));
+  }
+
+  let requestCount = 0;
+  let captured;
+  process.env.OPENAI_API_KEY = "test-only-openai-key";
+  process.env.OPENAI_MODEL = "gpt-4o-mini-2024-07-18";
+  process.env.OPENAI_TIMEOUT_MS = "120000";
+  process.env.OPENAI_MAX_RETRIES = "0";
+  globalThis.fetch = async (url, options) => {
+    requestCount += 1;
+    captured = { url, options, body: JSON.parse(options.body) };
+    return new Response(JSON.stringify({
+      status: "completed",
+      usage: {
+        input_tokens: 7000,
+        output_tokens: 500,
+        total_tokens: 7500,
+        input_tokens_details: { cached_tokens: 4096 },
+      },
+      output: [{
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{
+          type: "output_text",
+          text: JSON.stringify({ evaluation: report }),
+          annotations: [],
+        }],
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const { evaluateImage } = await import("../src/services/visionEngine.js");
+    const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "FEMALE");
+
+    assert.equal(requestCount, 1, "the female image must not be sent to a separate classifier");
+    assert.equal(result.overall_status, "COMPLIANT");
+    assert.equal(result.attire_type, "SAREE");
+    assert.deepEqual(
+      result.attire_check.map((item) => item.code),
+      sections.attire_check.map((item) => item.code),
+      "only the selected saree rows should reach the stored report",
+    );
+    assert.equal(captured.body.text.format.name, "female_grooming_evaluation");
+    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v3:female:auto");
+    assert.equal(captured.body.text.format.schema.type, "object");
+    assert.equal(captured.body.text.format.schema.properties.evaluation.anyOf.length, 4);
+    const images = captured.body.input[0].content.filter((part) => part.type === "input_image");
+    assert.equal(images.length, 1);
+    assert.equal(images[0].image_url, "data:image/jpeg;base64,/9j/4A==");
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries({
