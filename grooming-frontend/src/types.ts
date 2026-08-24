@@ -196,6 +196,7 @@ export interface AccessSettings {
 export interface NotificationSettings {
   checkin_email_enabled: boolean;
   checkout_email_enabled: boolean;
+  weekly_email_enabled: boolean;
   only_when_non_compliant: boolean;
 }
 

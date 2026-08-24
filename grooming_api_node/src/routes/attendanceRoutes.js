@@ -7,6 +7,7 @@ import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluateCheckoutNow, evaluationFilter } from "../services/evaluationWorker.js";
+import { localDateKey } from "../services/instructorReports.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
 import { buildPhotoKey, deletePhoto, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
 import { canDeleteAttendance, canDeleteCheckout, getAccessSettings } from "../services/accessSettings.js";
@@ -168,34 +169,50 @@ async function compensateUploadedPhoto(db, key, reason) {
 }
 
 /**
- * Matches an open check-in belonging to today.
+ * Matches an instructor's attendance record for the current local day.
  *
  * The guard used to match any open check-in ever. A check-out that was never
  * done left the record open forever, so one missed check-out on Monday blocked
  * that instructor from checking in for the rest of time. A day here is a local
  * calendar day — midnight to midnight where the instructor is — so yesterday's
  * unclosed record is a missed check-out to chase, not a reason to refuse today.
+ * Completed records still match because the product allows one check-in and
+ * one checkout per instructor per day, rather than multiple daily sessions.
  */
-function openCheckInToday(instructorId) {
-  const { start, end } = dateBoundsInTimeZone(undefined, runtimeConfig().appTimeZone);
+export function attendanceOnLocalDay(instructorId, now = new Date()) {
+  const timeZone = runtimeConfig().appTimeZone;
+  const attendanceDay = localDateKey(now, timeZone);
+  const { start, end } = dateBoundsInTimeZone(attendanceDay, timeZone);
   return {
     instructor_id: idMatch(String(instructorId)),
+    $or: [
+      { attendance_day: attendanceDay },
+      {
+        attendance_day: { $exists: false },
+        check_in_time: { $gte: start, $lt: end },
+      },
+    ],
+  };
+}
+
+function openCheckInToday(instructorId, now = new Date()) {
+  return {
+    ...attendanceOnLocalDay(instructorId, now),
     check_out_time: null,
-    check_in_time: { $gte: start, $lt: end },
   };
 }
 
 /**
- * The id of the instructor's open check-in, or null.
+ * The id of the instructor's attendance record for today, or null.
  *
  * Used only on the refusal path, where a duplicate check-in has already been
  * rejected and the caller needs somewhere to look. A failed lookup must not
  * turn a clear 409 into a 500, so it degrades to null.
  */
-async function activeAttendanceId(db, instructorId) {
+async function attendanceIdForToday(db, instructorId) {
   try {
     const record = await db.collection("attendance").findOne(
-      openCheckInToday(instructorId),
+      attendanceOnLocalDay(instructorId),
       { projection: { _id: 1 } },
     );
     return record ? String(record._id) : null;
@@ -242,6 +259,7 @@ export async function commitGuardedCheckIn(
     photoKey = null,
     locationAccuracyM = null,
     capturedAt = null,
+    now = new Date(),
   },
   runTransaction = withMongoTransaction
 ) {
@@ -253,11 +271,11 @@ export async function commitGuardedCheckIn(
     if (!instructor) return { outcome: "instructor_not_found" };
     if (!isValidEmail(instructor.email)) return { outcome: "invalid_email" };
 
-    const activeAttendance = await db.collection("attendance").findOne(
-      openCheckInToday(instructor._id),
+    const attendanceToday = await db.collection("attendance").findOne(
+      attendanceOnLocalDay(instructor._id, now),
       { session }
     );
-    if (activeAttendance) return { outcome: "already_active" };
+    if (attendanceToday) return { outcome: "already_checked_in_today" };
 
     const guard = await db.collection("instructors").updateOne(
       activeInstructorFilter(currentUser, instructorId),
@@ -266,7 +284,6 @@ export async function commitGuardedCheckIn(
     );
     if (!guard.matchedCount) return { outcome: "instructor_not_found" };
 
-    const now = new Date();
     const evaluationDeadline = new Date(now.getTime() + OUTBOX_DEADLINE_MS);
     const evaluationPayload = {
       instructor: {
@@ -294,6 +311,7 @@ export async function commitGuardedCheckIn(
       instructor_role: instructor.instructor_role || instructor.role || null,
       college_id: String(instructor.college_id),
       boa_id: currentUser.referenceId ? String(currentUser.referenceId) : "super-admin",
+      attendance_day: localDateKey(now, runtimeConfig().appTimeZone),
       date: now,
       check_in_time: now,
       check_out_time: null,
@@ -361,11 +379,11 @@ attendanceRouter.post(
     // step is almost always to look at that check-in, and without the id the
     // user has to go and find it by hand.
     const activeRecord = await db.collection("attendance").findOne(
-      openCheckInToday(instructor._id)
+      attendanceOnLocalDay(instructor._id)
     );
     if (activeRecord) {
       return res.status(409).json({
-        detail: "This instructor already has an active check-in",
+        detail: "This instructor has already checked in today",
         attendance_id: String(activeRecord._id),
       });
     }
@@ -417,13 +435,14 @@ attendanceRouter.post(
         photoKey,
         locationAccuracyM: Number.parseInt(req.body.location_accuracy_m, 10) || null,
         capturedAt: now,
+        now,
       });
     } catch (error) {
       await compensateUploadedPhoto(db, photoKey, "checkin_commit_failed");
       if (error.code === 11000) {
         return res.status(409).json({
-          detail: "This instructor already has an active check-in",
-          attendance_id: await activeAttendanceId(db, instructor._id),
+          detail: "This instructor has already checked in today",
+          attendance_id: await attendanceIdForToday(db, instructor._id),
         });
       }
       throw error;
@@ -438,11 +457,11 @@ attendanceRouter.post(
         detail: "This instructor needs a valid email address before check-in reports can be sent.",
       });
     }
-    if (committed.outcome === "already_active") {
+    if (committed.outcome === "already_checked_in_today") {
       await compensateUploadedPhoto(db, photoKey, "duplicate_checkin");
       return res.status(409).json({
-        detail: "This instructor already has an active check-in",
-        attendance_id: await activeAttendanceId(db, instructor._id),
+        detail: "This instructor has already checked in today",
+        attendance_id: await attendanceIdForToday(db, instructor._id),
       });
     }
     const { attendance, evaluationPayload } = committed;

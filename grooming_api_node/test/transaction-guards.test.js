@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { commitGuardedCheckIn } from "../src/routes/attendanceRoutes.js";
+import { attendanceOnLocalDay, commitGuardedCheckIn } from "../src/routes/attendanceRoutes.js";
 import {
   createInstructorGuarded,
   deleteInstructorGuarded,
@@ -60,6 +60,7 @@ test("guarded check-in locks the instructor and inserts attendance in one transa
       instructorId: instructor._id,
       coordinates: "17.45,78.38",
       normalizedImage: { buffer: Buffer.from("normalized"), mimeType: "image/jpeg" },
+      now: new Date("2026-08-24T05:08:00.000Z"),
     },
     transactionRunner(session)
   );
@@ -67,7 +68,19 @@ test("guarded check-in locks the instructor and inserts attendance in one transa
   assert.equal(result.outcome, "created");
   assert.equal(guardWrites, 1);
   assert.equal(insertedAttendance.instructor_name, "Current Name");
+  assert.equal(insertedAttendance.attendance_day, "2026-08-24");
   assert.equal(insertedAttendance._private_evaluation_outbox.instructor.email, "current@example.com");
+});
+
+test("daily attendance lookup ignores an unfinished record from a previous local day", () => {
+  const filter = attendanceOnLocalDay(
+    "instructor-1",
+    new Date("2026-08-24T05:08:00.000Z")
+  );
+  assert.equal(filter.$or[0].attendance_day, "2026-08-24");
+  assert.equal(filter.$or[1].attendance_day.$exists, false);
+  assert.equal(filter.$or[1].check_in_time.$gte.toISOString(), "2026-08-23T18:30:00.000Z");
+  assert.equal(filter.$or[1].check_in_time.$lt.toISOString(), "2026-08-24T18:30:00.000Z");
 });
 
 test("guarded instructor update shares the transaction boundary with check-in", async () => {

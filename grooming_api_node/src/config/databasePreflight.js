@@ -1,3 +1,5 @@
+import { runtimeConfig } from "./env.js";
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EXAMPLES = 20;
 
@@ -7,6 +9,16 @@ export const EVALUATION_IDENTITY_INDEX = {
   collection: "evaluations",
   key: { attendance_id: 1, kind: 1 },
   options: { unique: true, name: "attendance_id_1_kind_1" },
+};
+
+export const DAILY_ATTENDANCE_INDEX = {
+  collection: "attendance",
+  key: { instructor_id: 1, attendance_day: 1 },
+  options: {
+    unique: true,
+    name: "one_attendance_per_day",
+    partialFilterExpression: { attendance_day: { $type: "string" } },
+  },
 };
 
 export const REQUIRED_DATABASE_INDEXES = [
@@ -82,15 +94,7 @@ export const REQUIRED_DATABASE_INDEXES = [
     key: { instructor_id: 1, check_in_time: -1 },
     options: { name: "instructor_id_1_check_in_time_-1" },
   },
-  {
-    collection: "attendance",
-    key: { instructor_id: 1 },
-    options: {
-      unique: true,
-      partialFilterExpression: { check_out_time: null },
-      name: "one_active_attendance",
-    },
-  },
+  DAILY_ATTENDANCE_INDEX,
   { collection: "attendance", key: { date: -1 }, options: { name: "date_-1" } },
   {
     collection: "attendance",
@@ -320,6 +324,49 @@ export async function migrateLegacyEvaluationIdentityIndex(db) {
   };
 }
 
+/**
+ * Replaces the global "one open attendance" constraint with daily identity.
+ *
+ * Historical rows are deliberately not backfilled: production already has
+ * legitimate repeated attendance records on some older dates. Restricting the
+ * new unique index to rows carrying `attendance_day` protects every new
+ * check-in without rewriting or deleting history.
+ */
+export async function migrateLegacyActiveAttendanceIndex(db) {
+  const collection = db.collection("attendance");
+  const indexes = await listIndexes(collection);
+  const legacyIndexes = indexes.filter((index) => (
+    index.unique === true
+    && sameObject(index.key, { instructor_id: 1 })
+    && sameObject(index.partialFilterExpression, { check_out_time: null })
+  ));
+  if (legacyIndexes.length === 0) {
+    return { migrated: false, created: false, dropped: [] };
+  }
+
+  const targetExists = indexes.some((index) => (
+    sameObject(index.key, DAILY_ATTENDANCE_INDEX.key)
+    && indexOptionsMatch(index, DAILY_ATTENDANCE_INDEX.options)
+  ));
+  if (!targetExists) {
+    await collection.createIndex(
+      DAILY_ATTENDANCE_INDEX.key,
+      DAILY_ATTENDANCE_INDEX.options
+    );
+  }
+
+  const dropped = [];
+  for (const legacy of legacyIndexes) {
+    try {
+      await collection.dropIndex(legacy.name);
+      dropped.push(legacy.name);
+    } catch (error) {
+      if (error?.code !== 27 && error?.codeName !== "IndexNotFound") throw error;
+    }
+  }
+  return { migrated: true, created: !targetExists, dropped };
+}
+
 export async function verifyDatabaseIndexes(db) {
   const collections = [...new Set(REQUIRED_DATABASE_INDEXES.map((index) => index.collection))];
   const indexLists = new Map(await Promise.all(collections.map(async (name) => [
@@ -398,7 +445,7 @@ async function loadPreflightRows(db) {
     ).toArray(),
     db.collection("attendance").find(
       { check_out_time: null },
-      { projection: { _id: 1, instructor_id: 1, check_in_time: 1 } }
+      { projection: { _id: 1, instructor_id: 1, attendance_day: 1, check_in_time: 1 } }
     ).toArray(),
     db.collection("evaluations").find(
       {},
@@ -622,9 +669,21 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
       "After confirming ownership, reassign the attendance to an existing active instructor or record an accurate check_out_time. Preserve attendance history instead of deleting it."
     ));
   }
+  const timeZone = runtimeConfig().appTimeZone;
+  const attendanceDay = (row) => {
+    if (typeof row.attendance_day === "string" && row.attendance_day) return row.attendance_day;
+    const timestamp = new Date(row.check_in_time);
+    if (Number.isNaN(timestamp.getTime())) return "<missing-day>";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(timestamp);
+  };
   const activeCollisionGroups = [...groupRows(
     activeAttendances.filter((row) => referenceKey(row.instructor_id) != null),
-    (row) => String(row.instructor_id)
+    (row) => `${String(row.instructor_id)}:${attendanceDay(row)}`
   ).values()].filter((group) => group.length > 1);
   if (activeCollisionGroups.length) {
     findings.push(finding(
@@ -632,9 +691,10 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
       activeCollisionGroups.reduce((total, group) => total + group.length, 0),
       activeCollisionGroups.map((group) => ({
         instructor_id: String(group[0].instructor_id),
+        attendance_day: attendanceDay(group[0]),
         attendance_ids: group.map(documentId),
       })),
-      "Choose the authoritative active attendance and set an accurate check_out_time on the others. Preserve history; do not delete records blindly."
+      "Choose the authoritative attendance for that instructor and local day, then set an accurate check_out_time on the others. Preserve history; do not delete records blindly."
     ));
   }
 
@@ -706,6 +766,7 @@ export async function applyDatabaseIndexes(db, { confirmation } = {}) {
     );
   }
   await migrateLegacyEvaluationIdentityIndex(db);
+  await migrateLegacyActiveAttendanceIndex(db);
   const report = await auditDatabasePreflight(db);
   assertDatabasePreflightSafe(report);
 

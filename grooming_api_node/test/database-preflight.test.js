@@ -5,9 +5,11 @@ import {
   applyDatabaseIndexes,
   auditDatabasePreflight,
   DATABASE_INDEX_APPLY_CONFIRMATION,
+  DAILY_ATTENDANCE_INDEX,
   DatabasePreflightError,
   EVALUATION_IDENTITY_INDEX,
   formatDatabasePreflightReport,
+  migrateLegacyActiveAttendanceIndex,
   migrateLegacyEvaluationIdentityIndex,
   REQUIRED_DATABASE_INDEXES,
 } from "../src/config/databasePreflight.js";
@@ -114,7 +116,7 @@ test("read-only preflight detects semantic collisions without exposing email val
   assert.equal(db.createCalls.length, 0);
   const serialized = JSON.stringify(report);
   assert.doesNotMatch(serialized, /Admin@Example\.com|admin@example\.com|not-an-email/);
-  assert.match(formatDatabasePreflightReport(report), /Choose the authoritative active attendance/);
+  assert.match(formatDatabasePreflightReport(report), /Choose the authoritative attendance/);
 });
 
 test("check-in and checkout evaluations are distinct identities", async () => {
@@ -164,6 +166,71 @@ test("legacy evaluation index migration backfills kinds before replacing uniquen
   assert.deepEqual(second, { migrated: false, backfilled: 0, created: false, dropped: [] });
   assert.equal(db.createCalls.length, 1);
   assert.equal(db.dropCalls.length, 1);
+});
+
+test("legacy global active-attendance index migrates to daily uniqueness", async () => {
+  const db = preflightDb({}, {
+    attendance: [
+      { name: "_id_", key: { _id: 1 }, unique: true },
+      {
+        name: "one_active_attendance",
+        key: { instructor_id: 1 },
+        unique: true,
+        partialFilterExpression: { check_out_time: null },
+      },
+    ],
+  });
+
+  const first = await migrateLegacyActiveAttendanceIndex(db);
+  assert.deepEqual(first, {
+    migrated: true,
+    created: true,
+    dropped: ["one_active_attendance"],
+  });
+  assert.deepEqual(db.createCalls, [{
+    collection: "attendance",
+    key: DAILY_ATTENDANCE_INDEX.key,
+    options: DAILY_ATTENDANCE_INDEX.options,
+  }]);
+  assert.deepEqual(db.dropCalls, [{
+    collection: "attendance",
+    index: "one_active_attendance",
+  }]);
+
+  const second = await migrateLegacyActiveAttendanceIndex(db);
+  assert.deepEqual(second, { migrated: false, created: false, dropped: [] });
+});
+
+test("unfinished attendances on different local days are not a collision", async () => {
+  const db = preflightDb({
+    users: [{ _id: "user-1", email: "admin@example.com" }],
+    colleges: [{ _id: "college-1", name: "Campus", location: "Hyderabad" }],
+    instructors: [{
+      _id: "instructor-1",
+      employee_id: "INST-1",
+      college_id: "college-1",
+      email: "instructor@example.com",
+    }],
+    attendance: [
+      {
+        _id: "attendance-21",
+        instructor_id: "instructor-1",
+        check_in_time: new Date("2026-08-21T05:00:00.000Z"),
+      },
+      {
+        _id: "attendance-24",
+        instructor_id: "instructor-1",
+        attendance_day: "2026-08-24",
+        check_in_time: new Date("2026-08-24T05:00:00.000Z"),
+      },
+    ],
+  });
+
+  const report = await auditDatabasePreflight(db);
+  assert.equal(
+    report.findings.some((item) => item.code === "ACTIVE_ATTENDANCE_COLLISION"),
+    false
+  );
 });
 
 test("safe apply requires explicit confirmation and creates only missing indexes idempotently", async () => {

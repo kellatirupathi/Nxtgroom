@@ -5,6 +5,7 @@ import {
   auditDatabasePreflight,
   DATABASE_INDEX_APPLY_CONFIRMATION,
   DatabasePreflightError,
+  migrateLegacyActiveAttendanceIndex,
   migrateLegacyEvaluationIdentityIndex,
 } from "./databasePreflight.js";
 import { isProduction, runtimeConfig } from "./env.js";
@@ -58,6 +59,10 @@ export async function connectToMongo() {
       console.log(
         `Migrated evaluation identity index; backfilled ${evaluationIndexMigration.backfilled} legacy evaluation(s).`
       );
+    }
+    const attendanceIndexMigration = await migrateLegacyActiveAttendanceIndex(db);
+    if (attendanceIndexMigration.migrated) {
+      console.log("Migrated attendance uniqueness from global-open to one record per local day.");
     }
     const preflight = await auditDatabasePreflight(db);
     assertDatabasePreflightSafe(preflight);

@@ -23,6 +23,10 @@ const PHOTO_PURGE_BATCH = 200;
 import { evaluationFilter } from "../services/evaluationWorker.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
 import { enqueueMailJob } from "../services/mailWorker.js";
+import {
+  getNotificationSettings,
+  shouldSendWeeklyReport,
+} from "../services/notificationSettings.js";
 
 export const reportRouter = Router();
 
@@ -309,6 +313,12 @@ reportRouter.get(
  * proceeding normally.
  */
 async function deliverWeeklyReports(db, startKey) {
+  const notificationSettings = await getNotificationSettings(db);
+  if (!shouldSendWeeklyReport(notificationSettings)) {
+    console.log(`Weekly reports for ${startKey}: disabled by notification settings`);
+    return { queued: 0, skipped: 0, failures: [], disabled: true };
+  }
+
   const dates = workingWeekDates(startKey);
   const from = new Date(`${dates[0]}T00:00:00.000Z`);
   from.setUTCDate(from.getUTCDate() - 1);
@@ -392,9 +402,11 @@ reportRouter.post(
     const result = await deliverWeeklyReports(db, startKey);
     return res.status(202).json({
       week_start: startKey,
-      status: "queued",
       ...result,
-      note: "Each recipient is stored as an idempotent delivery job with retries.",
+      status: result.disabled ? "disabled" : "queued",
+      note: result.disabled
+        ? "Weekly instructor emails are turned off in admin notification settings."
+        : "Each recipient is stored as an idempotent delivery job with retries.",
     });
   })
 );

@@ -4,14 +4,25 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   normalizeNotificationSettings,
   shouldSendNotification,
+  shouldSendWeeklyReport,
   validateNotificationSettings,
 } from "../src/services/notificationSettings.js";
 
 test("defaults preserve the previous always-send behaviour", () => {
   assert.equal(shouldSendNotification(DEFAULT_NOTIFICATION_SETTINGS, "checkin", {}), true);
   assert.equal(shouldSendNotification(DEFAULT_NOTIFICATION_SETTINGS, "checkout", {}), true);
+  assert.equal(shouldSendWeeklyReport(DEFAULT_NOTIFICATION_SETTINGS), false);
   // An empty/missing document must not silently disable mail.
   assert.deepEqual(normalizeNotificationSettings(undefined), DEFAULT_NOTIFICATION_SETTINGS);
+});
+
+test("weekly summaries are opt-in and independent of attendance report filters", () => {
+  assert.equal(shouldSendWeeklyReport({}), false);
+  assert.equal(shouldSendWeeklyReport({ weekly_email_enabled: true }), true);
+  assert.equal(
+    shouldSendWeeklyReport({ weekly_email_enabled: true, only_when_non_compliant: true }),
+    true
+  );
 });
 
 test("per-type switches only suppress their own report", () => {

@@ -4,7 +4,8 @@
  * Stored as a single document so the notification worker can consult one
  * cheap read before queueing mail. Defaults are permissive (both reports on,
  * no suppression) so an empty database behaves exactly like the previous
- * always-send implementation.
+ * always-send implementation for per-attendance reports. Weekly summaries are
+ * opt-in so a new workspace cannot start a roster-wide mailing unexpectedly.
  */
 
 const SETTINGS_ID = "notification_settings";
@@ -12,6 +13,7 @@ const SETTINGS_ID = "notification_settings";
 export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
   checkin_email_enabled: true,
   checkout_email_enabled: true,
+  weekly_email_enabled: false,
   only_when_non_compliant: false,
 });
 
@@ -86,4 +88,9 @@ export function shouldSendNotification(settings, type, evaluation = {}) {
   if (config.only_when_non_compliant && !isNonCompliant) return false;
 
   return true;
+}
+
+/** Weekly summaries have their own opt-in and are not affected by result filters. */
+export function shouldSendWeeklyReport(settings) {
+  return normalizeNotificationSettings(settings).weekly_email_enabled;
 }

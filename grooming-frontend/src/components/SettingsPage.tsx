@@ -28,6 +28,11 @@ const TOGGLES: { key: keyof NotificationSettings; label: string; description: st
     description: 'Send the appearance report after checkout photo analysis completes.',
   },
   {
+    key: 'weekly_email_enabled',
+    label: 'Weekly summary to instructors',
+    description: 'Send each instructor their weekly attendance and appearance summary. This is off by default.',
+  },
+  {
     key: 'only_when_non_compliant',
     label: 'Only email when NON-COMPLIANT',
     description: 'Suppress emails for compliant results so instructors only hear about issues.',
@@ -37,6 +42,7 @@ const TOGGLES: { key: keyof NotificationSettings; label: string; description: st
 const DEFAULTS: NotificationSettings = {
   checkin_email_enabled: true,
   checkout_email_enabled: true,
+  weekly_email_enabled: false,
   only_when_non_compliant: false,
 };
 
@@ -120,7 +126,7 @@ function NotificationSettings() {
       <div className="mb-5">
         <h3 className="text-base font-bold text-slate-800">Email notifications</h3>
         <p className="text-sm text-slate-500 mt-1">
-          Control which appearance reports are emailed to instructors. Changes apply to new check-ins immediately.
+          Control which appearance reports and summaries are emailed to instructors. Changes apply to future deliveries immediately.
         </p>
       </div>
 
@@ -155,8 +161,8 @@ function NotificationSettings() {
       </div>
 
       <p className="text-xs text-slate-500 mt-4">
-        The suppression filter applies on top of the report switches: with it on, a report is sent only when the result
-        is non-compliant.
+        The non-compliant filter applies only to check-in and check-out reports. Weekly summaries are controlled by
+        their own switch.
       </p>
 
       <AccessSettingsSection />
