@@ -6,6 +6,7 @@ import {
   readKeypoints,
   readPoses,
   shutterEnabled,
+  stabilizeFrameReading,
   STEADY_MS,
 } from '../src/lib/fullBodyDetector.ts';
 
@@ -22,8 +23,8 @@ const framedPerson = [
 /**
  * The gate exists because a head-and-shoulders photograph leaves eleven of
  * twenty checkpoints unassessable. It must never become a reason somebody
- * cannot check in, so every failure path opens the shutter rather than closing
- * it.
+ * cannot check in, so detector infrastructure failures open the shutter. A
+ * working detector still blocks empty frames and multiple people.
  */
 
 test('a whole person is head and both ankles, nothing else', () => {
@@ -65,6 +66,45 @@ test('multiple people are rejected even when one is only partly visible', () => 
   ], 1000);
   assert.equal(reading.verdict, 'MULTIPLE_PEOPLE');
   assert.match(reading.guidance, /only one person/i);
+});
+
+test('overlapping duplicate poses from the model count as one person', () => {
+  const duplicate = framedPerson.map((keypoint) => ({
+    ...keypoint,
+    x: keypoint.x + 2,
+    y: keypoint.y + 2,
+  }));
+  assert.equal(readPoses([
+    { score: 0.9, keypoints: framedPerson },
+    { score: 0.4, keypoints: duplicate },
+  ], 1000).verdict, 'FULL_BODY');
+});
+
+test('a weak four-point model guess is not called another person', () => {
+  const weakGuess = [
+    { name: 'left_shoulder', score: 0.4, x: 500, y: 300 },
+    { name: 'right_shoulder', score: 0.4, x: 540, y: 300 },
+    { name: 'left_hip', score: 0.4, x: 505, y: 400 },
+    { name: 'right_hip', score: 0.4, x: 535, y: 400 },
+  ];
+  assert.equal(readPoses([
+    { score: 0.9, keypoints: framedPerson },
+    { score: 0.2, keypoints: weakGuess },
+  ], 1000).verdict, 'FULL_BODY');
+});
+
+test('camera feedback changes only after consecutive matching readings', () => {
+  const empty = { verdict: 'NO_PERSON', guidance: 'Step into the frame' };
+  const ready = { verdict: 'FULL_BODY', guidance: null };
+  let state = { reading: empty, candidate: null, candidateCount: 0 };
+  state = stabilizeFrameReading(state, ready);
+  assert.equal(state.reading.verdict, 'NO_PERSON');
+  state = stabilizeFrameReading(state, ready);
+  assert.equal(state.reading.verdict, 'NO_PERSON');
+  state = stabilizeFrameReading(state, ready);
+  assert.equal(state.reading.verdict, 'FULL_BODY');
+  state = stabilizeFrameReading(state, empty);
+  assert.equal(state.reading.verdict, 'FULL_BODY', 'one noisy frame must not flash the outline');
 });
 
 test('a low-confidence keypoint is a guess, not a sighting', () => {
@@ -113,12 +153,12 @@ test('the shutter opens when the detector cannot run at all', () => {
   assert.equal(shutterEnabled('UNAVAILABLE', 0, false), true);
 });
 
-test('the override opens the shutter whatever the frame shows', () => {
+test('the override permits an imperfect person frame but never an empty frame', () => {
   // A saree hiding the ankles, a wheelchair, a room too small to step back in.
   // Across six hundred daily check-ins even a small miss rate is people who
   // cannot record attendance at all.
   assert.equal(shutterEnabled('PARTIAL', 0, true), true);
-  assert.equal(shutterEnabled('NO_PERSON', 0, true), true);
+  assert.equal(shutterEnabled('NO_PERSON', 0, true), false, 'an empty frame is never attendance evidence');
   // And it is offered soon enough to be a way out, not a punishment.
   assert.ok(OVERRIDE_AFTER_MS <= 20_000, 'nobody should be stuck for longer than this');
 });

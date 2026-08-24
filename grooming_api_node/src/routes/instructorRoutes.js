@@ -381,7 +381,7 @@ instructorRouter.put(
 );
 
 /**
- * Sets gender alone.
+ * Sets gender alone for an elevated user, or for a BOA's own college.
  *
  * The AI is given the instructor's gender so it compares against the right
  * reference photos; synced instructors have none, so they are currently
@@ -392,12 +392,14 @@ instructorRouter.put(
  */
 instructorRouter.patch(
   "/:instructorId/gender",
-  requireSuperAdmin,
   validate(instructorGenderSchema),
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
     const result = await db.collection("instructors").updateOne(
-      activeFilter({ _id: idMatch(req.params.instructorId) }),
+      activeFilter({
+        _id: idMatch(req.params.instructorId),
+        ...instructorScope(req.currentUser),
+      }),
       { $set: { gender: req.validatedBody.gender, updated_at: new Date() } }
     );
     if (!result.matchedCount) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Camera, FileText, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
+import { Calendar, Camera, FileText, UploadCloud, RefreshCw, LogOut, MapPin, SwitchCamera } from 'lucide-react';
 import { ApiError, apiFetch } from '../api';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { preparePhoto } from '../lib/imageCapture';
@@ -20,13 +20,20 @@ import { useToast } from './useToast';
 import { pathForTab } from '../routes';
 import { TABS } from '../routes';
 import type { Instructor } from '../types';
+import { formatAttendanceDate } from '../attendanceFilters';
+import MissingGenderModal from './MissingGenderModal';
 
 interface EvaluateCardProps {
   instructors: Instructor[];
   fetchInstructors: () => Promise<void> | void;
+  onInstructorGenderSaved: (instructorId: string, gender: string) => void;
 }
 
-export default function EvaluateCard({ instructors, fetchInstructors }: EvaluateCardProps) {
+export default function EvaluateCard({
+  instructors,
+  fetchInstructors,
+  onInstructorGenderSaved,
+}: EvaluateCardProps) {
   const [selectedUuid, setSelectedUuid] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -42,6 +49,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
   const [facing, setFacing] = useState<'user' | 'environment'>('environment');
   const [preparing, setPreparing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [missingGenderInstructor, setMissingGenderInstructor] = useState<Instructor | null>(null);
   // Set when a duplicate daily action is refused, so the message can point at
   // today's existing attendance record instead of only naming the conflict.
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
@@ -57,6 +65,25 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
     } | null
   >(null);
   const toast = useToast();
+
+  const selectInstructor = (instructorId: string) => {
+    setSelectedUuid(instructorId);
+    const instructor = instructors.find((item) => item._id === instructorId);
+    if (instructor && !['MALE', 'FEMALE'].includes(String(instructor.gender || '').toUpperCase())) {
+      setMissingGenderInstructor(instructor);
+    } else {
+      setMissingGenderInstructor(null);
+    }
+  };
+
+  const requireSelectedGender = (): boolean => {
+    const instructor = instructors.find((item) => item._id === selectedUuid);
+    if (!instructor || ['MALE', 'FEMALE'].includes(String(instructor.gender || '').toUpperCase())) {
+      return true;
+    }
+    setMissingGenderInstructor(instructor);
+    return false;
+  };
 
   useEffect(() => () => {
     if (preview) URL.revokeObjectURL(preview);
@@ -141,6 +168,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       });
       return;
     }
+    if (!requireSelectedGender()) return;
 
     setLoading(true);
     setMessage({ type: '', text: '' });
@@ -218,6 +246,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       setMessage({ type: 'error', text: 'Select an instructor to check out.' });
       return;
     }
+    if (!requireSelectedGender()) return;
 
     setCheckoutLoading(true);
     setMessage({ type: '', text: '' });
@@ -329,7 +358,13 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
       <div className="absolute top-0 right-0 -mt-16 -mr-16 w-48 h-48 bg-indigo-50 rounded-full blur-3xl opacity-60 pointer-events-none group-hover:bg-indigo-100 transition-colors duration-700" />
 
       <div className="relative z-10">
-        <h2 id="attendance-action-title" className="text-xl md:text-2xl font-extrabold text-slate-800 mb-2 tracking-tight">Attendance Action</h2>
+        <div className="mb-2 flex items-center justify-between gap-4">
+          <h2 id="attendance-action-title" className="text-xl md:text-2xl font-extrabold text-slate-800 tracking-tight">Attendance Action</h2>
+          <p className="flex shrink-0 items-center gap-1.5 text-xs font-bold text-slate-500 sm:text-sm">
+            <Calendar size={16} className="text-indigo-600" aria-hidden="true" />
+            <span className="hidden sm:inline">Today,</span> {formatAttendanceDate(new Date())}
+          </p>
+        </div>
         <p className="text-slate-500 text-sm mb-6 font-medium">Select an instructor to check in or check out.</p>
 
         {/* Only failures remain on the page. A success message here repeated
@@ -361,7 +396,7 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           <InstructorSearchSelect
             instructors={instructors}
             selectedId={selectedUuid}
-            onSelect={setSelectedUuid}
+            onSelect={selectInstructor}
             disabled={loading || checkoutLoading}
           />
         </div>
@@ -468,6 +503,14 @@ export default function EvaluateCard({ instructors, fetchInstructors }: Evaluate
           onFlip={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
           onCapture={handleCapture}
           onClose={() => setCameraOpen(false)}
+        />
+      )}
+
+      {missingGenderInstructor && (
+        <MissingGenderModal
+          instructor={missingGenderInstructor}
+          onClose={() => setMissingGenderInstructor(null)}
+          onSaved={onInstructorGenderSaved}
         />
       )}
 

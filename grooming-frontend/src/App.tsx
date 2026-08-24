@@ -338,7 +338,15 @@ export default function App() {
           {activeTab === 'overview' && (
             <div className="w-full h-full flex justify-center items-start pt-10">
               <div className="w-full max-w-2xl shrink-0">
-                <EvaluateCard instructors={instructors} fetchInstructors={fetchInstructors} />
+                <EvaluateCard
+                  instructors={instructors}
+                  fetchInstructors={fetchInstructors}
+                  onInstructorGenderSaved={(instructorId, gender) => {
+                    setInstructors((current) => current.map((instructor) => (
+                      instructor._id === instructorId ? { ...instructor, gender } : instructor
+                    )));
+                  }}
+                />
               </div>
             </div>
           )}

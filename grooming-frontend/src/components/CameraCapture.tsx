@@ -5,7 +5,9 @@ import {
   OVERRIDE_AFTER_MS,
   readFrame,
   shutterEnabled,
+  stabilizeFrameReading,
   STEADY_MS,
+  type StableFrameState,
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
 import { coverSourceRect } from '../lib/cameraGeometry';
@@ -50,8 +52,10 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(true);
   const [capturing, setCapturing] = useState(false);
-  const [verdict, setVerdict] = useState<FrameVerdict>('UNAVAILABLE');
-  const [guidance, setGuidance] = useState<string | null>(null);
+  // Start closed. UNAVAILABLE deliberately fails open, so using it while the
+  // model was still loading briefly enabled capture on an empty frame.
+  const [verdict, setVerdict] = useState<FrameVerdict>('NO_PERSON');
+  const [guidance, setGuidance] = useState<string | null>('Step into the frame');
   const [steadyForMs, setSteadyForMs] = useState(0);
   const [overridden, setOverridden] = useState(false);
   const [canOverride, setCanOverride] = useState(false);
@@ -65,6 +69,11 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     let disposed = false;
     setStarting(true);
     setError('');
+    setVerdict('NO_PERSON');
+    setGuidance('Step into the frame');
+    setSteadyForMs(0);
+    setOverridden(false);
+    setCanOverride(false);
 
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -116,6 +125,11 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     let steadySince: number | null = null;
     let timer: ReturnType<typeof setTimeout>;
     const openedAt = Date.now();
+    let stableState: StableFrameState = {
+      reading: { verdict: 'NO_PERSON', guidance: 'Step into the frame' },
+      candidate: null,
+      candidateCount: 0,
+    };
 
     const inspect = async () => {
       const detector = await loadFullBodyDetector();
@@ -132,11 +146,13 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
           : ({ verdict: 'UNAVAILABLE', guidance: null } as const);
         if (disposed) return;
 
-        setVerdict(reading.verdict);
-        setGuidance(reading.guidance);
+        stableState = stabilizeFrameReading(stableState, reading);
+        const stableReading = stableState.reading;
+        setVerdict(stableReading.verdict);
+        setGuidance(stableReading.guidance);
         // Held continuously, not merely seen once: a single lucky frame while
         // somebody is still moving is not a steady full-body shot.
-        if (reading.verdict === 'FULL_BODY') {
+        if (stableReading.verdict === 'FULL_BODY') {
           steadySince ||= Date.now();
           setSteadyForMs(Date.now() - steadySince);
         } else {
@@ -270,8 +286,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
                 <rect
                   x="13" y="2" width="74" height="96" rx="37"
                   fill="none"
-                  strokeWidth="0.6"
-                  strokeDasharray="3 2"
+                  strokeWidth="0.8"
                   className={
                     verdict === 'MULTIPLE_PEOPLE'
                       ? 'stroke-rose-400/95'
@@ -319,7 +334,8 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
         {/* Offered rather than imposed. A saree hiding the ankles, a
             wheelchair or a small room must not become a missed check-in, so
             nobody is held here indefinitely. */}
-        {canOverride && !overridden && !ready && !error && verdict !== 'MULTIPLE_PEOPLE' && (
+        {canOverride && !overridden && !ready && !error
+          && verdict !== 'MULTIPLE_PEOPLE' && verdict !== 'NO_PERSON' && (
           <button
             type="button"
             onClick={() => setOverridden(true)}

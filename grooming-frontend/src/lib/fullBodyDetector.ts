@@ -6,10 +6,9 @@
  * cannot see feet, and how much of the frame a person fills says nothing about
  * whether their shoes are in it.
  *
- * Everything here fails open. A device without WebGL, a model that will not
- * download, a frame the detector chokes on — none of those may stop somebody
- * checking in, so each returns "cannot tell" and the caller lets the photo be
- * taken. Blocking attendance is a worse outcome than an unframed photograph.
+ * Detector infrastructure failures fail open so unsupported hardware cannot
+ * prevent attendance. A successful detector reading still requires one person
+ * and never permits an empty frame or multiple people.
  */
 
 export type FrameVerdict =
@@ -139,7 +138,20 @@ export function readKeypoints(
   };
 }
 
-/** A partial face or body is enough evidence that another person is present. */
+export interface StableFrameState {
+  reading: FrameReading;
+  candidate: FrameReading | null;
+  candidateCount: number;
+}
+
+/**
+ * A credible partial face or body is evidence that another person is present.
+ *
+ * MoveNet sometimes emits a second, weak pose made from four points belonging
+ * to the main person. Treating that guess as a second person made an otherwise
+ * empty frame flash "multiple people" on tablets. A partial face remains
+ * sufficient, while a body-only detection needs several coherent landmarks.
+ */
 function isDetectedPerson(pose: Pose): boolean {
   const confident = pose.keypoints.filter((point) => (
     (point.score ?? 0) >= KEYPOINT_CONFIDENCE
@@ -147,7 +159,57 @@ function isDetectedPerson(pose: Pose): boolean {
   const visibleHeadPoints = confident.filter((point) => (
     point.name != null && HEAD_KEYPOINTS.includes(point.name)
   )).length;
-  return visibleHeadPoints >= 2 || confident.length >= 4;
+  const namedBodyPoints = confident.filter((point) => (
+    point.name != null
+    && !HEAD_KEYPOINTS.includes(point.name)
+  )).length;
+  return visibleHeadPoints >= 2
+    || (visibleHeadPoints >= 1 && namedBodyPoints >= 4)
+    || namedBodyPoints >= 7;
+}
+
+type PoseBounds = { left: number; top: number; right: number; bottom: number };
+
+function poseBounds(pose: Pose): PoseBounds | null {
+  const points = pose.keypoints.filter((point) => (
+    (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+    && Number.isFinite(point.x)
+    && Number.isFinite(point.y)
+  ));
+  if (!points.length) return null;
+  return {
+    left: Math.min(...points.map((point) => point.x as number)),
+    top: Math.min(...points.map((point) => point.y as number)),
+    right: Math.max(...points.map((point) => point.x as number)),
+    bottom: Math.max(...points.map((point) => point.y as number)),
+  };
+}
+
+/** True when two model outputs are overlapping copies of the same person. */
+function duplicatePose(first: Pose, second: Pose, frameHeight?: number): boolean {
+  const a = poseBounds(first);
+  const b = poseBounds(second);
+  if (!a || !b) return false;
+  const intersectionWidth = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+  const intersectionHeight = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+  const intersection = intersectionWidth * intersectionHeight;
+  const aArea = Math.max(1, (a.right - a.left) * (a.bottom - a.top));
+  const bArea = Math.max(1, (b.right - b.left) * (b.bottom - b.top));
+  if (intersection / Math.min(aArea, bArea) >= 0.72) return true;
+
+  const aHead = first.keypoints.find((point) => (
+    point.name === 'nose' && (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+  ));
+  const bHead = second.keypoints.find((point) => (
+    point.name === 'nose' && (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+  ));
+  if (!aHead || !bHead || !Number.isFinite(aHead.x) || !Number.isFinite(aHead.y)
+      || !Number.isFinite(bHead.x) || !Number.isFinite(bHead.y)) return false;
+  const distance = Math.hypot(
+    (aHead.x as number) - (bHead.x as number),
+    (aHead.y as number) - (bHead.y as number),
+  );
+  return distance <= Math.max(20, (frameHeight || 0) * 0.055);
 }
 
 /** Converts all poses in a frame into one capture decision. */
@@ -155,7 +217,18 @@ export function readPoses(
   poses: Pose[] | undefined,
   frameHeight?: number,
 ): FrameReading {
-  const people = (poses || []).filter(isDetectedPerson);
+  const people: Pose[] = [];
+  const candidates = (poses || [])
+    .filter(isDetectedPerson)
+    .sort((a, b) => (
+      b.keypoints.filter((point) => (point.score ?? 0) >= KEYPOINT_CONFIDENCE).length
+      - a.keypoints.filter((point) => (point.score ?? 0) >= KEYPOINT_CONFIDENCE).length
+    ));
+  for (const candidate of candidates) {
+    if (!people.some((person) => duplicatePose(person, candidate, frameHeight))) {
+      people.push(candidate);
+    }
+  }
   if (people.length > 1) {
     return {
       verdict: 'MULTIPLE_PEOPLE',
@@ -163,6 +236,27 @@ export function readPoses(
     };
   }
   return readKeypoints(people[0]?.keypoints, frameHeight);
+}
+
+/**
+ * Requires the same result across several analyses before changing the UI.
+ * One noisy frame must not make the outline or guidance flash.
+ */
+export function stabilizeFrameReading(
+  state: StableFrameState,
+  next: FrameReading,
+  confirmations = 3,
+): StableFrameState {
+  if (next.verdict === state.reading.verdict) {
+    return { reading: next, candidate: null, candidateCount: 0 };
+  }
+  const candidateCount = state.candidate?.verdict === next.verdict
+    ? state.candidateCount + 1
+    : 1;
+  if (candidateCount >= confirmations) {
+    return { reading: next, candidate: null, candidateCount: 0 };
+  }
+  return { reading: state.reading, candidate: next, candidateCount };
 }
 
 /**
@@ -234,8 +328,8 @@ export function shutterEnabled(
   overridden: boolean,
 ): boolean {
   // An override exists for accessibility and difficult rooms, never to permit
-  // another person's face or body in attendance evidence.
-  if (verdict === 'MULTIPLE_PEOPLE') return false;
+  // another person's face or an empty frame in attendance evidence.
+  if (verdict === 'MULTIPLE_PEOPLE' || verdict === 'NO_PERSON') return false;
   if (overridden || verdict === 'UNAVAILABLE') return true;
   return verdict === 'FULL_BODY' && steadyForMs >= STEADY_MS;
 }
