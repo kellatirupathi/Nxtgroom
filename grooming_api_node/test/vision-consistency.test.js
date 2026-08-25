@@ -6,7 +6,7 @@ import { telemetrySnapshot } from "../src/services/telemetry.js";
 /**
  * Mirrors the consistency rules applied to a parsed grooming report. Kept in
  * step with visionEngine.js by hand: the real function performs a network call
- * to OpenAI, which cannot run in a unit test.
+ * to Gemini, which cannot run in a unit test.
  */
 function reconcile(report) {
   const checks = [
@@ -99,13 +99,13 @@ test("partial visibility is judged on what was actually assessed", () => {
   assert.equal(reconcile(report).overall_status, "COMPLIANT");
 });
 
-test("vision evaluation sends only the instructor image and structured output to GPT-4o mini", async () => {
+test("vision evaluation sends only the instructor image and structured output to Gemini 2.5 Flash-Lite", async () => {
   const originalFetch = globalThis.fetch;
-  const originalOpenAI = {
-    apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL,
-    timeout: process.env.OPENAI_TIMEOUT_MS,
-    retries: process.env.OPENAI_MAX_RETRIES,
+  const originalGemini = {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL,
+    timeout: process.env.GEMINI_TIMEOUT_MS,
+    retries: process.env.GEMINI_MAX_RETRIES,
   };
   const sections = checkpointSet("MALE", "FORMAL");
   const report = {
@@ -131,26 +131,23 @@ test("vision evaluation sends only the instructor image and structured output to
 
   let captured;
   const metricsBefore = telemetrySnapshot().counters;
-  process.env.OPENAI_API_KEY = "test-only-openai-key";
-  process.env.OPENAI_MODEL = "gpt-4o-mini-2024-07-18";
-  process.env.OPENAI_TIMEOUT_MS = "120000";
-  process.env.OPENAI_MAX_RETRIES = "0";
+  process.env.GEMINI_API_KEY = "test-only-gemini-key";
+  process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
+  process.env.GEMINI_TIMEOUT_MS = "120000";
+  process.env.GEMINI_MAX_RETRIES = "0";
   globalThis.fetch = async (url, options) => {
     captured = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({
-      status: "completed",
-      usage: {
-        input_tokens: 5000,
-        output_tokens: 500,
-        total_tokens: 5500,
-        input_tokens_details: { cached_tokens: 4096 },
-      },
-      output: [{
-        type: "message",
-        role: "assistant",
-        status: "completed",
-        content: [{ type: "output_text", text: JSON.stringify(report), annotations: [] }],
+      candidates: [{
+        content: { role: "model", parts: [{ text: JSON.stringify(report) }] },
+        finishReason: "STOP",
       }],
+      usageMetadata: {
+        promptTokenCount: 5000,
+        candidatesTokenCount: 500,
+        totalTokenCount: 5500,
+        cachedContentTokenCount: 4096,
+      },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
 
@@ -158,58 +155,52 @@ test("vision evaluation sends only the instructor image and structured output to
     const { evaluateImage } = await import("../src/services/visionEngine.js");
     const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "MALE");
     assert.equal(result.overall_status, "COMPLIANT");
-    assert.equal(captured.url, "https://api.openai.com/v1/responses");
-    assert.equal(captured.options.headers.authorization, "Bearer test-only-openai-key");
-    assert.equal(captured.body.model, "gpt-4o-mini-2024-07-18");
-    assert.equal(captured.body.store, false);
-    assert.equal(typeof captured.body.instructions, "string");
-    assert.equal(captured.body.text.format.type, "json_schema");
-    assert.equal(captured.body.text.format.name, "grooming_evaluation");
-    assert.equal(captured.body.text.format.strict, true);
-    assert.equal(captured.body.text.format.schema.additionalProperties, false);
-    assert.equal(captured.body.max_output_tokens, 6000);
-    assert.equal(captured.body.temperature, 0);
-    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v3:male:formal");
-    assert.equal("prompt_cache_retention" in captured.body, false);
-    assert.equal(captured.body.input.length, 1);
-    assert.equal(captured.body.input[0].role, "user");
-    const images = captured.body.input[0].content.filter((part) => part.type === "input_image");
-    assert.equal(images.length, 1, "only the changing instructor image must be sent");
-    assert.ok(images.every((part) => part.detail === "high"));
-    assert.ok(images.every((part) => part.image_url.startsWith("data:image/jpeg;base64,")));
     assert.equal(
-      images[0].image_url,
-      "data:image/jpeg;base64,/9j/4A==",
-      "the single image must be the instructor photograph",
+      captured.url,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
     );
-    const inputText = captured.body.input[0].content
-      .filter((part) => part.type === "input_text")
+    assert.equal(captured.options.headers["x-goog-api-key"], "test-only-gemini-key");
+    assert.equal(typeof captured.body.systemInstruction.parts[0].text, "string");
+    assert.equal(captured.body.generationConfig.responseMimeType, "application/json");
+    assert.equal(captured.body.generationConfig.responseJsonSchema.additionalProperties, false);
+    assert.equal(captured.body.generationConfig.maxOutputTokens, 6000);
+    assert.equal(captured.body.generationConfig.temperature, 0);
+    assert.equal(captured.body.generationConfig.thinkingConfig.thinkingBudget, 0);
+    assert.equal(captured.body.generationConfig.mediaResolution, "MEDIA_RESOLUTION_HIGH");
+    assert.equal(captured.body.contents.length, 1);
+    assert.equal(captured.body.contents[0].role, "user");
+    const images = captured.body.contents[0].parts.filter((part) => part.inlineData);
+    assert.equal(images.length, 1, "only the changing instructor image must be sent");
+    assert.equal(images[0].inlineData.mimeType, "image/jpeg");
+    assert.equal(images[0].inlineData.data, "/9j/4A==", "the single image must be the instructor photograph");
+    const inputText = captured.body.contents[0].parts
+      .filter((part) => typeof part.text === "string")
       .map((part) => part.text)
       .join(" ");
     assert.match(inputText, /written NxtWave Grooming Standard/i);
     assert.doesNotMatch(inputText, /reference image/i);
     const metricsAfter = telemetrySnapshot().counters;
     assert.equal(
-      metricsAfter.openai_input_tokens_total - (metricsBefore.openai_input_tokens_total || 0),
+      metricsAfter.gemini_input_tokens_total - (metricsBefore.gemini_input_tokens_total || 0),
       5000,
     );
     assert.equal(
-      metricsAfter.openai_cached_input_tokens_total
-        - (metricsBefore.openai_cached_input_tokens_total || 0),
+      metricsAfter.gemini_cached_input_tokens_total
+        - (metricsBefore.gemini_cached_input_tokens_total || 0),
       4096,
     );
     assert.equal(
-      metricsAfter.openai_prompt_cache_hits_total
-        - (metricsBefore.openai_prompt_cache_hits_total || 0),
+      metricsAfter.gemini_prompt_cache_hits_total
+        - (metricsBefore.gemini_prompt_cache_hits_total || 0),
       1,
     );
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries({
-      OPENAI_API_KEY: originalOpenAI.apiKey,
-      OPENAI_MODEL: originalOpenAI.model,
-      OPENAI_TIMEOUT_MS: originalOpenAI.timeout,
-      OPENAI_MAX_RETRIES: originalOpenAI.retries,
+      GEMINI_API_KEY: originalGemini.apiKey,
+      GEMINI_MODEL: originalGemini.model,
+      GEMINI_TIMEOUT_MS: originalGemini.timeout,
+      GEMINI_MAX_RETRIES: originalGemini.retries,
     })) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -219,11 +210,11 @@ test("vision evaluation sends only the instructor image and structured output to
 
 test("female attire classification and its matching report use one image request", async () => {
   const originalFetch = globalThis.fetch;
-  const originalOpenAI = {
-    apiKey: process.env.OPENAI_API_KEY,
-    model: process.env.OPENAI_MODEL,
-    timeout: process.env.OPENAI_TIMEOUT_MS,
-    retries: process.env.OPENAI_MAX_RETRIES,
+  const originalGemini = {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL,
+    timeout: process.env.GEMINI_TIMEOUT_MS,
+    retries: process.env.GEMINI_MAX_RETRIES,
   };
   const sections = checkpointSet("FEMALE", "SAREE");
   const report = {
@@ -250,31 +241,24 @@ test("female attire classification and its matching report use one image request
 
   let requestCount = 0;
   let captured;
-  process.env.OPENAI_API_KEY = "test-only-openai-key";
-  process.env.OPENAI_MODEL = "gpt-4o-mini-2024-07-18";
-  process.env.OPENAI_TIMEOUT_MS = "120000";
-  process.env.OPENAI_MAX_RETRIES = "0";
+  process.env.GEMINI_API_KEY = "test-only-gemini-key";
+  process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
+  process.env.GEMINI_TIMEOUT_MS = "120000";
+  process.env.GEMINI_MAX_RETRIES = "0";
   globalThis.fetch = async (url, options) => {
     requestCount += 1;
     captured = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({
-      status: "completed",
-      usage: {
-        input_tokens: 7000,
-        output_tokens: 500,
-        total_tokens: 7500,
-        input_tokens_details: { cached_tokens: 4096 },
-      },
-      output: [{
-        type: "message",
-        role: "assistant",
-        status: "completed",
-        content: [{
-          type: "output_text",
-          text: JSON.stringify({ evaluation: report }),
-          annotations: [],
-        }],
+      candidates: [{
+        content: { role: "model", parts: [{ text: JSON.stringify({ evaluation: report }) }] },
+        finishReason: "STOP",
       }],
+      usageMetadata: {
+        promptTokenCount: 7000,
+        candidatesTokenCount: 500,
+        totalTokenCount: 7500,
+        cachedContentTokenCount: 4096,
+      },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
 
@@ -290,20 +274,18 @@ test("female attire classification and its matching report use one image request
       sections.attire_check.map((item) => item.code),
       "only the selected saree rows should reach the stored report",
     );
-    assert.equal(captured.body.text.format.name, "female_grooming_evaluation");
-    assert.equal(captured.body.prompt_cache_key, "grooming-evaluation:v3:female:auto");
-    assert.equal(captured.body.text.format.schema.type, "object");
-    assert.equal(captured.body.text.format.schema.properties.evaluation.anyOf.length, 4);
-    const images = captured.body.input[0].content.filter((part) => part.type === "input_image");
+    assert.equal(captured.body.generationConfig.responseJsonSchema.type, "object");
+    assert.equal(captured.body.generationConfig.responseJsonSchema.properties.evaluation.anyOf.length, 4);
+    const images = captured.body.contents[0].parts.filter((part) => part.inlineData);
     assert.equal(images.length, 1);
-    assert.equal(images[0].image_url, "data:image/jpeg;base64,/9j/4A==");
+    assert.equal(images[0].inlineData.data, "/9j/4A==");
   } finally {
     globalThis.fetch = originalFetch;
     for (const [name, value] of Object.entries({
-      OPENAI_API_KEY: originalOpenAI.apiKey,
-      OPENAI_MODEL: originalOpenAI.model,
-      OPENAI_TIMEOUT_MS: originalOpenAI.timeout,
-      OPENAI_MAX_RETRIES: originalOpenAI.retries,
+      GEMINI_API_KEY: originalGemini.apiKey,
+      GEMINI_MODEL: originalGemini.model,
+      GEMINI_TIMEOUT_MS: originalGemini.timeout,
+      GEMINI_MAX_RETRIES: originalGemini.retries,
     })) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

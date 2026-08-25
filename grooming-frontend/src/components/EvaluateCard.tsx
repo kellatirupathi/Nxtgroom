@@ -285,7 +285,7 @@ export default function EvaluateCard({
       }>(
         '/api/v2/attendance/check-out',
         // Checkout analysis is completed by this request, so allow the API's
-        // configured OpenAI timeout plus transport overhead.
+        // configured Gemini timeout plus transport overhead.
         { method: 'POST', body: formData, timeoutMs: 150_000 },
       );
       if (hasPhoto && result?.attendance_id) {

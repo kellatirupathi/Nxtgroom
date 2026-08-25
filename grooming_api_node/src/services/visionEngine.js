@@ -5,11 +5,7 @@ import { incrementMetric, observeDuration } from "./telemetry.js";
 import { buildFemaleSystemPrompt, buildSystemPrompt } from "../prompts.js";
 import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints.js";
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-// Increment when the stable instructions or report schema changes materially.
-// The exact-prefix hash still prevents an invalid match; the version makes the
-// routing intent explicit in telemetry/debugging.
-const GROOMING_PROMPT_CACHE_VERSION = "v3";
+const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
@@ -38,7 +34,7 @@ const ENTRY_JSON_SCHEMA = {
   required: ["status", "observation", "reason"],
 };
 
-function createOpenAIError(message, code, { retryable = false } = {}) {
+function createGeminiError(message, code, { retryable = false } = {}) {
   const error = new Error(message);
   error.name = code;
   error.code = code;
@@ -46,31 +42,31 @@ function createOpenAIError(message, code, { retryable = false } = {}) {
   return error;
 }
 
-function openaiHttpError(status, providerMessage = "") {
+function geminiHttpError(status, providerMessage = "") {
   const safeMessage = String(providerMessage).replace(/\s+/g, " ").slice(0, 300);
   if (status === 429) {
-    return createOpenAIError(
-      `OpenAI rate limit exceeded${safeMessage ? `: ${safeMessage}` : ""}`,
+    return createGeminiError(
+      `Gemini rate limit exceeded${safeMessage ? `: ${safeMessage}` : ""}`,
       "RATE_LIMIT_EXCEEDED",
       { retryable: true }
     );
   }
   if (status === 401 || status === 403) {
-    return createOpenAIError("OpenAI authentication failed", "OPENAI_AUTH_ERROR");
+    return createGeminiError("Gemini authentication failed", "GEMINI_AUTH_ERROR");
   }
   if (status === 408) {
-    return createOpenAIError("OpenAI request timed out", "OPENAI_TIMEOUT", { retryable: true });
+    return createGeminiError("Gemini request timed out", "GEMINI_TIMEOUT", { retryable: true });
   }
   if (status >= 500) {
-    return createOpenAIError(
-      `OpenAI service error (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
-      "OPENAI_SERVER_ERROR",
+    return createGeminiError(
+      `Gemini service error (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
+      "GEMINI_SERVER_ERROR",
       { retryable: true }
     );
   }
-  return createOpenAIError(
-    `OpenAI request failed (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
-    "OPENAI_REQUEST_ERROR"
+  return createGeminiError(
+    `Gemini request failed (${status})${safeMessage ? `: ${safeMessage}` : ""}`,
+    "GEMINI_REQUEST_ERROR"
   );
 }
 
@@ -85,110 +81,107 @@ function retryAfterMilliseconds(response, attempt) {
   return Math.min(1000 * (2 ** attempt), 10000);
 }
 
-function extractOpenAIText(responseBody) {
-  return (responseBody?.output || [])
-    .filter((item) => item?.type === "message")
-    .flatMap((item) => item.content || [])
-    .filter((content) => content?.type === "output_text" && typeof content.text === "string")
-    .map((content) => content.text)
+function extractGeminiText(responseBody) {
+  return (responseBody?.candidates || [])
+    .flatMap((candidate) => candidate?.content?.parts || [])
+    .filter((part) => typeof part?.text === "string")
+    .map((part) => part.text)
     .join("")
     .trim();
 }
 
 /** Records provider-reported usage without logging prompts, images or people. */
-function recordOpenAICacheUsage(responseBody, cacheRouted) {
-  const inputTokens = Number(responseBody?.usage?.input_tokens || 0);
-  const cachedTokens = Number(responseBody?.usage?.input_tokens_details?.cached_tokens || 0);
+function recordGeminiUsage(responseBody) {
+  const usage = responseBody?.usageMetadata || {};
+  const inputTokens = Number(usage.promptTokenCount || 0);
+  const outputTokens = Number(usage.candidatesTokenCount || 0);
+  const cachedTokens = Number(usage.cachedContentTokenCount || 0);
   if (Number.isFinite(inputTokens) && inputTokens > 0) {
-    incrementMetric("openai_input_tokens_total", inputTokens);
+    incrementMetric("gemini_input_tokens_total", inputTokens);
+  }
+  if (Number.isFinite(outputTokens) && outputTokens > 0) {
+    incrementMetric("gemini_output_tokens_total", outputTokens);
   }
   if (Number.isFinite(cachedTokens) && cachedTokens > 0) {
-    incrementMetric("openai_cached_input_tokens_total", cachedTokens);
+    incrementMetric("gemini_cached_input_tokens_total", cachedTokens);
   }
-  if (!cacheRouted) return;
-  incrementMetric("openai_prompt_cache_requests_total");
+  // Gemini 2.5 enables implicit exact-prefix caching automatically. The stable
+  // system instruction and schema remain before the changing image content.
+  incrementMetric("gemini_prompt_cache_requests_total");
   incrementMetric(cachedTokens > 0
-    ? "openai_prompt_cache_hits_total"
-    : "openai_prompt_cache_misses_total");
+    ? "gemini_prompt_cache_hits_total"
+    : "gemini_prompt_cache_misses_total");
 }
 
-/**
- * Stable, non-personal routing key for requests with the same reusable prefix.
- * Male and female-auto requests have different instructions and schemas, so
- * they must not be grouped as though their prefixes were interchangeable.
- */
-export function groomingPromptCacheKey(gender, attireType) {
-  return [
-    "grooming-evaluation",
-    GROOMING_PROMPT_CACHE_VERSION,
-    String(gender).toLowerCase(),
-    String(attireType).toLowerCase(),
-  ].join(":");
+function geminiPart(part) {
+  if (part?.type === "input_text") return { text: part.text };
+  if (part?.type === "input_image") {
+    return {
+      inlineData: {
+        mimeType: part.mimeType,
+        data: part.data,
+      },
+    };
+  }
+  throw createGeminiError("Unsupported Gemini input part", "GEMINI_REQUEST_ERROR");
 }
 
-async function requestOpenAIStructured({
+async function requestGeminiStructured({
   systemInstruction,
   input,
   jsonSchema,
   validator,
   maxOutputTokens,
-  schemaName,
-  promptCacheKey,
 }) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) throw createOpenAIError("OPENAI_API_KEY is not configured", "OPENAI_AUTH_ERROR");
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
 
   const config = runtimeConfig();
+  const endpoint = `${GEMINI_API_ORIGIN}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`;
   const requestBody = {
-    model: config.openaiModel,
-    store: false,
-    instructions: systemInstruction,
-    input: [{
-      role: "user",
-      content: input,
-    }],
-    text: {
-      format: {
-        type: "json_schema",
-        name: schemaName,
-        strict: true,
-        schema: jsonSchema,
-      },
+    systemInstruction: {
+      parts: [{ text: systemInstruction }],
     },
-    max_output_tokens: maxOutputTokens,
-    temperature: 0,
-    // GPT-4o mini performs automatic exact-prefix caching. A stable key helps
-    // requests sharing the same written standards and schema reach the same
-    // cache. The changing instructor image remains at the end of input.
-    ...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
+    contents: [{
+      role: "user",
+      parts: input.map(geminiPart),
+    }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseJsonSchema: jsonSchema,
+      maxOutputTokens,
+      temperature: 0,
+      thinkingConfig: { thinkingBudget: 0 },
+      mediaResolution: "MEDIA_RESOLUTION_HIGH",
+    },
   };
 
-  for (let attempt = 0; attempt <= config.openaiMaxRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= config.geminiMaxRetries; attempt += 1) {
     const requestStartedAt = Date.now();
-    incrementMetric("openai_requests_total");
-    if (attempt > 0) incrementMetric("openai_retries_total");
+    incrementMetric("gemini_requests_total");
+    if (attempt > 0) incrementMetric("gemini_retries_total");
     let response;
     try {
-      response = await fetch(OPENAI_RESPONSES_URL, {
+      response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${apiKey}`,
+          "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(config.openaiTimeoutMs),
+        signal: AbortSignal.timeout(config.geminiTimeoutMs),
       });
-      observeDuration("openai_request_latency", Date.now() - requestStartedAt);
+      observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
     } catch (cause) {
-      observeDuration("openai_request_latency", Date.now() - requestStartedAt);
-      incrementMetric("openai_request_failures_total");
+      observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
+      incrementMetric("gemini_request_failures_total");
       const timedOut = cause?.name === "TimeoutError" || cause?.name === "AbortError";
-      const error = createOpenAIError(
-        timedOut ? "OpenAI request timed out" : "OpenAI request could not reach the service",
-        timedOut ? "OPENAI_TIMEOUT" : "OPENAI_NETWORK_ERROR",
+      const error = createGeminiError(
+        timedOut ? "Gemini request timed out" : "Gemini request could not reach the service",
+        timedOut ? "GEMINI_TIMEOUT" : "GEMINI_NETWORK_ERROR",
         { retryable: true }
       );
-      if (attempt === config.openaiMaxRetries) throw error;
+      if (attempt === config.geminiMaxRetries) throw error;
       await delay(Math.min(1000 * (2 ** attempt), 10000));
       continue;
     }
@@ -198,39 +191,46 @@ async function requestOpenAIStructured({
     try {
       body = bodyText ? JSON.parse(bodyText) : {};
     } catch {
-      throw createOpenAIError("OpenAI returned an unreadable response", "OPENAI_INVALID_RESPONSE");
+      throw createGeminiError("Gemini returned an unreadable response", "GEMINI_INVALID_RESPONSE");
     }
 
     if (!response.ok) {
-      incrementMetric("openai_request_failures_total");
-      const error = openaiHttpError(response.status, body?.error?.message);
-      if (!error.retryable || attempt === config.openaiMaxRetries) throw error;
+      incrementMetric("gemini_request_failures_total");
+      const error = geminiHttpError(response.status, body?.error?.message);
+      if (!error.retryable || attempt === config.geminiMaxRetries) throw error;
       await delay(retryAfterMilliseconds(response, attempt));
       continue;
     }
-    recordOpenAICacheUsage(body, Boolean(promptCacheKey));
-    if (body.status !== "completed") {
-      throw createOpenAIError(
-        `OpenAI did not complete the evaluation (status: ${body.status || "unknown"})`,
-        "OPENAI_INCOMPLETE_RESPONSE"
+    recordGeminiUsage(body);
+    const finishReason = body?.candidates?.[0]?.finishReason;
+    if (finishReason && finishReason !== "STOP") {
+      throw createGeminiError(
+        `Gemini did not complete the evaluation (finish reason: ${finishReason})`,
+        "GEMINI_INCOMPLETE_RESPONSE"
       );
     }
 
-    const text = extractOpenAIText(body);
+    const text = extractGeminiText(body);
     if (!text) {
-      throw createOpenAIError("OpenAI returned no structured evaluation", "OPENAI_INVALID_RESPONSE");
+      const blockReason = body?.promptFeedback?.blockReason;
+      throw createGeminiError(
+        blockReason
+          ? `Gemini blocked the evaluation (${blockReason})`
+          : "Gemini returned no structured evaluation",
+        blockReason ? "GEMINI_BLOCKED_RESPONSE" : "GEMINI_INVALID_RESPONSE"
+      );
     }
     let parsed;
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw createOpenAIError("OpenAI returned invalid structured JSON", "OPENAI_INVALID_RESPONSE");
+      throw createGeminiError("Gemini returned invalid structured JSON", "GEMINI_INVALID_RESPONSE");
     }
-    incrementMetric("openai_request_success_total");
+    incrementMetric("gemini_request_success_total");
     return validator.parse(parsed);
   }
 
-  throw createOpenAIError("OpenAI evaluation failed", "OPENAI_REQUEST_ERROR");
+  throw createGeminiError("Gemini evaluation failed", "GEMINI_REQUEST_ERROR");
 }
 
 /**
@@ -480,8 +480,8 @@ export function deriveVerdict(rows, { imageQuality } = {}) {
 function instructorImagePart(imageBuffer, mimeType) {
   return {
     type: "input_image",
-    image_url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
-    detail: "high",
+    mimeType,
+    data: imageBuffer.toString("base64"),
   };
 }
 
@@ -546,27 +546,23 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   let attireType = "FORMAL";
   let parsed;
   if (normalizedGender === "FEMALE") {
-    const response = await requestOpenAIStructured({
+    const response = await requestGeminiStructured({
       systemInstruction: buildFemaleSystemPrompt(),
       input: content,
       jsonSchema: buildFemaleResponseJsonSchema(),
       validator: buildFemaleResponseSchema(),
       maxOutputTokens: 6000,
-      schemaName: "female_grooming_evaluation",
-      promptCacheKey: groomingPromptCacheKey("FEMALE", "AUTO"),
     });
     parsed = response.evaluation;
     attireType = parsed.attire_type;
   } else {
     const maleSections = checkpointSet("MALE", attireType);
-    parsed = await requestOpenAIStructured({
+    parsed = await requestGeminiStructured({
       systemInstruction: buildSystemPrompt("MALE", attireType),
       input: content,
       jsonSchema: buildReportJsonSchema(maleSections),
       validator: buildReportSchema(maleSections),
       maxOutputTokens: 6000,
-      schemaName: "grooming_evaluation",
-      promptCacheKey: groomingPromptCacheKey("MALE", attireType),
     });
   }
   const sections = checkpointSet(normalizedGender, attireType);
