@@ -140,17 +140,15 @@ test('an empty frame asks the person to step into it', () => {
   assert.match(readKeypoints([]).guidance, /step into the frame/i);
 });
 
-test('the shutter waits for a frame that holds', () => {
-  // A single lucky frame while somebody is still walking backwards is not a
-  // steady full-body shot, and capturing on it defeats the gate.
-  assert.equal(shutterEnabled('FULL_BODY', 0, false), false);
-  assert.equal(shutterEnabled('FULL_BODY', STEADY_MS - 1, false), false);
-  assert.equal(shutterEnabled('FULL_BODY', STEADY_MS, false), true);
+test('the shutter opens immediately for a detected person', () => {
+  assert.equal(shutterEnabled('FULL_BODY', 0, false), true);
+  assert.equal(shutterEnabled('PARTIAL', 0, false), true);
+  assert.equal(shutterEnabled('TOO_FAR', 0, false), true);
 });
 
-test('a partial frame keeps the shutter shut', () => {
-  assert.equal(shutterEnabled('PARTIAL', 10_000, false), false);
-  assert.equal(shutterEnabled('TOO_FAR', 10_000, false), false);
+test('framing recommendations do not block attendance capture', () => {
+  assert.equal(shutterEnabled('PARTIAL', 10_000, false), true);
+  assert.equal(shutterEnabled('TOO_FAR', 10_000, false), true);
   assert.equal(shutterEnabled('NO_PERSON', 10_000, false), false);
 });
 

@@ -354,27 +354,23 @@ export async function readFrame(
   }
 }
 
-/** How long a full body must hold before the shutter unlocks. */
-export const STEADY_MS = 1000;
-/** How long somebody may be blocked before they can capture regardless. */
-export const OVERRIDE_AFTER_MS = 15_000;
+/** Retained for callers compiled against the earlier strict capture gate. */
+export const STEADY_MS = 0;
+export const OVERRIDE_AFTER_MS = 0;
 
 /**
  * Whether the shutter should be enabled.
  *
- * Open when a full body has held steady, when the detector is unavailable, and
- * once the override has been offered and taken. A person who cannot satisfy the
- * check — a saree hiding the ankles, a wheelchair, poor light — must still be
- * able to check in.
+ * Framing is guidance, not an attendance blocker. Once the detector sees one
+ * person, the shutter opens even if feet are cropped or the person is farther
+ * away than recommended. Only a confidently empty frame or a confidently
+ * detected group remains blocked. Detector failures fail open.
  */
 export function shutterEnabled(
   verdict: FrameVerdict,
-  steadyForMs: number,
-  overridden: boolean,
+  _steadyForMs: number,
+  _overridden: boolean,
 ): boolean {
-  // An override exists for accessibility and difficult rooms, never to permit
-  // another person's face or an empty frame in attendance evidence.
   if (verdict === 'MULTIPLE_PEOPLE' || verdict === 'NO_PERSON') return false;
-  if (overridden || verdict === 'UNAVAILABLE') return true;
-  return verdict === 'FULL_BODY' && steadyForMs >= STEADY_MS;
+  return true;
 }

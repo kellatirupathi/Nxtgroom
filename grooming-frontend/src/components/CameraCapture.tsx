@@ -2,22 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, RefreshCw, SwitchCamera, X } from 'lucide-react';
 import {
   loadFullBodyDetector,
-  OVERRIDE_AFTER_MS,
   readFrame,
   shutterEnabled,
   stabilizeFrameReading,
-  STEADY_MS,
   type StableFrameState,
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
 import { BODY_GUIDE_BOUNDS, bodyGuideSourceRect } from '../lib/cameraGeometry';
-import {
-  advanceLiveness,
-  createLivenessState,
-  livenessInstruction,
-  livenessVerified,
-  type LivenessState,
-} from '../lib/livenessChallenge';
 
 type Facing = 'user' | 'environment';
 
@@ -63,11 +54,6 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
   // model was still loading briefly enabled capture on an empty frame.
   const [verdict, setVerdict] = useState<FrameVerdict>('NO_PERSON');
   const [guidance, setGuidance] = useState<string | null>('Step into the frame');
-  const [steadyForMs, setSteadyForMs] = useState(0);
-  const [overridden, setOverridden] = useState(false);
-  const [canOverride, setCanOverride] = useState(false);
-  const [liveness, setLiveness] = useState<LivenessState>(() => createLivenessState());
-  const livenessRef = useRef(liveness);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -80,12 +66,6 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     setError('');
     setVerdict('NO_PERSON');
     setGuidance('Step into the frame');
-    setSteadyForMs(0);
-    setOverridden(false);
-    setCanOverride(false);
-    const freshLiveness = createLivenessState();
-    livenessRef.current = freshLiveness;
-    setLiveness(freshLiveness);
 
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -127,16 +107,21 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
    * Watches the live frame for a whole person, head to feet.
    *
    * Five readings a second is enough to feel immediate without competing with
-   * the preview for the GPU. Everything degrades to UNAVAILABLE, which unlocks
-   * the shutter: a device that cannot run the model must not stop somebody
-   * checking in.
+   * the preview for the GPU. Detection is a friendly safety net: one visible
+   * person can capture immediately and framing messages are recommendations.
+   * Everything degrades to UNAVAILABLE so a slow or unsupported device cannot
+   * prevent attendance.
    */
   useEffect(() => {
     if (error) return undefined;
     let disposed = false;
-    let steadySince: number | null = null;
     let timer: ReturnType<typeof setTimeout>;
-    const openedAt = Date.now();
+    const detectorGraceTimer = setTimeout(() => {
+      if (!disposed) {
+        setVerdict('UNAVAILABLE');
+        setGuidance(null);
+      }
+    }, 4_000);
     let stableState: StableFrameState = {
       reading: { verdict: 'NO_PERSON', guidance: 'Step into the frame' },
       candidate: null,
@@ -145,6 +130,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
 
     const inspect = async () => {
       const detector = await loadFullBodyDetector();
+      clearTimeout(detectorGraceTimer);
       const tick = async () => {
         if (disposed) return;
         const video = videoRef.current;
@@ -162,32 +148,6 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
         const stableReading = stableState.reading;
         setVerdict(stableReading.verdict);
         setGuidance(stableReading.guidance);
-        const previousLiveness = livenessRef.current;
-        const nextLiveness = advanceLiveness(previousLiveness, stableReading);
-        livenessRef.current = nextLiveness;
-        // The detector runs five times a second. Update React only when the
-        // challenge actually changes so the preview remains smooth on modest
-        // tablets instead of repainting for every inference frame.
-        if (
-          nextLiveness.phase !== previousLiveness.phase
-          || nextLiveness.side !== previousLiveness.side
-          || nextLiveness.confirmations !== previousLiveness.confirmations
-          || nextLiveness.deadline !== previousLiveness.deadline
-        ) {
-          setLiveness(nextLiveness);
-        }
-        // Held continuously, not merely seen once: a single lucky frame while
-        // somebody is still moving is not a steady full-body shot.
-        if (stableReading.verdict === 'FULL_BODY') {
-          steadySince ||= Date.now();
-          setSteadyForMs(Date.now() - steadySince);
-        } else {
-          steadySince = null;
-          setSteadyForMs(0);
-        }
-        // Nobody is held here indefinitely. A saree hiding the ankles, a
-        // wheelchair or poor light must not become a missed check-in.
-        if (Date.now() - openedAt >= OVERRIDE_AFTER_MS) setCanOverride(true);
         timer = setTimeout(tick, 200);
       };
       void tick();
@@ -196,6 +156,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
 
     return () => {
       disposed = true;
+      clearTimeout(detectorGraceTimer);
       clearTimeout(timer);
     };
   }, [error, facing]);
@@ -210,12 +171,7 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [stop]);
 
-  const framingReady = shutterEnabled(verdict, steadyForMs, overridden);
-  const liveVerified = livenessVerified(liveness);
-  const ready = framingReady && liveVerified;
-  const liveInstruction = verdict === 'UNAVAILABLE'
-    ? 'Live check unavailable - close and reopen the camera'
-    : livenessInstruction(liveness);
+  const ready = shutterEnabled(verdict, 0, false);
 
   const shoot = async () => {
     const video = videoRef.current;
@@ -336,21 +292,13 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
             {/* One line, only when something needs changing. A running
                 commentary on a correct frame is noise. */}
             <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center px-6">
-              {guidance && !overridden ? (
+              {guidance ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
                   {guidance}
                 </p>
-              ) : !liveVerified ? (
-                <p className="rounded-full bg-indigo-600/90 px-4 py-2 text-center text-sm font-bold text-white" role="status">
-                  {liveInstruction}
-                </p>
-              ) : verdict === 'FULL_BODY' && steadyForMs < STEADY_MS ? (
-                <p className="rounded-full bg-slate-900/75 px-4 py-2 text-sm font-semibold text-white" role="status">
-                  Hold still…
-                </p>
               ) : ready ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
-                  Live person verified - ready
+                  Ready to take photo
                 </p>
               ) : null}
             </div>
@@ -368,25 +316,11 @@ export default function CameraCapture({ facing, onFlip, onCapture, onClose }: Ca
         className="flex flex-col items-center gap-3 py-6"
         style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
       >
-        {/* Offered rather than imposed. A saree hiding the ankles, a
-            wheelchair or a small room must not become a missed check-in, so
-            nobody is held here indefinitely. */}
-        {canOverride && !overridden && !ready && !error
-          && verdict !== 'MULTIPLE_PEOPLE' && verdict !== 'NO_PERSON' && (
-          <button
-            type="button"
-            onClick={() => setOverridden(true)}
-            className="rounded-full border border-white/30 px-4 py-2 text-xs font-semibold text-white/80 active:bg-white/10"
-          >
-            Can&rsquo;t fit your full body? Take the photo anyway
-          </button>
-        )}
-
         <button
           type="button"
           onClick={shoot}
           disabled={Boolean(error) || starting || capturing || !ready}
-          aria-label={ready ? 'Capture photo' : 'Complete the live check to capture photo'}
+          aria-label={ready ? 'Capture photo' : 'Position one person in the camera to capture a photo'}
           className="w-[72px] h-[72px] rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 flex items-center justify-center"
         >
           {capturing ? (
