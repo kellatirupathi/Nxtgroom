@@ -224,6 +224,8 @@ with an insecure fallback.
 | `GEMINI_MODEL` | Optional | Defaults to pinned `gemini-2.5-flash-lite` |
 | `GEMINI_TIMEOUT_MS` | Optional | Defaults to `120000`; permitted range is 10000–600000 |
 | `GEMINI_MAX_RETRIES` | Optional | Defaults to `2`; permitted range is 0–2 |
+| `GEMINI_EXPLICIT_CACHE` | Optional | Defaults to `true`; set to `false` to disable explicit male/female prompt caching. Cache failures automatically use the normal request path. |
+| `GEMINI_CACHE_TTL_SECONDS` | Optional | Defaults to `3600`; permitted range is 600–86400. Prompt changes automatically create a new cache identity. |
 | `EVALUATION_POLL_MS` | Optional | Defaults to `2000`; permitted range is 250–60000 |
 | `EVALUATION_LEASE_MS` | Optional | Defaults to `600000`; must cover all Gemini attempts plus 60000 |
 | `EVALUATION_MAX_ATTEMPTS` | Optional | Defaults to `3`; permitted range is 1–10 |

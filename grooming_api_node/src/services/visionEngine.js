@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
 import { incrementMetric, observeDuration } from "./telemetry.js";
@@ -7,6 +8,13 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 
 const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
+const CACHE_RENEWAL_SAFETY_SECONDS = 300;
+const CACHE_FAILURE_BACKOFF_MS = 60_000;
+
+// Process-local registry of Gemini server-side cache resource names. The
+// resource itself lives at Gemini; this map merely prevents duplicate cache
+// creation and lets concurrent evaluations share the same in-flight promise.
+const geminiCacheRegistry = new Map();
 
 const VISIBILITY = z.enum(["VISIBLE", "PARTIAL", "NOT_VISIBLE"]);
 
@@ -105,8 +113,8 @@ function recordGeminiUsage(responseBody) {
   if (Number.isFinite(cachedTokens) && cachedTokens > 0) {
     incrementMetric("gemini_cached_input_tokens_total", cachedTokens);
   }
-  // Gemini 2.5 enables implicit exact-prefix caching automatically. The stable
-  // system instruction and schema remain before the changing image content.
+  // Provider usage metadata covers both the explicit prompt cache used here
+  // and Gemini's automatic implicit prefix cache on an uncached fallback.
   incrementMetric("gemini_prompt_cache_requests_total");
   incrementMetric(cachedTokens > 0
     ? "gemini_prompt_cache_hits_total"
@@ -126,22 +134,118 @@ function geminiPart(part) {
   throw createGeminiError("Unsupported Gemini input part", "GEMINI_REQUEST_ERROR");
 }
 
-async function requestGeminiStructured({
-  systemInstruction,
-  input,
-  jsonSchema,
-  validator,
-  maxOutputTokens,
-}) {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
 
-  const config = runtimeConfig();
-  const endpoint = `${GEMINI_API_ORIGIN}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`;
-  const requestBody = {
-    systemInstruction: {
-      parts: [{ text: systemInstruction }],
-    },
+function cacheRegistryKey({ apiKey, model, namespace, systemInstruction }) {
+  // Hash the credential instead of retaining a secret in a long-lived map key.
+  return [sha256(apiKey).slice(0, 16), model, namespace, sha256(systemInstruction)].join(":");
+}
+
+function cachedContentModel(model) {
+  return model.startsWith("models/") ? model : `models/${model}`;
+}
+
+function safeProviderMessage(body) {
+  return String(body?.error?.message || "")
+    .replace(/\s+/g, " ")
+    .slice(0, 200);
+}
+
+/**
+ * Creates or reuses one explicit Gemini context cache for a stable prompt.
+ *
+ * Male and female calls use different namespaces and different prompt hashes,
+ * so one gender can never receive the other gender's cached instructions.
+ * A null result is deliberate: the caller continues through the existing
+ * uncached request path when caching is unavailable for any reason.
+ */
+async function ensureGeminiPromptCache({ apiKey, config, namespace, systemInstruction }) {
+  if (!config.geminiExplicitCache) return null;
+
+  const registryKey = cacheRegistryKey({
+    apiKey,
+    model: config.geminiModel,
+    namespace,
+    systemInstruction,
+  });
+  const now = Date.now();
+  const existing = geminiCacheRegistry.get(registryKey);
+  if (existing && existing.expiresAt > now) {
+    return existing.namePromise.then((name) => (name ? { name, registryKey } : null));
+  }
+
+  const reuseSeconds = Math.max(
+    config.geminiCacheTtlSeconds - CACHE_RENEWAL_SAFETY_SECONDS,
+    Math.floor(config.geminiCacheTtlSeconds / 2),
+  );
+  const entry = {
+    expiresAt: now + reuseSeconds * 1000,
+    namePromise: Promise.resolve(null),
+  };
+
+  entry.namePromise = (async () => {
+    incrementMetric("gemini_explicit_cache_create_attempts_total");
+    try {
+      const response = await fetch(`${GEMINI_API_ORIGIN}/v1beta/cachedContents`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          model: cachedContentModel(config.geminiModel),
+          displayName: `nxtgroom-${namespace}-${sha256(systemInstruction).slice(0, 12)}`.slice(0, 128),
+          systemInstruction: { parts: [{ text: systemInstruction }] },
+          ttl: `${config.geminiCacheTtlSeconds}s`,
+        }),
+        signal: AbortSignal.timeout(Math.min(config.geminiTimeoutMs, 30_000)),
+      });
+      const bodyText = await response.text();
+      let body = {};
+      try {
+        body = bodyText ? JSON.parse(bodyText) : {};
+      } catch {
+        // An unreadable cache response is treated exactly like no cache.
+      }
+      const name = typeof body?.name === "string" ? body.name : null;
+      if (!response.ok || !name) {
+        incrementMetric("gemini_explicit_cache_create_failures_total");
+        entry.expiresAt = Date.now() + CACHE_FAILURE_BACKOFF_MS;
+        console.warn(
+          `Gemini explicit prompt cache unavailable for ${namespace} (${response.status}`
+          + `${safeProviderMessage(body) ? `: ${safeProviderMessage(body)}` : ""}); using uncached evaluation.`
+        );
+        return null;
+      }
+      incrementMetric("gemini_explicit_cache_create_successes_total");
+      return name;
+    } catch (error) {
+      incrementMetric("gemini_explicit_cache_create_failures_total");
+      entry.expiresAt = Date.now() + CACHE_FAILURE_BACKOFF_MS;
+      console.warn(
+        `Gemini explicit prompt cache unavailable for ${namespace} (${error?.name || "request error"}); using uncached evaluation.`
+      );
+      return null;
+    }
+  })();
+
+  geminiCacheRegistry.set(registryKey, entry);
+  const name = await entry.namePromise;
+  return name ? { name, registryKey } : null;
+}
+
+function invalidateGeminiPromptCache(cacheReference) {
+  if (!cacheReference) return;
+  geminiCacheRegistry.delete(cacheReference.registryKey);
+}
+
+function buildGeminiRequestBody({ systemInstruction, input, jsonSchema, maxOutputTokens, cacheName }) {
+  return {
+    ...(cacheName
+      ? { cachedContent: cacheName }
+      : { systemInstruction: { parts: [{ text: systemInstruction }] } }),
     contents: [{
       role: "user",
       parts: input.map(geminiPart),
@@ -155,6 +259,34 @@ async function requestGeminiStructured({
       mediaResolution: "MEDIA_RESOLUTION_HIGH",
     },
   };
+}
+
+async function requestGeminiStructured({
+  systemInstruction,
+  cacheNamespace,
+  input,
+  jsonSchema,
+  validator,
+  maxOutputTokens,
+}) {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
+
+  const config = runtimeConfig();
+  const endpoint = `${GEMINI_API_ORIGIN}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`;
+  let cacheReference = await ensureGeminiPromptCache({
+    apiKey,
+    config,
+    namespace: cacheNamespace,
+    systemInstruction,
+  });
+  let requestBody = buildGeminiRequestBody({
+    systemInstruction,
+    input,
+    jsonSchema,
+    maxOutputTokens,
+    cacheName: cacheReference?.name,
+  });
 
   for (let attempt = 0; attempt <= config.geminiMaxRetries; attempt += 1) {
     const requestStartedAt = Date.now();
@@ -196,6 +328,24 @@ async function requestGeminiStructured({
 
     if (!response.ok) {
       incrementMetric("gemini_request_failures_total");
+      // An expired, deleted or provider-rejected cache must never strand an
+      // attendance evaluation. Retry this same attempt once with the original
+      // full system instruction, then retain the normal retry policy.
+      if (cacheReference && (response.status === 400 || response.status === 404)) {
+        invalidateGeminiPromptCache(cacheReference);
+        cacheReference = null;
+        requestBody = buildGeminiRequestBody({
+          systemInstruction,
+          input,
+          jsonSchema,
+          maxOutputTokens,
+          cacheName: null,
+        });
+        incrementMetric("gemini_explicit_cache_fallbacks_total");
+        console.warn(`Gemini rejected the cached ${cacheNamespace} prompt; retrying uncached.`);
+        attempt -= 1;
+        continue;
+      }
       const error = geminiHttpError(response.status, body?.error?.message);
       if (!error.retryable || attempt === config.geminiMaxRetries) throw error;
       await delay(retryAfterMilliseconds(response, attempt));
@@ -548,6 +698,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
   if (normalizedGender === "FEMALE") {
     const response = await requestGeminiStructured({
       systemInstruction: buildFemaleSystemPrompt(),
+      cacheNamespace: "female",
       input: content,
       jsonSchema: buildFemaleResponseJsonSchema(),
       validator: buildFemaleResponseSchema(),
@@ -559,6 +710,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
     const maleSections = checkpointSet("MALE", attireType);
     parsed = await requestGeminiStructured({
       systemInstruction: buildSystemPrompt("MALE", attireType),
+      cacheNamespace: `male-${attireType.toLowerCase()}`,
       input: content,
       jsonSchema: buildReportJsonSchema(maleSections),
       validator: buildReportSchema(maleSections),

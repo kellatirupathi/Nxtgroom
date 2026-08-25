@@ -29,6 +29,7 @@ test("production configuration fails closed when secrets are missing", () => {
     "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SES_FROM_EMAIL", "APP_TIME_ZONE",
     "TIMEZONE_OFFSET_MINUTES", "GEMINI_TIMEOUT_MS", "EVALUATION_POLL_MS",
     "EVALUATION_LEASE_MS", "EVALUATION_MAX_ATTEMPTS", "GEMINI_MAX_RETRIES",
+    "GEMINI_EXPLICIT_CACHE", "GEMINI_CACHE_TTL_SECONDS",
     "SES_TIMEOUT_MS", "SES_MAX_ATTEMPTS", "NOTIFICATION_LEASE_MS",
     "NOTIFICATION_MAX_ATTEMPTS",
     "EVALUATION_CONCURRENCY", "CHECKIN_CONCURRENCY_LIMIT", "NOTIFICATION_CONCURRENCY",
@@ -46,6 +47,8 @@ test("production configuration accepts an exact secure contract", () => {
     GEMINI_MODEL: "gemini-2.5-flash-lite",
     GEMINI_TIMEOUT_MS: "120000",
     GEMINI_MAX_RETRIES: "2",
+    GEMINI_EXPLICIT_CACHE: "true",
+    GEMINI_CACHE_TTL_SECONDS: "3600",
     EVALUATION_POLL_MS: "2000",
     EVALUATION_LEASE_MS: "600000",
     EVALUATION_MAX_ATTEMPTS: "3",
@@ -103,6 +106,7 @@ test("production configuration accepts an exact secure contract", () => {
   process.env.ADMIN_PASSWORD = "test-only-password-123";
   for (const name of [
     "DB_NAME", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES",
+    "GEMINI_EXPLICIT_CACHE", "GEMINI_CACHE_TTL_SECONDS",
     "EVALUATION_POLL_MS", "EVALUATION_LEASE_MS", "EVALUATION_MAX_ATTEMPTS",
     "EVALUATION_CONCURRENCY", "CHECKIN_CONCURRENCY_LIMIT", "JWT_EXPIRE_MINUTES",
     "JWT_ISSUER", "JWT_AUDIENCE", "SES_TIMEOUT_MS", "SES_MAX_ATTEMPTS",
@@ -112,7 +116,18 @@ test("production configuration accepts an exact secure contract", () => {
   const compact = validateEnvironment();
   assert.equal(compact.dbName, "grooming_standards");
   assert.equal(compact.geminiModel, "gemini-2.5-flash-lite");
+  assert.equal(compact.geminiExplicitCache, true);
+  assert.equal(compact.geminiCacheTtlSeconds, 3600);
   assert.equal(compact.appTimeZone, "Asia/Kolkata");
+});
+
+test("Gemini explicit cache configuration validates boolean and TTL overrides", () => {
+  process.env.GEMINI_EXPLICIT_CACHE = "false";
+  process.env.GEMINI_CACHE_TTL_SECONDS = "7200";
+  assert.equal(runtimeConfig().geminiExplicitCache, false);
+  assert.equal(runtimeConfig().geminiCacheTtlSeconds, 7200);
+  process.env.GEMINI_EXPLICIT_CACHE = "sometimes";
+  assert.throws(() => runtimeConfig(), /GEMINI_EXPLICIT_CACHE must be true or false/);
 });
 
 test("access tokens carry the configured issuer, audience, and algorithm", () => {

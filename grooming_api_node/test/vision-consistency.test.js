@@ -106,6 +106,8 @@ test("vision evaluation sends only the instructor image and structured output to
     model: process.env.GEMINI_MODEL,
     timeout: process.env.GEMINI_TIMEOUT_MS,
     retries: process.env.GEMINI_MAX_RETRIES,
+    explicitCache: process.env.GEMINI_EXPLICIT_CACHE,
+    cacheTtl: process.env.GEMINI_CACHE_TTL_SECONDS,
   };
   const sections = checkpointSet("MALE", "FORMAL");
   const report = {
@@ -135,7 +137,21 @@ test("vision evaluation sends only the instructor image and structured output to
   process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
   process.env.GEMINI_TIMEOUT_MS = "120000";
   process.env.GEMINI_MAX_RETRIES = "0";
+  process.env.GEMINI_EXPLICIT_CACHE = "true";
+  process.env.GEMINI_CACHE_TTL_SECONDS = "3600";
+  let cacheRequest;
+  let cacheCreateCount = 0;
+  let imageRequestCount = 0;
   globalThis.fetch = async (url, options) => {
+    if (url.endsWith("/v1beta/cachedContents")) {
+      cacheCreateCount += 1;
+      cacheRequest = { url, options, body: JSON.parse(options.body) };
+      return new Response(JSON.stringify({ name: "cachedContents/nxtgroom-male-test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    imageRequestCount += 1;
     captured = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({
       candidates: [{
@@ -154,13 +170,22 @@ test("vision evaluation sends only the instructor image and structured output to
   try {
     const { evaluateImage } = await import("../src/services/visionEngine.js");
     const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "MALE");
+    const secondResult = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "MALE");
     assert.equal(result.overall_status, "COMPLIANT");
+    assert.equal(secondResult.overall_status, "COMPLIANT");
+    assert.equal(cacheCreateCount, 1, "the stable male prompt cache must be created once");
+    assert.equal(imageRequestCount, 2, "each changing image still requires one analysis request");
     assert.equal(
       captured.url,
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
     );
     assert.equal(captured.options.headers["x-goog-api-key"], "test-only-gemini-key");
-    assert.equal(typeof captured.body.systemInstruction.parts[0].text, "string");
+    assert.equal(cacheRequest.body.model, "models/gemini-2.5-flash-lite");
+    assert.equal(cacheRequest.body.ttl, "3600s");
+    assert.equal(typeof cacheRequest.body.systemInstruction.parts[0].text, "string");
+    assert.match(cacheRequest.body.displayName, /^nxtgroom-male-formal-/);
+    assert.equal(captured.body.cachedContent, "cachedContents/nxtgroom-male-test");
+    assert.equal(captured.body.systemInstruction, undefined, "cached requests must not resend the full prompt");
     assert.equal(captured.body.generationConfig.responseMimeType, "application/json");
     assert.equal(captured.body.generationConfig.responseJsonSchema.additionalProperties, false);
     assert.equal(captured.body.generationConfig.maxOutputTokens, 6000);
@@ -182,17 +207,17 @@ test("vision evaluation sends only the instructor image and structured output to
     const metricsAfter = telemetrySnapshot().counters;
     assert.equal(
       metricsAfter.gemini_input_tokens_total - (metricsBefore.gemini_input_tokens_total || 0),
-      5000,
+      10000,
     );
     assert.equal(
       metricsAfter.gemini_cached_input_tokens_total
         - (metricsBefore.gemini_cached_input_tokens_total || 0),
-      4096,
+      8192,
     );
     assert.equal(
       metricsAfter.gemini_prompt_cache_hits_total
         - (metricsBefore.gemini_prompt_cache_hits_total || 0),
-      1,
+      2,
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -201,6 +226,8 @@ test("vision evaluation sends only the instructor image and structured output to
       GEMINI_MODEL: originalGemini.model,
       GEMINI_TIMEOUT_MS: originalGemini.timeout,
       GEMINI_MAX_RETRIES: originalGemini.retries,
+      GEMINI_EXPLICIT_CACHE: originalGemini.explicitCache,
+      GEMINI_CACHE_TTL_SECONDS: originalGemini.cacheTtl,
     })) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -215,6 +242,8 @@ test("female attire classification and its matching report use one image request
     model: process.env.GEMINI_MODEL,
     timeout: process.env.GEMINI_TIMEOUT_MS,
     retries: process.env.GEMINI_MAX_RETRIES,
+    explicitCache: process.env.GEMINI_EXPLICIT_CACHE,
+    cacheTtl: process.env.GEMINI_CACHE_TTL_SECONDS,
   };
   const sections = checkpointSet("FEMALE", "SAREE");
   const report = {
@@ -245,8 +274,20 @@ test("female attire classification and its matching report use one image request
   process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
   process.env.GEMINI_TIMEOUT_MS = "120000";
   process.env.GEMINI_MAX_RETRIES = "0";
+  process.env.GEMINI_EXPLICIT_CACHE = "true";
+  process.env.GEMINI_CACHE_TTL_SECONDS = "3600";
+  let imageRequestCount = 0;
+  let cacheRequest;
   globalThis.fetch = async (url, options) => {
     requestCount += 1;
+    if (url.endsWith("/v1beta/cachedContents")) {
+      cacheRequest = { url, options, body: JSON.parse(options.body) };
+      return new Response(JSON.stringify({ name: "cachedContents/nxtgroom-female-test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    imageRequestCount += 1;
     captured = { url, options, body: JSON.parse(options.body) };
     return new Response(JSON.stringify({
       candidates: [{
@@ -266,7 +307,8 @@ test("female attire classification and its matching report use one image request
     const { evaluateImage } = await import("../src/services/visionEngine.js");
     const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "FEMALE");
 
-    assert.equal(requestCount, 1, "the female image must not be sent to a separate classifier");
+    assert.equal(requestCount, 2, "one cache creation and one image analysis request are expected");
+    assert.equal(imageRequestCount, 1, "the female image must not be sent to a separate classifier");
     assert.equal(result.overall_status, "COMPLIANT");
     assert.equal(result.attire_type, "SAREE");
     assert.deepEqual(
@@ -276,6 +318,13 @@ test("female attire classification and its matching report use one image request
     );
     assert.equal(captured.body.generationConfig.responseJsonSchema.type, "object");
     assert.equal(captured.body.generationConfig.responseJsonSchema.properties.evaluation.anyOf.length, 4);
+    assert.match(cacheRequest.body.displayName, /^nxtgroom-female-/);
+    assert.notEqual(
+      captured.body.cachedContent,
+      "cachedContents/nxtgroom-male-test",
+      "female analysis must never use the male prompt cache",
+    );
+    assert.equal(captured.body.cachedContent, "cachedContents/nxtgroom-female-test");
     const images = captured.body.contents[0].parts.filter((part) => part.inlineData);
     assert.equal(images.length, 1);
     assert.equal(images[0].inlineData.data, "/9j/4A==");
@@ -286,6 +335,100 @@ test("female attire classification and its matching report use one image request
       GEMINI_MODEL: originalGemini.model,
       GEMINI_TIMEOUT_MS: originalGemini.timeout,
       GEMINI_MAX_RETRIES: originalGemini.retries,
+      GEMINI_EXPLICIT_CACHE: originalGemini.explicitCache,
+      GEMINI_CACHE_TTL_SECONDS: originalGemini.cacheTtl,
+    })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("a rejected explicit cache retries the image safely with the full prompt", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalGemini = {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL,
+    timeout: process.env.GEMINI_TIMEOUT_MS,
+    retries: process.env.GEMINI_MAX_RETRIES,
+    explicitCache: process.env.GEMINI_EXPLICIT_CACHE,
+    cacheTtl: process.env.GEMINI_CACHE_TTL_SECONDS,
+  };
+  const sections = checkpointSet("MALE", "FORMAL");
+  const report = {
+    subject_visible: true,
+    image_quality: "ADEQUATE",
+    ai_summary: "All visible requirements pass.",
+    visible_regions: {
+      face: "VISIBLE",
+      upper_body: "VISIBLE",
+      lower_body: "VISIBLE",
+      footwear: "VISIBLE",
+      id_card: "VISIBLE",
+      hands: "VISIBLE",
+    },
+  };
+  for (const key of SECTION_KEYS) {
+    report[key] = Object.fromEntries(sections[key].map((item) => [item.code, {
+      status: "PASS",
+      observation: "Visible and acceptable.",
+      reason: "Meets the checkpoint.",
+    }]));
+  }
+
+  process.env.GEMINI_API_KEY = "test-only-expired-cache-key";
+  process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
+  process.env.GEMINI_TIMEOUT_MS = "120000";
+  process.env.GEMINI_MAX_RETRIES = "0";
+  process.env.GEMINI_EXPLICIT_CACHE = "true";
+  process.env.GEMINI_CACHE_TTL_SECONDS = "3600";
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    const body = JSON.parse(options.body);
+    requests.push({ url, body });
+    if (url.endsWith("/v1beta/cachedContents")) {
+      return new Response(JSON.stringify({ name: "cachedContents/expired-test" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (body.cachedContent) {
+      return new Response(JSON.stringify({ error: { message: "Cached content was not found" } }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({
+      candidates: [{
+        content: { role: "model", parts: [{ text: JSON.stringify(report) }] },
+        finishReason: "STOP",
+      }],
+      usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 500 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const { evaluateImage } = await import("../src/services/visionEngine.js");
+    const result = await evaluateImage(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), "image/jpeg", "MALE");
+    assert.equal(result.overall_status, "COMPLIANT");
+    assert.equal(requests.length, 3, "create, cached analysis and uncached fallback are expected");
+    assert.equal(requests[1].body.cachedContent, "cachedContents/expired-test");
+    assert.equal(requests[2].body.cachedContent, undefined);
+    assert.equal(typeof requests[2].body.systemInstruction.parts[0].text, "string");
+    assert.equal(
+      requests[2].body.contents[0].parts.filter((part) => part.inlineData).length,
+      1,
+      "fallback must still submit exactly one instructor image",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of Object.entries({
+      GEMINI_API_KEY: originalGemini.apiKey,
+      GEMINI_MODEL: originalGemini.model,
+      GEMINI_TIMEOUT_MS: originalGemini.timeout,
+      GEMINI_MAX_RETRIES: originalGemini.retries,
+      GEMINI_EXPLICIT_CACHE: originalGemini.explicitCache,
+      GEMINI_CACHE_TTL_SECONDS: originalGemini.cacheTtl,
     })) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;

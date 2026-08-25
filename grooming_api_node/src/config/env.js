@@ -15,6 +15,15 @@ function parseInteger(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER }
   return value;
 }
 
+function parseBoolean(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || String(raw).trim() === "") return fallback;
+  const normalized = String(raw).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  throw new Error(`${name} must be true or false`);
+}
+
 export function isProduction() {
   return process.env.NODE_ENV === "production";
 }
@@ -81,6 +90,11 @@ export function runtimeConfig() {
     geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
     geminiTimeoutMs: parseInteger("GEMINI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
     geminiMaxRetries: parseInteger("GEMINI_MAX_RETRIES", 2, { min: 0, max: 2 }),
+    // Explicit context caching is enabled by default. Unsupported models,
+    // undersized prompts and transient cache failures fall back to the normal
+    // request path inside visionEngine, so this never blocks an evaluation.
+    geminiExplicitCache: parseBoolean("GEMINI_EXPLICIT_CACHE", true),
+    geminiCacheTtlSeconds: parseInteger("GEMINI_CACHE_TTL_SECONDS", 3600, { min: 600, max: 86400 }),
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
     evaluationLeaseMs: parseInteger("EVALUATION_LEASE_MS", 600000, { min: 60000, max: 3600000 }),
     evaluationMaxAttempts: parseInteger("EVALUATION_MAX_ATTEMPTS", 3, { min: 1, max: 10 }),
