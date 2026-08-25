@@ -1,6 +1,19 @@
 const DEV_JWT_SECRET = "development-only-secret-change-before-production";
 const EXAMPLE_JWT_SECRET = "replace-with-at-least-32-random-characters";
 const EXAMPLE_ADMIN_PASSWORD = "replace-with-a-unique-password-of-at-least-12-characters";
+const PINNED_GEMINI_MODEL = "gemini-3.5-flash-lite";
+const LEGACY_GEMINI_MODELS = new Set(["gemini-2.5-flash-lite"]);
+
+function geminiModel() {
+  const configured = (process.env.GEMINI_MODEL || "").trim();
+  // Gemini 2.5 Flash-Lite is no longer available to new users. Transparently
+  // migrate the previously documented value so an old deployment variable
+  // cannot keep production stuck on the retired model.
+  if (!configured || LEGACY_GEMINI_MODELS.has(configured)) {
+    return PINNED_GEMINI_MODEL;
+  }
+  return configured;
+}
 
 function parseInteger(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
   const raw = process.env[name];
@@ -78,7 +91,7 @@ export function runtimeConfig() {
     // exists in the database; anything else leaves the stored one alone.
     adminPasswordReset: process.env.ADMIN_PASSWORD_RESET === "true",
     origins: corsOrigins(),
-    geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+    geminiModel: geminiModel(),
     geminiTimeoutMs: parseInteger("GEMINI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
     geminiMaxRetries: parseInteger("GEMINI_MAX_RETRIES", 2, { min: 0, max: 2 }),
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
@@ -207,8 +220,8 @@ export function validateEnvironment() {
       errors.push("MONGODB_URI is invalid");
     }
   }
-  if (config.geminiModel !== "gemini-2.5-flash-lite") {
-    errors.push("GEMINI_MODEL must use the pinned Gemini model gemini-2.5-flash-lite");
+  if (config.geminiModel !== PINNED_GEMINI_MODEL) {
+    errors.push(`GEMINI_MODEL must use the pinned Gemini model ${PINNED_GEMINI_MODEL}`);
   }
   const minimumEvaluationLease = config.geminiTimeoutMs * (config.geminiMaxRetries + 1) + 60000;
   if (config.evaluationLeaseMs < minimumEvaluationLease) {

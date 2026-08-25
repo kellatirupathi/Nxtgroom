@@ -105,8 +105,8 @@ function recordGeminiUsage(responseBody) {
   if (Number.isFinite(cachedTokens) && cachedTokens > 0) {
     incrementMetric("gemini_cached_input_tokens_total", cachedTokens);
   }
-  // Gemini 2.5 enables implicit exact-prefix caching automatically. The stable
-  // system instruction and schema remain before the changing image content.
+  // Keep the stable system instruction and schema before the changing image
+  // content so Gemini can reuse an eligible exact-prefix cache.
   incrementMetric("gemini_prompt_cache_requests_total");
   incrementMetric(cachedTokens > 0
     ? "gemini_prompt_cache_hits_total"
