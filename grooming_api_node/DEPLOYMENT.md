@@ -154,7 +154,7 @@ the administrative attendance record remains the source of truth.
 ### Gemini
 
 Create a Gemini API key with an appropriate spend limit. The configured model
-is pinned to `gemini-3.5-flash-lite`. Validate that the model is available to
+is pinned to `gemini-2.5-flash-lite`. Validate that the model is available to
 the Google AI project before launch.
 
 ## 3. Deploy the API on Northflank
@@ -221,7 +221,7 @@ with an insecure fallback.
 | `APP_URL` | Required | Canonical public Vercel HTTPS origin used in emailed links; must appear in `CORS_ORIGINS` |
 | `CRON_SECRET` | Required, secret | Random secret sent only in the scheduler request header |
 | `GEMINI_API_KEY` | Required, secret | Gemini API key |
-| `GEMINI_MODEL` | Optional | Defaults to pinned `gemini-3.5-flash-lite` |
+| `GEMINI_MODEL` | Optional | Defaults to pinned `gemini-2.5-flash-lite` |
 | `GEMINI_TIMEOUT_MS` | Optional | Defaults to `120000`; permitted range is 10000–600000 |
 | `GEMINI_MAX_RETRIES` | Optional | Defaults to `2`; permitted range is 0–2 |
 | `EVALUATION_POLL_MS` | Optional | Defaults to `2000`; permitted range is 250–60000 |

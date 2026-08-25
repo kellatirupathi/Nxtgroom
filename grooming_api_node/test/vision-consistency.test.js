@@ -99,7 +99,7 @@ test("partial visibility is judged on what was actually assessed", () => {
   assert.equal(reconcile(report).overall_status, "COMPLIANT");
 });
 
-test("vision evaluation sends only the instructor image and structured output to Gemini 3.5 Flash-Lite", async () => {
+test("vision evaluation sends only the instructor image and structured output to Gemini 2.5 Flash-Lite", async () => {
   const originalFetch = globalThis.fetch;
   const originalGemini = {
     apiKey: process.env.GEMINI_API_KEY,
@@ -132,7 +132,7 @@ test("vision evaluation sends only the instructor image and structured output to
   let captured;
   const metricsBefore = telemetrySnapshot().counters;
   process.env.GEMINI_API_KEY = "test-only-gemini-key";
-  process.env.GEMINI_MODEL = "gemini-3.5-flash-lite";
+  process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
   process.env.GEMINI_TIMEOUT_MS = "120000";
   process.env.GEMINI_MAX_RETRIES = "0";
   globalThis.fetch = async (url, options) => {
@@ -157,7 +157,7 @@ test("vision evaluation sends only the instructor image and structured output to
     assert.equal(result.overall_status, "COMPLIANT");
     assert.equal(
       captured.url,
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent",
     );
     assert.equal(captured.options.headers["x-goog-api-key"], "test-only-gemini-key");
     assert.equal(typeof captured.body.systemInstruction.parts[0].text, "string");
@@ -242,7 +242,7 @@ test("female attire classification and its matching report use one image request
   let requestCount = 0;
   let captured;
   process.env.GEMINI_API_KEY = "test-only-gemini-key";
-  process.env.GEMINI_MODEL = "gemini-3.5-flash-lite";
+  process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
   process.env.GEMINI_TIMEOUT_MS = "120000";
   process.env.GEMINI_MAX_RETRIES = "0";
   globalThis.fetch = async (url, options) => {

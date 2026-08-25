@@ -43,7 +43,7 @@ test("production configuration accepts an exact secure contract", () => {
     MONGODB_URI: "mongodb+srv://db.example.invalid/grooming_standards",
     DB_NAME: "grooming_standards",
     GEMINI_API_KEY: "test-only-gemini-key",
-    GEMINI_MODEL: "gemini-3.5-flash-lite",
+    GEMINI_MODEL: "gemini-2.5-flash-lite",
     GEMINI_TIMEOUT_MS: "120000",
     GEMINI_MAX_RETRIES: "2",
     EVALUATION_POLL_MS: "2000",
@@ -111,13 +111,8 @@ test("production configuration accepts an exact secure contract", () => {
   ]) delete process.env[name];
   const compact = validateEnvironment();
   assert.equal(compact.dbName, "grooming_standards");
-  assert.equal(compact.geminiModel, "gemini-3.5-flash-lite");
+  assert.equal(compact.geminiModel, "gemini-2.5-flash-lite");
   assert.equal(compact.appTimeZone, "Asia/Kolkata");
-});
-
-test("legacy Gemini model configuration upgrades to the current pinned model", () => {
-  process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
-  assert.equal(runtimeConfig().geminiModel, "gemini-3.5-flash-lite");
 });
 
 test("access tokens carry the configured issuer, audience, and algorithm", () => {
@@ -287,7 +282,7 @@ test("emailed links cannot be built from a localhost origin in production", () =
       ADMIN_PASSWORD_VERSION: "2", AWS_REGION: "ap-south-1",
       AWS_ACCESS_KEY_ID: "p", AWS_SECRET_ACCESS_KEY: "p", SES_FROM_EMAIL: "n@e.com",
       APP_TIME_ZONE: "Asia/Kolkata", TIMEZONE_OFFSET_MINUTES: "330",
-      GEMINI_API_KEY: "p", GEMINI_MODEL: "gemini-3.5-flash-lite",
+      GEMINI_API_KEY: "p", GEMINI_MODEL: "gemini-2.5-flash-lite",
       GEMINI_TIMEOUT_MS: "120000", GEMINI_MAX_RETRIES: "2",
       EVALUATION_POLL_MS: "2000", EVALUATION_LEASE_MS: "600000", EVALUATION_MAX_ATTEMPTS: "3",
       EVALUATION_CONCURRENCY: "2", CHECKIN_CONCURRENCY_LIMIT: "5",
