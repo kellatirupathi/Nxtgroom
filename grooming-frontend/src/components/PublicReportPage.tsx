@@ -196,8 +196,8 @@ export default function PublicReportPage({ token, kind, date, half = 'checkin' }
               <button
                 type="button"
                 onClick={() => setPhotoDate(date)}
-                aria-label="View the check-in photo"
-                title="View the check-in photo"
+                aria-label={half === 'checkout' ? 'View the check-out photo' : 'View the check-in photo'}
+                title={half === 'checkout' ? 'View the check-out photo' : 'View the check-in photo'}
                 className="shrink-0 rounded-md border border-indigo-100 bg-indigo-50 p-2 text-indigo-700 transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               >
                 <ImageIcon size={18} aria-hidden="true" />
