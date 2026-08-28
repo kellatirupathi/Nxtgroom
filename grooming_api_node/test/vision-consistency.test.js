@@ -188,9 +188,11 @@ test("vision evaluation sends only the instructor image and structured output to
     assert.equal(captured.body.systemInstruction, undefined, "cached requests must not resend the full prompt");
     assert.equal(captured.body.generationConfig.responseMimeType, "application/json");
     assert.equal(captured.body.generationConfig.responseJsonSchema.additionalProperties, false);
-    assert.equal(captured.body.generationConfig.maxOutputTokens, 6000);
+    assert.ok(captured.body.generationConfig.maxOutputTokens > 6000);
     assert.equal(captured.body.generationConfig.temperature, 0);
-    assert.equal(captured.body.generationConfig.thinkingConfig.thinkingBudget, 0);
+    // Vision checkpoints need room to inspect each body area before answering;
+    // a zero budget produced verdicts that contradicted the photograph.
+    assert.ok(captured.body.generationConfig.thinkingConfig.thinkingBudget >= 1024);
     assert.equal(captured.body.generationConfig.mediaResolution, "MEDIA_RESOLUTION_HIGH");
     assert.equal(captured.body.contents.length, 1);
     assert.equal(captured.body.contents[0].role, "user");

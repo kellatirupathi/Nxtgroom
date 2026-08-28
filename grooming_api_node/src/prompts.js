@@ -96,6 +96,21 @@ only to Shirt Collar / Tuck. A shirt must never fail Shirt Fit because it is or
 appears untucked. Natural folds or slight billowing above a visible waistband
 are not evidence that a shirt is untucked.
 
+The rules above push back on N/A that is claimed too readily. They never
+license the opposite error. A PASS is a positive claim that you looked at the
+body area and it complied, so it needs the same visible evidence a FAIL does.
+When a body area is outside the frame, return N/A for its checkpoints: do not
+infer trousers, a belt, footwear or a tuck from a head-and-shoulders photograph,
+and do not infer them from the part of the person you can see. Never describe a
+garment, its fit or its condition as observed when that garment is not in the
+frame.
+
+Judge each checkpoint against the photograph in front of you, not against a
+typical instructor or the rest of the report. Grooming checkpoints are decided
+strictly from the face as photographed: if a beard is present, Facial Hair is
+assessed on that beard's actual evenness and neatness, and hair falling across
+the forehead or eyes fails Hair Position however tidy the rest of the hair is.
+
 For every FAIL, observation and reason must identify the concrete visible
 violation. Never manufacture a hem, facial-hair problem, accessory or other
 detail that the image does not show, and never contradict visible evidence.

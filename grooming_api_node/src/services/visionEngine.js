@@ -8,6 +8,9 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 
 const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
+// Enough room to inspect each body area before committing to a verdict,
+// without paying for open-ended reasoning on a bounded checklist.
+const DEFAULT_THINKING_BUDGET = 2048;
 const CACHE_RENEWAL_SAFETY_SECONDS = 300;
 const CACHE_FAILURE_BACKOFF_MS = 60_000;
 
@@ -255,7 +258,14 @@ function buildGeminiRequestBody({ systemInstruction, input, jsonSchema, maxOutpu
       responseJsonSchema: jsonSchema,
       maxOutputTokens,
       temperature: 0,
-      thinkingConfig: { thinkingBudget: 0 },
+      // A grooming report is ~20 independent visual judgements over one
+      // photograph, each needing the model to look at a specific body area
+      // before committing to PASS/FAIL/N/A. With no thinking budget the model
+      // answered the whole schema in one pass and produced confident text that
+      // contradicted the image: a visible beard scored PASS, hair across the
+      // forehead scored PASS, and lower-body checkpoints were asserted from a
+      // face-only photograph. Give it room to inspect before it answers.
+      thinkingConfig: { thinkingBudget: DEFAULT_THINKING_BUDGET },
       mediaResolution: "MEDIA_RESOLUTION_HIGH",
     },
   };
@@ -702,7 +712,10 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
       input: content,
       jsonSchema: buildFemaleResponseJsonSchema(),
       validator: buildFemaleResponseSchema(),
-      maxOutputTokens: 6000,
+      // Covers the JSON report plus the thinking budget, which Gemini counts
+      // against the same ceiling: at 6000 a full checkpoint set could stop on
+      // MAX_TOKENS once thinking was enabled.
+      maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
     });
     parsed = response.evaluation;
     attireType = parsed.attire_type;
@@ -714,7 +727,10 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
       input: content,
       jsonSchema: buildReportJsonSchema(maleSections),
       validator: buildReportSchema(maleSections),
-      maxOutputTokens: 6000,
+      // Covers the JSON report plus the thinking budget, which Gemini counts
+      // against the same ceiling: at 6000 a full checkpoint set could stop on
+      // MAX_TOKENS once thinking was enabled.
+      maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
     });
   }
   const sections = checkpointSet(normalizedGender, attireType);
