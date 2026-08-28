@@ -393,3 +393,27 @@ test("a verdict is never recorded from the other half's evaluation", async () =>
   // And re-analysing one half must not delete the other's report.
   assert.deepEqual(evaluationFilter("a1", "checkout"), { attendance_id: "a1", kind: "checkout" });
 });
+
+test("grooming standards demand evidence of grooming, not just a tidy impression", async () => {
+  const { checkpointSet } = await import("../src/checkpoints.js");
+  const grooming = checkpointSet("MALE", "FORMAL").grooming_check;
+  const rule = (code) => grooming.find((item) => item.code === code).rule;
+
+  // A real check-out report passed a visibly untrimmed beard and a moustache
+  // grown over the lip line. Both rules read as permissive defaults with a
+  // narrow FAIL trigger, so the model had no reason to look at the edges that
+  // actually distinguish a groomed beard from an untended one.
+  const facialHair = rule("M_FACIAL_HAIR");
+  assert.match(facialHair, /positive evidence of grooming/);
+  assert.match(facialHair, /cheek line/);
+  assert.match(facialHair, /the correct answer is FAIL, not PASS/);
+  // Length is not the standard: a long shaped beard passes, a short ragged
+  // one does not, so neither may be inferred from size alone.
+  assert.match(facialHair, /Length alone does not pass or fail/);
+
+  const moustache = rule("M_MOUSTACHE");
+  assert.match(moustache, /trimmed clear of the lip line/);
+  assert.match(moustache, /obscured by hair, that is a FAIL/);
+  // "FAIL only ..." invited a pass whenever the defect was not extreme.
+  assert.doesNotMatch(moustache, /FAIL only/);
+});

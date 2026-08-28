@@ -68,6 +68,17 @@ observation if worth mentioning. Reserve FAIL for issues that are clearly
 visible and materially breach the standard, such as jeans instead of formal
 trousers, no ID card at all, or sneakers.
 
+Leniency is about the size of a defect, never about how hard the judgement is.
+It does not lower any written standard, and it is not a reason to pass an
+item you are unsure about. Grooming standards in particular are breached by
+degree rather than by an obvious substitution: an untrimmed beard or a
+moustache over the lip line is a material breach of its standard in exactly
+the way jeans are of the trousers standard, even though it is a subtler thing
+to see. Where a checkpoint states what its PASS requires, that wording
+governs and this section does not soften it. Apply the same standard to every
+instructor: a verdict must rest on what this photograph shows, never on an
+assumption that the person is probably well presented.
+
 Judging a checkpoint on how well the photograph shows it, rather than on what
 the instructor is wearing, is the most common way this goes wrong. Poor
 framing, distance, blur and low light are properties of the picture. They lead

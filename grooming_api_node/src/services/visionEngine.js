@@ -9,8 +9,11 @@ import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints
 const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
 // Enough room to inspect each body area before committing to a verdict,
-// without paying for open-ended reasoning on a bounded checklist.
-const DEFAULT_THINKING_BUDGET = 2048;
+// without paying for open-ended reasoning on a bounded checklist. Grooming
+// needs the most of it: a beard's cheek line and a moustache's lip edge are
+// fine local detail, and at a smaller budget both were passed on a general
+// impression of the face rather than on those edges.
+const DEFAULT_THINKING_BUDGET = 4096;
 const CACHE_RENEWAL_SAFETY_SECONDS = 300;
 const CACHE_FAILURE_BACKOFF_MS = 60_000;
 
