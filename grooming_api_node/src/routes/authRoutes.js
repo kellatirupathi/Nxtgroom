@@ -11,6 +11,7 @@ import {
 } from "../middleware/auth.js";
 import { asyncRoute } from "../utils.js";
 import { canDeleteAttendance, canDeleteCheckout, getAccessSettings } from "../services/accessSettings.js";
+import { getNotificationSettings } from "../services/notificationSettings.js";
 import {
   googleClientId,
   isGoogleLoginEnabled,
@@ -94,10 +95,14 @@ authRouter.post("/logout", (_req, res) => {
 
 authRouter.get("/me", getCurrentUser, asyncRoute(async (req, res) => {
   const settings = await getAccessSettings(req.app.locals.db);
+  // Read here rather than from the settings endpoint, which is super-admin
+  // only: a BOA opens the same record view and must see the same control.
+  const notifications = await getNotificationSettings(req.app.locals.db);
   res.json({
     email: req.currentUser.email,
     role: req.currentUser.role,
     college_id: req.currentUser.collegeId,
+    reanalyse_enabled: notifications.reanalyse_enabled,
     // Sent so the interface can hide an action the server would refuse. The
     // server still checks on every delete; this only keeps the UI honest.
     can_delete_records: canDeleteAttendance(req.currentUser, settings),

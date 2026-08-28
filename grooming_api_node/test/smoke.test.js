@@ -108,6 +108,10 @@ test("login preserves the frontend authentication contract", async () => {
     // admin always may; a BOA depends on the workspace and per-user settings.
     can_delete_records: true,
     can_delete_checkout: true,
+    // Workspace-wide, and off unless an administrator turns it on, so the
+    // record view knows whether to offer re-analysis without needing the
+    // super-admin-only settings endpoint.
+    reanalyse_enabled: false,
   });
 });
 

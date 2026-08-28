@@ -57,3 +57,19 @@ test("validation rejects unknown keys and non-boolean values", () => {
   assert.equal(ok.valid, true);
   assert.deepEqual(ok.value, { ...DEFAULT_NOTIFICATION_SETTINGS, checkin_email_enabled: false });
 });
+
+test("re-analysis is off until a workspace turns it on", () => {
+  // Re-running spends a vision call and replaces a report the instructor may
+  // already have been emailed, so an empty database must not offer it.
+  assert.equal(DEFAULT_NOTIFICATION_SETTINGS.reanalyse_enabled, false);
+  assert.equal(normalizeNotificationSettings({}).reanalyse_enabled, false);
+  assert.equal(normalizeNotificationSettings({ reanalyse_enabled: true }).reanalyse_enabled, true);
+
+  const enabled = validateNotificationSettings({ reanalyse_enabled: true });
+  assert.equal(enabled.valid, true);
+  assert.equal(enabled.value.reanalyse_enabled, true);
+  // The other preferences keep their defaults rather than being cleared.
+  assert.equal(enabled.value.checkin_email_enabled, true);
+
+  assert.equal(validateNotificationSettings({ reanalyse_enabled: "yes" }).valid, false);
+});

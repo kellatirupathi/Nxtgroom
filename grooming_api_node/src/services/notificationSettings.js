@@ -15,6 +15,10 @@ export const DEFAULT_NOTIFICATION_SETTINGS = Object.freeze({
   checkout_email_enabled: true,
   weekly_email_enabled: false,
   only_when_non_compliant: false,
+  // Re-running an evaluation costs a vision call and overwrites the report an
+  // instructor may already have been emailed, so the control stays hidden
+  // until a workspace deliberately turns it on.
+  reanalyse_enabled: false,
 });
 
 const BOOLEAN_KEYS = Object.keys(DEFAULT_NOTIFICATION_SETTINGS);

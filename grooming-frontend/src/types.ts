@@ -175,6 +175,8 @@ export interface CurrentUser {
   can_delete_records?: boolean;
   /** Whether it may remove a check-out on its own, leaving the check-in. */
   can_delete_checkout?: boolean;
+  /** Workspace-wide: whether the Re-analyse control is shown on a report. */
+  reanalyse_enabled?: boolean;
 }
 
 /** One account's capabilities, and where each answer comes from. */
@@ -198,6 +200,8 @@ export interface NotificationSettings {
   checkout_email_enabled: boolean;
   weekly_email_enabled: boolean;
   only_when_non_compliant: boolean;
+  /** Whether the Re-analyse control is offered on a record's report. */
+  reanalyse_enabled: boolean;
 }
 
 /** Options accepted by the shared fetch helpers. */

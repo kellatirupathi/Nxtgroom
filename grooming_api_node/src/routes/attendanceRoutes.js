@@ -7,6 +7,7 @@ import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluateCheckoutNow, evaluationFilter } from "../services/evaluationWorker.js";
+import { getNotificationSettings } from "../services/notificationSettings.js";
 import { localDateKey } from "../services/instructorReports.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
 import { buildPhotoKey, deletePhoto, getPhotoUrl, uploadPhoto } from "../services/photoStorage.js";
@@ -1128,6 +1129,15 @@ attendanceRouter.post(
   requireSuperAdmin,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
+    // Enforced here, not only by hiding the button: re-analysis spends a
+    // vision call and replaces a report the instructor may already have been
+    // emailed, so a workspace that has not enabled it must be refused.
+    const { reanalyse_enabled: reanalyseEnabled } = await getNotificationSettings(db);
+    if (!reanalyseEnabled) {
+      return res.status(403).json({
+        detail: "Re-analysis is turned off for this workspace. An administrator can enable it in Settings.",
+      });
+    }
     const attendance = await db.collection("attendance").findOne({
       _id: idMatch(req.params.attendanceId),
       ...attendanceScope(req.currentUser),

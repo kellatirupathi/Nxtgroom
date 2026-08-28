@@ -37,6 +37,11 @@ const TOGGLES: { key: keyof NotificationSettings; label: string; description: st
     label: 'Only email when NON-COMPLIANT',
     description: 'Suppress emails for compliant results so instructors only hear about issues.',
   },
+  {
+    key: 'reanalyse_enabled',
+    label: 'Allow re-analysing a report',
+    description: 'Show a Re-analyse control on each check-in and check-out report. Re-running costs a vision call and replaces the existing report, so this is off by default.',
+  },
 ];
 
 const DEFAULTS: NotificationSettings = {
@@ -44,6 +49,7 @@ const DEFAULTS: NotificationSettings = {
   checkout_email_enabled: true,
   weekly_email_enabled: false,
   only_when_non_compliant: false,
+  reanalyse_enabled: false,
 };
 
 export function Toggle({ id, checked, disabled, onChange }: ToggleProps) {

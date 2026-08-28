@@ -45,6 +45,7 @@ interface SessionState {
   validated: boolean;
   /** Decided by the server; the UI only uses it to hide what it would refuse. */
   canDeleteRecords?: boolean;
+  canReanalyse?: boolean;
   canDeleteCheckout?: boolean;
 }
 
@@ -133,7 +134,7 @@ export default function App() {
           throw new Error('The server returned an invalid user role.');
         }
         saveSession(session.token as string, currentUser.role);
-        setSession({ token: session.token, role: currentUser.role, email: currentUser.email || null, collegeId: currentUser.college_id || null, validated: true, canDeleteRecords: Boolean(currentUser.can_delete_records), canDeleteCheckout: Boolean(currentUser.can_delete_checkout) });
+        setSession({ token: session.token, role: currentUser.role, email: currentUser.email || null, collegeId: currentUser.college_id || null, validated: true, canDeleteRecords: Boolean(currentUser.can_delete_records), canDeleteCheckout: Boolean(currentUser.can_delete_checkout), canReanalyse: Boolean(currentUser.reanalyse_enabled) });
       } catch (error) {
         if (!controller.signal.aborted && (error as { status?: number })?.status !== 401) setSessionCheckError(error instanceof Error ? error.message : String(error));
       }
@@ -372,6 +373,7 @@ export default function App() {
                 record={selectedAttendanceRecord}
                 canDelete={session.canDeleteRecords}
                 canDeleteCheckout={session.canDeleteCheckout}
+                canReanalyse={session.canReanalyse}
                 onDeleted={() => setSelectedAttendanceRecord(null)}
                 onBack={() => navigate('daily-records')}
               />

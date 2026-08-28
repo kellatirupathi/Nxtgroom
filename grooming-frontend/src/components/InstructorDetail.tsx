@@ -79,6 +79,8 @@ interface InstructorDetailProps {
   canDelete?: boolean;
   /** Removing a check-out alone is a lesser permission, granted separately. */
   canDeleteCheckout?: boolean;
+  /** Workspace-wide switch for offering re-analysis on a report. */
+  canReanalyse?: boolean;
   /** Called after the record is gone, so the list behind can drop it. */
   onDeleted?: (attendanceId: string) => void;
 }
@@ -98,7 +100,7 @@ function StatusBadge({ status }: { status?: string }) {
   }
 }
 
-export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, onDeleted }: InstructorDetailProps) {
+export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, canReanalyse = false, onDeleted }: InstructorDetailProps) {
   const [freshRecord, setFreshRecord] = useState<AttendanceRecord | null>(record);
   const [reportStates, setReportStates] = useState<ReportPanelStates>({});
   const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
@@ -141,7 +143,10 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
       || queueStatus === 'processing');
   const shouldPoll = queuedHalf === tab || reportState?.settled === false;
   // Only worth offering when the photograph it would read is still there.
-  const canReanalyse = Boolean(tab === 'checkout' ? displayRecord?.check_out_photo_key : displayRecord?.check_in_photo_key);
+  const halfHasPhoto = Boolean(tab === 'checkout' ? displayRecord?.check_out_photo_key : displayRecord?.check_in_photo_key);
+  // Two independent conditions: the workspace has to allow re-analysis at all,
+  // and this half must still have the photograph it would read.
+  const reanalyseOffered = canReanalyse && halfHasPhoto;
 
   const handleReanalyse = async () => {
     if (!record) return;
@@ -526,7 +531,24 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           </div>
 
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 shrink-0">
-            <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">AI Remarks Summary</h4>
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 mb-4">
+              <h4 className="text-sm font-bold text-slate-800">AI Remarks Summary</h4>
+              {/* Plain text and icon rather than a filled button: this sits
+                  beside a heading and re-reads the half currently on screen,
+                  so it should not compete with the report itself. */}
+              {reanalyseOffered && (
+                <button
+                  type="button"
+                  onClick={() => void handleReanalyse()}
+                  disabled={reanalysing}
+                  aria-label={`Re-analyse the ${tab === 'checkout' ? 'check-out' : 'check-in'} photo`}
+                  className="inline-flex shrink-0 items-center gap-1.5 text-xs font-bold text-indigo-600 transition-colors hover:text-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCw size={13} className={reanalysing ? 'animate-spin' : ''} aria-hidden="true" />
+                  {reanalysing ? (tab === 'checkout' ? 'Analysing…' : 'Queueing…') : 'Re-analyse'}
+                </button>
+              )}
+            </div>
             <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">
               {aiRemarksForHalf(tab, displayRecord, evaluation) || 'No remarks available.'}
             </p>
@@ -573,7 +595,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                   {/* The photograph is still in storage, so the analysis can
                       simply be run again. Without this a record left without a
                       report could only be fixed by checking in afresh. */}
-                  {canReanalyse && (
+                  {reanalyseOffered && (
                     <button
                       type="button"
                       onClick={() => void handleReanalyse()}
