@@ -1,3 +1,8 @@
+// The server destroys a socket that outlives this, so anything running inside
+// a request must finish first. Exported so server.js and the check below can
+// never drift apart.
+export const HTTP_REQUEST_TIMEOUT_MS = 60000;
+
 const DEV_JWT_SECRET = "development-only-secret-change-before-production";
 const EXAMPLE_JWT_SECRET = "replace-with-at-least-32-random-characters";
 const EXAMPLE_ADMIN_PASSWORD = "replace-with-a-unique-password-of-at-least-12-characters";
@@ -90,6 +95,10 @@ export function runtimeConfig() {
     geminiModel: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
     geminiTimeoutMs: parseInteger("GEMINI_TIMEOUT_MS", 120000, { min: 10000, max: 600000 }),
     geminiMaxRetries: parseInteger("GEMINI_MAX_RETRIES", 2, { min: 0, max: 2 }),
+    // Check-out analysis runs inside the HTTP request, so its worst case must
+    // fit within the server's requestTimeout rather than the worker's budget.
+    geminiInteractiveTimeoutMs: parseInteger("GEMINI_INTERACTIVE_TIMEOUT_MS", 20000, { min: 5000, max: 120000 }),
+    geminiInteractiveMaxRetries: parseInteger("GEMINI_INTERACTIVE_MAX_RETRIES", 1, { min: 0, max: 2 }),
     // Explicit context caching is enabled by default. Unsupported models,
     // undersized prompts and transient cache failures fall back to the normal
     // request path inside visionEngine, so this never blocks an evaluation.
@@ -223,6 +232,17 @@ export function validateEnvironment() {
   }
   if (config.geminiModel !== "gemini-2.5-flash-lite") {
     errors.push("GEMINI_MODEL must use the pinned Gemini model gemini-2.5-flash-lite");
+  }
+  // Check-out analysis holds the HTTP connection open, so its worst case has
+  // to complete before the server destroys the socket. Without this the
+  // instructor sees a failure while the evaluation continues server-side and
+  // still emails them a report.
+  const interactiveWorstCase = config.geminiInteractiveTimeoutMs
+    * (config.geminiInteractiveMaxRetries + 1);
+  if (interactiveWorstCase >= HTTP_REQUEST_TIMEOUT_MS - 5000) {
+    errors.push(
+      `GEMINI_INTERACTIVE_TIMEOUT_MS times attempts must leave headroom inside the ${HTTP_REQUEST_TIMEOUT_MS}ms request timeout`
+    );
   }
   const minimumEvaluationLease = config.geminiTimeoutMs * (config.geminiMaxRetries + 1) + 60000;
   if (config.evaluationLeaseMs < minimumEvaluationLease) {

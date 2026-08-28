@@ -545,10 +545,19 @@ export async function evaluateCheckoutNow(db, {
   const source = imageBuffer
     ? { buffer: asBuffer(imageBuffer), mimeType }
     : await downloadPhoto(photoKey);
+  const config = runtimeConfig();
+  // This runs inside the check-out request, so it uses the shortened
+  // interactive budget: the caller is holding a connection that the server
+  // will destroy at requestTimeout, and a reply the client never receives is
+  // worse than one retry fewer.
   const report = await evaluateImage(
     source.buffer,
     source.mimeType || mimeType,
-    instructor?.gender
+    instructor?.gender,
+    {
+      timeoutMs: config.geminiInteractiveTimeoutMs,
+      maxRetries: config.geminiInteractiveMaxRetries,
+    }
   );
   const now = new Date();
   const job = {

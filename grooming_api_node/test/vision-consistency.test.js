@@ -437,3 +437,60 @@ test("a rejected explicit cache retries the image safely with the full prompt", 
     }
   }
 });
+
+test("interactive evaluation stays inside the HTTP request timeout", async () => {
+  const { HTTP_REQUEST_TIMEOUT_MS, runtimeConfig } = await import("../src/config/env.js");
+  const originalFetch = globalThis.fetch;
+  const original = {
+    key: process.env.GEMINI_API_KEY,
+    cache: process.env.GEMINI_EXPLICIT_CACHE,
+  };
+  process.env.GEMINI_API_KEY = "test-only-gemini-key";
+  process.env.GEMINI_EXPLICIT_CACHE = "false";
+
+  const config = runtimeConfig();
+  // Check-out analysis holds the connection open, so every attempt it is
+  // allowed must finish before the server destroys the socket. This is the
+  // arithmetic that failed in production: the worker's budget is 360s against
+  // a 60s request timeout.
+  const interactiveWorstCase = config.geminiInteractiveTimeoutMs
+    * (config.geminiInteractiveMaxRetries + 1);
+  assert.ok(
+    interactiveWorstCase < HTTP_REQUEST_TIMEOUT_MS,
+    `interactive worst case ${interactiveWorstCase}ms must be under ${HTTP_REQUEST_TIMEOUT_MS}ms`
+  );
+  // The background budget is deliberately larger, so the two must not be equal.
+  assert.ok(config.geminiTimeoutMs * (config.geminiMaxRetries + 1) > interactiveWorstCase);
+
+  const { evaluateImage } = await import("../src/services/visionEngine.js");
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    return {
+      ok: false,
+      status: 429,
+      headers: { get: () => "0" },
+      text: async () => JSON.stringify({ error: { message: "rate" } }),
+    };
+  };
+  try {
+    await assert.rejects(() => evaluateImage(Buffer.from("x"), "image/jpeg", "MALE", {
+      timeoutMs: config.geminiInteractiveTimeoutMs,
+      maxRetries: config.geminiInteractiveMaxRetries,
+    }));
+    assert.equal(attempts, config.geminiInteractiveMaxRetries + 1);
+
+    // A caller may only shorten the budget, never extend it past the ceiling.
+    attempts = 0;
+    await assert.rejects(() => evaluateImage(Buffer.from("x"), "image/jpeg", "MALE", {
+      timeoutMs: 999_000,
+      maxRetries: 99,
+    }));
+    assert.equal(attempts, config.geminiMaxRetries + 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.env.GEMINI_API_KEY = original.key;
+    if (original.cache === undefined) delete process.env.GEMINI_EXPLICIT_CACHE;
+    else process.env.GEMINI_EXPLICIT_CACHE = original.cache;
+  }
+});

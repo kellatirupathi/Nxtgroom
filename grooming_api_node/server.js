@@ -11,7 +11,7 @@ import {
   closeMongoConnection,
   connectToMongo,
 } from "./src/config/db.js";
-import { CORS_METHODS, isProduction, runtimeConfig, validateEnvironment } from "./src/config/env.js";
+import { CORS_METHODS, HTTP_REQUEST_TIMEOUT_MS, isProduction, runtimeConfig, validateEnvironment } from "./src/config/env.js";
 import {
   getCurrentUser,
   getPasswordHash,
@@ -305,8 +305,10 @@ export async function startServer() {
     startStorageCleanupWorker(db),
     startMailWorker(db),
   ];
-  server.requestTimeout = 60_000;
-  server.headersTimeout = 65_000;
+  // Shared with the environment check that keeps interactive Gemini work
+  // inside this window, so the two cannot drift apart.
+  server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
+  server.headersTimeout = HTTP_REQUEST_TIMEOUT_MS + 5_000;
   server.keepAliveTimeout = 5_000;
   console.log(`Grooming API listening on port ${currentConfig.port}.`);
 

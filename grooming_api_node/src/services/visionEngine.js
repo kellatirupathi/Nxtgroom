@@ -16,6 +16,10 @@ const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"]
 const DEFAULT_THINKING_BUDGET = 4096;
 const CACHE_RENEWAL_SAFETY_SECONDS = 300;
 const CACHE_FAILURE_BACKOFF_MS = 60_000;
+// The registry is process-local, so every replica retries a failing cache on
+// its own clock. Spreading the retry stops a fleet from hitting cachedContents
+// in lockstep each time the backoff expires.
+const CACHE_FAILURE_BACKOFF_JITTER_MS = 30_000;
 
 // Process-local registry of Gemini server-side cache resource names. The
 // resource itself lives at Gemini; this map merely prevents duplicate cache
@@ -218,7 +222,8 @@ async function ensureGeminiPromptCache({ apiKey, config, namespace, systemInstru
       const name = typeof body?.name === "string" ? body.name : null;
       if (!response.ok || !name) {
         incrementMetric("gemini_explicit_cache_create_failures_total");
-        entry.expiresAt = Date.now() + CACHE_FAILURE_BACKOFF_MS;
+        entry.expiresAt = Date.now() + CACHE_FAILURE_BACKOFF_MS
+          + Math.floor(Math.random() * CACHE_FAILURE_BACKOFF_JITTER_MS);
         console.warn(
           `Gemini explicit prompt cache unavailable for ${namespace} (${response.status}`
           + `${safeProviderMessage(body) ? `: ${safeProviderMessage(body)}` : ""}); using uncached evaluation.`
@@ -229,7 +234,8 @@ async function ensureGeminiPromptCache({ apiKey, config, namespace, systemInstru
       return name;
     } catch (error) {
       incrementMetric("gemini_explicit_cache_create_failures_total");
-      entry.expiresAt = Date.now() + CACHE_FAILURE_BACKOFF_MS;
+      entry.expiresAt = Date.now() + CACHE_FAILURE_BACKOFF_MS
+        + Math.floor(Math.random() * CACHE_FAILURE_BACKOFF_JITTER_MS);
       console.warn(
         `Gemini explicit prompt cache unavailable for ${namespace} (${error?.name || "request error"}); using uncached evaluation.`
       );
@@ -281,11 +287,17 @@ async function requestGeminiStructured({
   jsonSchema,
   validator,
   maxOutputTokens,
+  limits,
 }) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
 
   const config = runtimeConfig();
+  // A caller holding an HTTP connection open cannot wait for the background
+  // worker's budget, so it may shorten both the per-attempt timeout and the
+  // retry count. Nothing may exceed the configured ceiling.
+  const timeoutMs = Math.min(limits?.timeoutMs ?? config.geminiTimeoutMs, config.geminiTimeoutMs);
+  const maxRetries = Math.min(limits?.maxRetries ?? config.geminiMaxRetries, config.geminiMaxRetries);
   const endpoint = `${GEMINI_API_ORIGIN}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`;
   let cacheReference = await ensureGeminiPromptCache({
     apiKey,
@@ -301,7 +313,7 @@ async function requestGeminiStructured({
     cacheName: cacheReference?.name,
   });
 
-  for (let attempt = 0; attempt <= config.geminiMaxRetries; attempt += 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const requestStartedAt = Date.now();
     incrementMetric("gemini_requests_total");
     if (attempt > 0) incrementMetric("gemini_retries_total");
@@ -314,7 +326,7 @@ async function requestGeminiStructured({
           "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(config.geminiTimeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
       observeDuration("gemini_request_latency", Date.now() - requestStartedAt);
     } catch (cause) {
@@ -326,7 +338,7 @@ async function requestGeminiStructured({
         timedOut ? "GEMINI_TIMEOUT" : "GEMINI_NETWORK_ERROR",
         { retryable: true }
       );
-      if (attempt === config.geminiMaxRetries) throw error;
+      if (attempt === maxRetries) throw error;
       await delay(Math.min(1000 * (2 ** attempt), 10000));
       continue;
     }
@@ -360,7 +372,7 @@ async function requestGeminiStructured({
         continue;
       }
       const error = geminiHttpError(response.status, body?.error?.message);
-      if (!error.retryable || attempt === config.geminiMaxRetries) throw error;
+      if (!error.retryable || attempt === maxRetries) throw error;
       await delay(retryAfterMilliseconds(response, attempt));
       continue;
     }
@@ -691,7 +703,7 @@ export function unknownGenderEvaluation() {
   );
 }
 
-export async function evaluateImage(imageBuffer, mimeType, gender = null) {
+export async function evaluateImage(imageBuffer, mimeType, gender = null, limits = undefined) {
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
     throw new Error("Instructor image is empty or invalid");
   }
@@ -719,6 +731,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
       // against the same ceiling: at 6000 a full checkpoint set could stop on
       // MAX_TOKENS once thinking was enabled.
       maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
+      limits,
     });
     parsed = response.evaluation;
     attireType = parsed.attire_type;
@@ -734,6 +747,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null) {
       // against the same ceiling: at 6000 a full checkpoint set could stop on
       // MAX_TOKENS once thinking was enabled.
       maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
+      limits,
     });
   }
   const sections = checkpointSet(normalizedGender, attireType);

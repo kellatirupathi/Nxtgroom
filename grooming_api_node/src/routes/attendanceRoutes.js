@@ -44,6 +44,28 @@ const checkInLimiter = rateLimit({
   message: { detail: "Too many check-in attempts. Please try again later." },
 });
 
+// Check-out runs the vision call inside the request, so it is at least as
+// expensive as check-in and needs the same protection.
+const checkOutLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.currentUser?.email || "unauthenticated"),
+  message: { detail: "Too many check-out attempts. Please try again later." },
+});
+
+// Re-analysis spends a vision call on an image that already has a report, so
+// it is the cheapest way to run up a bill by accident. Deliberately tighter.
+const reanalyseLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.currentUser?.email || "unauthenticated"),
+  message: { detail: "Too many re-analysis requests. Please try again later." },
+});
+
 let activeCheckIns = 0;
 export function checkInConcurrencyGate(_req, res, next) {
   if (activeCheckIns >= runtimeConfig().checkInConcurrencyLimit) {
@@ -502,6 +524,11 @@ attendanceRouter.post(
 
 attendanceRouter.post(
   "/check-out",
+  checkOutLimiter,
+  // Shares the check-in gate deliberately: both decode an image and call the
+  // vision model in-process, so one shared ceiling bounds the real work rather
+  // than letting each half reach the limit independently.
+  checkInConcurrencyGate,
   // Accepts multipart so a check-out photo can be attached. The photo is
   // optional: check-out must still work when a camera is unavailable.
   upload.single("file"),
@@ -1127,6 +1154,7 @@ attendanceRouter.get(
 attendanceRouter.post(
   "/:attendanceId/reanalyse",
   requireSuperAdmin,
+  reanalyseLimiter,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
     // Enforced here, not only by hiding the button: re-analysis spends a
