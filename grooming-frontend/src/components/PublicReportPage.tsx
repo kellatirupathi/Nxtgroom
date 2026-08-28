@@ -12,8 +12,11 @@ interface PublicReportPageProps {
   token: string;
   kind: 'day' | 'week';
   date: string;
-  /** Which half a day link is for. Absent on weekly links. */
-  half?: 'checkin' | 'checkout';
+  /**
+   * Which half a day link is for. Required: defaulting this is what made an
+   * emailed check-out link render the check-in report.
+   */
+  half: 'checkin' | 'checkout';
 }
 
 interface DayResponse {
@@ -124,7 +127,7 @@ function Stat({ label, value }: { label: string; value: number | string }) {
  * about — with no controls for browsing to another week, so a link cannot be
  * walked backwards through someone's history.
  */
-export default function PublicReportPage({ token, kind, date, half = 'checkin' }: PublicReportPageProps) {
+export default function PublicReportPage({ token, kind, date, half }: PublicReportPageProps) {
   const [day, setDay] = useState<DayResponse | null>(null);
   const [week, setWeek] = useState<WeekResponse | null>(null);
   const [error, setError] = useState('');

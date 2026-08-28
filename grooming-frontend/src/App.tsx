@@ -253,6 +253,10 @@ export default function App() {
           token={publicReport.token}
           kind={publicReport.kind}
           date={publicReport.date}
+          // Without this the page falls back to its check-in default, so an
+          // emailed check-out link rendered the morning's report under a
+          // check-out URL. The half is parsed from the path; pass it on.
+          half={publicReport.half}
         />
       </Suspense>
     );

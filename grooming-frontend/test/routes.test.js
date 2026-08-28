@@ -180,3 +180,34 @@ test('both halves are recognised, and an older link still opens', () => {
   assert.equal(at('/reports/abcdefgh12345678/day/2026-08-18/check-sideways'), null);
   delete globalThis.window;
 });
+
+test('every parsed report route carries a half the page can render', () => {
+  // The parser was always right; the shell dropped the half on the way to the
+  // page, which then defaulted to check-in. So an emailed check-out link
+  // showed the morning's report under a check-out URL. The prop is required
+  // now, but assert the parser's side of that contract holds for every shape
+  // of link: an undefined here would put the default back.
+  const at = (pathname) => {
+    globalThis.window = { location: { pathname } };
+    return publicReportFromLocation();
+  };
+
+  for (const pathname of [
+    '/reports/abcdefgh12345678/day/2026-08-18/check-out',
+    '/reports/abcdefgh12345678/day/2026-08-18/check-in',
+    '/reports/abcdefgh12345678/day/2026-08-18',
+    '/reports/abcdefgh12345678/week/2026-08-17',
+  ]) {
+    const route = at(pathname);
+    assert.notEqual(route, null, pathname);
+    assert.ok(
+      route.half === 'checkin' || route.half === 'checkout',
+      `${pathname} must name a half, got ${String(route.half)}`
+    );
+  }
+
+  // The half a check-out link carries must survive a round trip through the
+  // builder, so the link the email sends reopens the same report.
+  const built = publicDayReportPath('abcdefgh12345678', '2026-08-18', 'checkout');
+  assert.equal(at(built).half, 'checkout');
+});

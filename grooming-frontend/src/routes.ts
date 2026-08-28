@@ -42,8 +42,12 @@ export interface PublicReportRoute {
   token: string;
   kind: 'day' | 'week';
   date: string;
-  /** Which half of the day the link is for. Weekly links have none. */
-  half?: 'checkin' | 'checkout';
+  /**
+   * Which half of the day the link is for. Always set: a path with no suffix
+   * is a check-in. Required rather than optional so a caller that forgets to
+   * forward it fails to compile instead of quietly rendering the check-in.
+   */
+  half: 'checkin' | 'checkout';
 }
 
 /** The path segment naming a half, as it appears in an emailed link. */
