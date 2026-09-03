@@ -10,13 +10,22 @@ import { openSecret, sealSecret } from "../src/services/secretBox.js";
  * retention window.
  */
 
+/**
+ * Fixture values are built rather than written as literals, and are
+ * deliberately repetitive. What is being tested is the sealing, not the
+ * content, and a random-looking literal assigned to a name like token or
+ * SECRET_KEY reads to a secret scanner as a real credential.
+ */
+const sampleToken = "token".repeat(6);
+const passphrase = (label) => `${label}-passphrase-of-more-than-thirty-two-chars`;
+
 test("a sealed value round-trips", () => {
-  const token = "3H2_yq-tokenvalue-abcdefghijklmnop";
+  const token = sampleToken;
   assert.equal(openSecret(sealSecret(token)), token);
 });
 
 test("the sealed form does not contain the plaintext", () => {
-  const token = "3H2_yq-tokenvalue-abcdefghijklmnop";
+  const token = sampleToken;
   const sealed = sealSecret(token);
   assert.ok(!sealed.includes(token));
   assert.notEqual(sealed, token);
@@ -29,7 +38,7 @@ test("sealing the same value twice never produces the same ciphertext", () => {
 });
 
 test("a tampered seal is refused rather than silently truncated", () => {
-  const sealed = sealSecret("a-real-token");
+  const sealed = sealSecret(sampleToken);
   const flipped = `${sealed.slice(0, -2)}${sealed.slice(-2) === "AA" ? "AB" : "AA"}`;
   assert.throws(() => openSecret(flipped), (error) => error.code === "SEALED_VALUE_INVALID");
 });
@@ -43,9 +52,9 @@ test("a malformed seal is refused", () => {
 test("a seal made under a different key cannot be opened", () => {
   // Rotating SECRET_KEY should leave old queued credentials unredeemable.
   const original = process.env.SECRET_KEY;
-  process.env.SECRET_KEY = "first-key-that-is-at-least-32-characters-long";
-  const sealed = sealSecret("a-real-token");
-  process.env.SECRET_KEY = "second-key-that-is-at-least-32-characters-long";
+  process.env.SECRET_KEY = passphrase("first");
+  const sealed = sealSecret(sampleToken);
+  process.env.SECRET_KEY = passphrase("second");
   try {
     assert.throws(() => openSecret(sealed), (error) => error.code === "SEALED_VALUE_INVALID");
   } finally {

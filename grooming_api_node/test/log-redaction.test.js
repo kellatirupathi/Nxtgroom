@@ -11,7 +11,9 @@ import { loggedPath } from "../server.js";
  */
 
 test("a report token never reaches the log", () => {
-  const token = "AbC-tok_123456789";
+  // Deliberately repetitive. The value is irrelevant to the assertion, and a
+  // random-looking fixture reads to a secret scanner as a real credential.
+  const token = "tokentokentokentoken";
   for (const path of [
     `/api/v2/reports/${token}/day/2026-01-05`,
     `/api/v2/reports/${token}/day/2026-01-05/check-out`,
