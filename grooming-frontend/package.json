@@ -27,6 +27,9 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
+  "overrides": {
+    "@xmldom/xmldom": "^0.9.12"
+  },
   "devDependencies": {
     "@capacitor/cli": "^8.4.2",
     "@tailwindcss/postcss": "^4.3.3",

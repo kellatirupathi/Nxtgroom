@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 /**
  * The fixed checkpoint sets every evaluation must return.
  *
@@ -212,6 +214,33 @@ export function checkpointSet(gender, attireType) {
   return null;
 }
 
+/**
+ * A fingerprint of the checkpoint tables in this file.
+ *
+ * PROMPT_VERSION is a hand-edited constant in another module, so a reworded
+ * rule here could ship without it moving. Two stored evaluations then carried
+ * the same prompt_version while having been judged against different
+ * standards, which is the one thing recording a version was meant to rule
+ * out. This is derived from the tables themselves, so it cannot drift from
+ * the rules it describes.
+ */
+export const CHECKPOINT_VERSION = createHash("sha256")
+  .update(JSON.stringify({
+    id_card: ID_CARD_CHECKS,
+    men_grooming: MEN_GROOMING_CHECKS,
+    men_attire: MEN_ATTIRE_CHECKS,
+    men_accessories: MEN_ACCESSORIES_CHECKS,
+    men_footwear: MEN_FOOTWEAR_CHECKS,
+    women_grooming: WOMEN_GROOMING_CHECKS,
+    saree_attire: SAREE_ATTIRE_CHECKS,
+    kurti_attire: KURTI_ATTIRE_CHECKS,
+    women_formal_attire: WOMEN_FORMAL_ATTIRE_CHECKS,
+    women_accessories: WOMEN_ACCESSORIES_CHECKS,
+    women_footwear: WOMEN_FOOTWEAR_CHECKS,
+  }))
+  .digest("hex")
+  .slice(0, 12);
+
 /** Codes that are recorded but never scored. */
 export const INFORMATIONAL_CODES = new Set(
   [...MEN_ACCESSORIES_CHECKS, ...WOMEN_ACCESSORIES_CHECKS]
@@ -280,6 +309,22 @@ export const IMPROVEMENT_TIPS = {
 };
 
 /**
+ * Advice for a checkpoint failed because the photograph did not evidence it.
+ *
+ * The men's tuck and belt checks fail when the submitted photograph cannot
+ * show them, which is a fact about the picture rather than about the clothes.
+ * The ordinary tip then told the instructor to wear a belt while the reason on
+ * the same report said the belt was not visible: the report contradicted its
+ * own advice, and somebody already wearing one was told to put one on. Both
+ * codes share one sentence so a report missing the whole waist asks for the
+ * retake once instead of twice.
+ */
+export const UNVERIFIED_IMPROVEMENT_TIPS = {
+  M_SHIRT_COLLAR_TUCK: "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+  M_BELT: "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+};
+
+/**
  * The tips for one evaluation, in report order.
  *
  * Reads the failing checkpoints rather than the section they sit in, so a tip
@@ -290,7 +335,8 @@ export function improvementTips(sections) {
   for (const key of SECTION_KEYS) {
     for (const item of sections?.[key] || []) {
       if (item.status !== "FAIL" || INFORMATIONAL_CODES.has(item.code)) continue;
-      const tip = IMPROVEMENT_TIPS[item.code];
+      const tip = (item.evidence === "NOT_SHOWN" && UNVERIFIED_IMPROVEMENT_TIPS[item.code])
+        || IMPROVEMENT_TIPS[item.code];
       if (tip && !tips.includes(tip)) tips.push(tip);
     }
   }

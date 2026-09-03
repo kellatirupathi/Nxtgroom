@@ -373,9 +373,29 @@ export async function saveInstitutes(db, records) {
  */
 export async function linkInstructorsToInstitutes(db) {
   const colleges = await db.collection("colleges")
-    .find({}, { projection: { _id: 1, name: 1 } })
+    .find(
+      // A soft-deleted college is not somewhere an instructor can be placed.
+      { $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] },
+      { projection: { _id: 1, name: 1 } }
+    )
     .toArray();
-  const byName = new Map(colleges.map((college) => [String(college.name).trim().toLowerCase(), college._id]));
+
+  // Colleges are unique on (name, location), so one name can belong to more
+  // than one campus. Keying the lookup on the name alone silently gave every
+  // instructor of a repeated name to whichever college was read last, which
+  // filed them under another campus and exposed them to that campus's BOA —
+  // college_id is the only scope boundary a BOA has. An ambiguous name is left
+  // unassigned instead, for someone to resolve deliberately.
+  const byName = new Map();
+  const ambiguousNames = new Set();
+  for (const college of colleges) {
+    const key = String(college.name).trim().toLowerCase();
+    if (byName.has(key)) {
+      ambiguousNames.add(key);
+      continue;
+    }
+    byName.set(key, college._id);
+  }
 
   const unassigned = await db.collection("instructors")
     .find({
@@ -388,8 +408,14 @@ export async function linkInstructorsToInstitutes(db) {
 
   const operations = [];
   let unmatched = 0;
+  let ambiguous = 0;
   for (const instructor of unassigned) {
-    const collegeId = byName.get(String(instructor.institute_name).trim().toLowerCase());
+    const key = String(instructor.institute_name).trim().toLowerCase();
+    if (ambiguousNames.has(key)) {
+      ambiguous += 1;
+      continue;
+    }
+    const collegeId = byName.get(key);
     if (!collegeId) {
       unmatched += 1;
       continue;
@@ -401,7 +427,17 @@ export async function linkInstructorsToInstitutes(db) {
       },
     });
   }
-  if (!operations.length) return { linked: 0, unmatched };
+  // An instructor with no college is invisible to every BOA, since the BOA
+  // scope filters on college_id. That used to be reported only as a number
+  // buried in the sync state, so nobody noticed people missing from a roster.
+  if (unmatched || ambiguous) {
+    console.warn(
+      `Institute linking left ${unmatched} instructor(s) with no matching college and `
+      + `${ambiguous} with an ambiguous college name; they remain unassigned and are not `
+      + "visible to any BOA until a college is set on them."
+    );
+  }
+  if (!operations.length) return { linked: 0, unmatched, ambiguous };
 
   let linked = 0;
   for (let index = 0; index < operations.length; index += 500) {
@@ -411,7 +447,7 @@ export async function linkInstructorsToInstitutes(db) {
     );
     linked += result.modifiedCount || 0;
   }
-  return { linked, unmatched };
+  return { linked, unmatched, ambiguous };
 }
 
 /** Runs the institute sync and the instructor linking together. */
@@ -420,7 +456,7 @@ export async function runInstituteSync(db, { triggeredBy } = {}) {
   try {
     const { records, fetched, skipped } = await fetchInstitutes();
     const { upserted, modified } = await saveInstitutes(db, records);
-    const { linked, unmatched } = await linkInstructorsToInstitutes(db);
+    const { linked, unmatched, ambiguous } = await linkInstructorsToInstitutes(db);
     const state = {
       last_sync_at: new Date(),
       last_sync_status: "success",
@@ -433,6 +469,7 @@ export async function runInstituteSync(db, { triggeredBy } = {}) {
       modified,
       instructors_linked: linked,
       instructors_unmatched: unmatched,
+      instructors_ambiguous: ambiguous,
       duration_ms: Date.now() - startedAt.getTime(),
     };
     await db.collection("app_settings").updateOne(

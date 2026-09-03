@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MEN_ACCESSORIES_CHECKS, MEN_ATTIRE_CHECKS, MEN_GROOMING_CHECKS } from "../src/checkpoints.js";
+import { improvementTips, MEN_ACCESSORIES_CHECKS, MEN_ATTIRE_CHECKS, MEN_GROOMING_CHECKS } from "../src/checkpoints.js";
 import { buildSystemPrompt } from "../src/prompts.js";
 import { resolveMaleAttireVisibility } from "../src/services/visionEngine.js";
 
@@ -130,4 +130,87 @@ test("the written standards state the required visibility outcomes", () => {
   assert.match(moustache, /when the mouth and upper lip are discernible, make the assessment/i);
   assert.match(buildSystemPrompt("MALE", "FORMAL"), /clear hands with no rings[\s\S]*PASS, not N\/A/i);
   assert.match(buildSystemPrompt("MALE", "FORMAL"), /shirt must never fail Shirt Fit because it is or[\s\S]*appears untucked/i);
+});
+
+test("a waist that is out of frame keeps its abstention", () => {
+  // Framing is a property of the photograph, not of the clothes. The override
+  // used to fire regardless, so a head-and-shoulders picture produced two
+  // dress-code failures about a waistband that was never in the frame — and
+  // only ever for men, since the women's path has no equivalent rule.
+  const rows = rowsWith({ tuck: "N/A", belt: "N/A" });
+  resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "NOT_VISIBLE" });
+
+  assert.equal(statusOf(rows, "attire_check", "M_SHIRT_COLLAR_TUCK"), "N/A");
+  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "N/A");
+});
+
+test("advice for an unshown tuck or belt asks for a photograph, not a belt", () => {
+  const rows = rowsWith({ tuck: "N/A", belt: "N/A" });
+  resolveMaleAttireVisibility(rows, { upper_body: "PARTIAL", lower_body: "PARTIAL" });
+  const tips = improvementTips(rows);
+
+  // The reason on these rows says the photograph did not show the item, so
+  // telling the instructor to wear one contradicts the same report — and
+  // accuses somebody who may well have been wearing it.
+  assert.ok(
+    tips.every((tip) => !/wear a formal belt/i.test(tip)),
+    "an instructor whose belt was never photographed must not be told to wear one"
+  );
+  // One sentence covers both, so a report missing the whole waist asks once.
+  assert.deepEqual(tips, [
+    "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+  ]);
+});
+
+test("a genuinely missing belt still gets the ordinary advice", () => {
+  const rows = rowsWith({ belt: "FAIL" });
+  resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "VISIBLE" });
+
+  assert.ok(improvementTips(rows).includes("Wear a formal belt with your trousers."));
+});
+
+test("an untucked hem is not counted as a shirt-fit violation", () => {
+  const rows = rowsWith({ fit: "FAIL" });
+  const fit = rows.attire_check.find((item) => item.code === "M_SHIRT_FIT");
+  fit.observation = "The shirt hangs loose outside the trousers.";
+  fit.reason = "The hem is loose below the waistband.";
+
+  resolveMaleAttireVisibility(rows, {});
+
+  // "loose" is how an untucked hem gets described, so matching it as a fit
+  // violation defeated the reclassification this block exists to perform.
+  assert.equal(fit.status, "PASS");
+});
+
+test("an excessively loose shirt is still a fit violation", () => {
+  const rows = rowsWith({ fit: "FAIL" });
+  const fit = rows.attire_check.find((item) => item.code === "M_SHIRT_FIT");
+  fit.observation = "The shirt is excessively loose across the shoulders and untucked.";
+  fit.reason = "The garment is far too loose for the wearer.";
+
+  resolveMaleAttireVisibility(rows, {});
+
+  assert.equal(fit.status, "FAIL");
+});
+
+test("a model-returned failure on an unshown waist still gets photograph advice", () => {
+  // The written standards tell the model to FAIL these outright rather than
+  // abstain, so most such rows never pass through the N/A conversion. The
+  // verdict is deliberate policy and stands; only the advice is corrected.
+  const rows = rowsWith({ tuck: "FAIL", belt: "FAIL" });
+  resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "NOT_VISIBLE" });
+
+  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "FAIL", "the standard is unchanged");
+  assert.deepEqual(improvementTips(rows), [
+    "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+  ]);
+});
+
+test("a failure on a waist that was photographed keeps the ordinary advice", () => {
+  const rows = rowsWith({ tuck: "FAIL", belt: "FAIL" });
+  resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "VISIBLE" });
+
+  const tips = improvementTips(rows);
+  assert.ok(tips.includes("Wear a formal belt with your trousers."));
+  assert.ok(tips.includes("Button the collar properly and tuck the shirt in."));
 });

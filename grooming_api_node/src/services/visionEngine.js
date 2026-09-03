@@ -113,6 +113,12 @@ function recordGeminiUsage(responseBody) {
   const usage = responseBody?.usageMetadata || {};
   const inputTokens = Number(usage.promptTokenCount || 0);
   const outputTokens = Number(usage.candidatesTokenCount || 0);
+  // Recorded so the distance between real responses and maxOutputTokens is
+  // visible. Without it, a ceiling quietly becoming too tight for the schema
+  // showed up only as MAX_TOKENS failures after the fact.
+  if (Number.isFinite(outputTokens) && outputTokens > 0) {
+    observeDuration("gemini_output_tokens", outputTokens);
+  }
   const cachedTokens = Number(usage.cachedContentTokenCount || 0);
   if (Number.isFinite(inputTokens) && inputTokens > 0) {
     incrementMetric("gemini_input_tokens_total", inputTokens);
@@ -379,6 +385,13 @@ async function requestGeminiStructured({
     recordGeminiUsage(body);
     const finishReason = body?.candidates?.[0]?.finishReason;
     if (finishReason && finishReason !== "STOP") {
+      // MAX_TOKENS is a configuration problem, not provider flakiness: the
+      // report plus the thinking budget did not fit in maxOutputTokens. It was
+      // counted with every other incomplete response, so an outgrown ceiling
+      // was invisible while paying for a full retry on each occurrence.
+      incrementMetric(finishReason === "MAX_TOKENS"
+        ? "gemini_max_output_tokens_total"
+        : "gemini_incomplete_responses_total");
       throw createGeminiError(
         `Gemini did not complete the evaluation (finish reason: ${finishReason})`,
         "GEMINI_INCOMPLETE_RESPONSE"
@@ -573,7 +586,12 @@ export function resolveMaleAttireVisibility(rows, visibleRegions) {
   if (shirtFit?.status === "FAIL") {
     const text = `${shirtFit.observation || ""} ${shirtFit.reason || ""}`.toLowerCase();
     const mentionsTuck = /\b(?:tuck(?:ed|ing)?|untucked|waist(?:band)?|shirt\s+(?:hem|tail))\b/i.test(text);
-    const mentionsFitViolation = /\b(?:pull(?:ing|s|ed)?|tight(?:ness)?|bunch(?:ing|ed)?|baggy|loose(?:ness)?|ill[-\s]?fitt?ing|poor\s+fit)\b/i.test(text);
+    // Bare "loose" is how an untucked hem gets described - "the shirt hangs
+    // loose outside the trousers" - so counting it as a fit violation kept the
+    // tuck finding filed against Shirt Fit, which is the exact
+    // miscategorisation this block exists to undo. Only wording that actually
+    // describes how the shirt fits counts.
+    const mentionsFitViolation = /\b(?:pull(?:ing|s|ed)?|tight(?:ness)?|bunch(?:ing|ed)?|baggy|looseness|loose[-\s]?fitting|(?:excessively|overly|too|very)\s+loose|ill[-\s]?fitt?ing|poor\s+fit)\b/i.test(text);
     if (mentionsTuck && !mentionsFitViolation) {
       shirtFit.status = "PASS";
       shirtFit.observation = "No shirt-fit violation is identified; shirt tuck is assessed separately.";
@@ -581,16 +599,45 @@ export function resolveMaleAttireVisibility(rows, visibleRegions) {
     }
   }
 
+  // The override applied whatever the photograph showed, so a head-and-
+  // shoulders picture produced two dress-code failures about a waistband that
+  // was never in frame. That contradicts the prompt's own rule - a body area
+  // outside the frame must be answered N/A, never inferred - and it only ever
+  // applied to men, since the women's path has no equivalent, so identical
+  // framing produced a worse verdict for a man. A waist that is genuinely out
+  // of frame keeps its abstention; anything else is still a required check
+  // the photograph had to evidence.
+  const lowerBodyInFrame = visibleRegions?.lower_body !== "NOT_VISIBLE";
+
   const tuck = find("attire_check", "M_SHIRT_COLLAR_TUCK");
-  if (tuck?.status === "N/A") {
+  if (tuck?.status === "N/A" && lowerBodyInFrame) {
     tuck.status = "FAIL";
     tuck.reason = "The submitted photograph does not show the required shirt tuck clearly enough to verify compliance.";
+    // Marks the failure as one about the evidence rather than about the
+    // clothing, so the advice attached to it can say the same thing the reason
+    // does. Internal: the report renders named fields only.
+    tuck.evidence = "NOT_SHOWN";
   }
 
   const belt = find("attire_check", "M_BELT");
-  if (belt?.status === "N/A") {
+  if (belt?.status === "N/A" && lowerBodyInFrame) {
     belt.status = "FAIL";
     belt.reason = "The submitted photograph does not show the required belt clearly enough to verify compliance.";
+    belt.evidence = "NOT_SHOWN";
+  }
+
+  // Their written standards tell the model to fail these outright when the
+  // photograph cannot evidence them, so most such failures arrive as FAIL and
+  // never pass through the branches above. The verdict stands - that policy is
+  // deliberate - but a failure recorded against a photograph with no lower
+  // body in it is a statement about the framing, so mark it as one. Otherwise
+  // the advice tells somebody to put on a belt that was never in the picture
+  // while the reason on the same row says it could not be seen.
+  if (!lowerBodyInFrame) {
+    for (const code of ["M_SHIRT_COLLAR_TUCK", "M_BELT"]) {
+      const row = find("attire_check", code);
+      if (row?.status === "FAIL") row.evidence = "NOT_SHOWN";
+    }
   }
 
   const explicitlyAbsent = (row, itemPattern) => {

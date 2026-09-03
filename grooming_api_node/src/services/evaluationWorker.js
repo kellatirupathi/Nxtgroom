@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { runtimeConfig } from "../config/env.js";
 import { PROMPT_VERSION } from "../prompts.js";
 import { evaluateImage } from "./visionEngine.js";
-import { improvementTips } from "../checkpoints.js";
+import { CHECKPOINT_VERSION, improvementTips } from "../checkpoints.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { downloadPhoto } from "./photoStorage.js";
@@ -167,6 +167,9 @@ function publicEvaluation(report, job, now) {
     improvement_tips: improvementTips(report),
     model: runtimeConfig().geminiModel,
     prompt_version: PROMPT_VERSION,
+    // Derived from the checkpoint tables, so a rule reworded without touching
+    // PROMPT_VERSION is still distinguishable in a stored report.
+    checkpoint_version: CHECKPOINT_VERSION,
     processed_at: now,
     attempts: job.attempts,
   };

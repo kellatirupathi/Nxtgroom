@@ -7,6 +7,7 @@ import {
   sendWeeklyReportEmail,
 } from "./emailService.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { openSecret } from "./secretBox.js";
 
 const WORKER_ID = randomUUID();
 const SUPPORTED_TYPES = new Set([
@@ -93,8 +94,20 @@ async function claimMail(db) {
   return result?.value || result;
 }
 
+/**
+ * Restores a sealed reset token for the one message that needs it.
+ *
+ * `token` is still honoured so a job queued before sealing shipped is not
+ * stranded in the retry loop by an upgrade.
+ */
+function passwordResetPayload(payload) {
+  if (!payload?.token_sealed) return payload;
+  const { token_sealed: sealed, ...rest } = payload;
+  return { ...rest, token: openSecret(sealed) };
+}
+
 async function deliver(job) {
-  if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, job.payload);
+  if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, passwordResetPayload(job.payload));
   if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, deliveryPayload(job));
   if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, deliveryPayload(job));
   return sendAttendanceReminderEmail(job.to_email, job.payload);

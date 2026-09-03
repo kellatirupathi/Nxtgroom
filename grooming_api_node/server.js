@@ -15,6 +15,7 @@ import { CORS_METHODS, HTTP_REQUEST_TIMEOUT_MS, isProduction, runtimeConfig, val
 import {
   getCurrentUser,
   getPasswordHash,
+  requireCronSecret,
   requireDatabase,
   ROLES,
 } from "./src/middleware/auth.js";
@@ -34,6 +35,20 @@ import { telemetrySnapshot } from "./src/services/telemetry.js";
 
 const config = runtimeConfig();
 
+/**
+ * The path as it is safe to record.
+ *
+ * A public report URL carries the recipient's report token in the path, and
+ * that token is the only credential guarding their photographs and their
+ * whole report history. Logging it verbatim copied a working credential into
+ * every log sink and retention system downstream. The shape of the request is
+ * all the log needs; the cron paths under the same prefix carry no secret and
+ * stay readable so an operator can still tell the jobs apart.
+ */
+export function loggedPath(path) {
+  return String(path).replace(/^(\/api\/v2\/reports\/)(?!cron(?:\/|$))[^/]+/, "$1<token>");
+}
+
 export const app = express();
 app.disable("x-powered-by");
 if (isProduction()) app.set("trust proxy", 1);
@@ -48,7 +63,7 @@ app.use((req, res, next) => {
       event: "http_request",
       request_id: req.requestId,
       method: req.method,
-      path: req.path,
+      path: loggedPath(req.path),
       status: res.statusCode,
       duration_ms: Date.now() - startedAt,
     }));
@@ -75,7 +90,13 @@ app.use(rateLimit({
   limit: isProduction() ? 600 : 5000,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  skip: (req) => req.method === "OPTIONS" || req.path.startsWith("/health"),
+  // Only the orchestrator's own probes are exempt. /health/metrics used to be
+  // covered by the prefix too, which left an unauthenticated endpoint that
+  // could be polled without limit.
+  skip: (req) => req.method === "OPTIONS"
+    || req.path === "/health"
+    || req.path === "/health/live"
+    || req.path === "/health/ready",
   message: { detail: "Too many requests. Please try again later." },
 }));
 app.use(express.json({ limit: "1mb" }));
@@ -96,7 +117,10 @@ app.get("/", (_req, res) => {
 app.get("/health/live", (_req, res) => {
   res.json({ status: "ok" });
 });
-app.get("/health/metrics", (_req, res) => res.json(telemetrySnapshot()));
+// Operational counters, including provider token spend. Guarded by the same
+// shared secret the schedulers use: it was previously open to anyone who knew
+// the path, which published usage and failure rates to the internet.
+app.get("/health/metrics", requireCronSecret, (_req, res) => res.json(telemetrySnapshot()));
 
 async function readinessStatus() {
   const databaseReady = Boolean(app.locals.db) && await checkMongoConnection();
@@ -126,8 +150,36 @@ async function readinessStatus() {
   });
 }
 
+/**
+ * Readiness pings MongoDB and Cloudflare R2. The endpoint is unauthenticated
+ * because an orchestrator probe cannot hold credentials, which meant anybody
+ * could turn one cheap HTTP request into a round trip against both providers.
+ * Results are held briefly and concurrent callers share one in-flight check,
+ * so probe frequency no longer drives dependency load.
+ */
+const READINESS_CACHE_MS = 5_000;
+let readinessCache = null;
+let readinessInFlight = null;
+
+async function cachedReadinessStatus() {
+  if (readinessCache && Date.now() - readinessCache.at < READINESS_CACHE_MS) {
+    return readinessCache.value;
+  }
+  if (!readinessInFlight) {
+    readinessInFlight = readinessStatus()
+      .then((value) => {
+        readinessCache = { value, at: Date.now() };
+        return value;
+      })
+      .finally(() => {
+        readinessInFlight = null;
+      });
+  }
+  return readinessInFlight;
+}
+
 async function readinessHandler(_req, res) {
-  const health = await readinessStatus();
+  const health = await cachedReadinessStatus();
   return res.status(health.ready ? 200 : 503).json(health);
 }
 

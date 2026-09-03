@@ -321,7 +321,7 @@ export async function commitGuardedCheckIn(
         name: instructor.name,
         email: instructor.email,
         gender: instructor.gender,
-        collegeId: String(instructor.college_id),
+        collegeId: instructor.college_id ? String(instructor.college_id) : null,
       },
       // Only the R2 key travels through the queue. The worker downloads the
       // image when it runs, so no image bytes are ever written to MongoDB.
@@ -339,7 +339,10 @@ export async function commitGuardedCheckIn(
       // `role` alone recorded null for 599 of 600 people and lost the
       // distinction between an INSTRUCTOR and a CENTRAL_INSTRUCTOR.
       instructor_role: instructor.instructor_role || instructor.role || null,
-      college_id: String(instructor.college_id),
+      // Null stays null. String() turned an unlinked instructor's absent
+      // college into the literal text "null", which then sat in the record as
+      // if it were a real college id and matched nothing anywhere.
+      college_id: instructor.college_id ? String(instructor.college_id) : null,
       boa_id: currentUser.referenceId ? String(currentUser.referenceId) : "super-admin",
       attendance_day: localDateKey(now, runtimeConfig().appTimeZone),
       date: now,

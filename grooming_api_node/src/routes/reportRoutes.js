@@ -1,8 +1,7 @@
-import crypto from "node:crypto";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { asyncRoute, dateBoundsInTimeZone } from "../utils.js";
-import { idMatch } from "../middleware/auth.js";
+import { idMatch, requireCronSecret } from "../middleware/auth.js";
 import { appUrl, runtimeConfig } from "../config/env.js";
 import {
   findInstructorByReportToken,
@@ -18,8 +17,20 @@ import { deletePhoto } from "../services/photoStorage.js";
 
 /** Attendance photographs are kept for this long, then deleted. */
 const PHOTO_RETENTION_MONTHS = 2;
-/** Capped so one run cannot exceed the scheduler's request timeout. */
+/** Rows read per query, so one find cannot return an oversized result. */
 const PHOTO_PURGE_BATCH = 200;
+/**
+ * How long one purge call keeps working through batches.
+ *
+ * A single 200-record batch per call cannot keep up: a roster checking in and
+ * out daily produces more expiring photographs than that, so the backlog grew
+ * without bound and the two-month retention promise quietly stopped holding.
+ * The run now keeps taking batches until the work is done or this budget is
+ * spent, which leaves headroom inside the scheduler's own timeout.
+ */
+const PHOTO_PURGE_DEADLINE_MS = 20_000;
+/** Bounds how many undeletable records one run will carry as exclusions. */
+const PHOTO_PURGE_MAX_STUCK = 500;
 import { evaluationFilter } from "../services/evaluationWorker.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
 import { enqueueMailJob } from "../services/mailWorker.js";
@@ -29,6 +40,36 @@ import {
 } from "../services/notificationSettings.js";
 
 export const reportRouter = Router();
+
+/**
+ * Producer runs that outlive their trigger.
+ *
+ * Weekly summaries and check-out reminders each queue one job per instructor,
+ * which takes far longer than the 30 seconds cron-jobs.org waits before
+ * recording a failure and retrying. The endpoints below therefore acknowledge
+ * the trigger and let the producer finish on its own; the durable job records
+ * in report_delivery_runs are where the real outcome is read.
+ *
+ * The in-flight set stops a retrying scheduler from starting a second pass
+ * over the same roster while the first is still walking it. Deterministic mail
+ * job ids already make a duplicate pass harmless, so this only saves the work.
+ */
+const runningProducers = new Set();
+
+function startProducer(runId, work) {
+  if (runningProducers.has(runId)) return false;
+  runningProducers.add(runId);
+  void (async () => {
+    try {
+      await work();
+    } catch (error) {
+      console.error(`Producer ${runId} failed: ${error?.name || "Error"}`);
+    } finally {
+      runningProducers.delete(runId);
+    }
+  })();
+  return true;
+}
 
 /**
  * Public report pages are unauthenticated by design — the recipient has no
@@ -42,25 +83,6 @@ const publicReportLimiter = rateLimit({
   legacyHeaders: false,
   message: { detail: "Too many requests. Please try again later." },
 });
-
-/**
- * Cron endpoints are triggered by cron-jobs.org, which cannot hold a session,
- * so they authenticate with a shared secret. Compared in constant time so the
- * comparison itself cannot leak the secret one byte at a time.
- */
-function requireCronSecret(req, res, next) {
-  const expected = process.env.CRON_SECRET || "";
-  if (!expected) {
-    return res.status(503).json({ detail: "CRON_SECRET is not configured on the server" });
-  }
-  const supplied = String(req.get("x-cron-secret") || "");
-  const expectedBuffer = Buffer.from(expected);
-  const suppliedBuffer = Buffer.from(supplied);
-  const matches = expectedBuffer.length === suppliedBuffer.length
-    && crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
-  if (!matches) return res.status(401).json({ detail: "Invalid cron secret" });
-  return next();
-}
 
 /** Month bounds for the monthly totals shown beneath the weekly table. */
 function monthKeyOf(dateKey) {
@@ -162,10 +184,19 @@ reportRouter.get(
  * immediate alert email links to.
  */
 reportRouter.get(
-  ["/:token/day/:date", "/:token/day/:date/:half(check-in|check-out)"],
+  ["/:token/day/:date", "/:token/day/:date/:half"],
   publicReportLimiter,
-  asyncRoute(async (req, res) => {
+  asyncRoute(async (req, res, next) => {
     const { token, date } = req.params;
+    // The half used to be constrained by an inline pattern in the path. That
+    // syntax is path-to-regexp 0.x only and throws on startup under Express 5,
+    // so the same constraint is applied here instead. Anything else falls
+    // through unmatched, exactly as it did before.
+    if (req.params.half !== undefined
+      && req.params.half !== "check-in"
+      && req.params.half !== "check-out") {
+      return next();
+    }
     if (!isValidDateKey(date)) return res.status(400).json({ detail: "Invalid date" });
     // Both halves are assessed separately, so the link names which one it is
     // for. A bare /day/:date stays the check-in, which is what every link
@@ -399,14 +430,28 @@ reportRouter.post(
     // week being reported on without any date arithmetic here.
     const startKey = weekStartKey(new Date());
 
-    const result = await deliverWeeklyReports(db, startKey);
+    // Read before detaching so a disabled workspace still gets a truthful
+    // answer in the response rather than only in the run record.
+    if (!shouldSendWeeklyReport(await getNotificationSettings(db))) {
+      return res.status(202).json({
+        week_start: startKey,
+        queued: 0,
+        skipped: 0,
+        failures: [],
+        status: "disabled",
+        note: "Weekly instructor emails are turned off in admin notification settings.",
+      });
+    }
+
+    const runId = `weekly:${startKey}`;
+    const started = startProducer(runId, () => deliverWeeklyReports(db, startKey));
     return res.status(202).json({
       week_start: startKey,
-      ...result,
-      status: result.disabled ? "disabled" : "queued",
-      note: result.disabled
-        ? "Weekly instructor emails are turned off in admin notification settings."
-        : "Each recipient is stored as an idempotent delivery job with retries.",
+      status: started ? "started" : "already_running",
+      run_id: runId,
+      note: started
+        ? "Queueing runs in the background; each recipient is an idempotent delivery job with retries."
+        : "A run for this week is already in progress.",
     });
   })
 );
@@ -491,12 +536,16 @@ reportRouter.post(
   requireCronSecret,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
-    const result = await deliverAttendanceReminders(db);
+    const today = localDateKey(new Date());
+    const runId = `attendance-reminders:${today}`;
+    const started = startProducer(runId, () => deliverAttendanceReminders(db));
     return res.status(202).json({
-      date: localDateKey(new Date()),
-      status: "queued",
-      ...result,
-      note: "Each reminder is stored as an idempotent delivery job with retries.",
+      date: today,
+      status: started ? "started" : "already_running",
+      run_id: runId,
+      note: started
+        ? "Queueing runs in the background; each reminder is an idempotent delivery job with retries."
+        : "A reminder run for today is already in progress.",
     });
   })
 );
@@ -545,17 +594,20 @@ reportRouter.post(
     const cutoff = new Date();
     cutoff.setUTCMonth(cutoff.getUTCMonth() - retentionMonths);
 
+    const expiredFilter = (excludeIds) => ({
+      check_in_time: { $lt: cutoff },
+      $or: [
+        { check_in_photo_key: { $type: "string" } },
+        { check_out_photo_key: { $type: "string" } },
+      ],
+      // Snapshotted, not aliased: the caller's array keeps growing as more
+      // deletes fail, and a filter holding the live reference would describe
+      // a different query than the one that was issued.
+      ...(excludeIds.length ? { _id: { $nin: [...excludeIds] } } : {}),
+    });
+
     const records = await db.collection("attendance")
-      .find(
-        {
-          check_in_time: { $lt: cutoff },
-          $or: [
-            { check_in_photo_key: { $type: "string" } },
-            { check_out_photo_key: { $type: "string" } },
-          ],
-        },
-        { projection: { check_in_photo_key: 1, check_out_photo_key: 1 } }
-      )
+      .find(expiredFilter([]), { projection: { check_in_photo_key: 1, check_out_photo_key: 1 } })
       .limit(PHOTO_PURGE_BATCH)
       .toArray();
 
@@ -572,41 +624,67 @@ reportRouter.post(
       });
     }
 
+    const deadline = Date.now() + PHOTO_PURGE_DEADLINE_MS;
+    // Records whose object could not be removed. They still match the filter,
+    // so without excluding them the loop would re-read the same rows forever
+    // instead of moving on to the rest of the backlog.
+    const stuck = [];
+    let scanned = 0;
     let deleted = 0;
     let failed = 0;
-    for (const record of records) {
-      const cleared = {};
-      for (const field of ["check_in_photo_key", "check_out_photo_key"]) {
-        const key = record[field];
-        if (!key) continue;
-        const result = await deletePhoto(key);
-        if (result.deleted) {
-          deleted += 1;
-          cleared[field] = null;
-        } else {
-          failed += 1;
+    let more = false;
+    let batch = records;
+
+    for (;;) {
+      scanned += batch.length;
+      for (const record of batch) {
+        const cleared = {};
+        let recordFailed = false;
+        for (const field of ["check_in_photo_key", "check_out_photo_key"]) {
+          const key = record[field];
+          if (!key) continue;
+          const result = await deletePhoto(key);
+          if (result.deleted) {
+            deleted += 1;
+            cleared[field] = null;
+          } else {
+            failed += 1;
+            recordFailed = true;
+          }
         }
+        // Only the keys whose objects are actually gone are cleared, so a
+        // storage outage leaves the record intact for the next run rather than
+        // orphaning a file nothing points at any more.
+        if (Object.keys(cleared).length) {
+          await db.collection("attendance").updateOne(
+            { _id: record._id },
+            { $set: { ...cleared, photos_purged_at: new Date() } }
+          );
+        }
+        if (recordFailed) stuck.push(record._id);
       }
-      // Only the keys whose objects are actually gone are cleared, so a
-      // storage outage leaves the record intact for the next run rather than
-      // orphaning a file nothing points at any more.
-      if (Object.keys(cleared).length) {
-        await db.collection("attendance").updateOne(
-          { _id: record._id },
-          { $set: { ...cleared, photos_purged_at: new Date() } }
-        );
+
+      if (batch.length < PHOTO_PURGE_BATCH) break;
+      if (Date.now() >= deadline || stuck.length >= PHOTO_PURGE_MAX_STUCK) {
+        more = true;
+        break;
       }
+      batch = await db.collection("attendance")
+        .find(expiredFilter(stuck), { projection: { check_in_photo_key: 1, check_out_photo_key: 1 } })
+        .limit(PHOTO_PURGE_BATCH)
+        .toArray();
+      if (!batch.length) break;
     }
 
     return res.json({
       retention_months: retentionMonths,
       cutoff: cutoff.toISOString(),
-      records: records.length,
+      records: scanned,
       photos_deleted: deleted,
       photos_failed: failed,
-      // The batch is capped, so a large backlog clears over several runs
-      // rather than one request timing out part way through.
-      more: records.length === PHOTO_PURGE_BATCH,
+      // True only when the budget ran out with work still queued, so a caller
+      // knows to run again rather than assuming the backlog is clear.
+      more,
     });
   })
 );

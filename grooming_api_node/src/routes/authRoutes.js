@@ -25,6 +25,7 @@ import {
   RESET_TTL_MS,
 } from "../services/passwordResetService.js";
 import { enqueueMailJob } from "../services/mailWorker.js";
+import { sealSecret } from "../services/secretBox.js";
 import { withMongoTransaction } from "../config/db.js";
 import rateLimit from "express-rate-limit";
 
@@ -192,6 +193,11 @@ authRouter.post(
   "/forgot-password",
   passwordResetLimiter,
   asyncRoute(async (req, res) => {
+    // Started before any lookup so a known and an unknown address take the same
+    // observable time. It lived in the change-password handler's scope, where
+    // this one could not see it, so every request here threw a ReferenceError
+    // and self-service reset answered 500 instead of the generic message.
+    const minimumResponse = new Promise((resolve) => setTimeout(resolve, 300));
     const email = String(req.body?.email || "").trim().toLowerCase();
     const genericResponse = {
       message: "If that email has an account, a reset link is on its way.",
@@ -220,7 +226,10 @@ authRouter.post(
         payload: {
           name,
           appUrl: appUrl(),
-          token,
+          // Sealed, not raw. password_resets stores only a hash of this token
+          // precisely so a database copy cannot be replayed; a queued job
+          // holding the plaintext gave that back until the mail was sent.
+          token_sealed: sealSecret(token),
           expiresInMinutes: Math.round(RESET_TTL_MS / 60000),
         },
       });

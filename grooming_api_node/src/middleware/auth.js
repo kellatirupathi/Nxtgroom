@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { ObjectId } from "mongodb";
@@ -128,6 +129,13 @@ export async function getCurrentUser(req, res, next) {
       ...(typeof user.can_delete_records === "boolean"
         ? { can_delete_records: user.can_delete_records }
         : {}),
+      // Carried for the same reason. canDeleteCheckout() reads this field, but
+      // it was never copied off the user document, so a per-person check-out
+      // override could be stored and would then be ignored: everyone silently
+      // fell back to the workspace default instead.
+      ...(typeof user.can_delete_checkout === "boolean"
+        ? { can_delete_checkout: user.can_delete_checkout }
+        : {}),
     };
     return next();
   } catch (error) {
@@ -170,6 +178,27 @@ export function idMatch(idStr) {
     variants.push(new ObjectId(idStr));
   }
   return { $in: variants };
+}
+
+/**
+ * Guard for endpoints an operator or scheduler calls without a session.
+ *
+ * cron-jobs.org cannot hold one, and neither can an uptime probe, so they
+ * present a shared secret instead. Compared in constant time so the check
+ * cannot leak the secret one byte at a time.
+ */
+export function requireCronSecret(req, res, next) {
+  const expected = process.env.CRON_SECRET || "";
+  if (!expected) {
+    return res.status(503).json({ detail: "CRON_SECRET is not configured on the server" });
+  }
+  const supplied = String(req.get("x-cron-secret") || "");
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(supplied);
+  const matches = expectedBuffer.length === suppliedBuffer.length
+    && crypto.timingSafeEqual(expectedBuffer, suppliedBuffer);
+  if (!matches) return res.status(401).json({ detail: "Invalid cron secret" });
+  return next();
 }
 
 export function requireDatabase(req, res, next) {
