@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, CircleAlert, MapPin, UserRoundSearch } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch } from 'lucide-react';
 import { apiFetch, ApiError } from '../api';
 import CameraCapture from './CameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 
-/** How long a result stays on screen before the camera is ready again. */
-const RESULT_VISIBLE_MS = 4_000;
+/**
+ * How long a result stays on screen.
+ *
+ * Long enough to read a name at arm's length, short enough that it is gone
+ * before the next person has finished stepping into frame. The camera keeps
+ * running underneath either way, so this only governs the message.
+ */
+const RESULT_VISIBLE_MS = 2_000;
 
 type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'UNIDENTIFIED';
 
@@ -119,15 +125,15 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
 
   return (
     <div className="w-full h-full flex flex-col">
-      <div className="mb-4 shrink-0 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h2 className="text-xl font-extrabold text-slate-800">Attendance</h2>
-          <p className="text-sm text-slate-500 mt-1">
-            Stand in the outline. The photo is taken automatically and the instructor is
-            identified from it.
-          </p>
-        </div>
-        <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5">
+      {/* One short line, so the picture gets the rest of the screen. The
+          instructions that used to sit here are already on the camera itself,
+          where somebody standing in front of it is actually looking: the guide
+          outline shows where to stand, and the guidance line says what to fix
+          when the camera has not fired. Repeating them above the frame only
+          pushed the frame down. */}
+      <div className="mb-2 shrink-0 flex items-center justify-between gap-4">
+        <h2 className="text-lg font-extrabold text-slate-800">Attendance</h2>
+        <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 shrink-0">
           <MapPin size={14} className={fix ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
           {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
         </p>
@@ -155,44 +161,47 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
           onClose={onExit}
         />
 
-        {/* Below the result card rather than beside it. The camera keeps
-            running while a result is on screen, so the common case is the next
-            person being identified while the previous name still shows: at the
-            same height the two would sit on top of each other. */}
-        {submitting && (
+        {/* The photograph has been taken and the person is being recognised,
+            which takes a couple of seconds against Rekognition. Centred and
+            green so that somebody standing at the tablet can see at a glance
+            that they were captured and the machine is working — a small dark
+            pill in a corner read as an incidental status line and left people
+            wondering whether anything had happened at all.
+
+            Hidden while a result is showing: with the camera live the next
+            capture can start before the previous name has faded, and the
+            answer somebody is reading matters more than the next request. */}
+        {submitting && !result && (
           <div
-            className={`absolute left-3 rounded-full bg-slate-900/80 px-4 py-2 ${result ? 'top-20' : 'top-3'}`}
+            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-emerald-600/90"
             role="status"
           >
-            <p className="text-sm font-bold text-white">Identifying…</p>
+            <Loader2 size={44} className="animate-spin text-white" aria-hidden="true" />
+            <p className="text-xl font-extrabold text-white">Identifying…</p>
           </div>
         )}
 
-        {/* Names the person and what was recorded, over a camera that keeps
-            running: the next instructor can step up while this is still on
-            screen, rather than waiting out a frame that has gone blank.
-
-            Anchored at the top, because the shutter and the framing guidance
-            both live along the bottom edge and a card there would cover the
-            instruction telling somebody why the camera has not fired. */}
+        {/* The answer, over a camera that never stopped: the next instructor
+            can step up while this is still on screen rather than waiting out a
+            blanked frame. Centred and large for the same reason as above — it
+            is the only confirmation anybody gets, and it is read at arm's
+            length by somebody who pressed nothing. */}
         {result && (
           <div
-            className={`absolute inset-x-3 top-3 flex items-center gap-3 rounded-xl px-4 py-3 shadow-lg ${toneStyles[result.tone]}`}
+            className={`absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center ${toneStyles[result.tone]}`}
             role="status"
             aria-live="assertive"
           >
-            <ToneIcon size={28} className="shrink-0" aria-hidden="true" />
-            <div className="min-w-0">
-              <p className="text-lg font-extrabold leading-tight truncate">{result.title}</p>
-              {result.detail && (
-                <p className="text-xs font-medium opacity-90 mt-0.5 line-clamp-2">{result.detail}</p>
-              )}
-              {!result.recorded && (
-                <p className="text-[10px] font-bold uppercase tracking-wider opacity-75 mt-0.5">
-                  Nothing was recorded
-                </p>
-              )}
-            </div>
+            <ToneIcon size={44} className="shrink-0" aria-hidden="true" />
+            <p className="text-2xl font-extrabold leading-tight">{result.title}</p>
+            {result.detail && (
+              <p className="text-sm font-medium opacity-90 max-w-md line-clamp-3">{result.detail}</p>
+            )}
+            {!result.recorded && (
+              <p className="text-[10px] font-bold uppercase tracking-wider opacity-75">
+                Nothing was recorded
+              </p>
+            )}
           </div>
         )}
       </div>
