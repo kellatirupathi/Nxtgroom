@@ -116,6 +116,41 @@ export function runtimeConfig() {
     notificationConcurrency: parseInteger("NOTIFICATION_CONCURRENCY", 2, { min: 1, max: 20 }),
     processRole: process.env.PROCESS_ROLE || "all",
     appTimeZone: process.env.APP_TIME_ZONE || "Asia/Kolkata",
+    // Face identification. Absent configuration is not an error: the flow is
+    // being built before the AWS collection exists, and check-in must keep
+    // working until it does, so faceRecognition reports NOT_CONFIGURED.
+    rekognitionCollectionId: (process.env.REKOGNITION_COLLECTION_ID || "").trim(),
+    // Face recognition lives in its own AWS account, so it carries its own
+    // credentials and its own region. Deliberately no fallback to the SES key:
+    // the accounts are unrelated, so silently reusing the mail credential would
+    // authenticate against the wrong account and fail as AccessDenied, which
+    // reads like a broken policy rather than a missing setting.
+    rekognitionRegion: (process.env.AWS_REKOGNITION_REGION || "").trim(),
+    rekognitionAccessKeyId: (process.env.REKOGNITION_ACCESS_KEY_ID || "").trim(),
+    rekognitionSecretAccessKey: (process.env.REKOGNITION_SECRET_ACCESS_KEY || "").trim(),
+    // A wrong identity files one instructor's grooming record under another
+    // name, so the floor is deliberately high: below this the record is saved
+    // unidentified for an admin to resolve, which is recoverable.
+    rekognitionMatchThreshold: parseInteger("REKOGNITION_MATCH_THRESHOLD", 95, { min: 80, max: 100 }),
+    rekognitionMaxFacesPerInstructor: parseInteger(
+      "REKOGNITION_MAX_FACES_PER_INSTRUCTOR",
+      6,
+      { min: 1, max: 20 }
+    ),
+    // More than one candidate is requested because the nearest faces are often
+    // other embeddings of the same person; they are grouped by instructor
+    // before the best score is compared.
+    rekognitionSearchCandidates: parseInteger("REKOGNITION_SEARCH_CANDIDATES", 8, { min: 2, max: 50 }),
+    // Quality floors for a reference photograph, applied before indexing. A
+    // blurry reference never fails loudly; it produces confident wrong matches
+    // for as long as it stays in the collection.
+    rekognitionMinFaceConfidence: parseInteger("REKOGNITION_MIN_FACE_CONFIDENCE", 90, { min: 50, max: 100 }),
+    rekognitionMinSharpness: parseInteger("REKOGNITION_MIN_SHARPNESS", 20, { min: 0, max: 100 }),
+    rekognitionMinBrightness: parseInteger("REKOGNITION_MIN_BRIGHTNESS", 20, { min: 0, max: 100 }),
+    // Identification runs inside the check-in request, so its worst case has to
+    // leave room for the rest of the handler inside HTTP_REQUEST_TIMEOUT_MS.
+    rekognitionTimeoutMs: parseInteger("REKOGNITION_TIMEOUT_MS", 10000, { min: 2000, max: 30000 }),
+    rekognitionMaxAttempts: parseInteger("REKOGNITION_MAX_ATTEMPTS", 2, { min: 1, max: 4 }),
   };
 }
 

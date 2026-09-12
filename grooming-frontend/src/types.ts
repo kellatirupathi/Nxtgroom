@@ -25,6 +25,12 @@ export type AttendanceStatus =
   | 'non_compliant'
   /** Analysed, but the photograph showed nothing to judge. Neither of the above. */
   | 'unassessed'
+  /**
+   * Recorded, but face recognition could not say who it is. Nothing was
+   * analysed and nothing is queued: it waits for an administrator to attach an
+   * instructor. Distinct from pending, which means analysis is still running.
+   */
+  | 'unidentified'
   | 'error'
   | 'pending';
 
@@ -71,6 +77,13 @@ export interface Instructor {
   phone_no?: string | null;
   created_at?: string;
   daily_feedbacks?: DailyFeedback[];
+  /**
+   * How many reference faces are enrolled for this instructor. Zero or absent
+   * means recognition cannot identify them, so every check-in reaches the
+   * unidentified queue until a photo is added.
+   */
+  face_count?: number;
+  face_indexed_at?: string | null;
   /** Fields owned by the BigQuery roster; absent on manually created rows. */
   instructor_user_id?: string | null;
   instructor_role?: string | null;
@@ -100,6 +113,12 @@ export interface AttendanceRecord {
   check_out_location_accuracy_m?: number | null;
   /** Its own reverse-geocoded name: the two halves can be different places. */
   check_out_location_address?: string | null;
+  /**
+   * Set to "not_checked_out" by the midnight job when a day ended with the
+   * check-in still open. Descriptive only: the record stays closeable, so a
+   * session that ran past midnight can still be closed afterwards.
+   */
+  checkout_status?: string | null;
   /** The check-out's own verdict. The fields above hold the check-in's. */
   checkout_compliance_status?: string | null;
   checkout_remarks?: string | null;
@@ -177,6 +196,18 @@ export interface CurrentUser {
   can_delete_checkout?: boolean;
   /** Workspace-wide: whether the Re-analyse control is shown on a report. */
   reanalyse_enabled?: boolean;
+  /**
+   * Whether this account may name an unidentified check-in, and discard one.
+   * Off for a BOA until granted, since naming decides whose attendance a
+   * record becomes and enrolls that photograph as a face for them.
+   */
+  can_identify?: boolean;
+  /**
+   * Whether this tablet's college identifies the instructor from the check-in
+   * photograph. Resolved server-side for the signed-in account's own college,
+   * so the capture screen shows a selector only where one still applies.
+   */
+  face_identification?: boolean;
 }
 
 /** One account's capabilities, and where each answer comes from. */
@@ -193,6 +224,35 @@ export interface UserPermissions {
 export interface AccessSettings {
   boa_can_delete_records: boolean;
   boa_can_delete_checkout: boolean;
+  /**
+   * Whether BOAs may name an unidentified check-in. Deliberately not implied by
+   * the delete permissions: discarding a photograph and deciding whose
+   * attendance record it becomes are different powers.
+   */
+  boa_can_identify: boolean;
+}
+
+export type IdentificationMode = 'FACE_ONLY' | 'SELECTOR';
+
+/** One college's identification mode, with the enrolment behind it. */
+export interface CollegeIdentification {
+  college_id: string;
+  college_name: string | null;
+  mode: IdentificationMode;
+  /** COLLEGE when set for this college, DEFAULT when following the global one. */
+  source: 'COLLEGE' | 'DEFAULT';
+  instructors: number;
+  enrolled: number;
+  enrolled_percent: number;
+  /** Advisory: face-only with too few enrolled faces. Never changes the mode. */
+  low_enrolment: boolean;
+}
+
+export interface IdentificationSettings {
+  default_mode: IdentificationMode;
+  modes: IdentificationMode[];
+  low_enrolment_percent: number;
+  colleges: CollegeIdentification[];
 }
 
 export interface NotificationSettings {
