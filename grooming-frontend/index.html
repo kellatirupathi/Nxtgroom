@@ -10,6 +10,21 @@
     <meta name="description" content="Authorized instructor attendance and grooming audit management." />
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <meta name="theme-color" content="#4f46e5" />
+
+    <!-- Installs to the home screen and opens without the browser's address
+         bar. The tablets run the kiosk screen, where that bar is both height
+         the camera needs for a full-body frame and a control somebody standing
+         at the tablet can tap to leave the app. Added to the site rather than
+         to the Android shell, which is a WebView and never had one. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Safari ignores the manifest's display mode, so iOS needs telling
+         separately. black-translucent lets the page paint under the status
+         bar, which the viewport-fit=cover above already accounts for. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FacultyTrack" />
     <title>FacultyTrack | Instructor Attendance</title>
     <!-- Painted before the bundle parses, so the first frame is the brand
          rather than a white page. React replaces #root and takes this with it. -->
