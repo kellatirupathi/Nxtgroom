@@ -124,6 +124,18 @@ export function runtimeConfig() {
     // out-of-memory kill is a worse answer to a busy minute than a 503 asking
     // the tablet to retry.
     checkInConcurrencyLimit: parseInteger("CHECKIN_CONCURRENCY_LIMIT", 10, { min: 1, max: 50 }),
+    // How long one R2 request may take before it is abandoned.
+    //
+    // Photo storage runs inside the check-in request, holding one of the
+    // decode slots above. Without a timeout a connected-but-silent R2 holds
+    // that slot until the server destroys the socket at
+    // HTTP_REQUEST_TIMEOUT_MS, so enough hung uploads close check-in entirely —
+    // and report nothing, because no error was ever raised. A refused or failed
+    // upload was always handled; only the hang had no bound.
+    //
+    // Generous for an 8MB upload on a slow campus connection, and well inside
+    // the request budget so the timeout is what fires rather than the socket.
+    r2TimeoutMs: parseInteger("R2_TIMEOUT_MS", 15000, { min: 2000, max: 60000 }),
     sesTimeoutMs: parseInteger("SES_TIMEOUT_MS", 30000, { min: 5000, max: 120000 }),
     sesMaxAttempts: parseInteger("SES_MAX_ATTEMPTS", 2, { min: 1, max: 3 }),
     notificationLeaseMs: parseInteger("NOTIFICATION_LEASE_MS", 300000, { min: 60000, max: 600000 }),
