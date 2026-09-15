@@ -8,6 +8,8 @@ import {
   DAILY_ATTENDANCE_INDEX,
   DatabasePreflightError,
   EVALUATION_IDENTITY_INDEX,
+  evaluationAuditCutoff,
+  EVALUATION_AUDIT_WINDOW_DAYS,
   formatDatabasePreflightReport,
   migrateLegacyActiveAttendanceIndex,
   migrateLegacyEvaluationIdentityIndex,
@@ -19,14 +21,21 @@ function preflightDb(rows = {}, initialIndexes = {}) {
   const createCalls = [];
   const dropCalls = [];
   const updateCalls = [];
+  const queries = [];
   return {
     createCalls,
     dropCalls,
     updateCalls,
+    queries,
     rows,
     collection(name) {
       return {
-        find() {
+        // The filter is recorded rather than applied. Applying it would mean
+        // reimplementing MongoDB's query language in the stub; recording it
+        // lets a test assert what the audit asked for, which is the part that
+        // can silently regress.
+        find(filter) {
+          queries.push({ collection: name, filter });
           return { toArray: async () => rows[name] || [] };
         },
         listIndexes() {
@@ -472,4 +481,65 @@ test("a database whose only oddity is an unidentified check-in still starts", as
     "an unrecognised check-in must never block startup"
   );
   assert.equal(report.findings.length, 0);
+});
+
+/**
+ * The audit reads a window of evaluations, not the whole collection.
+ *
+ * Evaluations are the only collection here that grows without limit — two rows
+ * per check-in, never pruned — and reading all of them put the audit on a
+ * deadline: at five thousand check-ins a day it outgrows a 512MB container in
+ * about seven months, and the audit is the thing meant to tell you when
+ * something is wrong.
+ *
+ * The stub does not apply filters, so this asserts what was asked for rather
+ * than what came back. That is the part that can regress silently: drop the
+ * filter and every existing fixture still passes, because they hand back their
+ * rows regardless.
+ */
+test("evaluations are audited over a bounded window, measured from the audit's own clock", async () => {
+  const now = new Date("2026-09-15T00:00:00.000Z");
+  const db = preflightDb({
+    evaluations: [{ _id: "evaluation-1", attendance_id: "attendance-1", kind: "checkin" }],
+  });
+
+  await auditDatabasePreflight(db, { now });
+
+  const evaluationQuery = db.queries.find((query) => query.collection === "evaluations");
+  assert.ok(evaluationQuery, "the audit must read evaluations");
+  assert.deepEqual(
+    evaluationQuery.filter,
+    { processed_at: { $gte: evaluationAuditCutoff(now) } },
+    "evaluations must be read from the cutoff, not from the beginning",
+  );
+
+  // The other collections stay unbounded on purpose: instructors is capped by
+  // headcount and open attendance by sessions genuinely still open, so neither
+  // grows with time the way evaluations does.
+  const attendanceQuery = db.queries.find((query) => query.collection === "attendance");
+  assert.deepEqual(
+    attendanceQuery.filter,
+    { check_out_time: null },
+    "open attendance is bounded by what is open, so it keeps its own filter",
+  );
+});
+
+test("the evaluation window is ninety days behind the moment it is measured from", () => {
+  const now = new Date("2026-09-15T00:00:00.000Z");
+  const cutoff = evaluationAuditCutoff(now);
+  const days = (now.getTime() - cutoff.getTime()) / (24 * 60 * 60 * 1000);
+  assert.equal(days, EVALUATION_AUDIT_WINDOW_DAYS);
+  assert.equal(EVALUATION_AUDIT_WINDOW_DAYS, 90);
+});
+
+test("a missing or unusable clock still produces a cutoff rather than an invalid date", () => {
+  // loadPreflightRows defaults its own clock, but auditDatabasePreflight is
+  // exported and a caller can pass anything. An Invalid Date here would make
+  // the filter match nothing, so the audit would quietly report a clean
+  // database while reading none of it.
+  for (const bad of [undefined, null, "yesterday", new Date("nonsense"), 0]) {
+    const cutoff = evaluationAuditCutoff(bad);
+    assert.ok(cutoff instanceof Date, `${String(bad)} must still yield a Date`);
+    assert.ok(Number.isFinite(cutoff.getTime()), `${String(bad)} must yield a usable Date`);
+  }
 });

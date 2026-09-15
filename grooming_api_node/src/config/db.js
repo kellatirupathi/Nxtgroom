@@ -1,12 +1,11 @@
 import { MongoClient } from "mongodb";
 import {
   applyDatabaseIndexes,
-  assertDatabasePreflightSafe,
-  auditDatabasePreflight,
   DATABASE_INDEX_APPLY_CONFIRMATION,
   DatabasePreflightError,
   migrateLegacyActiveAttendanceIndex,
   migrateLegacyEvaluationIdentityIndex,
+  verifyDatabaseIndexes,
 } from "./databasePreflight.js";
 import { isProduction, runtimeConfig } from "./env.js";
 
@@ -64,16 +63,43 @@ export async function connectToMongo() {
     if (attendanceIndexMigration.migrated) {
       console.log("Migrated attendance uniqueness from global-open to one record per local day.");
     }
-    const preflight = await auditDatabasePreflight(db);
-    assertDatabasePreflightSafe(preflight);
+    /**
+     * Startup checks the indexes, and nothing else.
+     *
+     * The full audit reads six collections in their entirety to look for
+     * duplicates and dangling references — every evaluation ever written among
+     * them, which is two rows per check-in and grows forever. On a 512MB
+     * container that crosses the limit inside a year, and it crosses it during
+     * startup, so the symptom is a container killed before it can serve and
+     * restarted into the same wall.
+     *
+     * Nothing is lost by moving it. The audit reports; it never repairs, since
+     * only a person can say which of two colliding records is the real one. And
+     * corruption appears when something writes it during the day, not when a
+     * process starts, so running the check here found it no sooner than a
+     * nightly `npm run db:preflight` does — it only made the finding arrive at
+     * the moment least able to act on it. That is not hypothetical: one
+     * unrecognised check-in was read as a dangling reference and kept the API
+     * down through eight restarts.
+     *
+     * verifyDatabaseIndexes stays because it is cheap — it lists index names
+     * and compares them — and because serving without the indexes is a real
+     * fault rather than a report: queries that should use an index would
+     * quietly scan instead.
+     */
+    const indexes = await verifyDatabaseIndexes(db);
     if (isProduction()) {
-      if (!preflight.indexes.ready) {
+      if (!indexes.ready) {
         throw new DatabasePreflightError(
-          preflight,
+          // Shaped like an audit report because that is what the error prints.
+          // There are no findings here: this path knows about indexes only, and
+          // claiming otherwise would put an empty corruption list in a message
+          // about missing indexes.
+          { findings: [], indexes, summary: { missing_indexes: indexes.missing.length } },
           "Required database indexes are missing; run the confirmed preflight apply job before production startup"
         );
       }
-    } else if (!preflight.indexes.ready) {
+    } else if (!indexes.ready) {
       await applyDatabaseIndexes(db, { confirmation: DATABASE_INDEX_APPLY_CONFIRMATION });
     }
   } catch (error) {

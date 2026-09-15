@@ -198,7 +198,15 @@ async function purgeAttendance(db, attendance) {
   );
   if (!marked.matchedCount) {
     const current = await db.collection("attendance").findOne({ _id: attendance._id });
+    // Already gone: another caller finished the whole deletion.
     if (!current) return;
+    // Still here, but already carrying a tombstone, so a deletion is in flight
+    // elsewhere. Continuing would race that one to the photographs, and the
+    // loser reports PHOTO_DELETE_FAILED for a key the winner has already
+    // removed — a 503 telling somebody their deletion failed when it
+    // succeeded, and a retry that then answers 404. The record is being
+    // removed either way; the only thing left to do is not interfere.
+    return;
   }
   // Cancel both halves before touching storage. Workers also re-check the
   // tombstone immediately before external work, covering already-claimed jobs.
@@ -1083,14 +1091,25 @@ async function storeAttendancePhoto({
   return upload.stored ? { stored: true, key } : { stored: false, reason: upload.reason };
 }
 
-/** Guard for queue work: naming a record, and discarding one. */
-async function requireIdentifyPermission(req, res, next) {
+/**
+ * Guard for queue work: naming a record, and discarding one.
+ *
+ * Wrapped like every handler, because it awaits. Express 4 does not catch a
+ * rejected promise from middleware, so an unwrapped version had two failures
+ * for the price of one: the request never received a reply and hung until the
+ * server destroyed its socket, and the rejection reached the process-level
+ * unhandledRejection listener, which shuts the API down. getAccessSettings
+ * reads the database on a thirty-second cache, so any transient fault — a
+ * failover, a pool timeout — turned one request for the unidentified queue
+ * into an outage for everybody.
+ */
+const requireIdentifyPermission = asyncRoute(async (req, res, next) => {
   const settings = await getAccessSettings(req.app.locals.db);
   if (!canIdentifyAttendance(req.currentUser, settings)) {
     return res.status(403).json({ detail: "Not authorized to resolve unidentified check-ins" });
   }
   return next();
-}
+});
 
 /**
  * Check-ins whose face was not recognised, oldest first.

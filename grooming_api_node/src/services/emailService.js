@@ -388,7 +388,11 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
       `Here is your appearance summary for ${range}.`,
       "",
       `Days present: ${summary.present_days} of 6`,
-      `Compliant: ${summary.compliant_days} | Needs review: ${summary.review_days} | Non-compliant: ${summary.non_compliant_days}`,
+      // No "needs review" figure: summariseWeek does not produce one. It was
+      // interpolated anyway, so every weekly summary told its reader "Needs
+      // review: undefined". The status it counted was removed from evaluation
+      // and only the label survived.
+      `Compliant: ${summary.compliant_days} | Non-compliant: ${summary.non_compliant_days}`,
       `Attire: formal ${summary.formal_days}, saree ${summary.saree_days}, kurti ${summary.kurti_days}`,
       ...(summary.missed_checkouts ? [`Missed check-outs: ${summary.missed_checkouts}`] : []),
       "",
@@ -406,7 +410,7 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
       <p>Here is your appearance summary for <strong>${escapeHtml(range)}</strong>.</p>
       <p>
         Days present: <strong>${summary.present_days} of 6</strong><br>
-        Compliant: ${summary.compliant_days} &middot; Needs review: ${summary.review_days} &middot; Non-compliant: ${summary.non_compliant_days}<br>
+        Compliant: ${summary.compliant_days} &middot; Non-compliant: ${summary.non_compliant_days}<br>
         Attire: formal ${summary.formal_days}, saree ${summary.saree_days}, kurti ${summary.kurti_days}
         ${summary.missed_checkouts ? `<br>Missed check-outs: ${summary.missed_checkouts}` : ""}
       </p>
