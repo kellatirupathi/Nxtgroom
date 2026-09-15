@@ -628,19 +628,96 @@ attendanceRouter.post(
       });
     }
 
-    const stored = await storeAttendancePhoto({
-      instructorId: instructor?._id || "unidentified",
-      kind: action === KIOSK_ACTIONS.CHECK_OUT ? "checkout" : "checkin",
-      normalizedImage,
-      coordinates,
-      accuracyMetres: req.body.location_accuracy_m || "",
+    /**
+     * The upload runs alongside the rest of the request rather than in front of
+     * it.
+     *
+     * Storing the photograph is the slowest thing this route does — measured at
+     * 400-900ms against R2, where recognition is 200-400ms and every database
+     * step is tens of milliseconds. Waiting for it before answering meant
+     * somebody stood at the tablet for a second longer than the system needed
+     * to know who they were and what to record.
+     *
+     * The key is generated here, so the record can reference the object before
+     * the bytes have finished arriving. Nothing reads that reference
+     * synchronously: the orphan reconciler skips referenced keys and waits an
+     * hour regardless, and the photo endpoints mint a link on demand rather
+     * than at write time.
+     *
+     * The one thing that genuinely needs the bytes is the analysis, because the
+     * worker downloads the photograph by key and is woken the moment a job is
+     * queued. So the response goes early and the enqueue still waits — see
+     * settleUpload below.
+     */
+    const photoKind = action === KIOSK_ACTIONS.CHECK_OUT ? "checkout" : "checkin";
+    const photoKey = buildPhotoKey({
+      instructorId: String(instructor?._id || "unidentified"),
+      kind: photoKind,
+      mimeType: normalizedImage.mimeType,
       now,
     });
-    if (!stored.stored) {
-      return res.status(503).json({
-        detail: "Photo storage is unavailable right now. Please try again in a moment.",
-      });
-    }
+    const uploading = uploadPhoto({
+      key: photoKey,
+      body: normalizedImage.buffer,
+      mimeType: normalizedImage.mimeType,
+      metadata: {
+        instructor_id: String(instructor?._id || "unidentified"),
+        kind: photoKind,
+        captured_at: now.toISOString(),
+        coordinates: coordinates || "",
+        accuracy_m: req.body.location_accuracy_m || "",
+      },
+    }).then(
+      (upload) => Boolean(upload?.stored),
+      (error) => {
+        console.error(`Kiosk photo upload failed for ${photoKey}: ${error?.name || "Error"}`);
+        return false;
+      }
+    );
+
+    /**
+     * Waits for the upload, and records the failure on the attendance row.
+     *
+     * A photograph that never arrived leaves a record pointing at nothing. The
+     * record still matters — it is the evidence somebody turned up — so it is
+     * kept and marked rather than deleted, and the analysis is not queued for
+     * an image the worker could never download.
+     */
+    const settleUpload = async (attendanceId, kind) => {
+      if (await uploading) return true;
+      const field = kind === "checkout" ? "check_out_photo_key" : "check_in_photo_key";
+      await db.collection("attendance").updateOne(
+        { _id: attendanceId },
+        {
+          $set: {
+            [field]: null,
+            photo_storage_failed_at: new Date(),
+            ...(kind === "checkout"
+              ? { checkout_evaluation_queue_status: null, checkout_email_status: "not_requested" }
+              : {
+                evaluation_queue_status: null,
+                status: "error",
+                remarks: "The photograph could not be stored, so this check-in was not analysed.",
+              }),
+            updated_at: new Date(),
+          },
+        }
+      );
+      incrementMetric("kiosk_photo_upload_failures_total");
+      return false;
+    };
+    /**
+     * Throws the photograph away once its upload has settled.
+     *
+     * Deleting the key while the upload is still in flight would race it: the
+     * delete finds nothing, the object lands a moment later, and it stays in
+     * the bucket forever with no record pointing at it. Waiting first means
+     * there is either something to delete or nothing to do.
+     */
+    const discardPendingUpload = async (reason) => {
+      if (await uploading) await compensateUploadedPhoto(db, photoKey, reason);
+    };
+    const stored = { key: photoKey };
 
     /**
      * Nobody matched, so this is recorded as an arrival for an administrator to
@@ -658,6 +735,9 @@ attendanceRouter.post(
         recognition: { reason: match.reason, bestSimilarity: null, candidateInstructorId: null },
         now,
       });
+      // Nothing is analysed for an unidentified record, so the upload only has
+      // to be accounted for, not waited on before answering.
+      void settleUpload(unidentified.attendance._id, "checkin");
       if (coordinates) void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
       incrementMetric("kiosk_unidentified_total");
       return res.status(202).json({
@@ -694,7 +774,7 @@ attendanceRouter.post(
           now,
         });
       } catch (error) {
-        await compensateUploadedPhoto(db, stored.key, "kiosk_checkin_commit_failed");
+        await discardPendingUpload("kiosk_checkin_commit_failed");
         if (error.code === 11000) {
           return res.status(409).json({
             detail: "This instructor has already checked in today",
@@ -706,7 +786,7 @@ attendanceRouter.post(
       if (committed.outcome !== "created") {
         // invalid_email and the duplicate guard both land here. The photo has an
         // owner only when a record was written, so it is discarded otherwise.
-        await compensateUploadedPhoto(db, stored.key, `kiosk_${committed.outcome}`);
+        await discardPendingUpload(`kiosk_${committed.outcome}`);
         return res.status(committed.outcome === "invalid_email" ? 422 : 409).json({
           detail: committed.outcome === "invalid_email"
             ? "This instructor needs a valid email address before check-in reports can be sent."
@@ -715,18 +795,24 @@ attendanceRouter.post(
       }
 
       const { attendance, evaluationPayload } = committed;
-      try {
-        await enqueueEvaluation(db, {
-          attendanceId: attendance._id,
-          instructor: evaluationPayload.instructor,
-          photoKey: evaluationPayload.photo_key,
-          mimeType: evaluationPayload.mime_type,
-          checkInTime: evaluationPayload.check_in_time,
-          deadlineAt: evaluationPayload.deadline_at,
-        });
-      } catch (error) {
-        console.error(`Kiosk evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
-      }
+      // Detached deliberately: the worker downloads the photograph by key and is
+      // woken as soon as a job exists, so the queue has to wait for the bytes —
+      // but the person at the tablet does not.
+      void settleUpload(attendance._id, "checkin").then(async (ok) => {
+        if (!ok) return;
+        try {
+          await enqueueEvaluation(db, {
+            attendanceId: attendance._id,
+            instructor: evaluationPayload.instructor,
+            photoKey: evaluationPayload.photo_key,
+            mimeType: evaluationPayload.mime_type,
+            checkInTime: evaluationPayload.check_in_time,
+            deadlineAt: evaluationPayload.deadline_at,
+          });
+        } catch (error) {
+          console.error(`Kiosk evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
+        }
+      });
       if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates);
       incrementMetric("kiosk_checkin_total");
       return res.status(202).json({
@@ -760,32 +846,35 @@ attendanceRouter.post(
     );
     const attendance = result?.value || result;
     if (!attendance) {
-      await compensateUploadedPhoto(db, stored.key, "kiosk_duplicate_checkout");
+      await discardPendingUpload("kiosk_duplicate_checkout");
       return res.status(409).json({
         detail: "This instructor has already checked out today",
         attendance_id: String(today._id),
       });
     }
 
-    try {
-      await enqueueEvaluation(db, {
-        attendanceId: attendance._id,
-        kind: "checkout",
-        instructor: {
-          id: String(instructor._id),
-          name: instructor.name,
-          email: recipient || instructor.email || null,
-          gender: instructor.gender || null,
-          collegeId: instructor.college_id ? String(instructor.college_id) : null,
-        },
-        photoKey: stored.key,
-        mimeType: normalizedImage.mimeType,
-        checkInTime: attendance.check_in_time,
-        checkOutTime: now,
-      });
-    } catch (error) {
-      console.error(`Kiosk checkout evaluation not queued for ${attendance._id} (${error?.name || "ERROR"})`);
-    }
+    void settleUpload(attendance._id, "checkout").then(async (ok) => {
+      if (!ok) return;
+      try {
+        await enqueueEvaluation(db, {
+          attendanceId: attendance._id,
+          kind: "checkout",
+          instructor: {
+            id: String(instructor._id),
+            name: instructor.name,
+            email: recipient || instructor.email || null,
+            gender: instructor.gender || null,
+            collegeId: instructor.college_id ? String(instructor.college_id) : null,
+          },
+          photoKey: stored.key,
+          mimeType: normalizedImage.mimeType,
+          checkInTime: attendance.check_in_time,
+          checkOutTime: now,
+        });
+      } catch (error) {
+        console.error(`Kiosk checkout evaluation not queued for ${attendance._id} (${error?.name || "ERROR"})`);
+      }
+    });
     if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates, "checkout");
     incrementMetric("kiosk_checkout_total");
     return res.status(202).json({

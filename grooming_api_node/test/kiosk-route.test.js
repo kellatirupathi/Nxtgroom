@@ -51,11 +51,81 @@ test("an outcome that records nothing stores no photograph", async () => {
   // Too early and already-done both return before the upload. A photograph kept
   // for a record that was never written is somebody's picture with nothing
   // explaining why it is held.
+  //
+  // The upload is started rather than awaited now, so the thing to order
+  // against is where it begins, not a helper that waited for it.
   const { route } = await routeSource("/auto");
   const refusal = route.indexOf("KIOSK_ACTIONS.TOO_EARLY || action === KIOSK_ACTIONS.ALREADY_DONE");
-  const store = route.indexOf("storeAttendancePhoto(");
+  const store = route.indexOf("uploadPhoto(");
   assert.ok(refusal >= 0, "the route must handle the outcomes that record nothing");
   assert.ok(store > refusal, "nothing may be stored before those outcomes have returned");
+});
+
+test("the tablet is not made to wait for the upload", async () => {
+  // Storing the photograph is the slowest step in the route - 400-900ms against
+  // R2, where recognition is 200-400ms - and the person standing at the tablet
+  // has no reason to wait for it. The upload is started and its promise carried
+  // forward, so the identity and the record decide the reply.
+  const { route } = await routeSource("/auto");
+  assert.ok(
+    /const uploading = uploadPhoto\(/.test(route),
+    "the upload must be started without being awaited",
+  );
+  assert.equal(
+    route.includes("await uploadPhoto("),
+    false,
+    "awaiting the upload puts R2 back on the path to the reply",
+  );
+});
+
+test("analysis is queued only once the photograph has actually landed", async () => {
+  // The worker downloads the photograph by key, and is woken as soon as a job
+  // exists. Queueing before the bytes arrive would send it to fetch an object
+  // that is not there yet, so the enqueue waits even though the reply does not.
+  const { route } = await routeSource("/auto");
+  for (const [label, offset] of [["check-in", 0], ["check-out", 1]]) {
+    const settle = route.indexOf("settleUpload(", offset === 0 ? 0 : route.indexOf("KIOSK_ACTIONS.CHECK_IN"));
+    assert.ok(settle >= 0, `${label} must settle the upload`);
+  }
+  // Every enqueue in this route sits inside a settleUpload continuation.
+  const enqueues = [...route.matchAll(/enqueueEvaluation\(/g)].map((match) => match.index);
+  assert.ok(enqueues.length >= 2, "both halves queue an evaluation");
+  for (const at of enqueues) {
+    const before = route.slice(0, at);
+    const lastSettle = before.lastIndexOf("settleUpload(");
+    const lastReturn = before.lastIndexOf("return res.status");
+    assert.ok(
+      lastSettle > lastReturn,
+      "an evaluation must be queued from inside a settled upload, not before one",
+    );
+  }
+});
+
+test("a photograph that never arrives does not leave a record pointing at it", async () => {
+  // Attendance matters more than its picture, so the record is kept. But the
+  // key has to be cleared, or the report offers a photo button that opens an
+  // error and the worker is queued for an image it can never download.
+  const { route } = await routeSource("/auto");
+  assert.ok(route.includes("photo_storage_failed_at"), "a failed upload must be recorded");
+  assert.ok(
+    /\[field\]: null/.test(route),
+    "the photo key must be cleared when its object never arrived",
+  );
+});
+
+test("discarding a photograph waits for the upload it is discarding", async () => {
+  // Deleting the key while the upload is in flight races it: the delete finds
+  // nothing, the object lands afterwards, and nothing points at it ever again.
+  const { route } = await routeSource("/auto");
+  assert.equal(
+    route.includes("compensateUploadedPhoto(db, stored.key"),
+    false,
+    "the refusal paths must not delete a key whose upload has not settled",
+  );
+  assert.ok(
+    /discardPendingUpload = async[\s\S]{0,200}await uploading/.test(route),
+    "discarding must await the upload before deleting",
+  );
 });
 
 test("the photograph is decoded once and reused", async () => {

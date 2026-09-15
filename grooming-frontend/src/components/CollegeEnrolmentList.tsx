@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Image as ImageIcon, ImageOff, RefreshCcwDot, RefreshCw, Search, Upload, X } from 'lucide-react';
-import { apiFetch, apiFetchAllPages, invalidateCache } from '../api';
+import { apiFetch, apiFetchAllPages, invalidateCache, primeCache, readStale } from '../api';
 import IconTooltip from './IconTooltip';
 import { preparePhoto } from '../lib/imageCapture';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { useToast } from './useToast';
 import type { Instructor } from '../types';
 
-const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
+/**
+ * The roster, with a signed link to each reference photograph.
+ *
+ * include_photo_url is asked for only here. Signing is a local HMAC at roughly
+ * 1.3ms per link, which is nothing for one row and most of a second across a
+ * 600-instructor roster, so every other screen that lists instructors keeps the
+ * cheaper response. Its own path, so it also gets its own cache entry rather
+ * than overwriting the attendance screen's copy with a heavier one.
+ */
+const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false&include_photo_url=true';
 
 type EnrolmentFilter = 'all' | 'needs_photo' | 'enrolled';
 
@@ -37,11 +46,22 @@ export default function CollegeEnrolmentList({
   onBack,
   onEnrolmentChanged,
 }: CollegeEnrolmentListProps) {
-  const [instructors, setInstructors] = useState<Instructor[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Painted from the last response before the network is asked anything. The
+  // roster changes rarely and the list is long, so re-fetching before showing
+  // anything meant an empty table on every visit for data that was already
+  // known. The request still runs underneath and replaces this.
+  const [instructors, setInstructors] = useState<Instructor[]>(() => {
+    const cached = readStale<Instructor[]>(INSTRUCTORS_PATH);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [loading, setLoading] = useState(() => readStale<Instructor[]>(INSTRUCTORS_PATH) === undefined);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<EnrolmentFilter>('needs_photo');
+  // Everybody, by default. Opening on "needs photo" answered the question an
+  // administrator asks while enrolling a campus, but it hid the rest of the
+  // college from anyone who came to look someone up, and a filtered list is not
+  // obviously a filtered list at a glance.
+  const [filter, setFilter] = useState<EnrolmentFilter>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
   /** Whose reference photo is open, or null. */
   const [photoFor, setPhotoFor] = useState<Instructor | null>(null);
@@ -62,6 +82,9 @@ export default function CollegeEnrolmentList({
       });
       if (signal?.aborted) return;
       setInstructors(Array.isArray(roster) ? roster : []);
+      // Kept whole, so the next visit paints immediately. apiFetchAllPages
+      // caches each page under its own path; this stores the assembled list.
+      if (Array.isArray(roster)) primeCache(INSTRUCTORS_PATH, roster, 60_000);
       setError('');
     } catch (requestError) {
       if (signal?.aborted) return;
@@ -151,15 +174,17 @@ export default function CollegeEnrolmentList({
       // people for the first time, and replacing would silently discard a face
       // somebody had already corrected.
       form.append('mode', 'add');
-      const result = await apiFetch<{ face_count?: number }>(
+      const result = await apiFetch<{ face_count?: number; photo_url?: string | null }>(
         `/api/v2/instructors/${encodeURIComponent(instructor._id)}/face`,
         { method: 'POST', body: form, timeoutMs: 60_000 },
       );
 
-      invalidateCache(INSTRUCTORS_PATH);
+      // Both the paged entries and the assembled copy, or a reload would paint
+      // the pre-upload roster back over the row that was just enrolled.
+      invalidateCache('/api/v2/instructors');
       setInstructors((current) => current.map((row) => (
         row._id === instructor._id
-          ? { ...row, face_count: result?.face_count ?? 1 }
+          ? { ...row, face_count: result?.face_count ?? 1, reference_photo_url: result?.photo_url ?? row.reference_photo_url }
           : row
       )));
       onEnrolmentChanged();
@@ -274,15 +299,19 @@ export default function CollegeEnrolmentList({
           was wider than the content and forced a scroll the table did not need.
           The minimum width goes with it: at px-3 the four columns fit. */}
       <div className="overflow-x-auto overscroll-x-contain">
-        <table className="w-full text-left border-collapse table-fixed">
+        <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              {/* Fixed widths so a long name truncates on one line instead of
-                  wrapping and doubling its row's height. */}
-              <th className="px-3 py-2.5 w-[44%]">Instructor</th>
-              <th className="px-3 py-2.5 w-[30%]">Role</th>
-              <th className="px-3 py-2.5 w-[13%]">Photo</th>
-              <th className="px-3 py-2.5 w-[13%] text-right">Action</th>
+              {/* Sized to what each column holds rather than split evenly. A
+                  name and a role are both short, and the two that were 44% and
+                  30% were mostly empty space at any useful window width; the
+                  photograph and the action are a fixed size, so they are given
+                  exactly that and no more. A long name still truncates on one
+                  line instead of wrapping and doubling its row's height. */}
+              <th className="px-3 py-2.5 w-auto">Instructor</th>
+              <th className="px-3 py-2.5 w-[26%]">Role</th>
+              <th className="px-3 py-2.5 w-[72px]">Photo</th>
+              <th className="px-3 py-2.5 w-[64px] text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -313,16 +342,34 @@ export default function CollegeEnrolmentList({
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {enrolled ? (
-                        // The photo itself is the useful thing, so the cell is
-                        // the way to open it rather than a badge describing it.
+                        // The photograph itself, not an icon standing for one.
+                        // Whether the right face is enrolled is the question this
+                        // column exists to answer, and a green icon answers only
+                        // whether something was uploaded. Clicking still opens it
+                        // full size, since a 40px thumbnail settles the obvious
+                        // cases and not the doubtful ones.
                         <IconTooltip label="View reference photo">
                           <button
                             type="button"
                             onClick={() => setPhotoFor(instructor)}
                             aria-label={`View ${instructor.name}'s reference photo`}
-                            className="w-8 h-8 rounded-md flex items-center justify-center text-emerald-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                            className="w-10 h-10 rounded-md overflow-hidden border border-emerald-200 bg-emerald-50 flex items-center justify-center text-emerald-700 hover:border-emerald-400 transition-colors"
                           >
-                            <ImageIcon size={15} aria-hidden="true" />
+                            {instructor.reference_photo_url ? (
+                              <img
+                                src={instructor.reference_photo_url}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover"
+                                // A link that expired between the response and
+                                // the scroll leaves a broken image; fall back to
+                                // the icon the column used to show.
+                                onError={(event) => { event.currentTarget.style.display = 'none'; }}
+                              />
+                            ) : (
+                              <ImageIcon size={15} aria-hidden="true" />
+                            )}
                           </button>
                         </IconTooltip>
                       ) : (
@@ -332,7 +379,7 @@ export default function CollegeEnrolmentList({
                         <IconTooltip label="No reference photo — cannot be recognised">
                           <span
                             aria-label="No reference photo"
-                            className="w-8 h-8 rounded-md flex items-center justify-center text-slate-400 bg-slate-50 border border-slate-200"
+                            className="w-10 h-10 rounded-md flex items-center justify-center text-slate-400 bg-slate-50 border border-dashed border-slate-300"
                           >
                             <X size={15} aria-hidden="true" />
                           </span>

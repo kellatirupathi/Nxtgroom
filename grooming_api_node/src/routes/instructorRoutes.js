@@ -308,6 +308,11 @@ instructorRouter.get(
     const db = req.app.locals.db;
     let pagination;
     let includeFeedback = true;
+    // Opt-in, because it is not free. Each link is a local HMAC signature at
+    // roughly 1.3ms, which is nothing for one row and most of a second across a
+    // 600-instructor roster — and every screen that lists instructors would pay
+    // it whether or not it shows a photograph. Only the enrolment screen asks.
+    let includePhotoUrl = false;
     try {
       pagination = parsePagination(req.query, {
         defaultLimit: INSTRUCTOR_PAGE_LIMIT,
@@ -317,6 +322,11 @@ instructorRouter.get(
         if (req.query.include_feedback === "true") includeFeedback = true;
         else if (req.query.include_feedback === "false") includeFeedback = false;
         else throw new RangeError("include_feedback must be true or false");
+      }
+      if (req.query.include_photo_url !== undefined) {
+        if (req.query.include_photo_url === "true") includePhotoUrl = true;
+        else if (req.query.include_photo_url === "false") includePhotoUrl = false;
+        else throw new RangeError("include_photo_url must be true or false");
       }
     } catch (error) {
       if (error instanceof RangeError) {
@@ -344,6 +354,27 @@ instructorRouter.get(
       grouped.set(String(attendance.instructor_id), rows);
     }
 
+    /**
+     * Reference thumbnails, signed only for the callers that asked.
+     *
+     * The bucket is private, so a link is minted per response and expires. They
+     * are signed together rather than one request per row: the enrolment screen
+     * shows a whole college at once, and a request each would be a round trip
+     * per instructor for a column of small pictures.
+     *
+     * Elevated roles only, matching the contact details below. A BOA sees who
+     * is enrolled; the photograph itself is biometric reference data.
+     */
+    const photoUrls = new Map();
+    if (includePhotoUrl && isElevated(req.currentUser.role)) {
+      const withPhotos = instructors.filter((row) => row.reference_photo_key);
+      const signed = await Promise.all(withPhotos.map(async (row) => [
+        String(row._id),
+        await getPhotoUrl(row.reference_photo_key),
+      ]));
+      for (const [id, url] of signed) if (url) photoUrls.set(id, url);
+    }
+
     return res.json(instructors.map((instructor) => {
       const serialized = serializeDocument(instructor);
       for (const key of Object.keys(serialized)) {
@@ -363,6 +394,11 @@ instructorRouter.get(
         : 0;
       delete serialized.face_ids;
       delete serialized.reference_photo_key;
+      // The link, never the key: a key is a durable handle to a private object,
+      // while this expires on its own.
+      if (includePhotoUrl) {
+        serialized.reference_photo_url = photoUrls.get(String(instructor._id)) || null;
+      }
       // Contact details are visible to both elevated roles; a BOA still only
       // sees the instructors at their own college, without contact details.
       if (!isElevated(req.currentUser.role)) {
@@ -617,6 +653,11 @@ instructorRouter.post(
       face_count: faceIds.length,
       retired_faces: retiredFaceIds.length,
       quality: quality.quality,
+      // The link to what was just stored, so the row that triggered this can
+      // show the new photograph straight away. Without it the enrolment list
+      // knew the upload had succeeded but had nothing to display until the
+      // whole roster was fetched again.
+      photo_url: await getPhotoUrl(photoKey),
     });
   })
 );

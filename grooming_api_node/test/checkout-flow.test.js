@@ -84,8 +84,13 @@ test("face identification decodes the photo before the record is known, and only
   assert.ok(availabilityAt > searchAt, "the record is found from the match, so it is checked after it");
   assert.ok(storeAt > availabilityAt, "nothing is stored until the record has been accepted");
 
-  assert.ok(
-    checkoutRoute.includes("normalizedCheckoutImage\n          || await normalizeInstructorImage"),
+  // Matched as a pattern rather than an exact string: this file is checked out
+  // with CRLF endings on Windows and LF on the CI runner, so a literal \n here
+  // passed in CI and failed for every developer on Windows - a red suite that
+  // said nothing about the code.
+  assert.match(
+    checkoutRoute,
+    /normalizedCheckoutImage\r?\n\s*\|\| await normalizeInstructorImage/,
     "the stored photo reuses the identified bytes rather than decoding the upload twice"
   );
 });

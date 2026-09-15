@@ -84,6 +84,12 @@ export interface Instructor {
    */
   face_count?: number;
   face_indexed_at?: string | null;
+  /**
+   * A time-limited link to the reference photograph, present only when the
+   * caller asked for it with include_photo_url. The bucket is private, so this
+   * expires; it is never a durable handle to the object.
+   */
+  reference_photo_url?: string | null;
   /** Fields owned by the BigQuery roster; absent on manually created rows. */
   instructor_user_id?: string | null;
   instructor_role?: string | null;
