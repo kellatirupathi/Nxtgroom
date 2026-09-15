@@ -106,6 +106,19 @@ const reanalyseLimiter = rateLimit({
   message: { detail: "Too many re-analysis requests. Please try again later." },
 });
 
+/**
+ * Bounds how many photographs are being decoded at once.
+ *
+ * This is a memory guard, not a rate limit. The limiters above count requests
+ * over fifteen minutes; this counts requests in flight right now, because the
+ * cost being bounded is sharp holding an uncompressed image in RAM. See
+ * checkInConcurrencyLimit in config/env.js for why the number is what it is.
+ *
+ * It sheds rather than queues: a tablet that is told to retry in five seconds
+ * has a person standing at it who can wait, whereas a queue of held
+ * connections would run into the request timeout and fail anyway, having
+ * consumed the memory in the meantime.
+ */
 let activeCheckIns = 0;
 export function checkInConcurrencyGate(_req, res, next) {
   if (activeCheckIns >= runtimeConfig().checkInConcurrencyLimit) {

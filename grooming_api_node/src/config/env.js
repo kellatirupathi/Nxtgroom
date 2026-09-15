@@ -108,7 +108,22 @@ export function runtimeConfig() {
     evaluationLeaseMs: parseInteger("EVALUATION_LEASE_MS", 600000, { min: 60000, max: 3600000 }),
     evaluationMaxAttempts: parseInteger("EVALUATION_MAX_ATTEMPTS", 3, { min: 1, max: 10 }),
     evaluationConcurrency: parseInteger("EVALUATION_CONCURRENCY", 2, { min: 1, max: 20 }),
-    checkInConcurrencyLimit: parseInteger("CHECKIN_CONCURRENCY_LIMIT", 5, { min: 1, max: 50 }),
+    // How many photographs may be decoded at once, across check-in, check-out
+    // and the kiosk.
+    //
+    // The ceiling is memory, not throughput. sharp decodes to uncompressed
+    // pixels before it resizes, and normalizeInstructorImage accepts up to
+    // MAX_INPUT_PIXELS (80MP), which is ~240MB of raw RGB for a single worst
+    // case. A phone photograph is 8-12MP, so ~36MB each, and ten of those sit
+    // near 360MB — comfortable on a 512MB container and still far from the
+    // pathological case, which the upload cap and the browser's own
+    // downscaling make rare rather than impossible.
+    //
+    // Raise this only alongside container memory, or after lowering
+    // MAX_INPUT_PIXELS. Twenty worst-case decodes is several gigabytes, and an
+    // out-of-memory kill is a worse answer to a busy minute than a 503 asking
+    // the tablet to retry.
+    checkInConcurrencyLimit: parseInteger("CHECKIN_CONCURRENCY_LIMIT", 10, { min: 1, max: 50 }),
     sesTimeoutMs: parseInteger("SES_TIMEOUT_MS", 30000, { min: 5000, max: 120000 }),
     sesMaxAttempts: parseInteger("SES_MAX_ATTEMPTS", 2, { min: 1, max: 3 }),
     notificationLeaseMs: parseInteger("NOTIFICATION_LEASE_MS", 300000, { min: 60000, max: 600000 }),
