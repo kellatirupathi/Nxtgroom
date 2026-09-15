@@ -8,6 +8,7 @@ import {
   reconcileExpiredEvaluationJobs,
   reconcileFailedEvaluationOutcomes,
   reconcileOverdueEvaluationJobs,
+  retryEvaluation,
 } from "../src/services/evaluationWorker.js";
 import {
   enqueueNotification,
@@ -661,4 +662,114 @@ test("notification enqueue is idempotent for the same attendance and type", asyn
     { _id: "attendance-9:checkin" },
     { _id: "attendance-9:checkin" },
   ]);
+});
+
+/**
+ * Which failures are worth paying to repeat.
+ *
+ * visionEngine already decides this — a rate limit, a timeout, a network fault
+ * or a provider 5xx can come out differently next time, and a wrong credential,
+ * a malformed request, a truncated response, a safety block or unreadable JSON
+ * cannot. It honours the distinction inside its own retry loop; the worker did
+ * not read the flag at all, so every hopeless failure was sent to Gemini three
+ * times and billed three times.
+ *
+ * The wasted money is the smaller half. Attempts are one budget of three, so a
+ * job that spends them on an answer that was never going to change has none
+ * left for the transient fault that follows.
+ */
+test("a permanent Gemini failure is not retried, and a transient one still is", async () => {
+  const jobUpdates = [];
+  const transitions = [];
+  const job = {
+    _id: "attendance-9:evaluation",
+    attendance_id: "attendance-9",
+    attempts: 1,
+    status: "processing",
+    instructor: { name: "Blocked", email: "blocked@example.com" },
+    check_in_time: new Date("2026-09-14T03:30:00.000Z"),
+  };
+  const db = () => fakeDb({
+    evaluations: { findOne: async () => null },
+    evaluation_jobs: {
+      findOneAndUpdate: async (...args) => {
+        transitions.push(args);
+        return { ...job, status: "failed", error_code: args[1].$set.error_code };
+      },
+      updateOne: async (...args) => {
+        jobUpdates.push(args);
+        return { matchedCount: 1, modifiedCount: 1 };
+      },
+    },
+    attendance: { updateOne: async () => ({ matchedCount: 1, modifiedCount: 1 }) },
+    notification_jobs: {
+      updateOne: async () => ({ upsertedCount: 1 }),
+      findOne: async () => null,
+    },
+  });
+
+  // The safety filter will block the same image every time.
+  const blocked = Object.assign(new Error("Gemini blocked the response"), {
+    code: "GEMINI_BLOCKED_RESPONSE",
+    retryable: false,
+  });
+  await retryEvaluation(db(), job, blocked);
+
+  assert.equal(transitions.length, 1, "a permanent failure is settled on its first attempt");
+  assert.equal(transitions[0][1].$set.status, "failed");
+  assert.equal(transitions[0][1].$set.error_code, "GEMINI_BLOCKED_RESPONSE");
+  assert.equal(
+    jobUpdates.some(([, update]) => update.$set?.status === "queued"),
+    false,
+    "a permanent failure must never be queued again",
+  );
+
+  // A rate limit is the same request arriving at a better moment.
+  transitions.length = 0;
+  jobUpdates.length = 0;
+  const throttled = Object.assign(new Error("Gemini rate limit"), {
+    code: "RATE_LIMIT_EXCEEDED",
+    retryable: true,
+  });
+  await retryEvaluation(db(), job, throttled);
+
+  assert.equal(transitions.length, 0, "a transient failure is not settled");
+  assert.equal(jobUpdates[0][1].$set.status, "queued", "a transient failure goes back in the queue");
+  assert.ok(jobUpdates[0][1].$set.available_at instanceof Date, "and waits before its next attempt");
+});
+
+/**
+ * An error nobody classified keeps the benefit of the doubt.
+ *
+ * Only an explicit false means "this cannot succeed". Anything thrown outside
+ * visionEngine — a driver fault, a bug in the commit path — carries no flag,
+ * and treating unclassified as permanent would turn a passing glitch into a
+ * lost report.
+ */
+test("an unclassified failure is still retried", async () => {
+  const jobUpdates = [];
+  const job = {
+    _id: "attendance-10:evaluation",
+    attendance_id: "attendance-10",
+    attempts: 1,
+    status: "processing",
+    instructor: { name: "Unknown", email: "unknown@example.com" },
+    check_in_time: new Date("2026-09-14T03:30:00.000Z"),
+  };
+  const db = fakeDb({
+    evaluations: { findOne: async () => null },
+    evaluation_jobs: {
+      findOneAndUpdate: async () => {
+        throw new Error("a job with no retryable flag must not be settled");
+      },
+      updateOne: async (...args) => {
+        jobUpdates.push(args);
+        return { matchedCount: 1, modifiedCount: 1 };
+      },
+    },
+    attendance: { updateOne: async () => ({ matchedCount: 1, modifiedCount: 1 }) },
+  });
+
+  await retryEvaluation(db, job, new Error("something unexpected"));
+  assert.equal(jobUpdates[0][1].$set.status, "queued");
 });
