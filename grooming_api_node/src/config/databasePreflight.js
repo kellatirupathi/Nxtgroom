@@ -12,6 +12,36 @@ export const EVALUATION_IDENTITY_INDEX = {
 };
 
 /**
+ * How far back the audit reads evaluations.
+ *
+ * Evaluations are the one collection that grows without limit — two rows per
+ * check-in, kept forever — and the audit used to read all of them to answer two
+ * questions. At five thousand check-ins a day that passes what a 512MB
+ * container can hold within about seven months, and the audit is the thing that
+ * is supposed to tell you when something is wrong.
+ *
+ * Ninety days is chosen because the audit reports rather than repairs: a
+ * finding ignored for a quarter was not going to be acted on in the fourth
+ * month. The narrowing is real and worth stating — corruption older than the
+ * window stops being reported, even though it is still there.
+ */
+export const EVALUATION_AUDIT_WINDOW_DAYS = 90;
+
+/**
+ * Lets the audit find recent evaluations without reading the old ones.
+ *
+ * Without this the date filter still works, but MongoDB reads every row to
+ * decide which ones match: memory is bounded and the scan is not, so the
+ * nightly job keeps getting slower as the collection grows. Sorted on the same
+ * field the filter uses, so the query starts at the cutoff and walks forward.
+ */
+export const EVALUATION_PROCESSED_AT_INDEX = {
+  collection: "evaluations",
+  key: { processed_at: -1 },
+  options: { name: "processed_at_-1" },
+};
+
+/**
  * One attendance record per instructor per local day.
  *
  * Still the day-only filter, which is what deployed clusters carry. Requiring a
@@ -158,6 +188,7 @@ export const REQUIRED_DATABASE_INDEXES = [
     options: { sparse: true, name: "pending_checkout_outbox" },
   },
   EVALUATION_IDENTITY_INDEX,
+  EVALUATION_PROCESSED_AT_INDEX,
   {
     collection: "evaluation_jobs",
     key: { status: 1, available_at: 1, created_at: 1 },
@@ -536,7 +567,7 @@ function collisionExamples(groups) {
   return groups.map((group) => ({ document_ids: group.map(documentId) }));
 }
 
-async function loadPreflightRows(db) {
+async function loadPreflightRows(db, now = new Date()) {
   return Promise.all([
     db.collection("users").find({}, { projection: { _id: 1, email: 1 } }).toArray(),
     db.collection("boas").find(
@@ -558,16 +589,31 @@ async function loadPreflightRows(db) {
       // usable instructor_id; only one of them is a fault.
       { projection: { _id: 1, instructor_id: 1, attendance_day: 1, check_in_time: 1, status: 1 } }
     ).toArray(),
+    // Bounded, unlike the collections above it. Those are capped by headcount
+    // or by how many sessions are genuinely still open; this one grows with
+    // every check-in and is never pruned, so reading all of it is what put the
+    // audit on a deadline. See EVALUATION_AUDIT_WINDOW_DAYS.
     db.collection("evaluations").find(
-      {},
+      { processed_at: { $gte: evaluationAuditCutoff(now) } },
       { projection: { _id: 1, attendance_id: 1, kind: 1 } }
     ).toArray(),
   ]);
 }
 
+/** The oldest evaluation the audit will read, relative to a given moment. */
+export function evaluationAuditCutoff(now = new Date()) {
+  const reference = now instanceof Date && Number.isFinite(now.getTime())
+    ? now
+    : new Date();
+  return new Date(reference.getTime() - EVALUATION_AUDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+}
+
 export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
   const [[users, boas, colleges, instructors, activeAttendances, evaluations], indexes] = await Promise.all([
-    loadPreflightRows(db),
+    // now is threaded through so the evaluation window is measured from the
+    // same moment the rest of the audit uses, rather than from whenever this
+    // particular query happened to run.
+    loadPreflightRows(db, now),
     verifyDatabaseIndexes(db),
   ]);
   const findings = [];
