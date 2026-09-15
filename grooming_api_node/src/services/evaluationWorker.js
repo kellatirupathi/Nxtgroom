@@ -815,7 +815,13 @@ export async function reconcileFailedEvaluationOutcomes(db) {
   return true;
 }
 
-async function retryEvaluation(db, job, error) {
+/**
+ * Exported for the tests. The retry decision is the one place a permanent
+ * failure and a transient one are told apart, and driving it through the whole
+ * worker loop would mean stubbing Gemini to assert a branch that is three lines
+ * of policy.
+ */
+export async function retryEvaluation(db, job, error) {
   const storedEvaluation = await db.collection("evaluations").findOne(
     // Scoped to this half. Matching on attendance_id alone found the check-in
     // report and reused it for the check-out job, so the check-out was never
@@ -827,6 +833,29 @@ async function retryEvaluation(db, job, error) {
     if (await renewEvaluationLease(db, job)) {
       await syncStoredEvaluation(db, job, storedEvaluation, "processing");
     }
+    return;
+  }
+
+  /**
+   * A failure that cannot come out differently is not retried.
+   *
+   * visionEngine marks each error: a rate limit, a timeout, a network fault or
+   * a provider 5xx can succeed on another attempt, and a wrong credential, a
+   * malformed request, a response that overran the token budget, a safety
+   * block or unreadable JSON cannot. It honours that distinction inside its own
+   * retry loop; this worker never read the flag, so every hopeless failure was
+   * sent to Gemini three times and billed three times.
+   *
+   * The cost is the smaller part. Attempts are one budget of three, so a job
+   * that spent them on an answer that was never going to change has none left
+   * for the transient fault that follows — and a recoverable failure becomes
+   * permanent because an unrecoverable one used the allowance.
+   *
+   * Only an explicit false counts. An error with no flag is unclassified rather
+   * than known-permanent, and those keep the benefit of the doubt.
+   */
+  if (error?.retryable === false) {
+    await markEvaluationFailed(db, job, error);
     return;
   }
 
