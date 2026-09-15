@@ -295,23 +295,26 @@ export default function CollegeEnrolmentList({
         )}
       </div>
 
-      {/* Two of the four columns hold a single 32px icon, so at p-4 the padding
-          was wider than the content and forced a scroll the table did not need.
-          The minimum width goes with it: at px-3 the four columns fit. */}
-      <div className="overflow-x-auto overscroll-x-contain">
-        <table className="w-full text-left border-collapse">
+      {/* No horizontal scroll. Every column is sized as a share of the table,
+          so the four of them always add up to the width available and a long
+          name is cut rather than allowed to widen the table. */}
+      <div>
+        {/* table-fixed is what makes truncation possible at all: in an
+            auto-layout table a cell's overflow is ignored and the column grows
+            to fit its longest value, which is how one 33-character name pushed
+            this table wider than its container and put a scrollbar under it. */}
+        <table className="w-full text-left border-collapse table-fixed">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              {/* Sized to what each column holds rather than split evenly. A
-                  name and a role are both short, and the two that were 44% and
-                  30% were mostly empty space at any useful window width; the
-                  photograph and the action are a fixed size, so they are given
-                  exactly that and no more. A long name still truncates on one
-                  line instead of wrapping and doubling its row's height. */}
-              <th className="px-3 py-2.5 w-auto">Instructor</th>
-              <th className="px-3 py-2.5 w-[26%]">Role</th>
-              <th className="px-3 py-2.5 w-[72px]">Photo</th>
-              <th className="px-3 py-2.5 w-[64px] text-right">Action</th>
+              {/* Shares of the table rather than fixed pixels, so the columns
+                  fit whatever width they are given instead of overflowing it.
+                  The name is the widest because it is the thing being looked
+                  up, but it is bounded: past its share it is cut with an
+                  ellipsis, with the full name on hover and in the title. */}
+              <th className="px-3 py-2.5 w-[38%]">Instructor</th>
+              <th className="px-3 py-2.5 w-[28%]">Role</th>
+              <th className="px-3 py-2.5 w-[12%]">Photo</th>
+              <th className="px-3 py-2.5 w-[22%] text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -398,29 +401,31 @@ export default function CollegeEnrolmentList({
                           if (file) void upload(instructor, file);
                         }}
                       />
-                      {/* Two different icons, because the two actions are not
-                          the same: adding a first reference is what makes
-                          somebody recognisable, while adding another only
-                          improves a face that already works. */}
-                      <IconTooltip label={enrolled ? 'Add another photo' : 'Upload reference photo'}>
-                        <button
-                          type="button"
-                          onClick={() => fileInputs.current[instructor._id]?.click()}
-                          disabled={busy || busyId !== null}
-                          aria-label={enrolled ? `Add another reference photo for ${instructor.name}` : `Upload a reference photo for ${instructor.name}`}
-                          className={`w-8 h-8 rounded-md inline-flex items-center justify-center border transition-colors disabled:opacity-50 ${
-                            enrolled
-                              ? 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50'
-                              : 'text-indigo-700 bg-indigo-50 border-indigo-100 hover:bg-indigo-100'
-                          }`}
-                        >
-                          {busy
-                            ? <RefreshCw size={15} className="animate-spin" aria-hidden="true" />
-                            : enrolled
-                              ? <RefreshCcwDot size={15} aria-hidden="true" />
-                              : <Upload size={15} aria-hidden="true" />}
-                        </button>
-                      </IconTooltip>
+                      {/* The icon carries a word now. Two icons that differ
+                          only in their glyph asked somebody to learn which was
+                          which; the label says it outright, and it changes with
+                          the state because the two actions are not the same —
+                          a first reference is what makes somebody recognisable,
+                          while a second only improves a face that already
+                          works. No tooltip: it would repeat the visible text. */}
+                      <button
+                        type="button"
+                        onClick={() => fileInputs.current[instructor._id]?.click()}
+                        disabled={busy || busyId !== null}
+                        aria-label={enrolled ? `Replace the reference photo for ${instructor.name}` : `Upload a reference photo for ${instructor.name}`}
+                        className={`w-full max-w-[7.5rem] ml-auto px-2 py-1.5 rounded-md inline-flex items-center justify-center gap-1.5 border text-xs font-bold transition-colors disabled:opacity-50 ${
+                          enrolled
+                            ? 'text-slate-600 bg-white border-slate-200 hover:bg-slate-50'
+                            : 'text-indigo-700 bg-indigo-50 border-indigo-100 hover:bg-indigo-100'
+                        }`}
+                      >
+                        {busy
+                          ? <RefreshCw size={14} className="animate-spin shrink-0" aria-hidden="true" />
+                          : enrolled
+                            ? <RefreshCcwDot size={14} className="shrink-0" aria-hidden="true" />
+                            : <Upload size={14} className="shrink-0" aria-hidden="true" />}
+                        <span className="truncate">{busy ? 'Saving' : enrolled ? 'Replace' : 'Upload'}</span>
+                      </button>
                     </td>
                   </tr>
                 );
