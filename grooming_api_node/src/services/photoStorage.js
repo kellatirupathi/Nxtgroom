@@ -8,6 +8,7 @@ import {
   ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { runtimeConfig } from "../config/env.js";
 import { incrementMetric } from "./telemetry.js";
 
 /**
@@ -64,6 +65,11 @@ function getClient() {
       region: "auto",
       endpoint,
       credentials: { accessKeyId, secretAccessKey },
+      // Without this a connected-but-silent R2 holds a check-in decode slot
+      // until the server destroys the socket, and reports nothing on the way:
+      // a refused upload always returned a reason, but a hang had no bound.
+      // See r2TimeoutMs in config/env.js.
+      requestHandler: { requestTimeout: runtimeConfig().r2TimeoutMs },
     });
     clientFingerprint = fingerprint;
   }
