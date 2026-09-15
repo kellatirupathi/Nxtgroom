@@ -20,7 +20,13 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // splits that single response back into a classification step and a report
 // step: Gemini began rejecting the combined schema outright, so no woman's
 // check-in could be evaluated at all (see buildFemaleAttirePrompt).
-export const PROMPT_VERSION = "2026-09-09.1";
+// 2026-09-15.1 asks every observation to name where on the garment its
+// evidence was seen, and tells the model how pressing and tucking are actually
+// read from a photograph - a fold line against a crush line, a hem's line of
+// disappearance against fabric hanging below the waistband. No checkpoint was
+// added, removed or rescoped: the condition and tuck rows already owned these
+// questions and were deciding them from a general impression of the garment.
+export const PROMPT_VERSION = "2026-09-15.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -52,9 +58,22 @@ For every checkpoint you are given, return exactly one entry containing:
 - code: the checkpoint code, copied exactly as given
 - checkpoint_name: the checkpoint name, copied exactly as given
 - status: PASS, FAIL or N/A
-- observation: what is actually visible in the image, in one short sentence
+- observation: what is actually visible, naming where on the body or garment
+  you saw it. "The shirt is creased" is a verdict wearing an observation's
+  clothes; "deep set-in creases run across both elbows and the lap, while the
+  placket is flat" is an observation. Name the region - sleeve, placket, collar
+  point, waistband, knee, seat, hem, cheek line, lip line - so the finding can
+  be checked against the photograph by somebody who was not there.
 - reason: why that observation meets, fails, or cannot be judged against the
   standard, in one short sentence
+
+One or two sentences for the observation. Length is not the point: a specific
+short sentence beats a vague long one. What must always be present is the
+location of the evidence and what it looked like, because that is the part an
+instructor can act on and an administrator can verify.
+
+This applies to a PASS as much as to a FAIL. "Looks fine" records nothing and
+cannot be checked. Say what you looked at and what it showed.
 
 PASS  - visible evidence satisfies the requirement.
 FAIL  - a clear, visible violation contradicts the standard.
@@ -207,6 +226,59 @@ not list everything that passed. Do not claim identity, intent, or anything not
 directly visible.
 `.trim();
 
+/**
+ * How pressing and tucking are actually read from a photograph.
+ *
+ * Kept out of COMMON_ANALYSIS_RULES on purpose. The female classification step
+ * shares that block, and it is told to return no checkpoint at all — sending it
+ * a thousand tokens on how to judge a crease both contradicted that
+ * instruction and was paid for on every check-in by a woman.
+ *
+ * These two questions earn the detail because the checkpoints that own them
+ * were deciding from a general impression of the garment: "Covers cleanliness,
+ * stains, tears and heavy wrinkling" gave the model nothing to look at, so it
+ * answered from the whole shirt rather than from the placket and the sleeve.
+ */
+const GARMENT_EVIDENCE_RULES = `
+### PRESSED, OR MERELY WORN
+Whether a garment has been ironed is decided on the same evidence a person uses
+in the room, and it is a different question from whether it is clean.
+
+Two kinds of line appear in cloth. A **fold line** is straight, deliberate and
+in the place an iron or a hanger puts it: down the centre of a sleeve, along a
+placket, in a trouser crease. It is evidence of pressing. A **crush line** is
+irregular, branching and in the place a body bends it: the inside of the elbow,
+the lap and seat after sitting, the waist under a belt, behind the knee. Many
+crush lines together, holding their shape rather than falling out, are what an
+unpressed garment looks like.
+
+So do not report "creased" without saying which kind and where. A shirt with a
+flat placket and a sharp sleeve line has been ironed even if it has picked up
+some sitting creases since; a shirt whose whole front is a web of soft
+branching wrinkles has not. Judge the garment as presented, and say which of
+those two you are looking at.
+
+One caution in both directions. A single travel crease is not an unpressed
+garment, and freshly pressed cloth that has been sat in for an hour is still a
+pressed garment. Equally, a garment that is clean and undamaged has not thereby
+been ironed - cleanliness and pressing are separate findings inside the same
+checkpoint, and an observation should say what it found about each.
+
+### TUCKED, OR HANGING
+A tucked shirt has a **line of disappearance**: the hem stops in a continuous,
+unbroken path at the waistband and nothing of it is seen below. Follow that
+line across the whole visible waist rather than judging from one side, because
+a shirt is often tucked at the front and pulled out at the hip.
+
+An untucked shirt shows **fabric below the waistband** - a hem edge, a curved
+shirt tail, or a side vent hanging free over the trousers. That is the evidence.
+Bulk or blousing *above* the belt is not: cloth gathers there precisely because
+it is tucked in.
+
+If the waistband itself cannot be seen, you cannot see the line of
+disappearance, and the checkpoint's own written standard decides what to answer.
+`.trim();
+
 const MEN_ANALYSIS_RULES = `
 ### THIS INSTRUCTOR
 The instructor is male. Apply the men's dress code only. Do not evaluate saree
@@ -270,6 +342,9 @@ export function buildSystemPrompt(gender, attireType) {
 
   return [
     COMMON_ANALYSIS_RULES,
+    // Only the step that returns checkpoints needs to know how a crease or a
+    // hem is read; the classification step is told to judge nothing.
+    GARMENT_EVIDENCE_RULES,
     genderRules,
     `### CHECKPOINTS
 Return every checkpoint listed below and no others: ${total} in total, each
