@@ -430,8 +430,52 @@ async function deliverNotification(db, job) {
     { returnDocument: "after" }
   );
   const terminalJob = transition?.value || transition;
-  if (!terminalJob) throw new Error("Notification delivery lease was lost after SES accepted the email");
-  await syncNotificationStatus(db, terminalJob);
+  if (terminalJob) {
+    await syncNotificationStatus(db, terminalJob);
+    return true;
+  }
+
+  /**
+   * The lease was lost while SES was accepting the message.
+   *
+   * Throwing here sent the job back through retryNotification, and the next
+   * worker to lease it sent the same report again — SES has no idempotency
+   * token, so the instructor received it twice. The email is already gone; the
+   * only question left is bookkeeping, and retrying answers it by making the
+   * mistake worse.
+   *
+   * So the job is settled where it stands. The write drops the worker_id and
+   * status guards that just failed, because the point is to record an outcome
+   * this worker no longer owns. "sent" rather than "delivery_unknown": that
+   * status exists for a message whose fate nobody knows, and this one was
+   * accepted — the message id proves it.
+   */
+  const settled = {
+    ...preparedJob,
+    status: "sent",
+    message_id: result.messageId || null,
+    sent_at: now,
+  };
+  await db.collection("notification_jobs").updateOne(
+    { _id: preparedJob._id },
+    {
+      $set: {
+        status: "sent",
+        message_id: settled.message_id,
+        sent_at: now,
+        lease_lost_after_send: true,
+      },
+      $unset: {
+        to_email: "",
+        report: "",
+        lease_until: "",
+        worker_id: "",
+        delivery_started_at: "",
+        last_error: "",
+      },
+    }
+  );
+  await syncNotificationStatus(db, settled);
   return true;
 }
 

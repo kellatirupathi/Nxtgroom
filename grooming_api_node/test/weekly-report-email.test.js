@@ -90,3 +90,46 @@ test("the identify guard is wrapped so a database fault cannot escape it", async
     "a bare async middleware leaves its rejection uncaught",
   );
 });
+
+/**
+ * A lost lease after SES has accepted the message must not retry.
+ *
+ * deliverNotification sends, then transitions the job to "sent" under its own
+ * worker id. When that transition matches nothing the lease has moved on, and
+ * the code used to throw — which sent the job back through retryNotification,
+ * so the next worker to lease it sent the same report a second time. SES has
+ * no idempotency token, so the instructor simply received it twice.
+ *
+ * The email is already gone at that point. The only thing left to decide is
+ * bookkeeping, and retrying decides it by making the error worse.
+ *
+ * Asserted from source: deliverNotification is module-private and the senders
+ * are static imports with no injection seam, so reaching this branch at
+ * runtime would mean exporting the function and adding a seam — two new
+ * surfaces to pin one branch. What matters is that the throw is gone and the
+ * settle is there.
+ */
+test("a notification whose lease is lost after sending is settled, not sent again", async () => {
+  const source = await readFile(
+    new URL("../src/services/notificationWorker.js", import.meta.url),
+    "utf8",
+  );
+  const deliver = source.slice(
+    source.indexOf("async function deliverNotification"),
+    source.indexOf("export async function reconcileOverdueNotificationJobs"),
+  );
+  assert.ok(deliver.length > 0, "deliverNotification must remain identifiable");
+
+  assert.doesNotMatch(
+    deliver,
+    /throw new Error\("Notification delivery lease was lost/,
+    "a delivered email must never be thrown back into the retry path",
+  );
+  assert.match(
+    deliver,
+    /lease_lost_after_send: true/,
+    "the lost lease is recorded so the settle is distinguishable from a normal one",
+  );
+  // The send itself still fails loudly: only the post-send bookkeeping changed.
+  assert.match(deliver, /failure\.code = result\.reason/, "a refused send still throws");
+});
