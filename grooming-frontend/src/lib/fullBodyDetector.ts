@@ -376,11 +376,17 @@ export const AUTO_CAPTURE_CONFIRMATIONS = 3;
 /**
  * How long the camera waits after firing before it will fire again.
  *
- * Without it one person standing in front of the tablet is photographed every
- * two hundred milliseconds, and every frame costs a recognition call, a vision
- * call and a stored object.
+ * Only long enough that one capture cannot fire twice before its own response
+ * has returned. It used to be eight seconds, which was how the same person was
+ * stopped from being photographed on every frame — but a clock cannot tell a
+ * person lingering from the next person in the queue, so a queue moved at one
+ * person every nine seconds to solve a problem caused by one person not moving.
+ *
+ * That job now belongs to the server, which refuses a repeat by name and lets
+ * a different face through immediately. See services/recentCaptures.js. What is
+ * left here is mechanical: a guard against the camera racing itself.
  */
-export const AUTO_CAPTURE_COOLDOWN_MS = 8_000;
+export const AUTO_CAPTURE_COOLDOWN_MS = 1_000;
 
 /**
  * Consecutive unusable readings before the manual shutter is offered.

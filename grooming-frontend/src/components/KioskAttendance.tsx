@@ -11,13 +11,19 @@ import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation,
  * before the next person has finished stepping into frame. The camera keeps
  * running underneath either way, so this only governs the message.
  */
-const RESULT_VISIBLE_MS = 2_000;
+const RESULT_VISIBLE_MS = 1_200;
 
 type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'UNIDENTIFIED';
 
 interface KioskResponse {
   action: KioskAction;
   recorded: boolean;
+  /**
+   * The same person, photographed again within the server's window. Nothing was
+   * recorded and nothing was spent, and they have already seen their result, so
+   * the screen says nothing rather than refusing something they did not ask for.
+   */
+  duplicate?: boolean;
   instructor_name: string | null;
   attendance_id: string | null;
   title: string;
@@ -99,7 +105,9 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
         body: form,
         timeoutMs: 75_000,
       });
-      showResult(response);
+      // A silent duplicate leaves the current panel alone: replacing it would
+      // cut short the message this person is still reading.
+      if (!response.duplicate) showResult(response);
     } catch (requestError) {
       if ((requestError as { status?: number })?.status === 401) return;
       const message = requestError instanceof ApiError

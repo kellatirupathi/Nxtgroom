@@ -48,6 +48,13 @@ import {
   describeCheckoutTiming,
 } from "../services/checkoutTiming.js";
 import {
+  instructorCaptureKey,
+  rememberCapture,
+  tabletCaptureKey,
+  UNIDENTIFIED_CAPTURE_WINDOW_MS,
+  wasRecentlyCaptured,
+} from "../services/recentCaptures.js";
+import {
   decideKioskAction,
   describeKioskAction,
   KIOSK_ACTIONS,
@@ -593,6 +600,35 @@ attendanceRouter.post(
         )
       : null;
 
+    /**
+     * Somebody who was photographed a moment ago is not photographed again.
+     *
+     * The camera fires five times a second, so one person standing in front of
+     * the tablet would otherwise be recorded on every frame. This refuses that
+     * person by name while leaving the camera free for whoever is next, which
+     * is what lets the blanket cooldown in the browser come down to a second.
+     *
+     * Silent, and deliberately so: the tablet already showed this person their
+     * result, and a second panel saying "already done" would be a refusal of
+     * something they did not ask for again. Nothing is stored and nothing is
+     * spent.
+     */
+    const captureKey = instructor
+      ? instructorCaptureKey(req.currentUser.collegeId, String(instructor._id))
+      : tabletCaptureKey(req.currentUser.email);
+    if (wasRecentlyCaptured(captureKey, { now: now.getTime() })) {
+      incrementMetric("kiosk_duplicate_capture_total");
+      return res.status(200).json({
+        action: KIOSK_ACTIONS.ALREADY_DONE,
+        recorded: false,
+        duplicate: true,
+        instructor_name: instructor?.name || null,
+        attendance_id: null,
+        title: "",
+        tone: "info",
+      });
+    }
+
     // A face that matched somebody this tablet cannot see is treated as no
     // match: the college scope is what stops one campus recording another's
     // attendance, and it must not be bypassed by a recognition result.
@@ -737,6 +773,12 @@ attendanceRouter.post(
       });
       // Nothing is analysed for an unidentified record, so the upload only has
       // to be accounted for, not waited on before answering.
+      // Held per tablet, not per person: nobody was identified, so there is no
+      // name to remember. Short, because it blocks a real retake.
+      rememberCapture(captureKey, {
+        now: now.getTime(),
+        windowMs: UNIDENTIFIED_CAPTURE_WINDOW_MS,
+      });
       void settleUpload(unidentified.attendance._id, "checkin");
       if (coordinates) void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
       incrementMetric("kiosk_unidentified_total");
@@ -813,6 +855,7 @@ attendanceRouter.post(
           console.error(`Kiosk evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
         }
       });
+      rememberCapture(captureKey, { now: now.getTime() });
       if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates);
       incrementMetric("kiosk_checkin_total");
       return res.status(202).json({
@@ -875,6 +918,7 @@ attendanceRouter.post(
         console.error(`Kiosk checkout evaluation not queued for ${attendance._id} (${error?.name || "ERROR"})`);
       }
     });
+    rememberCapture(captureKey, { now: now.getTime() });
     if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates, "checkout");
     incrementMetric("kiosk_checkout_total");
     return res.status(202).json({

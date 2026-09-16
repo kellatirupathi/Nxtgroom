@@ -70,12 +70,18 @@ test('the fallback arrives in a few seconds, not after a minute of waiting', () 
   assert.ok(seconds >= 3 && seconds <= 8, `fallback after ${seconds}s should be a few seconds`);
 });
 
-test('the cooldown is long enough that one person is not photographed repeatedly', () => {
-  // Without it a person standing in front of the tablet is captured every
-  // 200ms, and each frame costs a recognition call, a vision call and an object.
-  assert.ok(AUTO_CAPTURE_COOLDOWN_MS >= 5_000);
-  // And short enough that the next person does not queue behind it.
-  assert.ok(AUTO_CAPTURE_COOLDOWN_MS <= 15_000);
+test('the cooldown only stops the camera racing its own response', () => {
+  // Long enough that one capture cannot fire again before its own request has
+  // returned - the round trip is about a second and a half.
+  assert.ok(AUTO_CAPTURE_COOLDOWN_MS >= 800, 'a shorter gap lets one frame fire twice');
+  // And short enough that the next person is not made to wait for a rule that
+  // exists because of the previous one. Stopping the same person being
+  // photographed repeatedly is the server's job now, by name rather than by
+  // clock, so this must not grow back into that.
+  assert.ok(
+    AUTO_CAPTURE_COOLDOWN_MS <= 2_000,
+    'a longer cooldown makes a queue wait for a duplicate guard that lives elsewhere',
+  );
 });
 
 test('the hold is over half a second but under two', () => {
