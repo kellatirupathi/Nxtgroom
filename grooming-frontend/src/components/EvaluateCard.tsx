@@ -54,10 +54,9 @@ export default function EvaluateCard({
   const [message, setMessage] = useState({ type: '', text: '' });
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
   const [locationState, setLocationState] = useState<LocationStatus>('idle');
-  // Rear camera by default. A full-body photograph needs two to three metres
-  // of distance, which is not reachable at arm's length, so the front camera
-  // cannot satisfy the framing the report depends on.
-  const [facing, setFacing] = useState<'user' | 'environment'>('environment');
+  // Open the selfie camera first on every device; the switch remains available
+  // when a fixed kiosk setup needs the rear camera instead.
+  const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [missingGenderInstructor, setMissingGenderInstructor] = useState<Instructor | null>(null);
@@ -462,8 +461,7 @@ export default function EvaluateCard({
             <p className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
               {faceIdentification ? 'Photo' : 'Check-In Photo'}
             </p>
-            {/* The front camera stays one tap away for anyone photographing
-                themselves, but it cannot frame a full body. */}
+            {/* Keep camera choice visible before opening the viewfinder. */}
             <button
               type="button"
               onClick={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}

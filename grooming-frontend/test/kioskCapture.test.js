@@ -19,6 +19,14 @@ test('the kiosk returns its request promise to the camera', () => {
   assert.match(kiosk, /if \(submitInFlight\.current\) return/);
 });
 
+test('all attendance camera flows open the front camera by default', () => {
+  const kiosk = read('src/components/KioskAttendance.tsx');
+  const evaluation = read('src/components/EvaluateCard.tsx');
+  const frontCameraDefault = /useState<'user' \| 'environment'>\('user'\)/;
+  assert.match(kiosk, frontCameraDefault);
+  assert.match(evaluation, frontCameraDefault);
+});
+
 test('duplicate conflicts are neutral results and transient errors expire', () => {
   const kiosk = read('src/components/KioskAttendance.tsx');
   assert.match(kiosk, /requestError\.status === 409/);

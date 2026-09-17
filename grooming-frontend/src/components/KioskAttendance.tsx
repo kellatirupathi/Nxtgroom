@@ -63,7 +63,7 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fix, setFix] = useState<Fix | null>(null);
-  const [facing, setFacing] = useState<'user' | 'environment'>('environment');
+  const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const resultTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const submitInFlight = useRef(false);
