@@ -1,9 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Base application theme. -->
-    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
-        <!-- Customize your theme here. -->
+    <!-- Base application theme.
+
+         NoActionBar, not DarkActionBar. The app is a WebView filling the
+         screen: the page draws its own header, so the platform's bar was a
+         second one above it, taking height the kiosk camera needs for a
+         full-body frame and showing a title nobody reads. -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
@@ -16,7 +22,18 @@
     </style>
 
 
+    <!-- The theme the activity actually launches with.
+
+         Theme.SplashScreen does not suppress the action bar on its own, and the
+         application theme above used to supply one, so the bar survived into
+         the running app. Both are turned off here as well rather than relied on
+         from the parent, because this is the theme the window is created with
+         and the bar is decided before the WebView exists. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
     </style>
 </resources>
