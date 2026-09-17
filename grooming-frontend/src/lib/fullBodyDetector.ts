@@ -1,14 +1,12 @@
 /**
  * Decides whether a live camera frame shows a whole person, head to feet.
  *
- * The test is the question itself rather than a proxy for it: a head keypoint
- * and both ankle keypoints, each above a confidence threshold. Face detection
- * cannot see feet, and how much of the frame a person fills says nothing about
- * whether their shoes are in it.
+ * The test follows the complete body chain rather than relying on a face or a
+ * bounding box: face, shoulders, hips, knees and both ankles must all be
+ * confidently visible inside the part of the preview that will be saved.
  *
- * Detector infrastructure failures fail open so unsupported hardware cannot
- * prevent attendance. A successful detector reading still requires one person
- * and never permits an empty frame or multiple people.
+ * Detector infrastructure failures remain available to the manual fallback,
+ * but automatic capture requires a successful, complete reading.
  */
 
 export type FrameVerdict =
@@ -37,26 +35,23 @@ export interface PoseSignals {
 /** Below this a keypoint is a guess, not a sighting. */
 const KEYPOINT_CONFIDENCE = 0.35;
 
-import { coverSourceRect } from './cameraGeometry.ts';
+import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
 
-/**
- * Retained for callers compiled against the earlier distance gate.
- *
- * Auto-capture no longer measures how much of the frame a person fills. Head
- * and both ankles already prove the whole body is in shot, which is the thing
- * the grooming report needs; a span requirement on top of that asked them to
- * stand within a narrow band of distances as well. The two conditions could
- * exclude each other outright — close enough to fill 72% of the frame put the
- * feet below a chest-height camera's view, and far enough back for the feet to
- * appear dropped the span under the threshold — so on many mountings no
- * position satisfied both and the camera never fired.
- *
- * Restore the check in readKeypoints if a minimum subject size is ever wanted.
- */
-export const MIN_BODY_SPAN_RATIO = 0;
+/** Large enough for face recognition and grooming details without crowding the guide. */
+export const MIN_BODY_SPAN_RATIO = 0.48;
 /** MoveNet's ankle and head keypoints, by the names the model returns. */
 const HEAD_KEYPOINTS = ['nose', 'left_eye', 'right_eye'];
+const REQUIRED_KEYPOINT_GROUPS = [
+  ['left_shoulder', 'right_shoulder'],
+  ['left_hip', 'right_hip'],
+  ['left_knee', 'right_knee'],
+  ['left_ankle', 'right_ankle'],
+] as const;
 const ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle'];
+
+/** Fast pixel checks run on the already downscaled detector canvas. */
+export const MIN_FRAME_BRIGHTNESS = 42;
+export const MIN_FRAME_SHARPNESS = 7;
 
 type Keypoint = { name?: string; score?: number; x?: number; y?: number };
 type Pose = { keypoints: Keypoint[]; score?: number };
@@ -138,25 +133,76 @@ function poseSignals(keypoints: Keypoint[], frameHeight?: number): PoseSignals {
 export function readKeypoints(
   keypoints: Keypoint[] | undefined,
   frameHeight?: number,
+  frameWidth?: number,
 ): FrameReading {
   if (!keypoints?.length) {
     return { verdict: 'NO_PERSON', guidance: 'Step into the frame' };
   }
-  const seen = (names: string[]) => names.some((name) => keypoints.some(
+  const seen = (names: readonly string[]) => names.some((name) => keypoints.some(
     (point) => point.name === name && (point.score ?? 0) >= KEYPOINT_CONFIDENCE,
   ));
+  const find = (name: string) => keypoints.find((point) => (
+    point.name === name
+    && (point.score ?? 0) >= KEYPOINT_CONFIDENCE
+    && Number.isFinite(point.x)
+    && Number.isFinite(point.y)
+  ));
 
-  const headVisible = seen(HEAD_KEYPOINTS);
+  const visibleFacePoints = HEAD_KEYPOINTS.filter((name) => seen([name])).length;
+  const headVisible = visibleFacePoints >= 2;
   // Both ankles, not either: one foot in frame is not a full-body photograph.
   const anklesVisible = ANKLE_KEYPOINTS.every((name) => seen([name]));
 
   if (!headVisible && !anklesVisible) {
     return { verdict: 'NO_PERSON', guidance: 'Step into the frame' };
   }
-  if (headVisible && anklesVisible) {
-    // Head and both ankles in frame is the whole test: that is a full-body
-    // photograph, whatever proportion of the frame it occupies. How far back
-    // the person stands is left to them and to where the camera is mounted.
+  const missingGroup = REQUIRED_KEYPOINT_GROUPS.find((group) => (
+    !group.every((name) => seen([name]))
+  ));
+  if (headVisible && anklesVisible && !missingGroup) {
+    const requiredNames = [
+      ...HEAD_KEYPOINTS.filter((name) => find(name)),
+      ...REQUIRED_KEYPOINT_GROUPS.flat(),
+    ];
+    const requiredPoints = requiredNames
+      .map((name) => find(name))
+      .filter((point): point is Keypoint => Boolean(point));
+
+    if (frameWidth && frameHeight) {
+      const left = frameWidth * BODY_GUIDE_BOUNDS.left;
+      const right = frameWidth * (BODY_GUIDE_BOUNDS.left + BODY_GUIDE_BOUNDS.width);
+      const top = frameHeight * BODY_GUIDE_BOUNDS.top;
+      const bottom = frameHeight * (BODY_GUIDE_BOUNDS.top + BODY_GUIDE_BOUNDS.height);
+      const outsideGuide = requiredPoints.some((point) => (
+        (point.x as number) < left
+        || (point.x as number) > right
+        || (point.y as number) < top
+        || (point.y as number) > bottom
+      ));
+      if (outsideGuide) {
+        return {
+          verdict: 'PARTIAL',
+          guidance: 'Center your complete body inside the outline',
+          poseSignals: poseSignals(keypoints, frameHeight),
+        };
+      }
+
+      const headY = Math.min(...requiredPoints
+        .filter((point) => point.name && HEAD_KEYPOINTS.includes(point.name))
+        .map((point) => point.y as number));
+      const ankleY = Math.max(
+        find('left_ankle')?.y as number,
+        find('right_ankle')?.y as number,
+      );
+      if ((ankleY - headY) / frameHeight < MIN_BODY_SPAN_RATIO) {
+        return {
+          verdict: 'TOO_FAR',
+          guidance: 'Move closer while keeping your full body in the outline',
+          poseSignals: poseSignals(keypoints, frameHeight),
+        };
+      }
+    }
+
     return {
       verdict: 'FULL_BODY',
       guidance: null,
@@ -166,9 +212,11 @@ export function readKeypoints(
   return {
     verdict: 'PARTIAL',
     poseSignals: poseSignals(keypoints, frameHeight),
-    guidance: anklesVisible
-      ? 'Move the camera down — your head is out of frame'
-      : 'Step back — your feet are not in frame',
+    guidance: !headVisible
+      ? 'Face the camera with your full head visible'
+      : !anklesVisible
+        ? 'Step back — both feet must be in frame'
+        : 'Stand facing the camera with shoulders, hips and knees visible',
   };
 }
 
@@ -250,6 +298,7 @@ function duplicatePose(first: Pose, second: Pose, frameHeight?: number): boolean
 export function readPoses(
   poses: Pose[] | undefined,
   frameHeight?: number,
+  frameWidth?: number,
 ): FrameReading {
   const people: Pose[] = [];
   const candidates = (poses || [])
@@ -269,7 +318,52 @@ export function readPoses(
       guidance: 'Only one person should be visible',
     };
   }
-  return readKeypoints(people[0]?.keypoints, frameHeight);
+  return readKeypoints(people[0]?.keypoints, frameHeight, frameWidth);
+}
+
+export interface FrameQuality {
+  brightness: number;
+  sharpness: number;
+}
+
+/**
+ * Estimates exposure and blur from luminance only. Sampling every other pixel
+ * keeps this well below pose-inference cost on a tablet while still detecting
+ * a dark room or a badly smeared frame.
+ */
+export function measureFrameQuality(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+): FrameQuality {
+  if (width < 3 || height < 3 || pixels.length < width * height * 4) {
+    return { brightness: 0, sharpness: 0 };
+  }
+  let brightnessTotal = 0;
+  let sharpnessTotal = 0;
+  let samples = 0;
+  const luminance = (x: number, y: number) => {
+    const offset = (y * width + x) * 4;
+    return pixels[offset] * 0.299 + pixels[offset + 1] * 0.587 + pixels[offset + 2] * 0.114;
+  };
+  for (let y = 2; y < height - 2; y += 2) {
+    for (let x = 2; x < width - 2; x += 2) {
+      const center = luminance(x, y);
+      brightnessTotal += center;
+      sharpnessTotal += Math.abs(
+        (4 * center)
+        - luminance(x - 1, y)
+        - luminance(x + 1, y)
+        - luminance(x, y - 1)
+        - luminance(x, y + 1),
+      );
+      samples += 1;
+    }
+  }
+  return {
+    brightness: samples ? brightnessTotal / samples : 0,
+    sharpness: samples ? sharpnessTotal / samples : 0,
+  };
 }
 
 /**
@@ -295,7 +389,7 @@ export function stabilizeFrameReading(
 
 /**
  * Reads one frame. Never throws: a detector that fails mid-session reports
- * UNAVAILABLE, which the caller treats as permission to capture.
+ * UNAVAILABLE, which blocks auto-capture but leaves the manual fallback usable.
  */
 export async function readFrame(
   detector: Detector | null,
@@ -337,7 +431,26 @@ export async function readFrame(
       }
     }
     const poses = await detector.estimatePoses(input, { maxPoses: 6 });
-    return readPoses(poses, frameHeight);
+    const reading = readPoses(poses, frameHeight, input instanceof HTMLCanvasElement
+      ? input.width
+      : video.videoWidth);
+    if (reading.verdict !== 'FULL_BODY' || !(input instanceof HTMLCanvasElement)) {
+      return reading;
+    }
+    const context = input.getContext('2d', { willReadFrequently: true });
+    if (!context) return reading;
+    const quality = measureFrameQuality(
+      context.getImageData(0, 0, input.width, input.height).data,
+      input.width,
+      input.height,
+    );
+    if (quality.brightness < MIN_FRAME_BRIGHTNESS) {
+      return { ...reading, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
+    }
+    if (quality.sharpness < MIN_FRAME_SHARPNESS) {
+      return { ...reading, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
+    }
+    return reading;
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }

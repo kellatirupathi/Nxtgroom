@@ -50,12 +50,7 @@ export function advanceLiveness(
   reading: FrameReading,
   now = Date.now(),
 ): LivenessState {
-  if (
-    reading.verdict === 'NO_PERSON'
-    || reading.verdict === 'MULTIPLE_PEOPLE'
-    || reading.verdict === 'UNAVAILABLE'
-    || !reading.poseSignals
-  ) {
+  if (reading.verdict !== 'FULL_BODY' || !reading.poseSignals) {
     return state.phase === 'POSITION' ? { ...state, confirmations: 0 } : reset(state);
   }
 

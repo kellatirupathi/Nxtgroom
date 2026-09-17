@@ -13,6 +13,12 @@ import {
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
 import { BODY_GUIDE_BOUNDS, bodyGuideSourceRect } from '../lib/cameraGeometry';
+import {
+  advanceLiveness,
+  createLivenessState,
+  livenessInstruction,
+  livenessVerified,
+} from '../lib/livenessChallenge';
 
 type Facing = 'user' | 'environment';
 
@@ -109,6 +115,7 @@ export default function CameraCapture({
   const steadyRef = useRef(0);
   const unusableRef = useRef(0);
   const manualOfferedRef = useRef(!autoCapture);
+  const livenessRef = useRef(createLivenessState());
   /**
    * The current capture function, for the inspection loop.
    *
@@ -130,6 +137,7 @@ export default function CameraCapture({
     setError('');
     setVerdict('NO_PERSON');
     setGuidance('Step into the frame');
+    livenessRef.current = createLivenessState();
 
     const start = async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -171,10 +179,8 @@ export default function CameraCapture({
    * Watches the live frame for a whole person, head to feet.
    *
    * Five readings a second is enough to feel immediate without competing with
-   * the preview for the GPU. Detection is a friendly safety net: one visible
-   * person can capture immediately and framing messages are recommendations.
-   * Everything degrades to UNAVAILABLE so a slow or unsupported device cannot
-   * prevent attendance.
+   * the preview for the GPU. Automatic capture requires a complete, live,
+   * usable frame; unsupported devices retain the existing manual fallback.
    */
   useEffect(() => {
     if (error) return undefined;
@@ -211,13 +217,19 @@ export default function CameraCapture({
         stableState = stabilizeFrameReading(stableState, reading);
         const stableReading = stableState.reading;
         setVerdict(stableReading.verdict);
-        setGuidance(stableReading.guidance);
         verdictRef.current = stableReading.verdict;
 
         if (autoCapture) {
+          livenessRef.current = advanceLiveness(livenessRef.current, stableReading);
+          const live = livenessVerified(livenessRef.current);
+          setGuidance(
+            stableReading.verdict === 'FULL_BODY' && !live
+              ? livenessInstruction(livenessRef.current)
+              : stableReading.guidance,
+          );
           // Counted from the stabilised verdict rather than the raw reading, so
           // one noisy frame neither fires the camera nor resets a good hold.
-          const fireable = stableReading.verdict === 'FULL_BODY';
+          const fireable = stableReading.verdict === 'FULL_BODY' && live;
           const held = fireable ? steadyRef.current + 1 : 0;
           steadyRef.current = held;
           setSteadyFrames(held);
@@ -238,6 +250,8 @@ export default function CameraCapture({
           ) {
             void shootRef.current({ viaAuto: true });
           }
+        } else {
+          setGuidance(stableReading.guidance);
         }
         timer = setTimeout(tick, 200);
       };
@@ -327,6 +341,7 @@ export default function CameraCapture({
       cooldownUntilRef.current = Date.now() + AUTO_CAPTURE_COOLDOWN_MS;
       setSteadyFrames(0);
       steadyRef.current = 0;
+      livenessRef.current = createLivenessState();
     }
   }, [onCapture]);
 

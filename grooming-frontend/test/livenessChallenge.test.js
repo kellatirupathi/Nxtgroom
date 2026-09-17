@@ -54,6 +54,13 @@ test('leaving the frame resets an unfinished challenge', () => {
   assert.equal(state.confirmations, 0);
 });
 
+test('a partial body cannot progress or retain the live challenge', () => {
+  let state = repeat(createLivenessState('left'), frame('LOWERED', 'LOWERED'), 3);
+  assert.equal(state.phase, 'CHALLENGE');
+  state = advanceLiveness(state, frame('RAISED', 'LOWERED', 'PARTIAL'), 2_000);
+  assert.equal(state.phase, 'POSITION');
+});
+
 test('an expired challenge resets and changes the requested side', () => {
   let state = repeat(createLivenessState('left'), frame('LOWERED', 'LOWERED'), 3, 1_000);
   state = advanceLiveness(
