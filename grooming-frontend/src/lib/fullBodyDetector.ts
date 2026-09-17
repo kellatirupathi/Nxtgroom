@@ -382,9 +382,10 @@ export const AUTO_CAPTURE_CONFIRMATIONS = 3;
  * person lingering from the next person in the queue, so a queue moved at one
  * person every nine seconds to solve a problem caused by one person not moving.
  *
- * That job now belongs to the server, which refuses a repeat by name and lets
- * a different face through immediately. See services/recentCaptures.js. What is
- * left here is mechanical: a guard against the camera racing itself.
+ * The camera now waits for each reply before it can fire again, and a person
+ * photographed a second time is answered from their day's record - "already
+ * checked in" - which records nothing. What is left here is mechanical: a short
+ * pause after each reply so the result panel is not replaced before it is read.
  */
 export const AUTO_CAPTURE_COOLDOWN_MS = 1_000;
 

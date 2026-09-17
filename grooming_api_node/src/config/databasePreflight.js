@@ -44,42 +44,12 @@ export const EVALUATION_PROCESSED_AT_INDEX = {
 /**
  * One attendance record per instructor per local day.
  *
- * Still the day-only filter, which is what deployed clusters carry. Requiring a
- * string instructor_id here instead would be correct for photo-first check-in,
- * but it made the API refuse to start against any database still holding the old
- * index — including production, whose running code expects the old shape. New
- * code and the new index have to land together in one maintenance window, so
- * this stays as it is until that is scheduled.
- *
- * WIDENED_DAILY_ATTENDANCE_INDEX below is the target, and
- * migrateLegacyDailyAttendanceIndex performs the swap. Until it is applied, a
- * second unidentified check-in on the same local day is rejected as a duplicate:
- * every such record carries instructor_id: null, so under this filter they all
- * collide with each other. That is survivable only while check-in still
- * identifies by selector, and must be migrated before FACE_ONLY is deployed.
+ * Unidentified records carry instructor_id: null and must remain outside this
+ * rule, otherwise the second unidentified person anywhere in the workspace on
+ * the same day collides with the first. Startup migrates the old day-only filter
+ * before verifying this required shape.
  */
 export const DAILY_ATTENDANCE_INDEX = {
-  collection: "attendance",
-  key: { instructor_id: 1, attendance_day: 1 },
-  options: {
-    unique: true,
-    name: "one_attendance_per_day",
-    partialFilterExpression: { attendance_day: { $type: "string" } },
-  },
-};
-
-/** The filter this index uses today, and which the migration replaces. */
-export const LEGACY_DAILY_ATTENDANCE_FILTER = { attendance_day: { $type: "string" } };
-
-/**
- * The filter photo-first check-in needs.
- *
- * Requiring a string instructor_id takes unidentified records outside the unique
- * index, so several can exist for one day. Deliberately not in
- * REQUIRED_DATABASE_INDEXES: listing it there is what blocked startup, because
- * every existing cluster reports it as a conflict.
- */
-export const WIDENED_DAILY_ATTENDANCE_INDEX = {
   collection: "attendance",
   key: { instructor_id: 1, attendance_day: 1 },
   options: {
@@ -88,6 +58,28 @@ export const WIDENED_DAILY_ATTENDANCE_INDEX = {
     partialFilterExpression: {
       instructor_id: { $type: "string" },
       attendance_day: { $type: "string" },
+    },
+  },
+};
+
+/** The filter this index uses today, and which the migration replaces. */
+export const LEGACY_DAILY_ATTENDANCE_FILTER = { attendance_day: { $type: "string" } };
+
+/**
+ * The filter photo-first check-in needs, and the target of the migration.
+ *
+ * Requiring a string instructor_id takes unidentified records outside the unique
+ * index, so several can exist for one day. Identical to DAILY_ATTENDANCE_INDEX,
+ * which is the required shape; kept as its own name because the migration reads
+ * as moving from the legacy filter to this one.
+ */
+export const WIDENED_DAILY_ATTENDANCE_INDEX = {
+  ...DAILY_ATTENDANCE_INDEX,
+  key: { ...DAILY_ATTENDANCE_INDEX.key },
+  options: {
+    ...DAILY_ATTENDANCE_INDEX.options,
+    partialFilterExpression: {
+      ...DAILY_ATTENDANCE_INDEX.options.partialFilterExpression,
     },
   },
 };
@@ -450,16 +442,15 @@ export async function migrateLegacyActiveAttendanceIndex(db) {
  *
  * The replacement is created before the legacy index is dropped, so there is no
  * window in which two real check-ins could be written for the same instructor on
- * the same day. Run deliberately rather than on connect: dropping a unique index
- * is not something an ordinary deploy should do unasked, which is why the
- * preflight reports the old filter as a conflict instead of quietly swapping it.
+ * the same day. Startup runs this migration before index verification because
+ * FACE_ONLY attendance cannot safely operate with the legacy filter.
  */
 export async function migrateLegacyDailyAttendanceIndex(db) {
   const collection = db.collection("attendance");
   const indexes = await listIndexes(collection);
   const legacyIndexes = indexes.filter((index) => (
     index.unique === true
-    && sameObject(index.key, DAILY_ATTENDANCE_INDEX.key)
+    && sameObject(index.key, WIDENED_DAILY_ATTENDANCE_INDEX.key)
     && sameObject(index.partialFilterExpression, LEGACY_DAILY_ATTENDANCE_FILTER)
   ));
   if (legacyIndexes.length === 0) {
@@ -472,8 +463,8 @@ export async function migrateLegacyDailyAttendanceIndex(db) {
   ));
   if (!targetExists) {
     // A different name, because the legacy index still holds the canonical one
-    // and two indexes cannot share it. Renaming is not possible in MongoDB, so
-    // the final name is restored after the drop below.
+    // and two indexes cannot share it. The replacement keeps this name for good:
+    // see the note after the drop below.
     await collection.createIndex(WIDENED_DAILY_ATTENDANCE_INDEX.key, {
       ...WIDENED_DAILY_ATTENDANCE_INDEX.options,
       name: `${WIDENED_DAILY_ATTENDANCE_INDEX.options.name}_migrating`,
@@ -490,19 +481,10 @@ export async function migrateLegacyDailyAttendanceIndex(db) {
     }
   }
 
-  // Now that the name is free, create the index under it and retire the
-  // temporary one, so the end state is indistinguishable from a fresh install.
-  if (!targetExists) {
-    await collection.createIndex(
-      WIDENED_DAILY_ATTENDANCE_INDEX.key,
-      WIDENED_DAILY_ATTENDANCE_INDEX.options
-    );
-    try {
-      await collection.dropIndex(`${WIDENED_DAILY_ATTENDANCE_INDEX.options.name}_migrating`);
-    } catch (error) {
-      if (error?.code !== 27 && error?.codeName !== "IndexNotFound") throw error;
-    }
-  }
+  // Keep the replacement under its temporary name. Creating the same index
+  // again under the canonical name is rejected as an equivalent index by newer
+  // MongoDB versions, while dropping it first would briefly remove uniqueness.
+  // Verification compares keys and behavior rather than cosmetic names.
   return { migrated: true, created: !targetExists, dropped };
 }
 

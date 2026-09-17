@@ -19,9 +19,9 @@ interface KioskResponse {
   action: KioskAction;
   recorded: boolean;
   /**
-   * The same person, photographed again within the server's window. Nothing was
-   * recorded and nothing was spent, and they have already seen their result, so
-   * the screen says nothing rather than refusing something they did not ask for.
+   * An unrecognised frame inside the tablet's few-second hold - usually the
+   * frame after a person was recognised, caught mid-turn. Nothing was recorded,
+   * and the person has already seen their result, so the screen says nothing.
    */
   duplicate?: boolean;
   instructor_name: string | null;
@@ -65,12 +65,17 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
   const [fix, setFix] = useState<Fix | null>(null);
   const [facing, setFacing] = useState<'user' | 'environment'>('environment');
   const resultTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const submitInFlight = useRef(false);
 
   // Followed rather than sampled once: the position is evidence of where the
   // attendance happened, and a fix from a previous location must never be sent.
   useEffect(() => subscribeToLocation(setFix), []);
 
-  useEffect(() => () => clearTimeout(resultTimer.current), []);
+  useEffect(() => () => {
+    clearTimeout(resultTimer.current);
+    clearTimeout(errorTimer.current);
+  }, []);
 
   const showResult = useCallback((next: KioskResponse) => {
     setResult({ ...next, at: Date.now() });
@@ -89,8 +94,13 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
    * transport or server fault becomes an error.
    */
   const submit = useCallback(async (file: File) => {
+    // React state is not synchronous. This ref closes the small gap in which a
+    // second capture can arrive before `submitting` has caused a render.
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     setSubmitting(true);
     setError('');
+    clearTimeout(errorTimer.current);
     try {
       const form = new FormData();
       form.append('file', file);
@@ -110,11 +120,25 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
       if (!response.duplicate) showResult(response);
     } catch (requestError) {
       if ((requestError as { status?: number })?.status === 401) return;
+      if (requestError instanceof ApiError && requestError.status === 409) {
+        showResult({
+          action: 'ALREADY_DONE',
+          recorded: false,
+          instructor_name: null,
+          attendance_id: null,
+          title: requestError.message,
+          detail: 'Nothing was recorded.',
+          tone: 'info',
+        });
+        return;
+      }
       const message = requestError instanceof ApiError
         ? requestError.message
         : 'Could not record that. Try again.';
       setError(message);
+      errorTimer.current = setTimeout(() => setError(''), 5_000);
     } finally {
+      submitInFlight.current = false;
       setSubmitting(false);
     }
   }, [fix, showResult]);
@@ -165,7 +189,7 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
           autoCapture
           inline
           onFlip={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
-          onCapture={(file) => void submit(file)}
+          onCapture={submit}
           onClose={onExit}
         />
 

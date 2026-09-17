@@ -195,6 +195,7 @@ test("the provider is asked to apply the threshold too", async () => {
     const search = service.sent.find((command) => command.commandName === "SearchFacesByImage");
     assert.equal(search.input.FaceMatchThreshold, 97);
     assert.equal(search.input.CollectionId, COLLECTION);
+    assert.equal(search.input.QualityFilter, "LOW");
   });
 });
 

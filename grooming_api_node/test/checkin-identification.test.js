@@ -140,10 +140,10 @@ test("instructor_id is null, which is what will keep several in one day storable
     && typeof document.attendance_day === "string";
   assert.equal(coveredAfterMigration, false);
 
-  // Before the migration: still covered, and therefore still colliding.
+  // The required runtime index now has the same safe filter.
   const current = DAILY_ATTENDANCE_INDEX.options.partialFilterExpression;
-  assert.equal(current.instructor_id, undefined);
-  assert.equal(typeof document.attendance_day === "string", true);
+  assert.deepEqual(current.instructor_id, { $type: "string" });
+  assert.equal(typeof document.instructor_id === "string", false);
 });
 
 test("two unidentified check-ins on one day are both written", async () => {

@@ -4,6 +4,7 @@ import {
   DATABASE_INDEX_APPLY_CONFIRMATION,
   DatabasePreflightError,
   migrateLegacyActiveAttendanceIndex,
+  migrateLegacyDailyAttendanceIndex,
   migrateLegacyEvaluationIdentityIndex,
   verifyDatabaseIndexes,
 } from "./databasePreflight.js";
@@ -62,6 +63,10 @@ export async function connectToMongo() {
     const attendanceIndexMigration = await migrateLegacyActiveAttendanceIndex(db);
     if (attendanceIndexMigration.migrated) {
       console.log("Migrated attendance uniqueness from global-open to one record per local day.");
+    }
+    const dailyIndexMigration = await migrateLegacyDailyAttendanceIndex(db);
+    if (dailyIndexMigration.migrated) {
+      console.log("Migrated daily attendance uniqueness to exclude unidentified records.");
     }
     /**
      * Startup checks the indexes, and nothing else.

@@ -142,6 +142,40 @@ test("the photograph is decoded once and reused", async () => {
   assert.ok(search > normalize, "the match must run on the normalized bytes");
 });
 
+test("a recognised instructor is never held by name", async () => {
+  // A hold by name was claimed before the record was written and never
+  // released, so a request that failed after taking it left that person unable
+  // to retry - and the tablet silent - for the whole window. A repeat capture is
+  // answered from the day's record instead.
+  const { source, route } = await routeSource("/auto");
+  assert.equal(source.includes("instructorCaptureKey"), false, "no hold by instructor may exist");
+  assert.ok(
+    /if \(instructor\) \{\s*rememberCapture\(tabletKey/.test(route),
+    "a recognised frame only starts the tablet hold, and is never refused by it",
+  );
+});
+
+test("only an unrecognised frame can be refused as a duplicate", async () => {
+  const { route } = await routeSource("/auto");
+  const claim = route.indexOf("claimCapture(tabletKey, tabletHold)");
+  const duplicate = route.indexOf("duplicate: true");
+  assert.ok(claim >= 0, "unrecognised frames must take the tablet hold");
+  assert.ok(/else if \(!claimCapture\(tabletKey/.test(route), "the claim belongs to the unrecognised branch");
+  assert.ok(duplicate > claim, "the duplicate reply follows a refused claim");
+  assert.equal(
+    route.includes("UNIDENTIFIED_CAPTURE_WINDOW_MS"),
+    true,
+    "the hold is the short tablet window, not a long one",
+  );
+});
+
+test("a recognised frame briefly protects the tablet from a trailing NO_FACE frame", async () => {
+  const { route } = await routeSource("/auto");
+  const matchedTabletGuard = route.indexOf("rememberCapture(tabletKey, tabletHold)");
+  const unidentifiedCommit = route.indexOf("commitUnidentifiedCheckIn(");
+  assert.ok(matchedTabletGuard >= 0 && matchedTabletGuard < unidentifiedCommit);
+});
+
 test("an unrecognised face is recorded as an arrival, never as a departure", async () => {
   // A check-out closes one specific open session; there is no way to tell which
   // one an unidentified photograph belongs to.

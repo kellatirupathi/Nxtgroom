@@ -19,7 +19,7 @@ type Facing = 'user' | 'environment';
 interface CameraCaptureProps {
   facing: Facing;
   onFlip: () => void;
-  onCapture: (file: File) => void;
+  onCapture: (file: File) => void | Promise<void>;
   onClose: () => void;
   /**
    * Take the photograph as soon as one whole person stands still, with no
@@ -312,7 +312,10 @@ export default function CameraCapture({
         canvas.toBlob(resolve, 'image/jpeg', 0.92),
       );
       if (!blob) throw new Error('encode failed');
-      onCapture(new File([blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      // Keep the shutter locked until the owner has finished handling the
+      // photograph. In kiosk mode that includes identification and the
+      // attendance response, so a slow request cannot trigger a second frame.
+      await onCapture(new File([blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {

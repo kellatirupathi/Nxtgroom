@@ -1,34 +1,28 @@
 /**
- * Who was photographed a moment ago, so the same person is not recorded twice.
+ * A short per-tablet hold, so one moment at the camera is not recorded twice.
  *
- * The kiosk camera fires five times a second. Something has to stop one person
- * standing in front of it from being photographed on every frame, because each
- * one costs a recognition call, a vision call and a stored object.
+ * Recognised people are not held at all. A person who stays in front of the
+ * camera after their check-in is photographed again, identified again, and told
+ * what their day already holds - "already checked in" or "already checked out" -
+ * which records nothing. The daily record is what guarantees one check-in per
+ * day, and the tablet waits for each reply before it can fire again, so there
+ * is no overlap to guard against. A 45-second hold by name used to sit here; it
+ * was removed because a request that failed after claiming it left that person
+ * unable to retry, and the tablet silent, for the whole window.
  *
- * That job used to belong to an eight-second cooldown in the browser, which
- * blocked the camera outright. It worked, but it could not tell a person
- * lingering from the next person in the queue, so a queue moved at one person
- * every nine seconds to solve a problem caused by one person not moving.
+ * What remains is for photographs nobody can be recognised from. They have no
+ * name and no daily record to answer with, so each one would otherwise become a
+ * separate unidentified check-in. Two cases produce them in bursts: somebody
+ * unenrolled standing still, and a recognised person's next frame catching them
+ * mid-turn. Both are held briefly per tablet.
  *
- * Remembering who was seen is both faster and stricter. A different face fires
- * immediately; the same face is refused for the whole window, rather than being
- * free to fire again the moment an arbitrary timer expired.
- *
- * Deliberately in memory. The window is under a minute, the entries are
- * worthless after it, and a restart losing them costs one duplicate refusal at
- * most. Per replica, so two API instances each hold their own view: with a
- * single tablet per college talking to one connection at a time, the same
- * person reaching two replicas inside the window is not a case worth a shared
- * store. The daily record is what actually guarantees one check-in per day.
+ * Deliberately in memory and per replica. The window is a few seconds, and
+ * losing it on a restart costs at most one extra unidentified record.
  */
 
-/** Long enough to cover somebody lingering after their photo was taken. */
-export const RECENT_CAPTURE_WINDOW_MS = 45_000;
-
 /**
- * Unidentified captures have no instructor to remember, so they are held per
- * tablet instead. Shorter, because it blocks a real person from trying again:
- * long enough to stop a burst, short enough that a retake is not a wait.
+ * Long enough to swallow a burst of frames from one moment at the camera, short
+ * enough that a genuine retake is not a wait.
  */
 export const UNIDENTIFIED_CAPTURE_WINDOW_MS = 3_000;
 
@@ -45,12 +39,10 @@ function sweep(now) {
 }
 
 /**
- * Whether this subject was already recorded inside its window.
+ * Whether this tablet is inside its hold.
  *
- * Reading does not extend the window. Somebody who stands in front of the
- * camera for a full minute is refused for the first window and then genuinely
- * reconsidered, rather than being locked out for as long as they keep standing
- * there — which would turn a duplicate guard into a way of never checking out.
+ * Reading does not extend the window, or a person standing in front of the
+ * camera would keep the tablet held for as long as they stayed there.
  */
 export function wasRecentlyCaptured(key, { now = Date.now() } = {}) {
   if (!key) return false;
@@ -63,19 +55,26 @@ export function wasRecentlyCaptured(key, { now = Date.now() } = {}) {
   return true;
 }
 
-/** Records that this subject has just been captured. */
-export function rememberCapture(key, { now = Date.now(), windowMs = RECENT_CAPTURE_WINDOW_MS } = {}) {
+/** Starts, or restarts, the hold for this tablet. */
+export function rememberCapture(key, { now = Date.now(), windowMs = UNIDENTIFIED_CAPTURE_WINDOW_MS } = {}) {
   if (!key) return;
   sweep(now);
   seenAt.set(key, now + windowMs);
 }
 
-/** The key for a recognised instructor. Scoped per college, matching the record. */
-export function instructorCaptureKey(collegeId, instructorId) {
-  return `instructor:${collegeId || "none"}:${instructorId}`;
+/**
+ * Takes the hold if nobody currently owns it.
+ *
+ * The check and the set run with no await between them, so two overlapping
+ * requests in one API process cannot both pass.
+ */
+export function claimCapture(key, options = {}) {
+  if (!key || wasRecentlyCaptured(key, options)) return false;
+  rememberCapture(key, options);
+  return true;
 }
 
-/** The key for an unrecognised capture, which can only be held per tablet. */
+/** The key for a tablet, which is the account signed in on it. */
 export function tabletCaptureKey(accountEmail) {
   return `tablet:${accountEmail || "unknown"}`;
 }

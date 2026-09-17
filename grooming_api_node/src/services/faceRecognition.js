@@ -259,7 +259,10 @@ export async function searchFaceByImage(imageBuffer) {
       Image: { Bytes: imageBuffer },
       FaceMatchThreshold: config.rekognitionMatchThreshold,
       MaxFaces: config.rekognitionSearchCandidates,
-      QualityFilter: "AUTO",
+      // Full-body attendance frames naturally contain a smaller face. LOW still
+      // rejects the poorest inputs without filtering usable faces as aggressively
+      // as AUTO before similarity matching gets a chance to run.
+      QualityFilter: "LOW",
     })
   );
   if (error) {

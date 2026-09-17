@@ -48,11 +48,10 @@ import {
   describeCheckoutTiming,
 } from "../services/checkoutTiming.js";
 import {
-  instructorCaptureKey,
+  claimCapture,
   rememberCapture,
   tabletCaptureKey,
   UNIDENTIFIED_CAPTURE_WINDOW_MS,
-  wasRecentlyCaptured,
 } from "../services/recentCaptures.js";
 import {
   decideKioskAction,
@@ -601,28 +600,35 @@ attendanceRouter.post(
       : null;
 
     /**
-     * Somebody who was photographed a moment ago is not photographed again.
+     * A recognised person is never held.
      *
-     * The camera fires five times a second, so one person standing in front of
-     * the tablet would otherwise be recorded on every frame. This refuses that
-     * person by name while leaving the camera free for whoever is next, which
-     * is what lets the blanket cooldown in the browser come down to a second.
+     * Whatever they do next - stay in front of the camera, step back in a few
+     * seconds later - is answered from their day's record: "already checked in"
+     * or "already checked out", recording nothing. The daily unique index is what
+     * guarantees one check-in per day, and the tablet waits for this reply before
+     * it can fire again, so no overlapping request needs guarding. A hold by name
+     * used to sit here, and a request that failed after taking it left that
+     * person silently unable to retry until it expired.
      *
-     * Silent, and deliberately so: the tablet already showed this person their
-     * result, and a second panel saying "already done" would be a refusal of
-     * something they did not ask for again. Nothing is stored and nothing is
-     * spent.
+     * An unrecognised photograph has no record to answer with, so each one would
+     * become its own unidentified check-in. Those are held briefly per tablet.
+     * A recognised frame starts the same hold, so the next frame catching the
+     * person mid-turn - no face, or a face too blurred to match - is dropped
+     * rather than recorded as a stranger.
      */
-    const captureKey = instructor
-      ? instructorCaptureKey(req.currentUser.collegeId, String(instructor._id))
-      : tabletCaptureKey(req.currentUser.email);
-    if (wasRecentlyCaptured(captureKey, { now: now.getTime() })) {
+    const tabletKey = tabletCaptureKey(req.currentUser.email);
+    const tabletHold = { now: now.getTime(), windowMs: UNIDENTIFIED_CAPTURE_WINDOW_MS };
+    if (instructor) {
+      rememberCapture(tabletKey, tabletHold);
+    } else if (!claimCapture(tabletKey, tabletHold)) {
+      // Silent: this is a trailing frame from a moment the tablet has already
+      // answered, and nothing is stored for it.
       incrementMetric("kiosk_duplicate_capture_total");
       return res.status(200).json({
         action: KIOSK_ACTIONS.ALREADY_DONE,
         recorded: false,
         duplicate: true,
-        instructor_name: instructor?.name || null,
+        instructor_name: null,
         attendance_id: null,
         title: "",
         tone: "info",
@@ -775,10 +781,6 @@ attendanceRouter.post(
       // to be accounted for, not waited on before answering.
       // Held per tablet, not per person: nobody was identified, so there is no
       // name to remember. Short, because it blocks a real retake.
-      rememberCapture(captureKey, {
-        now: now.getTime(),
-        windowMs: UNIDENTIFIED_CAPTURE_WINDOW_MS,
-      });
       void settleUpload(unidentified.attendance._id, "checkin");
       if (coordinates) void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
       incrementMetric("kiosk_unidentified_total");
@@ -855,7 +857,6 @@ attendanceRouter.post(
           console.error(`Kiosk evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
         }
       });
-      rememberCapture(captureKey, { now: now.getTime() });
       if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates);
       incrementMetric("kiosk_checkin_total");
       return res.status(202).json({
@@ -918,7 +919,6 @@ attendanceRouter.post(
         console.error(`Kiosk checkout evaluation not queued for ${attendance._id} (${error?.name || "ERROR"})`);
       }
     });
-    rememberCapture(captureKey, { now: now.getTime() });
     if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates, "checkout");
     incrementMetric("kiosk_checkout_total");
     return res.status(202).json({

@@ -65,13 +65,14 @@ const currentIndex = {
   partialFilterExpression: WIDENED_DAILY_ATTENDANCE_INDEX.options.partialFilterExpression,
 };
 
-test("the index the API requires is still the one deployed clusters carry", () => {
-  // Requiring the widened filter here made the API refuse to start against any
-  // existing database, production included. The two have to land together in a
-  // maintenance window, so the required shape stays as it is until then.
+test("the API requires the widened daily attendance index", () => {
   assert.deepEqual(
     DAILY_ATTENDANCE_INDEX.options.partialFilterExpression,
-    LEGACY_DAILY_ATTENDANCE_FILTER
+    WIDENED_DAILY_ATTENDANCE_INDEX.options.partialFilterExpression
+  );
+  assert.deepEqual(
+    DAILY_ATTENDANCE_INDEX.options.partialFilterExpression.instructor_id,
+    { $type: "string" }
   );
   assert.equal(DAILY_ATTENDANCE_INDEX.options.unique, true);
 });
@@ -102,17 +103,16 @@ test("unidentified records fall outside the widened rule, real ones inside it", 
   assert.equal(covered({ attendance_day: day }), false);
 });
 
-test("until the migration runs, a second unidentified check-in still collides", () => {
-  // Stated as a test so the gap is recorded rather than remembered: under the
-  // filter currently required, every instructor_id: null record on one day is
-  // covered by the unique index and collides with the others.
+test("unidentified check-ins do not collide under the required index", () => {
   const filter = DAILY_ATTENDANCE_INDEX.options.partialFilterExpression;
-  assert.equal(filter.instructor_id, undefined);
-  const coveredByCurrentIndex = (record) => typeof record.attendance_day === "string";
-  assert.equal(coveredByCurrentIndex({ instructor_id: null, attendance_day: "2026-09-11" }), true);
+  assert.deepEqual(filter.instructor_id, { $type: "string" });
+  const coveredByCurrentIndex = (record) => (
+    typeof record.instructor_id === "string" && typeof record.attendance_day === "string"
+  );
+  assert.equal(coveredByCurrentIndex({ instructor_id: null, attendance_day: "2026-09-11" }), false);
 });
 
-test("migrating replaces the legacy filter and keeps the canonical index name", async () => {
+test("migrating replaces the legacy filter without recreating an equivalent index", async () => {
   const collection = fakeCollection([legacyIndex]);
   const result = await migrateLegacyDailyAttendanceIndex(fakeDb(collection));
 
@@ -120,20 +120,17 @@ test("migrating replaces the legacy filter and keeps the canonical index name", 
   assert.equal(result.created, true);
   assert.deepEqual(result.dropped, ["one_attendance_per_day"]);
 
-  // Ends with one index under the canonical name, carrying the widened filter.
+  // Ends with one widened replacement. Keeping its migration name avoids
+  // recreating an equivalent index, which newer MongoDB versions reject.
   const remaining = collection.indexes.filter((index) => (
-    index.name === WIDENED_DAILY_ATTENDANCE_INDEX.options.name
+    index.name === `${WIDENED_DAILY_ATTENDANCE_INDEX.options.name}_migrating`
   ));
   assert.equal(remaining.length, 1);
   assert.deepEqual(
     remaining[0].partialFilterExpression,
     WIDENED_DAILY_ATTENDANCE_INDEX.options.partialFilterExpression
   );
-  // No temporary index left behind.
-  assert.equal(
-    collection.indexes.some((index) => index.name.endsWith("_migrating")),
-    false
-  );
+  assert.equal(collection.created.length, 1);
 });
 
 test("the replacement is created before the legacy index is dropped", async () => {
@@ -178,7 +175,10 @@ test("migrating twice leaves the same single index", async () => {
 
   assert.equal(second.migrated, false);
   const matching = collection.indexes.filter((index) => (
-    index.name === WIDENED_DAILY_ATTENDANCE_INDEX.options.name
+    index.unique === true
+    && JSON.stringify(index.key) === JSON.stringify(WIDENED_DAILY_ATTENDANCE_INDEX.key)
+    && JSON.stringify(index.partialFilterExpression)
+      === JSON.stringify(WIDENED_DAILY_ATTENDANCE_INDEX.options.partialFilterExpression)
   ));
   assert.equal(matching.length, 1);
 });
