@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Image as ImageIcon, MapPin, RefreshCw, Trash2, UserRoundSearch } from 'lucide-react';
+import { ExternalLink, Image as ImageIcon, MapPin, RefreshCw, Trash2, UserRoundSearch } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiJson, invalidateCache } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import InstructorSearchSelect from './InstructorSearchSelect';
 import PhotoViewer from './PhotoViewer';
 import { useToast } from './useToast';
-import { formatCoordinates } from '../status';
+import { formatCoordinates, mapUrlForCoordinates } from '../status';
 import type { AttendanceRecord, Instructor } from '../types';
 
 const QUEUE_PATH = '/api/v2/attendance/unidentified';
@@ -241,6 +241,8 @@ export default function UnidentifiedQueue() {
             const busy = busyId === record._id;
             const mode = faceModes[record._id] ?? 'add';
             const suggestion = record.retry_candidates[0];
+            const mapUrl = mapUrlForCoordinates(record.location_coordinates);
+            const placeLabel = record.location_address || formatCoordinates(record.location_coordinates);
             return (
               <div key={record._id} className="bg-white rounded-md shadow-sm border border-slate-200 p-3">
                 {/* The photograph sets the card's height and everything else
@@ -259,27 +261,82 @@ export default function UnidentifiedQueue() {
                   </button>
 
                   <div className="flex-1 min-w-0 flex flex-col gap-2">
-                    {/* When and where on the left, who on the right: one line
-                        rather than a stack, because the picker is the action
-                        and the time and place are what it is about. */}
-                    <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap">
+                    {/* One row: when and where, then how to use the photo,
+                        then who it is. The picker is narrow and on the right,
+                        because a name is short and the full-width box left the
+                        photo controls stranded on a row of their own. */}
+                    <div className="flex items-center gap-3 flex-wrap lg:flex-nowrap">
                       <div className="min-w-0 sm:w-56 shrink-0">
                         <p className="text-sm font-bold text-slate-800 truncate">
                           {timeLabel(record.check_in_time)}
                         </p>
-                        <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
-                          <MapPin size={12} className="shrink-0" aria-hidden="true" />
-                          <span className="truncate">
-                            {record.location_address || formatCoordinates(record.location_coordinates)}
-                          </span>
-                        </p>
+                        {mapUrl ? (
+                          // Opens the place the photo was taken, so an admin can
+                          // tell which campus or entrance it came from.
+                          <a
+                            href={mapUrl}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            title="Open this location in a map"
+                            className="text-xs text-indigo-600 font-medium mt-0.5 flex items-center gap-1.5 hover:text-indigo-700 hover:underline"
+                          >
+                            <MapPin size={12} className="shrink-0" aria-hidden="true" />
+                            <span className="truncate">{placeLabel}</span>
+                            <ExternalLink size={11} className="shrink-0" aria-hidden="true" />
+                          </a>
+                        ) : (
+                          <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5">
+                            <MapPin size={12} className="shrink-0" aria-hidden="true" />
+                            <span className="truncate">{placeLabel}</span>
+                          </p>
+                        )}
                       </div>
-                      <div className="flex-1 min-w-[12rem]">
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {([
+                          ['add', 'Add'],
+                          ['replace', 'Replace'],
+                          ['none', 'Skip'],
+                        ] as [FaceMode, string][]).map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setFaceModes((current) => ({ ...current, [record._id]: value }))}
+                            aria-pressed={mode === value}
+                            disabled={busy}
+                            title={`${label} this photo as a face reference`}
+                            className={`px-2 py-1 rounded-md text-xs font-bold border transition-colors disabled:opacity-50 ${
+                              mode === value
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+
+                        <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600 whitespace-nowrap">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(analyseNow[record._id])}
+                            onChange={(event) => setAnalyseNow((current) => ({
+                              ...current,
+                              [record._id]: event.target.checked,
+                            }))}
+                            disabled={busy}
+                            className="rounded border-slate-300"
+                          />
+                          Analyse now
+                        </label>
+                      </div>
+
+                      <div className="w-full sm:w-72 lg:ml-auto shrink-0">
                         <InstructorSearchSelect
                           instructors={instructors}
                           selectedId={selection[record._id] || ''}
                           onSelect={(id) => setSelection((current) => ({ ...current, [record._id]: id }))}
                           disabled={busy}
+                          compact
                         />
                       </div>
                     </div>
@@ -295,46 +352,8 @@ export default function UnidentifiedQueue() {
                       </p>
                     )}
 
-                    {/* Controls and actions on one line: three small toggles, a
-                        checkbox and two buttons had taken three rows between
-                        them. */}
+                    {/* The decision, on its own at the right. */}
                     <div className="flex items-center gap-2 flex-wrap">
-                      {([
-                        ['add', 'Add'],
-                        ['replace', 'Replace'],
-                        ['none', 'Skip'],
-                      ] as [FaceMode, string][]).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setFaceModes((current) => ({ ...current, [record._id]: value }))}
-                          aria-pressed={mode === value}
-                          disabled={busy}
-                          title={`${label} this photo as a face reference`}
-                          className={`px-2 py-1 rounded-md text-xs font-bold border transition-colors disabled:opacity-50 ${
-                            mode === value
-                              ? 'bg-indigo-600 text-white border-indigo-600'
-                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-
-                      <label className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(analyseNow[record._id])}
-                          onChange={(event) => setAnalyseNow((current) => ({
-                            ...current,
-                            [record._id]: event.target.checked,
-                          }))}
-                          disabled={busy}
-                          className="rounded border-slate-300"
-                        />
-                        Analyse now
-                      </label>
-
                       <div className="flex items-center gap-2 ml-auto">
                         <button
                           type="button"

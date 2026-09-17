@@ -58,3 +58,18 @@ export function formatCoordinates(coordinates: unknown): string {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return String(coordinates);
   return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 }
+
+/**
+ * A link that opens the stored coordinates on a map, or null when there are no
+ * usable coordinates.
+ *
+ * OpenStreetMap, matching the embedded map on the record page: no API key, and
+ * the same place opens whichever screen the link came from.
+ */
+export function mapUrlForCoordinates(coordinates: unknown): string | null {
+  if (!coordinates) return null;
+  const [latitude, longitude] = String(coordinates).split(',').map((value) => Number(value.trim()));
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  return `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=17/${latitude}/${longitude}`;
+}

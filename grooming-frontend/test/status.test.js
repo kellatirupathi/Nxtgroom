@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatCoordinates,
+  mapUrlForCoordinates,
   hasEvaluation,
   imageQualityLabel,
   normalizeAttendanceStatus,
@@ -34,4 +35,16 @@ test('image quality is reported separately from the verdict', () => {
 test('formats valid coordinates without a third-party lookup', () => {
   assert.equal(formatCoordinates('17.385044,78.486671'), '17.38504, 78.48667');
   assert.equal(formatCoordinates('not-coordinates'), 'not-coordinates');
+});
+
+test('links coordinates to a map, and only real coordinates', () => {
+  assert.equal(
+    mapUrlForCoordinates('17.42138, 78.33251'),
+    'https://www.openstreetmap.org/?mlat=17.42138&mlon=78.33251#map=17/17.42138/78.33251',
+  );
+  // Nothing to open, so no link rather than a map of the ocean at 0,0.
+  assert.equal(mapUrlForCoordinates(null), null);
+  assert.equal(mapUrlForCoordinates(''), null);
+  assert.equal(mapUrlForCoordinates('not-coordinates'), null);
+  assert.equal(mapUrlForCoordinates('95,78'), null);
 });

@@ -8,6 +8,12 @@ interface InstructorSearchSelectProps {
   selectedId: string;
   onSelect: (instructorId: string) => void;
   disabled?: boolean;
+  /**
+   * A shorter box for sitting in a row of small controls, such as a card in
+   * the unidentified queue. The results list keeps a readable width even when
+   * the box itself is narrow.
+   */
+  compact?: boolean;
 }
 
 /** Rendering all 599 matches would cost more than anyone scrolls through. */
@@ -40,6 +46,7 @@ export default function InstructorSearchSelect({
   selectedId,
   onSelect,
   disabled,
+  compact = false,
 }: InstructorSearchSelectProps) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -125,8 +132,8 @@ export default function InstructorSearchSelect({
       {selected && !open ? (
         // Once chosen, show the person rather than an empty search box, with a
         // clear button to start over.
-        <div className="flex items-center gap-3 rounded-md border-2 border-indigo-200 bg-indigo-50/40 p-4">
-          <Check size={18} className="shrink-0 text-emerald-600" aria-hidden="true" />
+        <div className={`flex items-center gap-3 rounded-md border-2 border-indigo-200 bg-indigo-50/40 ${compact ? 'px-3 py-1' : 'p-4'}`}>
+          <Check size={compact ? 16 : 18} className="shrink-0 text-emerald-600" aria-hidden="true" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-bold text-slate-800">{selected.name}</span>
             <span className="block truncate text-xs text-slate-500">
@@ -146,8 +153,8 @@ export default function InstructorSearchSelect({
       ) : (
         <>
           <Search
-            size={18}
-            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+            size={compact ? 16 : 18}
+            className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-slate-400 ${compact ? 'left-3' : 'left-4'}`}
             aria-hidden="true"
           />
           <input
@@ -168,7 +175,7 @@ export default function InstructorSearchSelect({
             }}
             onFocus={() => setOpen(true)}
             onKeyDown={handleKeyDown}
-            className="w-full rounded-md border-2 border-slate-100 bg-slate-50 p-4 pl-11 text-sm font-medium text-slate-700 outline-none transition-all hover:bg-slate-100 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 disabled:opacity-60"
+            className={`w-full rounded-md border-2 border-slate-100 bg-slate-50 text-sm font-medium text-slate-700 outline-none transition-all hover:bg-slate-100 focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 disabled:opacity-60 ${compact ? 'px-3 py-2 pl-9' : 'p-4 pl-11'}`}
           />
         </>
       )}
@@ -179,7 +186,7 @@ export default function InstructorSearchSelect({
           id="instructor-search-list"
           role="listbox"
           aria-label="Matching instructors"
-          className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl"
+          className={`absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-slate-200 bg-white shadow-xl ${compact ? 'right-0 min-w-[20rem]' : ''}`}
         >
           {results.length === 0 ? (
             <li className="px-4 py-6 text-center text-sm text-slate-400">
