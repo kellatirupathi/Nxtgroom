@@ -10,8 +10,11 @@ import {
   shutterEnabled,
   stabilizeFrameReading,
   type StableFrameState,
+  type FrameReading,
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
+import FaceBoxOverlay from './FaceBoxOverlay';
+import type { FaceBox } from '../lib/faceBoxes';
 import { BODY_GUIDE_BOUNDS, bodyGuideSourceRect } from '../lib/cameraGeometry';
 
 type Facing = 'user' | 'environment';
@@ -87,6 +90,16 @@ export default function CameraCapture({
   const [guidance, setGuidance] = useState<string | null>('Step into the frame');
   /** How many consecutive readings auto-capture could fire on. */
   const [steadyFrames, setSteadyFrames] = useState(0);
+  /**
+   * Where to draw a box on the preview.
+   *
+   * Taken from the raw reading rather than the stabilised one. The verdict is
+   * held steady so the outline and the guidance do not flicker, but a box that
+   * only moved three times a second would visibly lag the face it belongs to —
+   * and unlike the verdict, a box in slightly the wrong place for one frame
+   * costs nothing.
+   */
+  const [faceBoxes, setFaceBoxes] = useState<FaceBox[]>([]);
   /** Shown once the strict frame has proved unreachable, with the instruction. */
   const [manualOffered, setManualOffered] = useState(!autoCapture);
   /**
@@ -197,13 +210,13 @@ export default function CameraCapture({
         if (disposed) return;
         const video = videoRef.current;
         const viewport = viewportRef.current;
-        const reading = video
+        const reading: FrameReading = video
           ? await readFrame(detector, video, viewport ? {
               width: viewport.clientWidth,
               height: viewport.clientHeight,
               canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
-            } : undefined)
-          : ({ verdict: 'UNAVAILABLE', guidance: null } as const);
+            } : undefined, { mirrored: facing === 'user' })
+          : { verdict: 'UNAVAILABLE', guidance: null, boxes: [] };
         if (disposed) return;
 
         stableState = stabilizeFrameReading(stableState, reading);
@@ -211,6 +224,7 @@ export default function CameraCapture({
         setVerdict(stableReading.verdict);
         setGuidance(stableReading.guidance);
         verdictRef.current = stableReading.verdict;
+        setFaceBoxes(reading.boxes ?? []);
 
         if (autoCapture) {
           // Counted from the stabilised verdict rather than the raw reading, so
@@ -387,6 +401,13 @@ export default function CameraCapture({
               className="absolute inset-0 w-full h-full object-cover"
               style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
             />
+            {/* A box on the face the camera has found, so somebody standing in
+                front of the tablet can see they have been detected rather than
+                inferring it from an outline that has not turned green yet.
+                Drawn outside the mirroring transform above, which is why the
+                coordinates arrive already flipped. */}
+            {!starting && <FaceBoxOverlay boxes={faceBoxes} ready={verdict === 'FULL_BODY'} />}
+
             {/* A head-to-toe outline to stand inside. It occupies nearly the
                 full preview height so the instructor, rather than the room,
                 supplies most of the pixels sent for appearance analysis.

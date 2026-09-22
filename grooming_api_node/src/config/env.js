@@ -178,6 +178,24 @@ export function runtimeConfig() {
     // leave room for the rest of the handler inside HTTP_REQUEST_TIMEOUT_MS.
     rekognitionTimeoutMs: parseInteger("REKOGNITION_TIMEOUT_MS", 10000, { min: 2000, max: 30000 }),
     rekognitionMaxAttempts: parseInteger("REKOGNITION_MAX_ATTEMPTS", 2, { min: 1, max: 4 }),
+    // Group attendance: one photograph, several people, one record each. The
+    // single-person route is untouched by all of this and remains the default
+    // way attendance is taken.
+    //
+    // The cap is a refusal rather than a trim. Every extra face is a
+    // Rekognition search, a crop held in memory, an upload and a vision call,
+    // so the number is what one request may spend — and a photograph with more
+    // people than this is retaken rather than partly processed, because
+    // silently ignoring the seventh person is the worst outcome available.
+    groupMaxPeople: parseInteger("GROUP_ATTENDANCE_MAX_PEOPLE", 6, { min: 2, max: 12 }),
+    // Below this a cropped face has too few pixels for a 95% match to mean
+    // anything, so it is reported as too far away instead of searched for and
+    // reported as a stranger. Measured on the shorter side of the crop.
+    groupMinFacePixels: parseInteger("GROUP_MIN_FACE_PIXELS", 72, { min: 32, max: 300 }),
+    // How many people are cropped and encoded at once. sharp holds an
+    // uncompressed image per operation, and this route runs several per
+    // request, so the ceiling here is memory rather than time.
+    groupCropConcurrency: parseInteger("GROUP_CROP_CONCURRENCY", 3, { min: 1, max: 8 }),
   };
 }
 

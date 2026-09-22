@@ -83,3 +83,14 @@ export function tabletCaptureKey(accountEmail) {
 export function resetRecentCaptures() {
   seenAt.clear();
 }
+
+/**
+ * The key for group captures at a tablet, kept apart from the single-person one.
+ *
+ * The two screens hold for the same reason and must not hold each other: a
+ * group photograph and a single check-in are different moments at the camera,
+ * and sharing a key would let one silently swallow the other's next frame.
+ */
+export function groupTabletCaptureKey(accountEmail) {
+  return `group:${accountEmail || "unknown"}`;
+}

@@ -37,7 +37,7 @@ const UserManagement = lazy(() => import('./components/UserManagement'));
 const SettingsPage = lazy(() => import('./components/SettingsPage'));
 const InstructorManagement = lazy(() => import('./components/InstructorManagement'));
 const UnidentifiedQueue = lazy(() => import('./components/UnidentifiedQueue'));
-const KioskAttendance = lazy(() => import('./components/KioskAttendance'));
+const AttendanceScreen = lazy(() => import('./components/AttendanceScreen'));
 
 interface SessionState {
   token: string | null;
@@ -364,7 +364,7 @@ export default function App() {
               how a college mid-enrolment records attendance. */}
           {activeTab === 'overview' && session.faceIdentification && (
             <div className="w-full h-full">
-              <KioskAttendance onExit={() => navigate('daily-records')} />
+              <AttendanceScreen onExit={() => navigate('daily-records')} />
             </div>
           )}
 

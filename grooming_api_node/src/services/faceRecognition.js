@@ -366,3 +366,83 @@ export function facesToEvict(existingFaceIds, { adding = 1 } = {}) {
   if (overflow <= 0) return [];
   return current.slice(0, overflow);
 }
+
+/**
+ * Every face in one photograph, with where each of them is.
+ *
+ * `SearchFacesByImage` deliberately does not do this. It searches the largest
+ * face it finds and ignores the rest, which is correct for one person at a
+ * tablet and silently wrong for six: five people would be photographed,
+ * analysed by nobody, and told nothing. So a group photograph is detected
+ * first, then each face is cut out and searched on its own.
+ *
+ * Detection only. Nothing here decides who anybody is, and no crop is made —
+ * this reports boxes and lets the caller choose what to cut, because the crop a
+ * face search wants and the crop a grooming report wants are different
+ * rectangles around the same person.
+ *
+ * `maxFaces` is a refusal, not a limit to silently apply. Quietly dropping the
+ * seventh person would record attendance for six and leave the seventh
+ * believing they were photographed, which is the one failure worth being loud
+ * about.
+ */
+export async function detectFacesForGroup(imageBuffer, { maxFaces = 0 } = {}) {
+  if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
+  if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
+    return failure(FACE_REASONS.NO_FACE);
+  }
+
+  const { response, error } = await send(
+    "DetectFaces",
+    new DetectFacesCommand({
+      Image: { Bytes: imageBuffer },
+      // Quality and Pose come with DEFAULT, and both are wanted: a face turned
+      // away or badly lit is worth reporting as unusable rather than searching
+      // for and reporting as unrecognised.
+      Attributes: ["DEFAULT"],
+    })
+  );
+  if (error) return providerFailure("DetectFaces", error);
+
+  const details = response?.FaceDetails || [];
+  if (details.length === 0) return failure(FACE_REASONS.NO_FACE);
+  if (maxFaces > 0 && details.length > maxFaces) {
+    incrementMetric("rekognition_group_too_many_faces_total");
+    return {
+      ok: false,
+      reason: FACE_REASONS.MULTIPLE_FACES,
+      message: `This photo has ${details.length} people in it. Take it again with at most ${maxFaces}.`,
+      detected: details.length,
+    };
+  }
+
+  const config = runtimeConfig();
+  const faces = details.map((detail, index) => ({
+    index,
+    box: {
+      left: Number(detail?.BoundingBox?.Left ?? 0),
+      top: Number(detail?.BoundingBox?.Top ?? 0),
+      width: Number(detail?.BoundingBox?.Width ?? 0),
+      height: Number(detail?.BoundingBox?.Height ?? 0),
+    },
+    confidence: Number(detail?.Confidence ?? 0),
+    sharpness: Number(detail?.Quality?.Sharpness ?? 0),
+    brightness: Number(detail?.Quality?.Brightness ?? 0),
+    yaw: Number(detail?.Pose?.Yaw ?? 0),
+    pitch: Number(detail?.Pose?.Pitch ?? 0),
+  }))
+    // A low-confidence detection in a group is usually a pattern on a wall or a
+    // face on a poster. Searching for it costs a call and can only produce an
+    // unidentified record nobody can resolve.
+    .filter((face) => face.confidence >= config.rekognitionMinFaceConfidence
+      && face.box.width > 0
+      && face.box.height > 0);
+
+  if (faces.length === 0) {
+    incrementMetric("rekognition_group_no_usable_face_total");
+    return failure(FACE_REASONS.NO_FACE);
+  }
+
+  incrementMetric("rekognition_group_detect_total");
+  return { ok: true, faces, detected: details.length };
+}

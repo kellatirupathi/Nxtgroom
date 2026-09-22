@@ -14,11 +14,17 @@ import {
 } from "../services/identificationSettings.js";
 import {
   deleteFaces,
+  FACE_REASONS,
   facesToEvict,
   indexFace,
   isFaceRecognitionConfigured,
   searchFaceByImage,
 } from "../services/faceRecognition.js";
+import {
+  describeGroupOutcome,
+  GROUP_OUTCOMES,
+  identifyPeopleInPhoto,
+} from "../services/groupRecognition.js";
 import { incrementMetric } from "../services/telemetry.js";
 import { localDateKey } from "../services/instructorReports.js";
 import { enqueueNotification } from "../services/notificationWorker.js";
@@ -49,6 +55,7 @@ import {
 } from "../services/checkoutTiming.js";
 import {
   claimCapture,
+  groupTabletCaptureKey,
   rememberCapture,
   tabletCaptureKey,
   UNIDENTIFIED_CAPTURE_WINDOW_MS,
@@ -99,6 +106,21 @@ const checkOutLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => String(req.currentUser?.email || "unauthenticated"),
   message: { detail: "Too many check-out attempts. Please try again later." },
+});
+
+// One group photograph is up to GROUP_ATTENDANCE_MAX_PEOPLE check-ins, each
+// with its own crop, upload, face search and vision call. The count is
+// therefore lower than the single-person limiter above even though the ceiling
+// on people recorded is higher: at six to a photograph this is still several
+// hundred check-ins per quarter hour, which is more than a tablet can
+// physically photograph.
+const groupCheckInLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  keyGenerator: (req) => String(req.currentUser?.email || "unauthenticated"),
+  message: { detail: "Too many group check-in attempts. Please try again later." },
 });
 
 // Re-analysis spends a vision call on an image that already has a report, so
@@ -927,6 +949,488 @@ attendanceRouter.post(
       instructor_name: instructor.name,
       attendance_id: String(attendance._id),
       ...describeKioskAction(action, { instructorName: instructor.name }),
+    });
+  })
+);
+
+/**
+ * One photograph, several people, one attendance record each.
+ *
+ * The single-person route above is untouched and remains how attendance is
+ * normally taken. This is the same sequence — identify, decide, record,
+ * analyse — applied to everybody standing in one frame, and it exists because
+ * the obvious shortcut does not work: `SearchFacesByImage` answers about the
+ * largest face in a photograph and ignores the others, so pointing the existing
+ * route at a group would record the nearest person and silently discard the
+ * rest.
+ *
+ * Every person is treated as their own check-in. Their identity comes from the
+ * same collection at the same threshold, their day is read from the same
+ * record, the action is chosen by the same decideKioskAction, and the
+ * photograph analysed for their grooming report is a crop containing them
+ * rather than the whole group — otherwise six people would receive six
+ * identical reports describing whoever the model happened to look at.
+ *
+ * One person's failure is theirs alone. A refused upload, a duplicate record or
+ * an unreachable service is reported against that person and the others are
+ * still recorded, because five people should not lose their attendance because
+ * a sixth stood too far back.
+ */
+attendanceRouter.post(
+  "/auto/group",
+  groupCheckInLimiter,
+  checkInConcurrencyGate,
+  upload.single("file"),
+  asyncRoute(async (req, res) => {
+    const validation = validateImageUpload(req.file);
+    if (!validation.valid) return res.status(400).json({ detail: validation.detail });
+
+    const db = req.app.locals.db;
+    const now = new Date();
+    const config = runtimeConfig();
+
+    if (!isFaceRecognitionConfigured()) {
+      return res.status(503).json({
+        detail: "Face recognition is not available right now, so nobody can be identified.",
+      });
+    }
+
+    const coordinates = parseCoordinates(req.body.location_coordinates);
+    if (req.body.location_coordinates && !coordinates) {
+      return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
+    }
+    const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
+
+    let groupImage;
+    try {
+      groupImage = await normalizeInstructorImage(req.file.buffer);
+    } catch {
+      return res.status(400).json({
+        detail: "Image could not be decoded; take a clear photo and try again",
+      });
+    }
+
+    const identified = await identifyPeopleInPhoto(groupImage.buffer, {
+      width: groupImage.width,
+      height: groupImage.height,
+    });
+    if (!identified.ok) {
+      // Too many people is the one refusal worth a distinct status: it is a
+      // request the tablet should not repeat unchanged, unlike an empty frame.
+      const tooMany = identified.reason === FACE_REASONS.MULTIPLE_FACES;
+      return res.status(tooMany ? 422 : 200).json({
+        detail: identified.message
+          || (identified.reason === FACE_REASONS.NO_FACE
+            ? "No faces were found in this photo."
+            : "Nobody could be identified from this photo."),
+        detected: identified.detected ?? 0,
+        recorded: 0,
+        people: [],
+      });
+    }
+
+    /**
+     * A short hold, for the same reason the single route has one.
+     *
+     * Unmatched people are the ones that need it: they have no daily record to
+     * be answered from, so a second photograph of the same group within a
+     * moment would create a second unidentified record for each of them. A
+     * frame where everybody matched cannot do that — each of them is answered
+     * "already checked in", which records nothing — so it starts the hold
+     * without being blocked by it.
+     */
+    const willRecordStrangers = identified.people.some((person) => (
+      person.outcome === GROUP_OUTCOMES.NO_MATCH
+      || person.outcome === GROUP_OUTCOMES.AMBIGUOUS
+      || person.outcome === GROUP_OUTCOMES.PROVIDER_ERROR
+    ));
+    const holdKey = groupTabletCaptureKey(req.currentUser.email);
+    const hold = { now: now.getTime(), windowMs: UNIDENTIFIED_CAPTURE_WINDOW_MS };
+    if (!willRecordStrangers) {
+      rememberCapture(holdKey, hold);
+    } else if (!claimCapture(holdKey, hold)) {
+      incrementMetric("group_duplicate_capture_total");
+      return res.status(200).json({
+        detected: identified.detected,
+        recorded: 0,
+        duplicate: true,
+        people: [],
+      });
+    }
+
+    /**
+     * Stores one person's crop and records the failure against their record.
+     *
+     * The same contract as the single route's settleUpload: the record is kept
+     * and marked rather than deleted, because it is still the evidence that
+     * somebody turned up, and no analysis is queued for bytes that never
+     * arrived.
+     */
+    const settleUpload = async (uploading, attendanceId, kind) => {
+      if (await uploading) return true;
+      const field = kind === "checkout" ? "check_out_photo_key" : "check_in_photo_key";
+      await db.collection("attendance").updateOne(
+        { _id: attendanceId },
+        {
+          $set: {
+            [field]: null,
+            photo_storage_failed_at: new Date(),
+            ...(kind === "checkout"
+              ? { checkout_evaluation_queue_status: null, checkout_email_status: "not_requested" }
+              : {
+                evaluation_queue_status: null,
+                status: "error",
+                remarks: "The photograph could not be stored, so this check-in was not analysed.",
+              }),
+            updated_at: new Date(),
+          },
+        }
+      );
+      incrementMetric("kiosk_photo_upload_failures_total");
+      return false;
+    };
+
+    /** Begins one person's upload without waiting for it. */
+    const beginUpload = (person, instructorId, kind) => {
+      const key = buildPhotoKey({
+        instructorId: String(instructorId || "unidentified"),
+        kind,
+        mimeType: person.image.mimeType,
+        now,
+      });
+      const uploading = uploadPhoto({
+        key,
+        body: person.image.buffer,
+        mimeType: person.image.mimeType,
+        metadata: {
+          instructor_id: String(instructorId || "unidentified"),
+          kind,
+          captured_at: now.toISOString(),
+          coordinates: coordinates || "",
+          accuracy_m: req.body.location_accuracy_m || "",
+          // Marks this image as one person cut out of a group photograph, so a
+          // thin report or an unusual framing has a recorded explanation.
+          capture_mode: "group",
+        },
+      }).then(
+        (upload) => Boolean(upload?.stored),
+        (error) => {
+          console.error(`Group photo upload failed for ${key}: ${error?.name || "Error"}`);
+          return false;
+        }
+      );
+      return { key, uploading };
+    };
+
+    /**
+     * How this person came to be named, recorded on their row exactly as the
+     * single route records it — plus where in the group photograph they stood,
+     * which is the only way to check a disputed match afterwards.
+     */
+    const identificationFor = (person) => ({
+      method: "FACE",
+      outcome: "MATCHED",
+      similarity: person.similarity,
+      face_id: person.faceId,
+      runner_up_instructor_id: person.runnerUp?.instructorId || null,
+      runner_up_similarity: person.runnerUp?.similarity ?? null,
+      attempted_at: now,
+      capture_mode: "GROUP",
+      group_face_box: person.box,
+      group_body_coverage: person.bodyCoverage,
+    });
+
+    const answer = (person, fields) => ({
+      position: person.box,
+      similarity: person.similarity,
+      ...fields,
+    });
+
+    /** Everything one person's turn can end in. Never throws to the request. */
+    const processPerson = async (person) => {
+      if (!person.image) {
+        return answer(person, {
+          action: KIOSK_ACTIONS.UNIDENTIFIED,
+          recorded: false,
+          instructor_name: null,
+          attendance_id: null,
+          title: "Could not be photographed",
+          detail: "This person could not be cut out of the group photo.",
+          tone: "warning",
+        });
+      }
+
+      /**
+       * Somebody too far away to identify is told so, and nothing is written.
+       *
+       * This is where a group photograph differs from a single one. The
+       * single-person screen refuses to fire at all when it sees more than one
+       * person, so a colleague crossing the corridor behind the subject can
+       * never reach the server. Here the whole frame is the photograph, and a
+       * passer-by forty feet back is a detected face like any other — recording
+       * them would fill the unidentified queue with people who were not
+       * checking in and leave an administrator to work out which strangers
+       * mattered.
+       *
+       * An instructor who genuinely was standing too far back loses nothing:
+       * they are named on the screen, told to stand closer, and photographed
+       * again a second later. That is a better trade than a record nobody can
+       * resolve.
+       */
+      if (person.outcome === GROUP_OUTCOMES.TOO_SMALL) {
+        incrementMetric("group_too_small_total");
+        return answer(person, {
+          action: KIOSK_ACTIONS.UNIDENTIFIED,
+          recorded: false,
+          instructor_name: null,
+          attendance_id: null,
+          title: describeGroupOutcome(person.outcome),
+          detail: "Stand closer to the camera and try again.",
+          tone: "warning",
+        });
+      }
+
+      const instructor = person.instructorId
+        ? await db.collection("instructors").findOne(
+            activeInstructorFilter(req.currentUser, person.instructorId)
+          )
+        : null;
+
+      const today = instructor
+        ? await db.collection("attendance").findOne(attendanceOnLocalDay(instructor._id, now))
+        : null;
+      const action = decideKioskAction({
+        matched: Boolean(instructor),
+        availability: checkoutAvailability(today, now),
+      });
+
+      // Nothing is recorded, so nothing is stored and no crop is uploaded.
+      if (action === KIOSK_ACTIONS.TOO_EARLY || action === KIOSK_ACTIONS.ALREADY_DONE) {
+        const timing = checkoutTiming(today?.check_in_time, { now });
+        const opensAtLabel = timing.opens_at
+          ? new Intl.DateTimeFormat("en-IN", {
+              timeZone: config.appTimeZone,
+              hour: "numeric",
+              minute: "2-digit",
+              hour12: true,
+            }).format(timing.opens_at)
+          : null;
+        return answer(person, {
+          action,
+          recorded: false,
+          instructor_name: instructor?.name || null,
+          attendance_id: today ? String(today._id) : null,
+          ...describeKioskAction(action, {
+            instructorName: instructor?.name,
+            opensAtLabel: action === KIOSK_ACTIONS.TOO_EARLY ? opensAtLabel : null,
+            minutesRemaining: timing.minutes_remaining,
+          }),
+        });
+      }
+
+      if (action === KIOSK_ACTIONS.UNIDENTIFIED) {
+        const { key, uploading } = beginUpload(person, null, "checkin");
+        const unidentified = await commitUnidentifiedCheckIn(db, {
+          currentUser: req.currentUser,
+          coordinates,
+          normalizedImage: person.image,
+          photoKey: key,
+          locationAccuracyM: accuracyMetres,
+          capturedAt: now,
+          recognition: {
+            reason: person.outcome,
+            bestSimilarity: person.similarity,
+            candidateInstructorId: null,
+          },
+          now,
+        });
+        void settleUpload(uploading, unidentified.attendance._id, "checkin");
+        if (coordinates) void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
+        incrementMetric("group_unidentified_total");
+        return answer(person, {
+          action,
+          recorded: true,
+          instructor_name: null,
+          attendance_id: String(unidentified.attendance._id),
+          title: describeGroupOutcome(person.outcome),
+          detail: "Recorded for an administrator to name.",
+          tone: "warning",
+        });
+      }
+
+      if (action === KIOSK_ACTIONS.CHECK_IN) {
+        const { key, uploading } = beginUpload(person, instructor._id, "checkin");
+        let committed;
+        try {
+          committed = await commitGuardedCheckIn(db, {
+            currentUser: req.currentUser,
+            instructorId: String(instructor._id),
+            coordinates,
+            normalizedImage: person.image,
+            photoKey: key,
+            locationAccuracyM: accuracyMetres,
+            capturedAt: now,
+            identification: identificationFor(person),
+            now,
+          });
+        } catch (error) {
+          if (await uploading) await compensateUploadedPhoto(db, key, "group_checkin_commit_failed");
+          if (error.code !== 11000) throw error;
+          committed = { outcome: "already_checked_in_today" };
+        }
+        if (committed.outcome !== "created") {
+          if (await uploading) await compensateUploadedPhoto(db, key, `group_${committed.outcome}`);
+          return answer(person, {
+            action: KIOSK_ACTIONS.ALREADY_DONE,
+            recorded: false,
+            instructor_name: instructor.name,
+            attendance_id: null,
+            title: committed.outcome === "invalid_email"
+              ? `${instructor.name} needs an email address`
+              : `${instructor.name} has already checked in today`,
+            detail: committed.outcome === "invalid_email"
+              ? "Check-in reports cannot be sent until one is set."
+              : "Nothing was recorded.",
+            tone: "info",
+          });
+        }
+
+        const { attendance, evaluationPayload } = committed;
+        void settleUpload(uploading, attendance._id, "checkin").then(async (ok) => {
+          if (!ok) return;
+          try {
+            await enqueueEvaluation(db, {
+              attendanceId: attendance._id,
+              instructor: evaluationPayload.instructor,
+              photoKey: evaluationPayload.photo_key,
+              mimeType: evaluationPayload.mime_type,
+              checkInTime: evaluationPayload.check_in_time,
+              deadlineAt: evaluationPayload.deadline_at,
+            });
+          } catch (error) {
+            console.error(`Group evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
+          }
+        });
+        if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates);
+        incrementMetric("group_checkin_total");
+        return answer(person, {
+          action,
+          recorded: true,
+          instructor_name: instructor.name,
+          attendance_id: String(attendance._id),
+          ...describeKioskAction(action, { instructorName: instructor.name }),
+        });
+      }
+
+      // CHECK_OUT, guarded on check_out_time exactly as the single route is, so
+      // two photographs a moment apart cannot both close one session.
+      const { key, uploading } = beginUpload(person, instructor._id, "checkout");
+      const recipient = isValidEmail(instructor.email) ? instructor.email : null;
+      const result = await db.collection("attendance").findOneAndUpdate(
+        { _id: today._id, check_out_time: null, ...attendanceScope(req.currentUser) },
+        {
+          $set: {
+            check_out_time: now,
+            check_out_photo_key: key,
+            check_out_photo_captured_at: now,
+            ...(coordinates ? { check_out_coordinates: coordinates } : {}),
+            ...(accuracyMetres != null ? { check_out_location_accuracy_m: accuracyMetres } : {}),
+            checkout_identification: identificationFor(person),
+            checkout_evaluation_queue_status: "processing",
+            checkout_email_status: recipient ? "waiting_for_analysis" : "skipped_no_email",
+            updated_at: now,
+          },
+        },
+        { returnDocument: "after" }
+      );
+      const attendance = result?.value || result;
+      if (!attendance) {
+        if (await uploading) await compensateUploadedPhoto(db, key, "group_duplicate_checkout");
+        return answer(person, {
+          action: KIOSK_ACTIONS.ALREADY_DONE,
+          recorded: false,
+          instructor_name: instructor.name,
+          attendance_id: String(today._id),
+          title: `${instructor.name} has already checked out today`,
+          detail: "Nothing was recorded.",
+          tone: "info",
+        });
+      }
+
+      void settleUpload(uploading, attendance._id, "checkout").then(async (ok) => {
+        if (!ok) return;
+        try {
+          await enqueueEvaluation(db, {
+            attendanceId: attendance._id,
+            kind: "checkout",
+            instructor: {
+              id: String(instructor._id),
+              name: instructor.name,
+              email: recipient || instructor.email || null,
+              gender: instructor.gender || null,
+              collegeId: instructor.college_id ? String(instructor.college_id) : null,
+            },
+            photoKey: key,
+            mimeType: person.image.mimeType,
+            checkInTime: attendance.check_in_time,
+            checkOutTime: now,
+          });
+        } catch (error) {
+          console.error(`Group checkout evaluation not queued for ${attendance._id} (${error?.name || "ERROR"})`);
+        }
+      });
+      if (coordinates) void attachAddressToAttendance(db, attendance._id, coordinates, "checkout");
+      incrementMetric("group_checkout_total");
+      return answer(person, {
+        action,
+        recorded: true,
+        instructor_name: instructor.name,
+        attendance_id: String(attendance._id),
+        ...describeKioskAction(action, { instructorName: instructor.name }),
+      });
+    };
+
+    /**
+     * People are processed a few at a time rather than all at once.
+     *
+     * Each turn holds a crop, an upload and a MongoDB transaction, and the
+     * container this runs in has 512MB and a fifth of a CPU. Six at once is not
+     * meaningfully faster than three at a time here, and it is the difference
+     * between a busy tablet and an out-of-memory restart.
+     */
+    const people = [];
+    for (let index = 0; index < identified.people.length; index += config.groupCropConcurrency) {
+      const batch = identified.people.slice(index, index + config.groupCropConcurrency);
+      const settled = await Promise.allSettled(batch.map(processPerson));
+      for (const [offset, outcome] of settled.entries()) {
+        if (outcome.status === "fulfilled") {
+          people.push(outcome.value);
+          continue;
+        }
+        // One person's turn threw. Theirs is reported and everybody else's
+        // still stands, which is the whole reason these are settled rather
+        // than awaited together.
+        console.error(`Group attendance failed for one person: ${outcome.reason?.name || "Error"}`);
+        incrementMetric("group_person_failed_total");
+        people.push({
+          position: batch[offset].box,
+          action: KIOSK_ACTIONS.UNIDENTIFIED,
+          recorded: false,
+          instructor_name: null,
+          attendance_id: null,
+          title: "Could not be recorded",
+          detail: "Something went wrong for this person. Photograph them again.",
+          tone: "warning",
+        });
+      }
+    }
+
+    const recorded = people.filter((person) => person.recorded).length;
+    incrementMetric("group_capture_total");
+    return res.status(recorded > 0 ? 202 : 200).json({
+      detected: identified.detected,
+      recorded,
+      people,
     });
   })
 );

@@ -23,6 +23,16 @@ export interface FrameReading {
   guidance: string | null;
   /** Relative arm positions used by the live challenge before capture. */
   poseSignals?: PoseSignals;
+  /**
+   * Where the face is, for drawing a box on the preview.
+   *
+   * Shown to the person in front of the camera and used for nothing else: no
+   * verdict, no gate and no request depends on it, and a reading with no boxes
+   * behaves exactly as this one always has. Carried on the reading rather than
+   * fetched separately because the poses it comes from are computed here and
+   * were previously discarded.
+   */
+  boxes?: FaceBox[];
 }
 
 export type WristPosition = 'RAISED' | 'LOWERED' | 'UNKNOWN';
@@ -33,14 +43,15 @@ export interface PoseSignals {
 }
 
 /** Below this a keypoint is a guess, not a sighting. */
-const KEYPOINT_CONFIDENCE = 0.35;
+export const KEYPOINT_CONFIDENCE = 0.35;
 
 import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
+import { faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
 
 /** Large enough for face recognition and grooming details without crowding the guide. */
 export const MIN_BODY_SPAN_RATIO = 0.48;
 /** MoveNet's ankle and head keypoints, by the names the model returns. */
-const HEAD_KEYPOINTS = ['nose', 'left_eye', 'right_eye'];
+export const HEAD_KEYPOINTS = ['nose', 'left_eye', 'right_eye'];
 const REQUIRED_KEYPOINT_GROUPS = [
   ['left_shoulder', 'right_shoulder'],
   ['left_hip', 'right_hip'],
@@ -53,10 +64,10 @@ const ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle'];
 export const MIN_FRAME_BRIGHTNESS = 42;
 export const MIN_FRAME_SHARPNESS = 7;
 
-type Keypoint = { name?: string; score?: number; x?: number; y?: number };
-type Pose = { keypoints: Keypoint[]; score?: number };
+export type Keypoint = { name?: string; score?: number; x?: number; y?: number };
+export type Pose = { keypoints: Keypoint[]; score?: number };
 
-type Detector = {
+export type Detector = {
   estimatePoses: (
     input: HTMLVideoElement | HTMLCanvasElement,
     config?: { maxPoses?: number },
@@ -234,7 +245,7 @@ export interface StableFrameState {
  * empty frame flash "multiple people" on tablets. A partial face remains
  * sufficient, while a body-only detection needs several coherent landmarks.
  */
-function isDetectedPerson(pose: Pose): boolean {
+export function isDetectedPerson(pose: Pose): boolean {
   const confident = pose.keypoints.filter((point) => (
     (point.score ?? 0) >= KEYPOINT_CONFIDENCE
   ));
@@ -268,7 +279,7 @@ function poseBounds(pose: Pose): PoseBounds | null {
 }
 
 /** True when two model outputs are overlapping copies of the same person. */
-function duplicatePose(first: Pose, second: Pose, frameHeight?: number): boolean {
+export function duplicatePose(first: Pose, second: Pose, frameHeight?: number): boolean {
   const a = poseBounds(first);
   const b = poseBounds(second);
   if (!a || !b) return false;
@@ -395,6 +406,9 @@ export async function readFrame(
   detector: Detector | null,
   video: HTMLVideoElement,
   viewport?: { width: number; height: number; canvas: HTMLCanvasElement },
+  // Only the front camera's preview is flipped, and a box drawn without
+  // accounting for that lands on the opposite side of the screen from the face.
+  options?: { mirrored?: boolean },
 ): Promise<FrameReading> {
   if (!detector || !video.videoWidth) {
     return { verdict: 'UNAVAILABLE', guidance: null };
@@ -431,26 +445,34 @@ export async function readFrame(
       }
     }
     const poses = await detector.estimatePoses(input, { maxPoses: 6 });
-    const reading = readPoses(poses, frameHeight, input instanceof HTMLCanvasElement
-      ? input.width
-      : video.videoWidth);
+    const frameWidth = input instanceof HTMLCanvasElement ? input.width : video.videoWidth;
+    // One box, because this camera photographs one person: the largest face,
+    // which is the one nearest the lens. Everything below is unchanged.
+    const boxes = faceBoxesFromPoses(poses, {
+      frameWidth,
+      frameHeight,
+      mirrored: options?.mirrored,
+      limit: 1,
+      minScore: KEYPOINT_CONFIDENCE,
+    });
+    const reading = readPoses(poses, frameHeight, frameWidth);
     if (reading.verdict !== 'FULL_BODY' || !(input instanceof HTMLCanvasElement)) {
-      return reading;
+      return { ...reading, boxes };
     }
     const context = input.getContext('2d', { willReadFrequently: true });
-    if (!context) return reading;
+    if (!context) return { ...reading, boxes };
     const quality = measureFrameQuality(
       context.getImageData(0, 0, input.width, input.height).data,
       input.width,
       input.height,
     );
     if (quality.brightness < MIN_FRAME_BRIGHTNESS) {
-      return { ...reading, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
+      return { ...reading, boxes, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
     }
     if (quality.sharpness < MIN_FRAME_SHARPNESS) {
-      return { ...reading, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
+      return { ...reading, boxes, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
     }
-    return reading;
+    return { ...reading, boxes };
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }
