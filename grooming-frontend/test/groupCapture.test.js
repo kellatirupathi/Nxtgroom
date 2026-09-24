@@ -126,8 +126,9 @@ test('the boxes follow the live reading, not the stabilised one', () => {
   assert.ok(!single.includes('setFaceBoxes(stableReading'), 'boxes must not be stabilised');
 
   const group = read('src/components/GroupCameraCapture.tsx');
-  assert.match(group, /setFaceBoxes\(next\.boxes \?\? \[\]\)/);
-  assert.ok(!group.includes('setFaceBoxes(stable.'), 'boxes must not be stabilised');
+  // Positions come from the live reading; only the chips are held steady.
+  assert.match(group, /stabilizeBoxLabels\(labelMemoryRef\.current, next\.boxes \?\? \[\]\)/);
+  assert.ok(!group.includes('stable.boxes'), 'box positions must not be stabilised');
 });
 
 test('the single camera still draws exactly one box', () => {
@@ -135,4 +136,67 @@ test('the single camera still draws exactly one box', () => {
   // suggest the tablet was about to record them.
   const detector = read('src/lib/fullBodyDetector.ts');
   assert.match(detector, /limit: 1,/);
+});
+
+test('a detected face gets a green box, on both cameras', () => {
+  // The box answers "am I detected?" and green is the answer people expect to
+  // that question. Amber is reserved for a face the camera cannot use.
+  const overlay = read('src/components/FaceBoxOverlay.tsx');
+  assert.match(overlay, /box\.confident \? 'border-emerald-400' : 'border-amber-400'/);
+  // Nothing else decides the colour any more: the "ready" signal belongs to
+  // the outline and the border, not to the face box.
+  assert.ok(!overlay.includes('ready'), 'the box colour must not depend on capture readiness');
+  for (const path of ['src/components/CameraCapture.tsx', 'src/components/GroupCameraCapture.tsx']) {
+    assert.ok(!read(path).includes('<FaceBoxOverlay boxes={faceBoxes} ready='), `${path} still passes a readiness flag`);
+  }
+});
+
+test('the chip under a box is per person, and the group camera supplies it', () => {
+  const overlay = read('src/components/FaceBoxOverlay.tsx');
+  assert.match(overlay, /box\.label && \(/);
+  const detector = read('src/lib/groupFrameDetector.ts');
+  assert.match(detector, /labelFor: \(pose\) => boxLabel\(pose, frameHeight\)/);
+  // The single camera does not label: its guidance line already says the same
+  // thing, and there is only one person it could be about.
+  const single = read('src/lib/fullBodyDetector.ts');
+  assert.ok(!single.includes('labelFor'), 'the single camera must not have grown chips');
+});
+
+test('the group result names each person with their time', () => {
+  const screen = read('src/components/GroupKioskAttendance.tsx');
+  assert.match(screen, /formatAttendanceTime\(when\)/);
+  assert.match(screen, /person\.recorded_at \|\| person\.check_in_time/);
+  // A time that could not be formatted is left out rather than shown as "--"
+  // next to somebody's name.
+  assert.match(screen, /timeLabel !== '--'/);
+});
+
+test('neither camera fires by itself on a half body', () => {
+  // The single gate hands the FULL_BODY branch to the body check before it
+  // returns, and the group gate has a verdict of its own for a cut-off person
+  // that groupCaptureReady refuses.
+  const single = read('src/lib/fullBodyDetector.ts');
+  const check = single.indexOf('assessBody(keypoints, { frameHeight, minScore: KEYPOINT_CONFIDENCE })');
+  const fullBody = single.indexOf("verdict: 'FULL_BODY',");
+  assert.ok(check >= 0 && check < fullBody, 'the body check must run before FULL_BODY is returned');
+
+  const group = read('src/lib/groupFrameDetector.ts');
+  assert.match(group, /verdict: 'BODIES_CUT'/);
+  assert.match(group, /if \(verdict !== 'GROUP_READY'\) return false;/);
+});
+
+import { formatAttendanceTime } from '../src/attendanceFilters.ts';
+
+test('chips are held steady, and hidden once the group is ready', () => {
+  const group = read('src/components/GroupCameraCapture.tsx');
+  assert.match(group, /stabilizeBoxLabels\(labelMemoryRef\.current, next\.boxes \?\? \[\]\)/);
+  assert.match(group, /stable\.verdict === 'GROUP_READY' \? withoutLabels\(labelled\.boxes\) : labelled\.boxes/);
+});
+
+test('a time on the wire formats as a clock time, not as a dash', () => {
+  // The screen hides a '--', so a wire-format mismatch would silently drop the
+  // column. Prove the formatter handles what the server actually sends.
+  const label = formatAttendanceTime('2026-09-24T04:11:00.000Z');
+  assert.match(label, /^\d{2}:\d{2}/, `got ${label}`);
+  assert.equal(formatAttendanceTime(null), '--');
 });

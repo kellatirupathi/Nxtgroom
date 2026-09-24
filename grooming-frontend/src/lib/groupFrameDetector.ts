@@ -33,11 +33,14 @@ import {
   type Pose,
 } from './fullBodyDetector.ts';
 import { coverSourceRect } from './cameraGeometry.ts';
-import { faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
+import { faceBoxesFromPoses, type BoxPose, type FaceBox } from './faceBoxes.ts';
+import { assessBody, shortBodyProblem } from './bodyCompleteness.ts';
 
 export type GroupVerdict =
   /** Enough faces, all pointed this way. The camera may fire. */
   | 'GROUP_READY'
+  /** Somebody is not in the frame from head to feet. */
+  | 'BODIES_CUT'
   /** People are there, but not all of them are facing the camera. */
   | 'FACES_HIDDEN'
   /** One person. That is what the single-person screen is for. */
@@ -134,6 +137,47 @@ export function distinctPeople(poses: Pose[] | undefined, frameHeight?: number):
   return people;
 }
 
+/** Whether one person in the group is in frame from head to feet. */
+function bodyIsWhole(pose: Pose, frameHeight?: number): boolean {
+  return assessBody(pose.keypoints, { frameHeight, minScore: KEYPOINT_CONFIDENCE }).complete;
+}
+
+/**
+ * The chip under one person's box: what they, specifically, need to fix.
+ *
+ * The guidance line says how many people have a problem; this says which.
+ * A hidden face comes first because without one there is nobody to identify,
+ * whatever the rest of the body is doing.
+ */
+export function boxLabel(pose: BoxPose, frameHeight?: number): string | null {
+  if (!faceIsVisible(pose)) return 'Face the camera';
+  const body = assessBody(pose.keypoints, { frameHeight, minScore: KEYPOINT_CONFIDENCE });
+  return shortBodyProblem(body.problem);
+}
+
+/**
+ * The boxes for a group: one per counted person, carrying that person's chip.
+ *
+ * Built from the same distinct people the verdict counts, never from the raw
+ * poses. MoveNet emits overlapping copies of one person, and the gate discards
+ * them - but a box drawn on a discarded copy would carry a chip about somebody
+ * the gate is not counting: "Step back" under a face the countdown is already
+ * running for. The box list and the verdict have to be made from one list of
+ * people, or the screen contradicts itself.
+ */
+export function groupBoxes(
+  poses: Pose[] | undefined,
+  { frameWidth, frameHeight, mirrored }: { frameWidth: number; frameHeight: number; mirrored?: boolean },
+): FaceBox[] {
+  return faceBoxesFromPoses(distinctPeople(poses, frameHeight), {
+    frameWidth,
+    frameHeight,
+    mirrored,
+    minScore: KEYPOINT_CONFIDENCE,
+    labelFor: (pose) => boxLabel(pose, frameHeight),
+  });
+}
+
 /** Turns the poses in one frame into a group capture decision. */
 export function readGroupPoses(poses: Pose[] | undefined, frameHeight?: number): GroupReading {
   const people = distinctPeople(poses, frameHeight);
@@ -165,6 +209,26 @@ export function readGroupPoses(poses: Pose[] | undefined, frameHeight?: number):
       guidance: hidden === 1
         ? 'One person is not facing the camera'
         : `${hidden} people are not facing the camera`,
+      people: people.length,
+      faces,
+    };
+  }
+  /**
+   * Everybody head to feet, or nobody is photographed.
+   *
+   * This is the rule the single-person camera has always applied, and a group
+   * does not get a looser one: a person cut off at the waist gets a report with
+   * nothing to say about their trousers or shoes, and six of those are six
+   * reports to redo. The wording covers the other reason somebody can be half
+   * in frame - they were walking past - because from here the two look alike.
+   */
+  const cut = people.filter((person) => !bodyIsWhole(person, frameHeight)).length;
+  if (cut > 0) {
+    return {
+      verdict: 'BODIES_CUT',
+      guidance: cut === 1
+        ? 'One person is not fully in frame — step back, or step out if not checking in'
+        : `${cut} people are not fully in frame — step back so everyone shows head to feet`,
       people: people.length,
       faces,
     };
@@ -269,11 +333,10 @@ export async function readGroupFrame(
     const poses = await detector.estimatePoses(input, { maxPoses: GROUP_MAX_PEOPLE + 1 });
     // Every face, not just one: the point of the boxes here is to show a group
     // who the camera has and has not found.
-    const boxes = faceBoxesFromPoses(poses, {
+    const boxes = groupBoxes(poses, {
       frameWidth: input instanceof HTMLCanvasElement ? input.width : video.videoWidth,
       frameHeight,
       mirrored: options?.mirrored,
-      minScore: KEYPOINT_CONFIDENCE,
     });
     const reading = readGroupPoses(poses, frameHeight);
     if (reading.verdict !== 'GROUP_READY' || !(input instanceof HTMLCanvasElement)) {

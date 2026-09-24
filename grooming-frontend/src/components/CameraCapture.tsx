@@ -406,7 +406,7 @@ export default function CameraCapture({
                 inferring it from an outline that has not turned green yet.
                 Drawn outside the mirroring transform above, which is why the
                 coordinates arrive already flipped. */}
-            {!starting && <FaceBoxOverlay boxes={faceBoxes} ready={verdict === 'FULL_BODY'} />}
+            {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
             {/* A head-to-toe outline to stand inside. It occupies nearly the
                 full preview height so the instructor, rather than the room,

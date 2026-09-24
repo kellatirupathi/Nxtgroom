@@ -3,6 +3,7 @@ import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch, Users } fr
 import { apiFetch, ApiError } from '../api';
 import GroupCameraCapture from './GroupCameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
+import { formatAttendanceTime } from '../attendanceFilters';
 
 /**
  * How long a group's results stay on screen.
@@ -27,6 +28,10 @@ interface GroupPerson {
   similarity?: number | null;
   /** Where in the photograph this person stood, as ratios of the frame. */
   position?: { left: number; top: number; width: number; height: number };
+  /** When this photograph recorded something for them, or null if it did not. */
+  recorded_at?: string | null;
+  /** When their day began, if it has: the time worth showing next to their name. */
+  check_in_time?: string | null;
 }
 
 interface GroupResponse {
@@ -181,6 +186,11 @@ export default function GroupKioskAttendance() {
             <ul className="flex flex-col gap-2">
               {result.people.map((person, index) => {
                 const Icon = RowIcon(person.tone);
+                // The moment this photograph recorded, or failing that the
+                // check-in it is being measured against. Somebody told they
+                // have already checked in wants to know when.
+                const when = person.recorded_at || person.check_in_time || null;
+                const timeLabel = when ? formatAttendanceTime(when) : null;
                 return (
                   <li
                     key={person.attendance_id || `${person.title}-${index}`}
@@ -193,6 +203,9 @@ export default function GroupKioskAttendance() {
                         <p className="text-xs font-medium opacity-90 truncate">{person.detail}</p>
                       )}
                     </div>
+                    {timeLabel && timeLabel !== '--' && (
+                      <span className="text-sm font-bold tabular-nums shrink-0">{timeLabel}</span>
+                    )}
                     {!person.recorded && (
                       <span className="text-[10px] font-bold uppercase tracking-wider opacity-75 shrink-0">
                         Not recorded

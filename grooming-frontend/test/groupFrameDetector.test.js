@@ -196,3 +196,77 @@ test('a group whose count wobbles keeps its hold', () => {
   assert.equal(state.reading.verdict, 'GROUP_READY');
   assert.equal(state.candidateCount, 0, 'the verdict agreed, so nothing is pending');
 });
+
+/**
+ * A group is photographed only when everybody is in frame head to feet.
+ *
+ * The same rule the single-person camera applies, and for the same reason: a
+ * person cut off at the waist gets a report with nothing to say about their
+ * trousers or shoes. Six of those are six reports to redo.
+ */
+import { boxLabel } from '../src/lib/groupFrameDetector.ts';
+
+/** One person whose legs end at the knee: the model still invents ankles. */
+const cutAtKnees = (x) => ({
+  keypoints: person(x).keypoints.map((point) => (
+    point.name.endsWith('_ankle') ? { ...point, y: 660, score: 0.6 } : point
+  )),
+});
+
+test('one person half in frame stops the whole group being photographed', () => {
+  const reading = readGroupPoses([person(100), person(260), cutAtKnees(420)], 1000);
+  assert.equal(reading.verdict, 'BODIES_CUT');
+  assert.equal(reading.people, 3, 'they are still counted; they are just not ready');
+  assert.match(reading.guidance, /one person is not fully in frame/i);
+  assert.match(reading.guidance, /step back/i);
+  assert.equal(groupCaptureReady('BODIES_CUT', 99), false, 'must never fire by itself');
+  assert.equal(groupShutterEnabled('BODIES_CUT'), true, 'but a person may still judge the frame');
+
+  const two = readGroupPoses([person(100), cutAtKnees(260), cutAtKnees(420)], 1000);
+  assert.match(two.guidance, /2 people are not fully in frame/i);
+});
+
+test('somebody turned away is told to face the camera, not that they are cut off', () => {
+  // A hidden face has no visible eyes, which the body check would otherwise
+  // read as a missing head. Faces are checked first so the message is the
+  // right one.
+  const reading = readGroupPoses([person(100), person(260, { face: false })], 1000);
+  assert.equal(reading.verdict, 'FACES_HIDDEN');
+  assert.match(reading.guidance, /not facing the camera/i);
+});
+
+test('the chip under each box says what that person, specifically, must fix', () => {
+  assert.equal(boxLabel(person(100), 1000), null, 'nothing to fix, nothing to say');
+  assert.equal(boxLabel(cutAtKnees(100), 1000), 'Step back');
+  assert.equal(boxLabel(person(100, { face: false }), 1000), 'Face the camera');
+  // Turned away and cut off: the face comes first, because without one there
+  // is nobody to identify whatever the legs are doing.
+  const both = { keypoints: cutAtKnees(100).keypoints.map((point) => (
+    point.name === 'nose' || point.name.endsWith('_eye') ? { ...point, score: 0.1 } : point
+  )) };
+  assert.equal(boxLabel(both, 1000), 'Face the camera');
+});
+
+test('a whole group standing properly is still photographed', () => {
+  // The rule must not have become one no real group can satisfy.
+  assert.equal(readGroupPoses(line(4), 1000).verdict, 'GROUP_READY');
+  assert.equal(readGroupPoses(line(GROUP_MAX_PEOPLE), 1000).verdict, 'GROUP_READY');
+});
+
+import { groupBoxes } from '../src/lib/groupFrameDetector.ts';
+
+test('a ghost copy of somebody gets no box and no chip', () => {
+  // MoveNet emits a sparse duplicate over person A. The gate discards it; a
+  // box on it would carry "Step back" under a person the countdown is already
+  // running for. Boxes and verdict must come from one list of people.
+  const a = person(100);
+  const ghost = {
+    keypoints: a.keypoints
+      .filter((k) => ['nose', 'left_eye', 'right_eye', 'left_shoulder', 'right_shoulder'].includes(k.name))
+      .map((k) => ({ ...k, score: 0.5, x: k.x + 2 })),
+  };
+  const boxes = groupBoxes([a, person(300), ghost], { frameWidth: 480, frameHeight: 1000 });
+  assert.equal(boxes.length, 2, 'one box per counted person');
+  assert.ok(boxes.every((box) => !('label' in box)), 'nobody counted has anything to fix');
+  assert.equal(readGroupPoses([a, person(300), ghost], 1000).verdict, 'GROUP_READY');
+});

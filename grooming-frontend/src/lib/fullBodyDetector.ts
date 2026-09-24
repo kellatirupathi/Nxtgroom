@@ -47,6 +47,7 @@ export const KEYPOINT_CONFIDENCE = 0.35;
 
 import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
 import { faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
+import { assessBody, describeBodyProblem } from './bodyCompleteness.ts';
 
 /** Large enough for face recognition and grooming details without crowding the guide. */
 export const MIN_BODY_SPAN_RATIO = 0.48;
@@ -184,16 +185,22 @@ export function readKeypoints(
       const right = frameWidth * (BODY_GUIDE_BOUNDS.left + BODY_GUIDE_BOUNDS.width);
       const top = frameHeight * BODY_GUIDE_BOUNDS.top;
       const bottom = frameHeight * (BODY_GUIDE_BOUNDS.top + BODY_GUIDE_BOUNDS.height);
-      const outsideGuide = requiredPoints.some((point) => (
+      const belowOutline = requiredPoints.some((point) => (point.y as number) > bottom);
+      const outsideElsewhere = requiredPoints.some((point) => (
         (point.x as number) < left
         || (point.x as number) > right
         || (point.y as number) < top
-        || (point.y as number) > bottom
       ));
-      if (outsideGuide) {
+      if (belowOutline || outsideElsewhere) {
         return {
           verdict: 'PARTIAL',
-          guidance: 'Center your complete body inside the outline',
+          // Feet past the bottom edge is the one case "center yourself" does
+          // not fix. The person is too close, and the joints the model pushed
+          // to the edge are the invented ankles of legs it cannot see, so the
+          // instruction that works is the one the body check would give.
+          guidance: belowOutline && !outsideElsewhere
+            ? describeBodyProblem('FEET')
+            : 'Center your complete body inside the outline',
           poseSignals: poseSignals(keypoints, frameHeight),
         };
       }
@@ -212,6 +219,23 @@ export function readKeypoints(
           poseSignals: poseSignals(keypoints, frameHeight),
         };
       }
+    }
+
+    /**
+     * The keypoints are all present and inside the outline, and the person is
+     * close enough. What is left to rule out is a body the model completed by
+     * guessing: MoveNet predicts joints it cannot see, so somebody cut off at
+     * the knees still arrives with two ankles. This is the check that tells a
+     * seen foot from an invented one, and it is why a half-body frame is told
+     * to step back rather than photographed.
+     */
+    const body = assessBody(keypoints, { frameHeight, minScore: KEYPOINT_CONFIDENCE });
+    if (!body.complete) {
+      return {
+        verdict: 'PARTIAL',
+        guidance: describeBodyProblem(body.problem),
+        poseSignals: poseSignals(keypoints, frameHeight),
+      };
     }
 
     return {

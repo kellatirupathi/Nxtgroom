@@ -47,15 +47,26 @@ export interface FaceBox {
   width: number;
   height: number;
   /**
-   * Whether enough of the face is visible to identify somebody from: two of
-   * nose, eyes and ears. One landmark alone is as likely to be a profile or the
-   * back of a head, which cannot be matched against a reference photograph.
+   * Whether the face is pointed at the camera: two of nose and eyes, the same
+   * three landmarks both frame gates judge a face by. Ears are deliberately
+   * not counted here even though they shape the box — somebody side-on shows
+   * both ears and no eyes, and a green box on them would contradict the line
+   * beneath telling them to face the camera.
    */
   confident: boolean;
+  /**
+   * A short instruction to show under the box, when there is one. Set by the
+   * caller, which is the only thing that knows what this person needs to fix;
+   * this module only knows where their face is.
+   */
+  label?: string;
 }
 
 /** The landmarks a face box is built from, by the names MoveNet returns. */
 const FACE_LANDMARKS = ['nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear'];
+
+/** The landmarks that say a face is pointed this way. Matches the gates' HEAD_KEYPOINTS. */
+const FACING_LANDMARKS = ['nose', 'left_eye', 'right_eye'];
 
 /**
  * A head is a little over half a shoulder width across.
@@ -128,13 +139,14 @@ export function faceBoxPixels(
   if (!(width > 0)) return null;
 
   const height = width * HEAD_ASPECT;
+  const facing = usablePoints(pose.keypoints, FACING_LANDMARKS, minScore);
   return {
     centreX,
     // The landmarks are low in the box, so its centre is above theirs.
     centreY: landmarkCentreY - height * (LANDMARK_HEIGHT_FRACTION - 0.5),
     width,
     height,
-    confident: landmarks.length >= 2,
+    confident: facing.length >= 2,
   };
 }
 
@@ -151,12 +163,18 @@ export interface FaceBoxOptions {
   /** At most this many, largest first. One, for the single-person camera. */
   limit?: number;
   minScore?: number;
+  /**
+   * What to write under this person's box, or null for nothing. Given the
+   * whole pose, because what needs fixing - a hidden face, feet out of frame -
+   * is a judgement about the person, not the face.
+   */
+  labelFor?: (pose: BoxPose) => string | null;
 }
 
 /** Every face in a frame, as ratios ready to position with. */
 export function faceBoxesFromPoses(
   poses: BoxPose[] | undefined,
-  { frameWidth, frameHeight, mirrored = false, limit = 0, minScore = 0.35 }: FaceBoxOptions,
+  { frameWidth, frameHeight, mirrored = false, limit = 0, minScore = 0.35, labelFor }: FaceBoxOptions,
 ): FaceBox[] {
   if (!(frameWidth > 0) || !(frameHeight > 0)) return [];
 
@@ -179,6 +197,7 @@ export function faceBoxesFromPoses(
       const centreY = box.centreY / frameHeight;
       const left = (mirrored ? 1 - centreX : centreX) - width / 2;
       const top = centreY - height / 2;
+      const label = labelFor ? labelFor(pose) : null;
       return {
         // A tracked id survives a person moving; without tracking the position
         // is the next best thing, and it is rounded so a pixel of jitter does
@@ -189,9 +208,69 @@ export function faceBoxesFromPoses(
         width: Math.min(width, 1),
         height: Math.min(height, 1),
         confident: box.confident,
+        ...(label ? { label } : {}),
       };
     })
     // Left to right, so the keys stay in reading order and React does not
     // reorder the elements underneath a CSS transition.
     .sort((a, b) => a.left - b.left);
+}
+
+/**
+ * What each box's chip said last, so it does not change on every reading.
+ *
+ * Keyed by the box key. Entries for boxes that have left the frame are dropped
+ * each time, so the memory is never larger than the number of faces on screen.
+ */
+export interface LabelMemory {
+  [key: string]: {
+    /** The label currently shown, or null for no chip. */
+    label: string | null;
+    /** A different label seen recently, and how many times in a row. */
+    candidate: string | null;
+    count: number;
+  };
+}
+
+/**
+ * Holds each chip steady until its replacement has been seen several times.
+ *
+ * The positions of the boxes follow the live reading on purpose, because a box
+ * that lagged its face would look broken. The chips cannot, because they are
+ * built from thresholds: an ankle score wandering across 0.45 five times a
+ * second would make "Step back" flash under somebody's face like a fault
+ * light. A label has to be reported this many consecutive times before it
+ * replaces the one showing. The first label a new face arrives with is shown
+ * at once, so somebody stepping into frame gets their instruction immediately.
+ */
+export function stabilizeBoxLabels(
+  memory: LabelMemory,
+  boxes: FaceBox[],
+  confirmations = 3,
+): { boxes: FaceBox[]; memory: LabelMemory } {
+  const next: LabelMemory = {};
+  const stabilised = boxes.map((box) => {
+    const seen = box.label ?? null;
+    const previous = memory[box.key];
+    let entry: LabelMemory[string];
+    if (!previous) {
+      entry = { label: seen, candidate: null, count: 0 };
+    } else if (seen === previous.label) {
+      entry = { label: previous.label, candidate: null, count: 0 };
+    } else {
+      const count = seen === previous.candidate ? previous.count + 1 : 1;
+      entry = count >= confirmations
+        ? { label: seen, candidate: null, count: 0 }
+        : { label: previous.label, candidate: seen, count };
+    }
+    next[box.key] = entry;
+    const { label: _live, ...rest } = box;
+    return entry.label ? { ...rest, label: entry.label } : rest;
+  });
+  return { boxes: stabilised, memory: next };
+}
+
+/** The same boxes with no chips, for a frame the camera is about to take. */
+export function withoutLabels(boxes: FaceBox[]): FaceBox[] {
+  return boxes.map(({ label: _label, ...rest }) => rest);
 }

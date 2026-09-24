@@ -183,3 +183,36 @@ test("the tablet hold is taken only when a record for a stranger is at stake", a
   );
   assert.ok(guard[1].includes("NO_MATCH"), "an unrecognised person is what the hold is for");
 });
+
+test("every person's line carries a time, so the tablet can show one next to their name", async () => {
+  // Six names with no times is a list; six names with times is attendance.
+  // The moment this photograph recorded is on every recorded line, and the
+  // day's check-in on every line about somebody whose day had already begun.
+  const group = await routeSource("/auto/group");
+
+  const defaults = /const answer = \(person, fields\) => \(\{[\s\S]*?recorded_at: null,\s*check_in_time: null,[\s\S]*?\.\.\.fields,/;
+  assert.match(group, defaults, "a line with nothing known must say so with nulls, not omit the fields");
+
+  const recorded = [...group.matchAll(/recorded_at: now,/g)];
+  assert.equal(recorded.length, 3, "check-in, check-out and an unidentified arrival each record a time");
+
+  // Somebody told they already checked in is told when.
+  assert.ok(group.includes("check_in_time: today?.check_in_time || null"), "too-early and already-done must carry the day's check-in");
+  assert.ok(group.includes("check_in_time: today.check_in_time || null"), "a duplicate check-out must too");
+  // And a check-out shows the check-in it closed, not itself twice.
+  assert.ok(group.includes("check_in_time: attendance.check_in_time || null"));
+});
+
+test("somebody who already checked in is told when, even when the race was lost inside the transaction", async () => {
+  // Two crops of one person, or the single-person tablet a second earlier:
+  // the day's record appears between this turn's lookup and its transaction.
+  // "Already checked in today" with no time next to it reads like a fault.
+  const group = await routeSource("/auto/group");
+  const fallback = group.indexOf('committed.outcome === "already_checked_in_today"');
+  assert.ok(fallback >= 0, "the lost-race branch must look the day's record up");
+  const lookup = group.indexOf("projection: { _id: 1, check_in_time: 1 }", fallback);
+  assert.ok(lookup > fallback, "and read its time");
+  assert.ok(group.includes("check_in_time: existing?.check_in_time || null"));
+  // Cosmetic, so it must never turn a clear answer into a failure.
+  assert.ok(group.slice(fallback, lookup).includes("try {"), "the lookup must be guarded");
+});

@@ -217,3 +217,66 @@ test('the override permits an imperfect person frame but never an empty frame', 
   // And it is offered soon enough to be a way out, not a punishment.
   assert.ok(OVERRIDE_AFTER_MS <= 20_000, 'nobody should be stuck for longer than this');
 });
+
+/**
+ * A half-body frame must not be photographed automatically.
+ *
+ * Every keypoint the gate asks for was present in these frames, because
+ * MoveNet predicts joints it cannot see. What distinguishes them from a whole
+ * person is where the invented ankles landed, and that is what the gate now
+ * reads. Frame: 1000 tall, 240 wide, so the person sits inside the outline.
+ */
+test('a person cut off at the knees is told to step back, not photographed', () => {
+  // The model's ankles for legs that end at the knee land just below it. Head
+  // to "ankle" still spans more than half the frame, so the distance rule
+  // passes; only the leg proportions give it away.
+  const cutAtKnees = framedPerson.map((keypoint) => (
+    keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 660, score: 0.6 } : keypoint
+  ));
+  const reading = readKeypoints(cutAtKnees, 1000, 240);
+  assert.equal(reading.verdict, 'PARTIAL');
+  assert.match(reading.guidance, /step back/i);
+});
+
+test('the gate accepts feet anywhere inside the outline, and refuses them just past it', () => {
+  // The feet margin is the outline's own bottom edge. A gate stricter than the
+  // outline was tried and reproduced the old ping-pong - "step back" inside the
+  // outline, "move closer" outside it - so the two must agree exactly.
+  const insideOutline = framedPerson.map((keypoint) => (
+    keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 975, score: 0.7 } : keypoint
+  ));
+  assert.equal(readKeypoints(insideOutline, 1000, 240).verdict, 'FULL_BODY');
+
+  const pastOutline = framedPerson.map((keypoint) => (
+    keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 985, score: 0.7 } : keypoint
+  ));
+  const reading = readKeypoints(pastOutline, 1000, 240);
+  assert.equal(reading.verdict, 'PARTIAL');
+  assert.match(reading.guidance, /step back/i);
+});
+
+test('ankles the model is unsure of are not feet', () => {
+  // Above the general floor - so the gate used to accept them - and below the
+  // stricter one feet are now held to.
+  const uncertainFeet = framedPerson.map((keypoint) => (
+    keypoint.name.endsWith('_ankle') ? { ...keypoint, score: 0.4 } : keypoint
+  ));
+  assert.equal(readKeypoints(uncertainFeet, 1000, 240).verdict, 'PARTIAL');
+  // And the same frame with confident feet is the whole person it was.
+  assert.equal(readKeypoints(framedPerson, 1000, 240).verdict, 'FULL_BODY');
+});
+
+test('ankles pushed off the bottom of the outline are told to step back, not to centre', () => {
+  // The model pushes joints it cannot see to the frame edge. Those land past
+  // the outline's bottom, where the old wording said "center yourself" to a
+  // person who was centred. The fix is to step back, and that is what is said.
+  const pushedToEdge = framedPerson.map((keypoint) => (
+    keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 990, score: 0.5 } : keypoint
+  ));
+  const reading = readKeypoints(pushedToEdge, 1000, 240);
+  assert.equal(reading.verdict, 'PARTIAL');
+  assert.match(reading.guidance, /step back/i);
+  // Somebody genuinely off to one side is still told to centre.
+  const offToTheSide = framedPerson.map((keypoint) => ({ ...keypoint, x: keypoint.x + 200 }));
+  assert.match(readKeypoints(offToTheSide, 1000, 240).guidance, /center/i);
+});

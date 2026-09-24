@@ -1140,9 +1140,21 @@ attendanceRouter.post(
       group_body_coverage: person.bodyCoverage,
     });
 
+    /**
+     * One person's line on the tablet.
+     *
+     * `recorded_at` is when this photograph wrote something for them, and
+     * `check_in_time` is when their day began - the same instant for a
+     * check-in, an earlier one for a check-out, and the only time worth
+     * showing for somebody told they had already checked in. Both are null
+     * when nothing is known, so the screen can show a time or nothing rather
+     * than guess.
+     */
     const answer = (person, fields) => ({
       position: person.box,
       similarity: person.similarity,
+      recorded_at: null,
+      check_in_time: null,
       ...fields,
     });
 
@@ -1220,6 +1232,7 @@ attendanceRouter.post(
           recorded: false,
           instructor_name: instructor?.name || null,
           attendance_id: today ? String(today._id) : null,
+          check_in_time: today?.check_in_time || null,
           ...describeKioskAction(action, {
             instructorName: instructor?.name,
             opensAtLabel: action === KIOSK_ACTIONS.TOO_EARLY ? opensAtLabel : null,
@@ -1252,6 +1265,8 @@ attendanceRouter.post(
           recorded: true,
           instructor_name: null,
           attendance_id: String(unidentified.attendance._id),
+          recorded_at: now,
+          check_in_time: now,
           title: describeGroupOutcome(person.outcome),
           detail: "Recorded for an administrator to name.",
           tone: "warning",
@@ -1280,11 +1295,28 @@ attendanceRouter.post(
         }
         if (committed.outcome !== "created") {
           if (await uploading) await compensateUploadedPhoto(db, key, `group_${committed.outcome}`);
+          // The record that beat this one to the day - written between this
+          // turn's lookup and its transaction, by the single-person tablet or
+          // by another crop of the same person in this photograph. Its time is
+          // what "already checked in" should show. Cosmetic, so a failed lookup
+          // degrades to no time rather than to no answer for this person.
+          let existing = null;
+          if (committed.outcome === "already_checked_in_today") {
+            try {
+              existing = await db.collection("attendance").findOne(
+                attendanceOnLocalDay(instructor._id, now),
+                { projection: { _id: 1, check_in_time: 1 } }
+              );
+            } catch {
+              existing = null;
+            }
+          }
           return answer(person, {
             action: KIOSK_ACTIONS.ALREADY_DONE,
             recorded: false,
             instructor_name: instructor.name,
-            attendance_id: null,
+            attendance_id: existing ? String(existing._id) : null,
+            check_in_time: existing?.check_in_time || null,
             title: committed.outcome === "invalid_email"
               ? `${instructor.name} needs an email address`
               : `${instructor.name} has already checked in today`,
@@ -1318,6 +1350,8 @@ attendanceRouter.post(
           recorded: true,
           instructor_name: instructor.name,
           attendance_id: String(attendance._id),
+          recorded_at: now,
+          check_in_time: now,
           ...describeKioskAction(action, { instructorName: instructor.name }),
         });
       }
@@ -1351,6 +1385,7 @@ attendanceRouter.post(
           recorded: false,
           instructor_name: instructor.name,
           attendance_id: String(today._id),
+          check_in_time: today.check_in_time || null,
           title: `${instructor.name} has already checked out today`,
           detail: "Nothing was recorded.",
           tone: "info",
@@ -1386,6 +1421,8 @@ attendanceRouter.post(
         recorded: true,
         instructor_name: instructor.name,
         attendance_id: String(attendance._id),
+        recorded_at: now,
+        check_in_time: attendance.check_in_time || null,
         ...describeKioskAction(action, { instructorName: instructor.name }),
       });
     };

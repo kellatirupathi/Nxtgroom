@@ -15,7 +15,7 @@ import {
 } from '../lib/groupFrameDetector';
 import { loadFullBodyDetector, AUTO_CAPTURE_COOLDOWN_MS } from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
-import type { FaceBox } from '../lib/faceBoxes';
+import { stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
 import { coverSourceRect } from '../lib/cameraGeometry';
 
 /**
@@ -87,6 +87,8 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
   const unusableRef = useRef(0);
   const manualOfferedRef = useRef(false);
   const shootRef = useRef<(options?: { viaAuto?: boolean }) => Promise<void>>(async () => {});
+  /** What each chip said last; see stabilizeBoxLabels. */
+  const labelMemoryRef = useRef<LabelMemory>({});
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -170,7 +172,14 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
         const stable = stableState.reading;
         setReading(stable);
         verdictRef.current = stable.verdict;
-        setFaceBoxes(next.boxes ?? []);
+        // Positions follow the live reading; the chips do not. A chip built
+        // from a threshold would flip on every tick as an ankle score wandered
+        // across it, so a label must be seen three times before it changes.
+        // And once the group is ready no chip is shown at all: an instruction
+        // under a face the countdown is running for is a contradiction.
+        const labelled = stabilizeBoxLabels(labelMemoryRef.current, next.boxes ?? []);
+        labelMemoryRef.current = labelled.memory;
+        setFaceBoxes(stable.verdict === 'GROUP_READY' ? withoutLabels(labelled.boxes) : labelled.boxes);
 
         const fireable = stable.verdict === 'GROUP_READY';
         const held = fireable ? steadyRef.current + 1 : 0;
@@ -310,17 +319,12 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
               style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
             />
 
-            {/* A box on every face the camera has found, amber on anyone it
-                cannot identify from. This is what makes "2 people are not
-                facing the camera" usable: the message says how many and the
-                boxes say which. */}
-            {!starting && (
-              <FaceBoxOverlay
-                boxes={faceBoxes}
-                ready={reading.verdict === 'GROUP_READY'}
-                labelHidden="Face the camera"
-              />
-            )}
+            {/* A box on every face the camera has found: green on a face it
+                could identify, amber on one turned away, and a chip under
+                anyone with something to fix. This is what makes "2 people are
+                not fully in frame" usable: the message says how many and the
+                chips say which. */}
+            {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
             {/* A border rather than a standing outline: the whole frame is the
                 photograph here, so what it shows is the edge of what will be

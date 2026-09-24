@@ -170,3 +170,75 @@ test('drawing boxes changed no capture decision', () => {
     assert.equal('boxes' in reading, false, 'the gate must not be carrying overlay data');
   }
 });
+
+test('a caller can put an instruction under a box, and only where it has one', () => {
+  // The module knows where a face is, not what its owner needs to fix; that
+  // judgement arrives as a function and the result rides on the box.
+  const boxes = faceBoxesFromPoses([person(100), person(300)], {
+    ...FRAME,
+    labelFor: (pose) => (pose.keypoints[0].x < 200 ? 'Step back' : null),
+  });
+  const [left, right] = boxes;
+  assert.equal(left.label, 'Step back');
+  assert.equal('label' in right, false, 'no instruction means no key, not an empty string');
+
+  // Without the function nothing changes for anybody.
+  for (const box of faceBoxesFromPoses([person(100)], FRAME)) {
+    assert.equal('label' in box, false);
+  }
+});
+
+import { stabilizeBoxLabels, withoutLabels } from '../src/lib/faceBoxes.ts';
+
+test('ears alone do not make a face the camera could identify', () => {
+  // Side-on: both ears, no eyes. The gates call this "not facing the camera",
+  // and a green box would contradict the line saying so.
+  const sideOn = {
+    keypoints: [
+      { name: 'left_ear', score: 0.8, x: 222, y: 98 },
+      { name: 'right_ear', score: 0.8, x: 258, y: 98 },
+      { name: 'nose', score: 0.2, x: 240, y: 100 },
+      { name: 'left_shoulder', score: 0.9, x: 200, y: 160 },
+      { name: 'right_shoulder', score: 0.9, x: 280, y: 160 },
+    ],
+  };
+  const [box] = faceBoxesFromPoses([sideOn], FRAME);
+  assert.ok(box, 'they are still boxed - the camera can see a head');
+  assert.equal(box.confident, false);
+});
+
+test('a chip changes only once its replacement has been seen three times', () => {
+  const box = (label) => ({
+    key: 't1', left: 0.4, top: 0.2, width: 0.1, height: 0.13, confident: true,
+    ...(label ? { label } : {}),
+  });
+  let memory = {};
+  let out;
+  // The first sighting shows at once.
+  ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box('Step back')]));
+  assert.equal(out[0].label, 'Step back');
+  // Two ticks of disagreement change nothing...
+  ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(null)]));
+  assert.equal(out[0].label, 'Step back');
+  ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(null)]));
+  assert.equal(out[0].label, 'Step back');
+  // ...the third in a row does.
+  ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(null)]));
+  assert.equal('label' in out[0], false);
+  // A flicker - back and forth - never gets three in a row, so it never shows.
+  for (const label of ['Step back', null, 'Step back', null, 'Step back']) {
+    ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(label)]));
+    assert.equal('label' in out[0], false, `flicker leaked through on ${label}`);
+  }
+  // A face that leaves the frame is forgotten.
+  ({ memory } = stabilizeBoxLabels(memory, []));
+  assert.deepEqual(memory, {});
+});
+
+test('withoutLabels strips every chip and nothing else', () => {
+  const boxes = [{ key: 'a', left: 0, top: 0, width: 0.1, height: 0.1, confident: true, label: 'Step back' }];
+  const [bare] = withoutLabels(boxes);
+  assert.equal('label' in bare, false);
+  assert.equal(bare.key, 'a');
+  assert.equal(bare.confident, true);
+});
