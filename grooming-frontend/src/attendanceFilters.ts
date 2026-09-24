@@ -1,4 +1,5 @@
-import type { AttendanceRecord } from './types.ts';
+import type { AttendanceRecord, AttendanceStatus } from './types.ts';
+import { normalizeAttendanceStatus } from './status.ts';
 
 export const BUSINESS_TIME_ZONE = 'Asia/Kolkata';
 
@@ -193,16 +194,41 @@ export interface AttendanceFilters {
   search?: string;
   role?: string;
   college?: string;
+  /** Matched on the normalised status, so legacy values file under the label they display as. */
+  status?: AttendanceStatus | '';
+}
+
+/**
+ * The statuses a record can be filtered by, in the words the table shows.
+ *
+ * Taken from the badge each row already carries, so choosing "Non-compliant"
+ * here returns exactly the rows showing a Non-compliant badge - including the
+ * older records stored as `fail` or `needs_review`, which display under the
+ * normalised name and therefore have to be matched on it.
+ */
+export const STATUS_FILTER_OPTIONS: ReadonlyArray<{ value: AttendanceStatus; label: string }> = [
+  { value: 'compliant', label: 'Compliant' },
+  { value: 'non_compliant', label: 'Non-compliant' },
+  { value: 'unassessed', label: 'Not assessed' },
+  { value: 'pending', label: 'Pending AI' },
+  { value: 'unidentified', label: 'Unidentified' },
+  { value: 'error', label: 'Analysis error' },
+];
+
+export function statusLabel(status: unknown): string {
+  const normalized = normalizeAttendanceStatus(status);
+  return STATUS_FILTER_OPTIONS.find((option) => option.value === normalized)?.label || 'Pending AI';
 }
 
 export function filterAttendanceRecords(
   records: AttendanceRecord[],
-  { search = '', role = '', college = '' }: AttendanceFilters = {},
+  { search = '', role = '', college = '', status = '' }: AttendanceFilters = {},
 ): AttendanceRecord[] {
   const term = search.trim().toLowerCase();
   return records.filter((record) => {
     if (role && record.instructor_role !== role) return false;
     if (college && record.college_name !== college) return false;
+    if (status && normalizeAttendanceStatus(record.status) !== status) return false;
     if (!term) return true;
     return [
       record.instructor_name,

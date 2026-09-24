@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, UserRoundSearch } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, UserRoundSearch, SlidersHorizontal, Download } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
-import DateRangeFilter from './DateRangeFilter';
+import AttendanceFilterDrawer from './AttendanceFilterDrawer';
+import { downloadAttendanceCsv } from '../attendanceExport';
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './useToast';
 import {
@@ -19,7 +20,7 @@ import {
 } from '../attendanceFilters';
 import { publicDayReportPath } from '../routes';
 import { canOpenRecord, formatCoordinates, normalizeAttendanceStatus } from '../status';
-import type { AttendanceRecord } from '../types';
+import type { AttendanceRecord, AttendanceStatus } from '../types';
 
 interface DailyAttendanceTableProps {
   onRowClick: (record: AttendanceRecord) => void;
@@ -83,6 +84,8 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   const [range, setRange] = useState<DateRange>(() => rangeForPreset('today'));
   const [roleFilter, setRoleFilter] = useState('');
   const [collegeFilter, setCollegeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<AttendanceStatus | ''>('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
@@ -192,8 +195,9 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
       search,
       role: roleFilter,
       college: collegeFilter,
+      status: statusFilter,
     }),
-    [records, search, roleFilter, collegeFilter],
+    [records, search, roleFilter, collegeFilter, statusFilter],
   );
   const visibleIds = useMemo(
     () => filteredRecords.map((record) => String(record._id)),
@@ -218,6 +222,27 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     setLoading(true);
     setPreset(nextPreset);
     setRange(nextRange);
+  };
+
+  /**
+   * How many filters differ from the defaults, for the badge on the button.
+   * The panel hides them, so without the count a filtered table looks like a
+   * short day.
+   */
+  const activeFilterCount = (preset !== 'today' ? 1 : 0)
+    + (collegeFilter ? 1 : 0)
+    + (roleFilter ? 1 : 0)
+    + (statusFilter ? 1 : 0);
+
+  // Stable, because the panel re-subscribes its Escape handler when this changes.
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
+
+  const clearAllFilters = () => {
+    setCollegeFilter('');
+    setRoleFilter('');
+    setStatusFilter('');
+    // Only reload when the dates actually change; Today is already loaded.
+    if (preset !== 'today') handleRangeChange('today', rangeForPreset('today', today));
   };
 
   const toggleRecord = (attendanceId: string) => {
@@ -305,32 +330,58 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               className="h-9 w-full sm:w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
             />
           </span>
-          <DateRangeFilter
-            preset={preset}
-            range={range}
-            today={today}
-            onChange={handleRangeChange}
-          />
-          <select
-            aria-label="Filter by institute"
-            value={collegeFilter}
-            onChange={(event) => setCollegeFilter(event.target.value)}
-            className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={filtersOpen}
+            className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+              activeFilterCount
+                ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
           >
-            <option value="">All institutes</option>
-            {colleges.map((college) => <option key={college} value={college}>{college}</option>)}
-          </select>
-          <select
-            aria-label="Filter by instructor role"
-            value={roleFilter}
-            onChange={(event) => setRoleFilter(event.target.value)}
-            className="h-9 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            <SlidersHorizontal size={16} aria-hidden="true" />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-bold text-white">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+          {/* Exports the rows on screen - search and every filter applied -
+              so what is downloaded is what was being looked at. */}
+          <button
+            type="button"
+            onClick={() => downloadAttendanceCsv(filteredRecords, range)}
+            disabled={loading || filteredRecords.length === 0}
+            title={filteredRecords.length ? `Download ${filteredRecords.length} records as CSV` : 'Nothing to export'}
+            className="flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <option value="">All roles</option>
-            {roles.map((role) => <option key={role} value={role}>{role}</option>)}
-          </select>
+            <Download size={16} aria-hidden="true" />
+            Export
+          </button>
         </div>
       </div>
+
+      <AttendanceFilterDrawer
+        open={filtersOpen}
+        onClose={closeFilters}
+        preset={preset}
+        range={range}
+        today={today}
+        onRangeChange={handleRangeChange}
+        college={collegeFilter}
+        colleges={colleges}
+        onCollegeChange={setCollegeFilter}
+        role={roleFilter}
+        roles={roles}
+        onRoleChange={setRoleFilter}
+        status={statusFilter}
+        onStatusChange={setStatusFilter}
+        onClearAll={clearAllFilters}
+        matchCount={filteredRecords.length}
+      />
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
