@@ -7,6 +7,7 @@ import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeGroupImage, normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluateCheckoutNow, evaluationFilter } from "../services/evaluationWorker.js";
+import { escalationFor, weeklyEscalations } from "../services/escalations.js";
 import { getNotificationSettings } from "../services/notificationSettings.js";
 import {
   getIdentificationSettings,
@@ -2507,11 +2508,17 @@ attendanceRouter.get(
         }).toArray()
       : [];
     const collegeMap = new Map(colleges.map((row) => [String(row._id), row.name]));
+    // Counted across each instructor's whole week, under the same scope as the
+    // rows themselves, so a campus sees only its own records counted.
+    const escalations = await weeklyEscalations(db, attendances, attendanceScope(req.currentUser));
     return res.json(attendances.map((attendance) => {
       const instructor = instructorMap.get(String(attendance.instructor_id));
       const collegeId = attendance.college_id || instructor?.college_id || null;
       return {
         ...serializeAttendance(attendance),
+        // Three or more non-compliant results in this row's Monday-to-Sunday
+        // week, or null. The same count that sends partners the URGENT email.
+        escalation: escalationFor(escalations, attendance),
         instructor_name: attendance.instructor_name || instructor?.name || "Unknown",
         instructor_role: attendance.instructor_role
           || instructor?.instructor_role

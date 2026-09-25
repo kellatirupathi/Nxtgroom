@@ -140,6 +140,20 @@ export interface AttendanceRecord {
   check_out_photo_key?: string | null;
   status?: string;
   remarks?: string | null;
+  /** The local calendar day of the session, YYYY-MM-DD. */
+  attendance_day?: string;
+  updated_at?: string;
+  /**
+   * Three or more non-compliant results in this row's Monday-to-Sunday week,
+   * counted by the server across the whole week, or null.
+   */
+  escalation?: AttendanceEscalation | null;
+}
+
+export interface AttendanceEscalation {
+  week_start: string;
+  week_end: string;
+  count: number;
 }
 
 export interface CheckItem {

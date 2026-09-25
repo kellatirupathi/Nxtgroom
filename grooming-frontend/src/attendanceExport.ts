@@ -1,6 +1,7 @@
 import {
   attendanceSessionDateLabel,
   checkoutDateTimeLabel,
+  escalationLabel,
   formatAttendanceTime,
   statusLabel,
   type DateRange,
@@ -32,6 +33,9 @@ const COLUMNS: ReadonlyArray<[string, (record: AttendanceRecord) => unknown]> = 
   ['Check-Out', (record) => checkoutDateTimeLabel(record.check_in_time, record.check_out_time, record.checkout_status)],
   ['Coordinates', (record) => (record.location_coordinates ? formatCoordinates(record.location_coordinates) : '')],
   ['Status', (record) => statusLabel(record.status)],
+  // The dated sentence, not the table's "this week", which a file opened next
+  // month would get wrong.
+  ['Escalation', (record) => escalationLabel(record.escalation)?.title ?? ''],
   ['Attire', (record) => (record.attire_type ? ATTIRE_LABELS[record.attire_type] || '' : '')],
   ['Remark', (record) => record.remarks],
 ];

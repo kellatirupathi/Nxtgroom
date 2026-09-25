@@ -14,13 +14,16 @@ import {
   rangeForPreset,
   type DatePreset,
   type DateRange,
+  type EscalationFilter,
+  escalationLabel,
   filterAttendanceRecords,
   localDateValue,
+  spreadEscalation,
   uniqueRecordValues,
 } from '../attendanceFilters';
 import { publicDayReportPath } from '../routes';
 import { canOpenRecord, formatCoordinates, normalizeAttendanceStatus } from '../status';
-import type { AttendanceRecord, AttendanceStatus } from '../types';
+import type { AttendanceEscalation, AttendanceRecord, AttendanceStatus } from '../types';
 
 interface DailyAttendanceTableProps {
   onRowClick: (record: AttendanceRecord) => void;
@@ -71,6 +74,27 @@ function AttireTag({ attire }: { attire?: string | null }) {
   );
 }
 
+/**
+ * Three or more non-compliant results in the instructor's week.
+ *
+ * It belongs to the instructor's week, not to this row, so a compliant row in
+ * an escalated week carries it too. Solid red, to stand apart from the
+ * Non-compliant badge beside it.
+ */
+function EscalationTag({ escalation, today }: { escalation?: AttendanceEscalation | null; today: string }) {
+  const label = escalationLabel(escalation, today);
+  if (!label) return <span className="text-xs text-slate-300">--</span>;
+  return (
+    <span
+      title={label.title}
+      className="inline-flex max-w-full items-center gap-1 rounded-full border border-rose-600 bg-rose-600 px-2.5 py-1 text-xs font-bold whitespace-nowrap text-white"
+    >
+      <TriangleAlert size={12} className="shrink-0" aria-hidden="true" />
+      <span className="truncate">{label.text}</span>
+    </span>
+  );
+}
+
 export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false }: DailyAttendanceTableProps) {
   const today = useMemo(() => localDateValue(), []);
   const toast = useToast();
@@ -85,6 +109,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   const [roleFilter, setRoleFilter] = useState('');
   const [collegeFilter, setCollegeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<AttendanceStatus | ''>('');
+  const [escalationFilter, setEscalationFilter] = useState<EscalationFilter>('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -143,6 +168,9 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
         } else {
           currentRows = rows;
         }
+        // A refresh fetches only changed rows, so an escalation that arrives
+        // with today's row is copied to the instructor's earlier rows that week.
+        currentRows = spreadEscalation(currentRows);
         syncCursor = requestStartedAt;
         pendingWork = currentRows.some(
           (row) => normalizeAttendanceStatus(row.status) === 'pending'
@@ -196,8 +224,9 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
       role: roleFilter,
       college: collegeFilter,
       status: statusFilter,
+      escalation: escalationFilter,
     }),
-    [records, search, roleFilter, collegeFilter, statusFilter],
+    [records, search, roleFilter, collegeFilter, statusFilter, escalationFilter],
   );
   const visibleIds = useMemo(
     () => filteredRecords.map((record) => String(record._id)),
@@ -232,7 +261,8 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   const activeFilterCount = (preset !== 'today' ? 1 : 0)
     + (collegeFilter ? 1 : 0)
     + (roleFilter ? 1 : 0)
-    + (statusFilter ? 1 : 0);
+    + (statusFilter ? 1 : 0)
+    + (escalationFilter ? 1 : 0);
 
   // Stable, because the panel re-subscribes its Escape handler when this changes.
   const closeFilters = useCallback(() => setFiltersOpen(false), []);
@@ -241,6 +271,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     setCollegeFilter('');
     setRoleFilter('');
     setStatusFilter('');
+    setEscalationFilter('');
     // Only reload when the dates actually change; Today is already loaded.
     if (preset !== 'today') handleRangeChange('today', rangeForPreset('today', today));
   };
@@ -379,6 +410,8 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
         onRoleChange={setRoleFilter}
         status={statusFilter}
         onStatusChange={setStatusFilter}
+        escalation={escalationFilter}
+        onEscalationChange={setEscalationFilter}
         onClearAll={clearAllFilters}
         matchCount={filteredRecords.length}
       />
@@ -400,7 +433,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             scroll the row far off screen instead of truncating at 320px.
             1610px is the sum of the column widths below.
           */}
-          <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? 'w-[1828px]' : 'w-[1780px]'}`}>
+          <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? 'w-[2058px]' : 'w-[2010px]'}`}>
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                 {canBulkDelete && (
@@ -424,6 +457,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                 <th className="p-4 w-[110px]">Check-Out</th>
                 <th className="p-4 w-[190px]">Coordinates</th>
                 <th className="p-4 w-[150px]">Status</th>
+                <th className="p-4 w-[230px]">Escalation</th>
                 <th className="p-4 w-[170px]">Attire</th>
                 <th className="p-4 w-[90px]">Photo</th>
                 <th className="p-4 w-[100px]">Report</th>
@@ -432,11 +466,11 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
-                <tr><td colSpan={canBulkDelete ? 13 : 12} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+                <tr><td colSpan={canBulkDelete ? 14 : 13} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
               ) : records.length === 0 ? (
-                <tr><td colSpan={canBulkDelete ? 13 : 12} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
+                <tr><td colSpan={canBulkDelete ? 14 : 13} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
               ) : filteredRecords.length === 0 ? (
-                <tr><td colSpan={canBulkDelete ? 13 : 12} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+                <tr><td colSpan={canBulkDelete ? 14 : 13} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
               ) : filteredRecords.map((record) => {
                 const canOpen = canOpenRecord(record.status);
                 const attendanceId = String(record._id);
@@ -486,6 +520,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                       ) : '--'}
                     </td>
                     <td className="p-4 whitespace-nowrap"><StatusBadge status={record.status} /></td>
+                    <td className="p-4 whitespace-nowrap"><EscalationTag escalation={record.escalation} today={today} /></td>
                     <td className="p-4 whitespace-nowrap"><AttireTag attire={record.attire_type} /></td>
                     <td className="p-4">
                       {/* stopPropagation: the row itself opens the evaluation

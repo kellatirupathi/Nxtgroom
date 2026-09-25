@@ -54,10 +54,10 @@ test('every status the table can show is a filter option', () => {
 test('the export has the table columns and one line per row', () => {
   const csv = attendanceCsv(records.slice(0, 2));
   const [header, first, second] = csv.split('\r\n');
-  assert.equal(header, 'Instructor Name,Role,Institute,Date,Check-In,Check-Out,Coordinates,Status,Attire,Remark');
+  assert.equal(header, 'Instructor Name,Role,Institute,Date,Check-In,Check-Out,Coordinates,Status,Escalation,Attire,Remark');
   assert.match(first, /^Asha,Instructor,Campus A,/);
-  assert.match(first, /,Compliant,Saree,Neat$/);
-  assert.match(second, /,Non-compliant,,Shirt untucked$/);
+  assert.match(first, /,Compliant,,Saree,Neat$/);
+  assert.match(second, /,Non-compliant,,,Shirt untucked$/);
   assert.equal(csv.split('\r\n').length, 3);
 });
 

@@ -2,9 +2,11 @@ import { useEffect, useRef } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
 import DateRangeFilter from './DateRangeFilter';
 import {
+  ESCALATION_FILTER_OPTIONS,
   STATUS_FILTER_OPTIONS,
   type DatePreset,
   type DateRange,
+  type EscalationFilter,
 } from '../attendanceFilters';
 import type { AttendanceStatus } from '../types';
 
@@ -23,6 +25,8 @@ interface AttendanceFilterDrawerProps {
   onRoleChange: (value: string) => void;
   status: AttendanceStatus | '';
   onStatusChange: (value: AttendanceStatus | '') => void;
+  escalation: EscalationFilter;
+  onEscalationChange: (value: EscalationFilter) => void;
   onClearAll: () => void;
   /** Rows the current filters leave, so the button says what closing will show. */
   matchCount: number;
@@ -56,6 +60,8 @@ export default function AttendanceFilterDrawer({
   onRoleChange,
   status,
   onStatusChange,
+  escalation,
+  onEscalationChange,
   onClearAll,
   matchCount,
 }: AttendanceFilterDrawerProps) {
@@ -130,6 +136,20 @@ export default function AttendanceFilterDrawer({
             >
               <option value="">All statuses</option>
               {STATUS_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-bold uppercase tracking-wider text-slate-500">Escalation</span>
+            <select
+              value={escalation}
+              onChange={(event) => onEscalationChange(event.target.value as EscalationFilter)}
+              className={FIELD}
+            >
+              <option value="">All instructors</option>
+              {ESCALATION_FILTER_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>

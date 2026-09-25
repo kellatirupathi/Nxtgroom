@@ -1,4 +1,4 @@
-import type { AttendanceRecord, AttendanceStatus } from './types.ts';
+import type { AttendanceEscalation, AttendanceRecord, AttendanceStatus } from './types.ts';
 import { normalizeAttendanceStatus } from './status.ts';
 
 export const BUSINESS_TIME_ZONE = 'Asia/Kolkata';
@@ -196,6 +196,90 @@ export interface AttendanceFilters {
   college?: string;
   /** Matched on the normalised status, so legacy values file under the label they display as. */
   status?: AttendanceStatus | '';
+  escalation?: EscalationFilter;
+}
+
+/** Failures in a week at which an instructor is escalated. Matches the server. */
+export const ESCALATION_THRESHOLD = 3;
+
+export type EscalationFilter = '' | 'escalated' | 'not_escalated';
+
+export const ESCALATION_FILTER_OPTIONS: ReadonlyArray<{ value: Exclude<EscalationFilter, ''>; label: string }> = [
+  { value: 'escalated', label: 'Escalated (3+ non-compliant in a week)' },
+  { value: 'not_escalated', label: 'Not escalated' },
+];
+
+export function isEscalated(escalation: AttendanceEscalation | null | undefined): boolean {
+  return (escalation?.count ?? 0) >= ESCALATION_THRESHOLD;
+}
+
+/** The Monday of the week containing a YYYY-MM-DD day, as a day key. Matches the server. */
+export function weekStartOf(dayKey: string): string {
+  const [year, month, day] = String(dayKey).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  return date.toISOString().slice(0, 10);
+}
+
+function shortDay(dayKey: string, withYear = false): string {
+  const date = new Date(`${dayKey}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return String(dayKey);
+  // The Date column's format: "Sep 21", "Sep 27, 2026".
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(withYear ? { year: 'numeric' } : {}),
+    timeZone: 'UTC',
+  });
+}
+
+/**
+ * The one line shown in the Escalation column, and the full sentence behind it.
+ *
+ * "This week" only when it is: a row from an earlier week says "that week",
+ * and the tooltip and the export always carry the dates.
+ */
+export function escalationLabel(
+  escalation: AttendanceEscalation | null | undefined,
+  today: string = localDateValue(),
+): { text: string; title: string } | null {
+  if (!escalation || !isEscalated(escalation)) return null;
+  const thisWeek = escalation.week_start === weekStartOf(today);
+  const range = `${shortDay(escalation.week_start)} - ${shortDay(escalation.week_end, true)}`;
+  return {
+    text: `Escalated · ${escalation.count}× ${thisWeek ? 'this week' : 'that week'}`,
+    title: `Escalated: non-compliant ${escalation.count} times in the week of ${range}`,
+  };
+}
+
+/**
+ * Gives every row of an instructor's week the freshest escalation fetched.
+ *
+ * The table refreshes by fetching only rows that changed. A new failure on
+ * Friday can escalate an instructor whose Monday and Tuesday rows were fetched
+ * earlier and are not fetched again, so those rows would stay unmarked until a
+ * full reload. The most recently updated row in each instructor-week carries
+ * the newest count, and it is copied to the rest.
+ */
+export function spreadEscalation(rows: AttendanceRecord[]): AttendanceRecord[] {
+  const keyOf = (row: AttendanceRecord) => (
+    row.instructor_id && row.attendance_day ? `${row.instructor_id}|${weekStartOf(row.attendance_day)}` : null
+  );
+  const freshest = new Map<string, { at: number; escalation: AttendanceEscalation | null }>();
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (!key) continue;
+    const at = new Date(row.updated_at || 0).getTime() || 0;
+    const current = freshest.get(key);
+    if (!current || at > current.at) freshest.set(key, { at, escalation: row.escalation ?? null });
+  }
+  return rows.map((row) => {
+    const key = keyOf(row);
+    const source = key ? freshest.get(key) : undefined;
+    if (!source) return row;
+    const unchanged = JSON.stringify(row.escalation ?? null) === JSON.stringify(source.escalation);
+    return unchanged ? row : { ...row, escalation: source.escalation };
+  });
 }
 
 /**
@@ -222,13 +306,15 @@ export function statusLabel(status: unknown): string {
 
 export function filterAttendanceRecords(
   records: AttendanceRecord[],
-  { search = '', role = '', college = '', status = '' }: AttendanceFilters = {},
+  { search = '', role = '', college = '', status = '', escalation = '' }: AttendanceFilters = {},
 ): AttendanceRecord[] {
   const term = search.trim().toLowerCase();
   return records.filter((record) => {
     if (role && record.instructor_role !== role) return false;
     if (college && record.college_name !== college) return false;
     if (status && normalizeAttendanceStatus(record.status) !== status) return false;
+    if (escalation === 'escalated' && !isEscalated(record.escalation)) return false;
+    if (escalation === 'not_escalated' && isEscalated(record.escalation)) return false;
     if (!term) return true;
     return [
       record.instructor_name,
