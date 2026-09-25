@@ -5,6 +5,7 @@ import { evaluateImage } from "./visionEngine.js";
 import { CHECKPOINT_VERSION, improvementTips } from "../checkpoints.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { incrementMetric } from "./telemetry.js";
 import { downloadPhoto } from "./photoStorage.js";
 import { enqueueMailJob } from "./mailWorker.js";
 import { idMatch } from "../middleware/auth.js";
@@ -191,6 +192,215 @@ async function sendGroomingAlerts(db, {
     console.warn("No reporting partners are configured; only the instructor was alerted.");
   }
   return deliveries.length;
+}
+
+/** The short hash used to key one recipient's copy of a message. */
+function recipientKey(email) {
+  return createHash("sha256").update(String(email).trim().toLowerCase()).digest("hex").slice(0, 20);
+}
+
+/** A link to one half of one day's report. */
+function halfReportUrl(token, dayKey, kind) {
+  return `${appUrl()}/reports/${token}/day/${dayKey}/${kind === "checkout" ? "check-out" : "check-in"}`;
+}
+
+/**
+ * A compliant result, for the reporting partners.
+ *
+ * Partners are copied on failures by sendGroomingAlerts; this is the other
+ * half, so they hear about every assessed result rather than only the bad
+ * ones. Partners only: the instructor already receives their own report for
+ * every result, compliant or not. Governed by the same per-half switches as the
+ * alerts, and keyed separately from them so neither can suppress the other.
+ */
+async function sendComplianceReports(db, {
+  attendanceId,
+  instructorId,
+  instructorName,
+  summary,
+  checkInTime,
+  eventTime = checkInTime,
+  kind = "checkin",
+}) {
+  const recipients = await reportRecipientsFor(db, kind);
+  if (!recipients.length) return 0;
+  const instructor = instructorId
+    ? await db.collection("instructors").findOne({ _id: idMatch(String(instructorId)) })
+    : null;
+  if (!instructor) return 0;
+
+  const token = await ensureReportToken(db, instructor);
+  const payload = {
+    name: instructorName || instructor.name,
+    status: "compliant",
+    summary,
+    dateLabel: localDateKey(new Date(eventTime || checkInTime || Date.now())),
+    reportUrl: halfReportUrl(token, localDateKey(new Date(checkInTime || Date.now())), kind),
+    kind,
+    role: "reporting_partner",
+    forReviewer: true,
+  };
+  for (const recipient of recipients) {
+    await enqueueMailJob(db, {
+      id: `${attendanceId}:compliance-report:${kind}:reporting_partner:${recipientKey(recipient)}`,
+      type: "grooming_alert",
+      toEmail: recipient,
+      attendanceId,
+      payload,
+    });
+  }
+  return recipients.length;
+}
+
+/** Failures in a week at which reporting partners are sent an escalation. */
+export const ESCALATION_THRESHOLD = 3;
+
+const NON_COMPLIANT_STATUSES = new Set(["non_compliant", "fail"]);
+
+/** The Monday of the week containing a local date key, as a key. */
+export function weekStartKey(dayKey) {
+  const [year, month, day] = String(dayKey).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  return date.toISOString().slice(0, 10);
+}
+
+export function addDaysToKey(dayKey, days) {
+  const [year, month, day] = String(dayKey).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Every non-compliant result in a set of one instructor's attendance records,
+ * oldest first. A check-in and a check-out are separate results and count
+ * separately: each is its own photograph judged against the standards.
+ */
+export function nonCompliantOccurrences(records) {
+  const occurrences = [];
+  for (const record of records || []) {
+    if (record.deleting_at) continue;
+    if (NON_COMPLIANT_STATUSES.has(String(record.status || "").toLowerCase())) {
+      occurrences.push({
+        kind: "checkin",
+        day: record.attendance_day,
+        time: record.check_in_time || null,
+        summary: record.remarks || "",
+      });
+    }
+    if (
+      !record.checkout_deleting_at
+      && String(record.checkout_compliance_status || "").toUpperCase() === "NON_COMPLIANT"
+    ) {
+      occurrences.push({
+        kind: "checkout",
+        day: record.attendance_day,
+        time: record.check_out_time || record.check_in_time || null,
+        summary: record.checkout_remarks || "",
+      });
+    }
+  }
+  return occurrences.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
+}
+
+/**
+ * Escalates to the reporting partners once an instructor has failed three or
+ * more times in the Monday-to-Sunday week of this result.
+ *
+ * Sent on the third failure and again on each one after, each message listing
+ * the whole week so far. The job is keyed by the week's count, so a retried or
+ * repeated evaluation reaching the same count sends nothing twice, while a new
+ * failure - a new count - always sends. Copied to the same partners, under the
+ * same switch, as the alert for the half that triggered it.
+ */
+async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, kind = "checkin" }) {
+  if (!instructorId) return 0;
+  const attendance = await db.collection("attendance").findOne(
+    { _id: attendanceId },
+    { projection: { attendance_day: 1, check_in_time: 1 } }
+  );
+  const dayKey = attendance?.attendance_day
+    || localDateKey(new Date(attendance?.check_in_time || Date.now()));
+  const weekStart = weekStartKey(dayKey);
+  const weekEnd = addDaysToKey(weekStart, 6);
+
+  const records = await db.collection("attendance").find(
+    {
+      instructor_id: idMatch(String(instructorId)),
+      attendance_day: { $gte: weekStart, $lte: weekEnd },
+      deleting_at: { $exists: false },
+    },
+    {
+      projection: {
+        attendance_day: 1,
+        check_in_time: 1,
+        check_out_time: 1,
+        status: 1,
+        remarks: 1,
+        checkout_compliance_status: 1,
+        checkout_remarks: 1,
+        checkout_deleting_at: 1,
+      },
+    }
+  ).toArray();
+  const occurrences = nonCompliantOccurrences(records);
+  if (occurrences.length < ESCALATION_THRESHOLD) return 0;
+
+  const recipients = await reportRecipientsFor(db, kind);
+  if (!recipients.length) return 0;
+  const instructor = await db.collection("instructors").findOne({ _id: idMatch(String(instructorId)) });
+  if (!instructor) return 0;
+
+  const token = await ensureReportToken(db, instructor);
+  const payload = {
+    name: instructor.name,
+    count: occurrences.length,
+    weekStart,
+    weekEnd,
+    occurrences: occurrences.map((occurrence) => ({
+      kind: occurrence.kind,
+      day: occurrence.day,
+      time: occurrence.time ? new Date(occurrence.time).toISOString() : null,
+      summary: occurrence.summary,
+      reportUrl: halfReportUrl(token, occurrence.day, occurrence.kind),
+    })),
+  };
+  for (const recipient of recipients) {
+    await enqueueMailJob(db, {
+      id: `escalation:${instructorId}:${weekStart}:${occurrences.length}:${recipientKey(recipient)}`,
+      type: "grooming_escalation",
+      toEmail: recipient,
+      attendanceId,
+      payload,
+    });
+  }
+  incrementMetric("grooming_escalations_total");
+  return recipients.length;
+}
+
+/**
+ * What reporting partners receive for one result, beyond the existing alert:
+ * a report when it was compliant, an escalation check when it was not.
+ *
+ * Each is attempted on its own and never throws: the evaluation is committed
+ * before this runs, and must not be retried and paid for again because an
+ * email could not be queued.
+ */
+async function notifyReportingPartners(db, { attendanceStatus, ...details }) {
+  if (attendanceStatus === "compliant") {
+    try {
+      await sendComplianceReports(db, details);
+    } catch (error) {
+      console.error(`Compliance report not queued for ${details.attendanceId}: ${error?.name || "Error"}`);
+    }
+  }
+  if (attendanceStatus === "non_compliant") {
+    try {
+      await escalateRepeatedNonCompliance(db, details);
+    } catch (error) {
+      console.error(`Escalation not checked for ${details.attendanceId}: ${error?.name || "Error"}`);
+    }
+  }
 }
 
 function publicEvaluation(report, job, now) {
@@ -489,6 +699,16 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         console.error(`Check-out alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);
       }
     }
+    await notifyReportingPartners(db, {
+      attendanceStatus,
+      attendanceId: job.attendance_id,
+      instructorId: job.instructor?.id,
+      instructorName: job.instructor?.name,
+      summary: evaluation.ai_summary || "",
+      checkInTime: job.check_in_time,
+      eventTime: job.check_out_time || job.check_in_time,
+      kind: "checkout",
+    });
 
     if (job._id) {
       await db.collection("evaluation_jobs").deleteOne({
@@ -554,6 +774,15 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
       console.error(`Grooming alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);
     }
   }
+  await notifyReportingPartners(db, {
+    attendanceStatus,
+    attendanceId: job.attendance_id,
+    instructorId: job.instructor?.id,
+    instructorName: job.instructor?.name,
+    summary: evaluation.ai_summary || "",
+    checkInTime: job.check_in_time,
+    kind: jobKind(job),
+  });
   await db.collection("evaluation_jobs").deleteOne({
     _id: job._id,
     worker_id: WORKER_ID,

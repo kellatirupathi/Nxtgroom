@@ -441,6 +441,9 @@ export function buildGroomingAlertEmail({
 }) {
   const person = name || "Instructor";
   const eventLabel = kind === "checkout" ? "check-out" : "check-in";
+  if (status === "compliant") {
+    return buildCompliantReportEmail({ person, eventLabel, summary, dateLabel, reportUrl, forReviewer, kind });
+  }
   // Alerts only fire on a failure now that manual review is gone, but the
   // wording still handles the other case rather than asserting a status that
   // an older queued job might not have.
@@ -477,6 +480,144 @@ export function buildGroomingAlertEmail({
       <p>${escapeHtml(opening)}</p>
       <p style="background:#fff7ed;border-left:3px solid #f59e0b;padding:10px 14px">${escapeHtml(summary || "See the full report for the checkpoint detail.")}</p>
       <p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View the full report</a></p>
+      <p style="color:#64748b;font-size:12px">This is an assistive screening result and should be reviewed before any action is taken.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+/**
+ * A result that met the standards, for reporting partners.
+ *
+ * Partners used to hear only about failures, which told them nothing about
+ * the instructors who were getting it right. Same shape as the alert - the
+ * name and date in the subject, the summary, the link - so the two read as a
+ * pair, marked Compliant in the subject and green in the body so it is never
+ * mistaken for one.
+ */
+function buildCompliantReportEmail({ person, eventLabel, summary, dateLabel, reportUrl, forReviewer, kind }) {
+  const eventTitle = kind === "checkout" ? "Check-out" : "Check-in";
+  const subject = forReviewer
+    ? `${eventTitle} appearance report: ${person} - ${dateLabel} (Compliant)`
+    : `Your ${eventLabel} on ${dateLabel} met the appearance standards`;
+  const opening = forReviewer
+    ? `${person}'s ${eventLabel} on ${dateLabel} met the appearance standards.`
+    : `Your ${eventLabel} on ${dateLabel} met the appearance standards.`;
+  const detail = summary || "See the full report for the checkpoint detail.";
+  return {
+    subject,
+    text: [
+      forReviewer ? "Hello," : `Hello ${person},`,
+      "",
+      opening,
+      "",
+      detail,
+      "",
+      "Full report:",
+      reportUrl,
+      "",
+      "This is an assistive screening result and should be reviewed before any action is taken.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>${forReviewer ? "Hello," : `Hello ${escapeHtml(person)},`}</p>
+      <p>${escapeHtml(opening)}</p>
+      <p style="background:#ecfdf5;border-left:3px solid #10b981;padding:10px 14px">${escapeHtml(detail)}</p>
+      <p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">View the full report</a></p>
+      <p style="color:#64748b;font-size:12px">This is an assistive screening result and should be reviewed before any action is taken.</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
+function shortDay(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  return Number.isNaN(date.getTime())
+    ? String(dateKey || "")
+    : date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+function clockTime(value) {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: runtimeConfig().appTimeZone,
+  }).format(parsed);
+}
+
+/**
+ * Sent to reporting partners when one instructor has failed the appearance
+ * standards three or more times in a Monday-to-Sunday week, and again at each
+ * further failure that week.
+ *
+ * Every occurrence is listed with its own summary and report link, so a
+ * partner can see the whole week at once rather than piecing it together from
+ * separate alerts. The count in the subject is the week's total, which is why
+ * a fourth failure sends a new message rather than repeating the third.
+ */
+export function buildEscalationEmail({ name, count, weekStart, weekEnd, occurrences = [] }) {
+  const person = name || "Instructor";
+  const range = `${shortDay(weekStart)} to ${shortDay(weekEnd)}`;
+  const subject = `URGENT action needed: Check-in appearance report - ${person} non-compliant ${count} times this week (${range})`;
+  const rows = occurrences.map((occurrence, index) => ({
+    number: index + 1,
+    day: shortDay(occurrence.day),
+    event: occurrence.kind === "checkout" ? "Check-out" : "Check-in",
+    time: clockTime(occurrence.time),
+    summary: occurrence.summary || "See the report for the checkpoint detail.",
+    reportUrl: occurrence.reportUrl,
+  }));
+  const opening = `${person} has not met the appearance standards ${count} times this week (${range}). This needs your attention.`;
+
+  return {
+    subject,
+    text: [
+      "Hello,",
+      "",
+      opening,
+      "",
+      ...rows.flatMap((row) => [
+        `${row.number}. ${row.day} - ${row.event} at ${row.time}`,
+        `   ${row.summary}`,
+        `   Report: ${row.reportUrl}`,
+        "",
+      ]),
+      `Please follow up with ${person} about the appearance standards.`,
+      "",
+      "This is an assistive screening result and should be reviewed before any action is taken.",
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello,</p>
+      <p style="background:#fef2f2;border-left:4px solid #dc2626;padding:10px 14px;color:#991b1b"><strong>Urgent:</strong> ${escapeHtml(opening)}</p>
+      <table style="border-collapse:collapse;font-size:14px;margin:16px 0;width:100%">
+        <thead><tr style="background:#f1f5f9">
+          <th style="padding:6px 10px;text-align:left">#</th>
+          <th style="padding:6px 10px;text-align:left">Date</th>
+          <th style="padding:6px 10px;text-align:left">Event</th>
+          <th style="padding:6px 10px;text-align:left">Time</th>
+          <th style="padding:6px 10px;text-align:left">What was found</th>
+          <th style="padding:6px 10px;text-align:left">Report</th>
+        </tr></thead>
+        <tbody>${rows.map((row) => `
+          <tr style="border-top:1px solid #e2e8f0;vertical-align:top">
+            <td style="padding:6px 10px">${row.number}</td>
+            <td style="padding:6px 10px;white-space:nowrap">${escapeHtml(row.day)}</td>
+            <td style="padding:6px 10px">${escapeHtml(row.event)}</td>
+            <td style="padding:6px 10px;white-space:nowrap">${escapeHtml(row.time)}</td>
+            <td style="padding:6px 10px">${escapeHtml(row.summary)}</td>
+            <td style="padding:6px 10px"><a href="${escapeHtml(row.reportUrl)}">View</a></td>
+          </tr>`).join("")}
+        </tbody>
+      </table>
+      <p>Please follow up with ${escapeHtml(person)} about the appearance standards.</p>
       <p style="color:#64748b;font-size:12px">This is an assistive screening result and should be reviewed before any action is taken.</p>
       <p>Regards,<br>NxtWave Administration</p>
     `,
@@ -525,6 +666,10 @@ export function sendWeeklyReportEmail(toEmail, payload) {
 
 export function sendGroomingAlertEmail(toEmail, payload) {
   return sendEmail(toEmail, buildGroomingAlertEmail(payload));
+}
+
+export function sendEscalationEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildEscalationEmail(payload));
 }
 
 export function sendAttendanceReminderEmail(toEmail, payload) {

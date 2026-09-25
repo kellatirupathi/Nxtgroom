@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { appUrl, runtimeConfig } from "../config/env.js";
 import {
   sendAttendanceReminderEmail,
+  sendEscalationEmail,
   sendGroomingAlertEmail,
   sendPasswordResetEmail,
   sendWeeklyReportEmail,
@@ -15,6 +16,7 @@ const SUPPORTED_TYPES = new Set([
   "weekly_report",
   "attendance_reminder",
   "grooming_alert",
+  "grooming_escalation",
 ]);
 
 /**
@@ -41,6 +43,21 @@ function deliveryPayload(job) {
   return {
     ...job.payload,
     reportUrl: canonicalReportUrl(job.payload.reportUrl),
+  };
+}
+
+/**
+ * An escalation carries one report link per occurrence, each given the same
+ * origin correction a single report link gets.
+ */
+function escalationPayload(job) {
+  const payload = job.payload || {};
+  return {
+    ...payload,
+    occurrences: (payload.occurrences || []).map((occurrence) => ({
+      ...occurrence,
+      reportUrl: canonicalReportUrl(occurrence.reportUrl),
+    })),
   };
 }
 
@@ -110,6 +127,7 @@ async function deliver(job) {
   if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, passwordResetPayload(job.payload));
   if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, deliveryPayload(job));
   if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, deliveryPayload(job));
+  if (job.type === "grooming_escalation") return sendEscalationEmail(job.to_email, escalationPayload(job));
   return sendAttendanceReminderEmail(job.to_email, job.payload);
 }
 
