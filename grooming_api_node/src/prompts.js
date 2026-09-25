@@ -26,7 +26,7 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // disappearance against fabric hanging below the waistband. No checkpoint was
 // added, removed or rescoped: the condition and tuck rows already owned these
 // questions and were deciding them from a general impression of the garment.
-export const PROMPT_VERSION = "2026-09-15.1";
+export const PROMPT_VERSION = "2026-09-25.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -283,6 +283,12 @@ const MEN_ANALYSIS_RULES = `
 ### THIS INSTRUCTOR
 The instructor is male. Apply the men's dress code only. Do not evaluate saree
 or kurti standards, and do not comment on makeup.
+
+### HAIR ON THE FOREHEAD
+Hair must be set back or up on top of the head with the whole forehead clear.
+Any fringe or strands resting on or hanging over the forehead fail Hair Position,
+however neat or deliberately styled they are. Messy or unset hair fails Hair
+Neatness. Say where the front of the hair sits.
 `.trim();
 
 const WOMEN_ANALYSIS_RULES = `
@@ -301,8 +307,16 @@ Look for these specifically rather than assuming compliance:
 A sleeveless saree blouse is never permitted. Say so explicitly when you see
 one, rather than describing the fit and moving on.
 
-A kurti with short, half, cap or sleeveless sleeves is a FAIL. Name the sleeve
-style you can see. Silence on sleeves reads as approval.
+Sleeves must reach at least halfway from the shoulder to the elbow - on a
+kurti, a saree blouse and a western top alike. A sleeve ending above that point,
+a cap sleeve and sleeveless are a FAIL; a half sleeve ending at the middle of the
+upper arm or lower passes. Name the sleeve style and where its hem ends. Silence
+on sleeves reads as approval.
+
+Bottom wear must fall loosely and straight: palazzo pants or straight formal
+trousers. Leggings, jeggings and other skin-tight bottoms fail, as do churidar
+and gathered patiala or dhoti salwar. Read the leg from the hip to the ankle and
+say what you saw.
 
 A dupatta must be worn, not merely present. Fabric visible over one shoulder,
 trailing, or bunched is not a dupatta properly worn.

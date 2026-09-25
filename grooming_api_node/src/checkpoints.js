@@ -41,8 +41,8 @@ export const ID_CARD_CHECKS = [
  * is not judged at all.
  */
 export const MEN_GROOMING_CHECKS = [
-  { code: "M_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, combed, controlled and deliberately maintained. Classic side parts, tapers, short back-and-sides and crew cuts are acceptable. FAIL clearly messy, uncombed, dishevelled, shaggy, uncontrolled or visibly over-spiked hair. Do not judge hair colour or infer whether hair products were used." },
-  { code: "M_HAIR_POSITION", name: "Hair Position / Away From Face", rule: "Hair is kept back and away from the face. FAIL when strands clearly fall across the forehead, eyes or face. Hair should stay behind or away from the face throughout a session." },
+  { code: "M_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, combed, controlled and deliberately maintained, set neatly on top of the head. Classic side parts, tapers, short back-and-sides and crew cuts are acceptable. FAIL messy, uncombed, dishevelled, shaggy, uncontrolled or visibly over-spiked hair. Look at the crown, the sides and the front hairline, where unset hair shows first, and say in the observation which of them you judged. Do not judge hair colour or infer whether hair products were used." },
+  { code: "M_HAIR_POSITION", name: "Hair Position / Away From Face", rule: "Hair is set back or up on top of the head, and the whole forehead is clear of it. Look at the front hairline: FAIL when any fringe, strands or locks rest on, hang over or cover any part of the forehead, the eyebrows or the eyes - even when that hair is otherwise tidy or deliberately styled forward. A forehead visible from the hairline down to the eyebrows is the evidence for a PASS. Say in the observation where the front of the hair sits relative to the forehead." },
   { code: "M_HAIR_LENGTH", name: "Hair Length", rule: "Hair does not extend past the shirt collar." },
   { code: "M_FACIAL_HAIR", name: "Facial Hair", rule: "Inspect the face, cheeks, jaw and chin closely. PASS requires positive evidence of grooming, not merely the presence of a beard: a clean shave, maintained light stubble of even length, a short trimmed beard, or a beard with a deliberately shaped cheek line and neckline. A beard is groomed only when its outer edges are defined: look for a cheek line that follows a clean boundary rather than fading into stray growth, and a neckline trimmed at or above the jaw. FAIL an untrimmed or grown-out beard, uneven or patchy density, an undefined or ragged cheek edge, growth straying onto the neck, or hair long enough to look bushy rather than close-trimmed. Length alone does not pass or fail: a long beard that is evenly trimmed and cleanly shaped passes, and a short one with ragged edges fails. If you cannot point to a specific groomed edge, the correct answer is FAIL, not PASS. Do not return N/A merely because this is a full-body photograph: when the face, jaw and chin are discernible, make the assessment. Use N/A only when the face is actually cropped, occluded or too blurred to distinguish facial hair." },
   { code: "M_MOUSTACHE", name: "Moustache", rule: "Inspect the upper-lip area closely. A clean-shaven upper lip passes. A visible moustache passes only when the hair is trimmed clear of the lip line, so the top edge of the upper lip is unobscured along its width. FAIL a moustache whose hair grows down over the lip line or into the mouth line, one that is long or bushy enough to hide the lip edge, and one with straggling or uneven hairs at its lower border. A moustache merging into the beard without any trimmed separation at the lip is not evidence of maintenance and does not by itself pass. Judge this on the lip edge you can actually see: if the lip line is obscured by hair, that is a FAIL. Do not return N/A merely because this is a full-body photograph: when the mouth and upper lip are discernible, make the assessment. Use N/A only when the upper lip is actually cropped, occluded or too blurred to judge." },
@@ -95,7 +95,7 @@ export const SAREE_ATTIRE_CHECKS = [
   { code: "W_SAREE_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a professional saree is the visible garment. Plain, solid or subtle designs pass. FAIL loud, conspicuous or strongly distracting prints and patterns." },
   { code: "W_SAREE_WEARING", name: "Saree Wearing / Drape", rule: "The saree is properly and professionally draped: secure at the waist and shoulder, sitting where it should, not slipping or loosely thrown on. FAIL a saree that is visibly worn incorrectly or carelessly." },
   { code: "W_SAREE_PLEATS_PALLU", name: "Saree Pleats & Pallu", rule: "Pleats are even and tidy, and the pallu is pinned or managed neatly at an appropriate length. FAIL bunched or disordered pleats, and FAIL a pallu that hangs loose, drags or is left unmanaged. Count the pleats at the waist where they are set: tidy pleats run parallel and hold one direction, while disordered ones fan, twist or collapse into each other. Follow the pallu from the shoulder to its end - pinned or deliberately held is a PASS, while an end that trails toward the floor or hangs off the shoulder unmanaged is not. Say in the observation which of the pleats and the pallu your finding is about, since they can differ." },
-  { code: "W_SAREE_BLOUSE", name: "Blouse Fit & Coverage", rule: "Covers fit, neckline and sleeve coverage together. A SLEEVELESS BLOUSE IS NOT PERMITTED and is always a FAIL — say explicitly that the blouse is sleeveless. Also FAIL exposed straps or visible safety pins." },
+  { code: "W_SAREE_BLOUSE", name: "Blouse Fit & Coverage", rule: "Covers fit, neckline and sleeve coverage together. A SLEEVELESS BLOUSE IS NOT PERMITTED and is always a FAIL — say explicitly that the blouse is sleeveless. The sleeve must also reach at least halfway from the shoulder to the elbow: find where the shoulder meets the arm and where the elbow bends, and see where the hem ends between them. FAIL a cap sleeve or any sleeve ending above the middle of the upper arm; a sleeve ending at the middle of the upper arm or lower passes. Say where the hem ends. The pallu often covers one arm - judge the sleeve you can see. Also FAIL exposed straps or visible safety pins." },
   { code: "W_SAREE_FABRIC", name: "Saree Fabric / Condition", rule: "Covers the fabric and the state it is in: professional material, not sheer or transparent, and clean, pressed and undamaged. FAIL visible stains, tears, fraying or heavy creasing. Read pressing from the pallu as it falls and from the skirt below the knee, where the cloth hangs free: pressed fabric falls in clean lines there, while unpressed fabric shows crumpling that holds its shape. Judge opacity where the cloth lies over a single layer rather than where it is doubled, since doubled cloth reads as opaque whatever it is made of. Say in the observation which part of the drape your evidence came from." },
   { code: "W_SAREE_PRESENTATION", name: "Saree Overall Presentation", rule: "Whether the saree reads as professional overall — the impression the whole outfit gives in a teaching setting, once drape, fabric and blouse are each accounted for." },
 ];
@@ -106,7 +106,7 @@ export const KURTI_ATTIRE_CHECKS = [
   {
     code: "W_KURTI_NECKLINE_SLEEVES",
     name: "Kurti Neckline & Sleeves",
-    rule: "Covers neckline depth and sleeve length together. Name the sleeve style explicitly whenever it is visible. Short sleeves, half sleeves, cap sleeves and sleeveless are all a FAIL — the standard requires full or three-quarter length. Never pass over a short sleeve in silence.",
+    rule: "Covers neckline depth and sleeve length together. Sleeve length is judged against the upper arm: find where the shoulder meets the arm and where the elbow bends, and see where the sleeve's hem ends between them. A sleeve reaching at least halfway from the shoulder to the elbow passes - a half sleeve ending at the middle of the upper arm or lower, an elbow-length, three-quarter or full sleeve. FAIL a sleeve ending above that halfway point, a cap sleeve and sleeveless. Name the sleeve style and where its hem ends (for example just below the shoulder, mid upper arm, at the elbow) whenever it is visible. When a dupatta or the pose hides one arm, judge the arm you can see. Never pass over a short sleeve in silence.",
   },
   {
     code: "W_KURTI_MATERIAL",
@@ -122,7 +122,7 @@ export const KURTI_ATTIRE_CHECKS = [
   {
     code: "W_BOTTOM_WEAR",
     name: "Bottom Wear",
-    rule: "Palazzo, churidar or straight formal trousers in a matching or neutral tone. The fabric must be opaque: FAIL anything visibly thin, sheer or transparent. FAIL jeans, denim, casual cropped trousers and leggings worn as outerwear.",
+    rule: "Palazzo pants or straight formal trousers in a matching or neutral tone: legs that fall loosely and straight from the hip, wider than the leg beneath, to a plain hem at the ankle. The fabric must be opaque: FAIL anything visibly thin, sheer or transparent. FAIL leggings, jeggings and any skin-tight bottom that follows the outline of the thigh, knee and calf. FAIL churidar and patiala, dhoti or heavily gathered salwar, whose fabric bunches into rings or pleats at the ankle. FAIL jeans, denim and casual cropped trousers. Read the leg from the hip to the ankle - or whatever part of it the kurti leaves visible - and say what you saw: a loose vertical fall passes; a leg whose shape shows through the cloth, or cloth gathered at the ankle, fails.",
   },
 ];
 
@@ -136,9 +136,9 @@ export const KURTI_ATTIRE_CHECKS = [
  */
 export const WOMEN_FORMAL_ATTIRE_CHECKS = [
   { code: "W_FORMAL_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms the visible outfit belongs to the western formal-wear family. A professional shirt or blouse with formal trousers is acceptable. FAIL t-shirts, crop tops, jeans, denim, sportswear and clearly casual combinations." },
-  { code: "W_FORMAL_TOP", name: "Formal Top", rule: "The top must be a professional shirt or blouse with appropriate workplace coverage. FAIL clearly casual tops, loud novelty designs, sheer fabric, exposed straps or an obviously inappropriate neckline." },
+  { code: "W_FORMAL_TOP", name: "Formal Top", rule: "The top must be a professional shirt or blouse with appropriate workplace coverage. Sleeves must reach at least halfway from the shoulder to the elbow: FAIL a sleeveless top, a cap sleeve or any sleeve ending above the middle of the upper arm, and say where the hem ends. FAIL clearly casual tops, loud novelty designs, sheer fabric, exposed straps or an obviously inappropriate neckline." },
   { code: "W_FORMAL_TOP_FIT_CONDITION", name: "Top Fit & Condition", rule: "Covers fit, cleanliness, stains, tears, damage and heavy wrinkling together. Ordinary folds and normal ease are acceptable. Read pressing from the placket, the collar or neckline and the sleeve line, where a pressed garment lies flat and an unpressed one shows branching wrinkles that hold their shape across the body and upper sleeve. Read fit from whether the cloth pulls at the buttons or shoulders, not from how it drapes when the wearer is standing still. Name the region your evidence came from in the observation." },
-  { code: "W_FORMAL_BOTTOM_TYPE", name: "Formal Bottom Wear", rule: "Formal trousers in an opaque professional fabric are expected. FAIL jeans, denim, leggings worn as outerwear, joggers, shorts and clearly casual bottoms." },
+  { code: "W_FORMAL_BOTTOM_TYPE", name: "Formal Bottom Wear", rule: "Formal trousers in an opaque professional fabric, falling straight from the hip, are expected. FAIL jeans, denim, leggings, jeggings or any skin-tight trousers that follow the outline of the thigh, knee and calf, joggers, shorts and clearly casual bottoms." },
   { code: "W_FORMAL_BOTTOM_FIT_CONDITION", name: "Bottom Fit & Condition", rule: "Covers fit, opacity, visible condition, tears, fraying, heavy creasing and appropriate hem length together. Read pressing from the line down the leg and the front of the thigh: pressed trousers fall in a clean vertical line, while unpressed ones crush horizontally across the lap, the seat and behind the knee. Judge opacity where the cloth lies over a single layer, since doubled cloth reads as opaque whatever it is made of. Fraying and hem length are read at the ankle. Say which region your evidence came from in the observation." },
   { code: "W_FORMAL_PRESENTATION", name: "Overall Formal Presentation", rule: "Judge whether the visible western formal outfit reads as coordinated and professional overall, after the top and bottom checkpoints have been assessed separately." },
 ];
@@ -259,7 +259,7 @@ export const INFORMATIONAL_CODES = new Set(
 export const IMPROVEMENT_TIPS = {
   ID_PRESENT: "Wear your instructor ID card.",
   M_HAIR_NEATNESS: "Comb your hair neatly before the session.",
-  M_HAIR_POSITION: "Keep your hair back and away from your face.",
+  M_HAIR_POSITION: "Set your hair back or up so your forehead is fully clear.",
   M_HAIR_LENGTH: "Trim your hair so it does not fall past the collar.",
   M_FACIAL_HAIR: "Trim and shape your beard, or shave clean.",
   M_MOUSTACHE: "Trim your moustache neatly above the lip line.",
@@ -284,20 +284,20 @@ export const IMPROVEMENT_TIPS = {
   W_SAREE_ATTIRE_TYPE: "Wear a saree or a kurti with dupatta.",
   W_SAREE_WEARING: "Drape the saree neatly and secure it properly.",
   W_SAREE_PLEATS_PALLU: "Set the pleats evenly and pin the pallu at the shoulder.",
-  W_SAREE_BLOUSE: "Wear a blouse with proper sleeves and coverage. Sleeveless blouses are not permitted.",
+  W_SAREE_BLOUSE: "Wear a blouse with sleeves reaching at least halfway to the elbow and proper coverage. Sleeveless blouses are not permitted.",
   W_SAREE_FABRIC: "Wear a clean, pressed, opaque saree.",
   W_SAREE_PRESENTATION: "Check the overall drape and presentation before the session.",
   W_KURTI_ATTIRE_TYPE: "Wear a saree or a kurti with dupatta.",
   W_KURTI_FIT_LENGTH: "Wear a kurti of appropriate length and fit.",
-  W_KURTI_NECKLINE_SLEEVES: "Wear a kurti with full or three-quarter sleeves and an appropriate neckline.",
+  W_KURTI_NECKLINE_SLEEVES: "Wear a kurti with sleeves reaching at least halfway to the elbow and an appropriate neckline.",
   W_KURTI_MATERIAL: "Wear a plain kurti in an opaque, non-transparent fabric.",
   W_DUPATTA: "Wear the dupatta properly draped and secured, not loosely placed.",
   W_KURTI_CONDITION: "Wear a clean, pressed, undamaged kurti.",
-  W_BOTTOM_WEAR: "Wear palazzos, churidar or formal trousers in an opaque fabric.",
+  W_BOTTOM_WEAR: "Wear palazzo pants or straight formal trousers in an opaque fabric. Leggings, churidar and gathered salwar are not permitted.",
   W_FORMAL_ATTIRE_TYPE: "Wear a professional formal shirt or blouse with formal trousers.",
-  W_FORMAL_TOP: "Wear a professional, appropriately covered formal top.",
+  W_FORMAL_TOP: "Wear a professional, appropriately covered formal top with sleeves reaching at least halfway to the elbow.",
   W_FORMAL_TOP_FIT_CONDITION: "Wear a clean, pressed formal top that fits well.",
-  W_FORMAL_BOTTOM_TYPE: "Wear formal trousers instead of casual bottom wear.",
+  W_FORMAL_BOTTOM_TYPE: "Wear straight formal trousers instead of leggings or casual bottom wear.",
   W_FORMAL_BOTTOM_FIT_CONDITION: "Wear clean, pressed and well-fitted formal trousers.",
   W_FORMAL_PRESENTATION: "Wear a coordinated professional formal outfit.",
   W_EARRINGS: "Wear simple studs or small earrings, no larger than 2 cm.",
