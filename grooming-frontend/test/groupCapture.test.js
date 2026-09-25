@@ -52,7 +52,14 @@ test('the single-person frame gate still refuses a group', () => {
 test('attendance still opens on the single-person screen', () => {
   // Nobody who has not asked for group mode should find their tablet in it.
   const screen = read('src/components/AttendanceScreen.tsx');
-  assert.match(screen, /useState<CaptureMode>\('single'\)/);
+  assert.match(screen, /useState<CaptureMode>\(\(\) => \(reopenGroupRequested\(\) \? 'group' : 'single'\)\)/);
+  // The only way to start on Group is a page reloaded while opening it, and
+  // that flag is set in exactly one place: just before such a reload.
+  const setters = screen.match(/sessionStorage\.setItem\(REOPEN_GROUP_KEY/g) || [];
+  assert.equal(setters.length, 1);
+  const flagged = screen.indexOf('sessionStorage.setItem(REOPEN_GROUP_KEY');
+  assert.ok(screen.lastIndexOf('componentDidCatch', flagged) > 0, 'only the failure handler may set it');
+  assert.ok(screen.indexOf('isChunkLoadError(error)') < flagged, 'and only for a failed download');
 });
 
 test('the group camera keeps the whole frame, not the standing outline', () => {

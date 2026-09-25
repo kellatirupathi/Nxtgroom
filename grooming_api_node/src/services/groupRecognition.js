@@ -72,28 +72,88 @@ async function mapWithConcurrency(items, limit, worker) {
 }
 
 /**
- * Cuts one rectangle out of an image and encodes it on its own.
+ * Rekognition refuses image bytes over 5MB. A detailed group photograph at
+ * full size can approach that, so anything over this margin is detected at
+ * the single-person size instead. The boxes come back as ratios, so they apply
+ * to the full-size pixels either way.
+ */
+const DETECTION_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
+const DETECTION_FALLBACK_DIMENSION = 2048;
+
+/**
+ * Pixels, whatever arrived.
  *
- * The quality settings match normalizeInstructorImage deliberately: a crop and
- * a whole photograph end up in the same bucket, are analysed by the same
- * prompt, and are looked at side by side in the same report. They should not be
- * visibly different kinds of image.
+ * The route hands over pixels already decoded by normalizeGroupImage. An
+ * encoded image is still accepted, and decoded once here, so the tests and any
+ * other caller need not know about the difference.
+ */
+async function toPixels(input) {
+  if (input?.data && input.width > 0 && input.height > 0 && input.channels > 0) return input;
+  const { data, info } = await sharp(input, { animated: false, failOn: "warning" })
+    .rotate()
+    .flatten({ background: "#ffffff" })
+    .toColourspace("srgb")
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return { data, width: info.width, height: info.height, channels: info.channels };
+}
+
+/** A sharp pipeline over pixels already in memory: nothing is decoded again. */
+function fromPixels(pixels) {
+  return sharp(pixels.data, {
+    raw: { width: pixels.width, height: pixels.height, channels: pixels.channels },
+  });
+}
+
+/**
+ * The image Rekognition is asked to find faces in: the whole photograph, at
+ * the full resolution that was kept, so a face at the back is as findable as
+ * the pixels allow.
+ */
+async function detectionImage(pixels) {
+  const full = await fromPixels(pixels)
+    .jpeg({ quality: 85, optimiseCoding: true })
+    .toBuffer();
+  if (full.length <= DETECTION_MAX_BYTES) return full;
+  incrementMetric("group_detection_downscaled_total");
+  return fromPixels(pixels)
+    .resize({
+      width: DETECTION_FALLBACK_DIMENSION,
+      height: DETECTION_FALLBACK_DIMENSION,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: 85, optimiseCoding: true })
+    .toBuffer();
+}
+
+/**
+ * Cuts one rectangle out of the photograph and encodes it on its own.
+ *
+ * Cut from pixels decoded once, rather than from an encoded image decoded
+ * again for every crop: that repeated decode, and the slower mozjpeg encoder,
+ * were most of what a group photograph cost before. The standard encoder at a
+ * slightly higher quality gives an image at least as good, one generation of
+ * compression fresher, at a few percent more bytes.
  *
  * No minimum size is enforced here. A crop is legitimately smaller than a
  * photograph, and a person standing at the back genuinely does occupy fewer
  * pixels — that is a fact about the photograph to be recorded, not an error to
  * raise.
  */
-export async function cropRegion(imageBuffer, rect) {
+export async function cropRegion(pixels, rect, { quality = 88 } = {}) {
   if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
-  const { data, info } = await sharp(imageBuffer, { animated: false, failOn: "warning" })
+  const source = await toPixels(pixels);
+  const left = Math.max(0, Math.round(rect.left));
+  const top = Math.max(0, Math.round(rect.top));
+  const { data, info } = await fromPixels(source)
     .extract({
-      left: Math.max(0, Math.round(rect.left)),
-      top: Math.max(0, Math.round(rect.top)),
-      width: Math.max(1, Math.round(rect.width)),
-      height: Math.max(1, Math.round(rect.height)),
+      left,
+      top,
+      width: Math.max(1, Math.min(source.width - left, Math.round(rect.width))),
+      height: Math.max(1, Math.min(source.height - top, Math.round(rect.height))),
     })
-    .jpeg({ quality: 86, chromaSubsampling: "4:4:4", mozjpeg: true })
+    .jpeg({ quality, chromaSubsampling: "4:4:4", optimiseCoding: true })
     .toBuffer({ resolveWithObject: true });
   return { buffer: data, mimeType: "image/jpeg", width: info.width, height: info.height };
 }
@@ -120,17 +180,29 @@ function faceIsLargeEnough(box, imageWidth, imageHeight) {
  * is still a record of somebody who turned up and an administrator names it
  * later — exactly as the single-person route already does.
  */
-export async function identifyPeopleInPhoto(imageBuffer, { width, height } = {}) {
+export async function identifyPeopleInPhoto(input, _dimensions = {}) {
   if (!isFaceRecognitionConfigured()) {
     return { ok: false, reason: FACE_REASONS.NOT_CONFIGURED };
   }
+  let pixels;
+  try {
+    pixels = await toPixels(input);
+  } catch {
+    return { ok: false, reason: FACE_REASONS.NO_FACE };
+  }
+  // Measured from the pixels themselves, never from a caller's say-so: every
+  // crop rectangle below is computed from these, and a mismatch would cut the
+  // wrong part of the photograph or run off its edge.
+  const { width, height } = pixels;
   if (!(width > 0) || !(height > 0)) {
     return { ok: false, reason: FACE_REASONS.NO_FACE };
   }
 
   const config = runtimeConfig();
   const startedAt = Date.now();
-  const detection = await detectFacesForGroup(imageBuffer, { maxFaces: config.groupMaxPeople });
+  const detection = await detectFacesForGroup(await detectionImage(pixels), {
+    maxFaces: config.groupMaxPeople,
+  });
   if (!detection.ok) {
     return { ok: false, reason: detection.reason, message: detection.message, detected: detection.detected };
   }
@@ -147,7 +219,9 @@ export async function identifyPeopleInPhoto(imageBuffer, { width, height } = {})
   const searchCrops = await mapWithConcurrency(faces, config.groupCropConcurrency, async (face) => {
     if (!faceIsLargeEnough(face.box, width, height)) return null;
     try {
-      return await cropRegion(imageBuffer, faceSearchCrop(face.box, width, height));
+      // Not stored, only searched: a little more quality buys Rekognition a
+      // little more detail at no cost to anybody's storage.
+      return await cropRegion(pixels, faceSearchCrop(face.box, width, height), { quality: 92 });
     } catch {
       return null;
     }
@@ -207,7 +281,7 @@ export async function identifyPeopleInPhoto(imageBuffer, { width, height } = {})
   /** The body crops, made only now so a refused face never costs one. */
   const bodies = await mapWithConcurrency(people, config.groupCropConcurrency, async (person) => {
     try {
-      return await cropRegion(imageBuffer, personBodyCrop(person.face.box, width, height));
+      return await cropRegion(pixels, personBodyCrop(person.face.box, width, height));
     } catch {
       return null;
     }

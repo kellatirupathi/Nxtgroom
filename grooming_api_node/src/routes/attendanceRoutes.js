@@ -5,7 +5,7 @@ import { withMongoTransaction } from "../config/db.js";
 import { runtimeConfig } from "../config/env.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
-import { normalizeInstructorImage } from "../imageProcessor.js";
+import { normalizeGroupImage, normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluateCheckoutNow, evaluationFilter } from "../services/evaluationWorker.js";
 import { getNotificationSettings } from "../services/notificationSettings.js";
 import {
@@ -147,6 +147,39 @@ const reanalyseLimiter = rateLimit({
  * connections would run into the request timeout and fail anyway, having
  * consumed the memory in the meantime.
  */
+/**
+ * Bounds how many group photographs are being processed at once.
+ *
+ * In addition to the gate below, not instead of it. A group photograph is held
+ * as decoded pixels at up to 3072 on its long side - roughly 19MB - for the
+ * whole of its request, several times what one single-person photograph
+ * costs, so ten of them at once is a different amount of memory from ten
+ * check-ins. Group photographs are rare enough that two at a time is plenty,
+ * and the tablet is asked to retry rather than queued, for the same reason
+ * the gate below sheds.
+ */
+let activeGroupCaptures = 0;
+export function groupCaptureGate(_req, res, next) {
+  if (activeGroupCaptures >= runtimeConfig().groupConcurrencyLimit) {
+    res.set("Retry-After", "5");
+    return res.status(503).json({
+      detail: "Another group photo is being processed. Please retry in a few seconds.",
+    });
+  }
+  activeGroupCaptures += 1;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    activeGroupCaptures = Math.max(0, activeGroupCaptures - 1);
+    res.off("finish", release);
+    res.off("close", release);
+  };
+  res.once("finish", release);
+  res.once("close", release);
+  return next();
+}
+
 let activeCheckIns = 0;
 export function checkInConcurrencyGate(_req, res, next) {
   if (activeCheckIns >= runtimeConfig().checkInConcurrencyLimit) {
@@ -980,6 +1013,7 @@ attendanceRouter.post(
   "/auto/group",
   groupCheckInLimiter,
   checkInConcurrencyGate,
+  groupCaptureGate,
   upload.single("file"),
   asyncRoute(async (req, res) => {
     const validation = validateImageUpload(req.file);
@@ -1001,19 +1035,19 @@ attendanceRouter.post(
     }
     const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
 
+    // Decoded once, to pixels, at up to 3072 on the long side. The group frame
+    // itself is never stored, so it is never re-encoded either; each person's
+    // crop is cut from these pixels and encoded exactly once.
     let groupImage;
     try {
-      groupImage = await normalizeInstructorImage(req.file.buffer);
+      groupImage = await normalizeGroupImage(req.file.buffer);
     } catch {
       return res.status(400).json({
         detail: "Image could not be decoded; take a clear photo and try again",
       });
     }
 
-    const identified = await identifyPeopleInPhoto(groupImage.buffer, {
-      width: groupImage.width,
-      height: groupImage.height,
-    });
+    const identified = await identifyPeopleInPhoto(groupImage);
     if (!identified.ok) {
       // Too many people is the one refusal worth a distinct status: it is a
       // request the tablet should not repeat unchanged, unlike an empty frame.

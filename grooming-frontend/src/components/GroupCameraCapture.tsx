@@ -17,6 +17,8 @@ import { loadFullBodyDetector, AUTO_CAPTURE_COOLDOWN_MS } from '../lib/fullBodyD
 import FaceBoxOverlay from './FaceBoxOverlay';
 import { stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
 import { coverSourceRect } from '../lib/cameraGeometry';
+import { openCameraStream } from '../lib/cameraStream';
+import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 
 /**
  * A viewfinder for photographing several people at once.
@@ -89,6 +91,12 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
   const shootRef = useRef<(options?: { viaAuto?: boolean }) => Promise<void>>(async () => {});
   /** What each chip said last; see stabilizeBoxLabels. */
   const labelMemoryRef = useRef<LabelMemory>({});
+  /** What this camera's still photographs can do; see stillCapture. */
+  const stillStateRef = useRef(createStillCaptureState());
+  /** True while the camera is being opened, so a wake-up does not open it twice. */
+  const openingRef = useRef(false);
+  /** Bumped to reopen the camera after the screen was hidden. */
+  const [streamGeneration, setStreamGeneration] = useState(0);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -107,14 +115,16 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
         setStarting(false);
         return;
       }
+      openingRef.current = true;
       try {
-        // The highest the device will give. Each person occupies a fraction of
-        // a group frame, so resolution is the single thing that decides whether
-        // their face can be matched and their shirt can be assessed.
-        const stream = await navigator.mediaDevices.getUserMedia({
+        // The preview only needs 1080p; the photograph itself is taken as a
+        // full-resolution still where the device allows - see stillCapture.
+        // Retried while the camera is busy, because the one-person screen may
+        // have let go of it only a moment ago - see openCameraStream.
+        const stream = await openCameraStream({
           video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
-        });
+        }, { isCancelled: () => disposed });
         if (disposed) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -127,6 +137,7 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
       } catch (startError) {
         if (!disposed) setError(describeCameraError(startError));
       } finally {
+        openingRef.current = false;
         if (!disposed) setStarting(false);
       }
     };
@@ -136,7 +147,7 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
       disposed = true;
       stop();
     };
-  }, [facing, stop]);
+  }, [facing, stop, streamGeneration]);
 
   /** Watches the live frame for a group standing still and facing this way. */
   useEffect(() => {
@@ -212,10 +223,15 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
     };
   }, [error, facing]);
 
-  // A held stream keeps the camera indicator on and blocks other apps.
+  // A held stream keeps the camera indicator on and blocks other apps. Coming
+  // back, the camera is opened again - unless an opening is already under way.
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') stop();
+      if (document.visibilityState === 'hidden') {
+        stop();
+      } else if (!streamRef.current && !openingRef.current) {
+        setStreamGeneration((generation) => generation + 1);
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
@@ -231,7 +247,6 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
     firingRef.current = true;
     setCapturing(true);
     try {
-      const canvas = document.createElement('canvas');
       const viewport = viewportRef.current;
       /**
        * The whole visible preview, not the standing outline.
@@ -247,21 +262,22 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
         viewport?.clientWidth || video.videoWidth,
         viewport?.clientHeight || video.videoHeight,
       );
-      canvas.width = Math.max(1, Math.round(crop.width));
-      canvas.height = Math.max(1, Math.round(crop.height));
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('no 2d context');
-      // The preview is mirrored for the front camera because an unmirrored
-      // self-view is disorienting; the saved photo must not be, or text on a
-      // lanyard reads backwards.
-      context.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', 0.92),
-      );
-      if (!blob) throw new Error('encode failed');
+      // Taken from the camera's full-resolution still where the device can,
+      // at up to 3072 on the long side: a group spends its pixels on several
+      // faces. The video frame otherwise. Unmirrored either way, or text on a
+      // lanyard reads backwards. Quality a notch under the single camera's,
+      // because this photograph is several times larger to upload.
+      const photo = await capturePhoto({
+        video,
+        track: streamRef.current?.getVideoTracks()[0] ?? null,
+        region: crop,
+        maxDimension: GROUP_UPLOAD_MAX_DIMENSION,
+        quality: 0.9,
+        state: stillStateRef.current,
+      });
       // The shutter stays locked until the whole group has been identified,
       // recorded and answered for, so a slow request cannot fire a second frame.
-      await onCapture(new File([blob], `group-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      await onCapture(new File([photo.blob], `group-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {
@@ -347,7 +363,7 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
                   {reading.guidance}
                 </p>
-              ) : steadyFrames > 0 && steadyFrames < GROUP_CAPTURE_CONFIRMATIONS ? (
+              ) : capturing || (steadyFrames > 0 && steadyFrames < GROUP_CAPTURE_CONFIRMATIONS) ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
                   Everybody hold still…
                 </p>

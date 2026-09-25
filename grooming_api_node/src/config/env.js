@@ -196,6 +196,9 @@ export function runtimeConfig() {
     // uncompressed image per operation, and this route runs several per
     // request, so the ceiling here is memory rather than time.
     groupCropConcurrency: parseInteger("GROUP_CROP_CONCURRENCY", 3, { min: 1, max: 8 }),
+    // Group photographs being processed at once. Each holds ~19MB of decoded
+    // pixels for its whole request; see groupCaptureGate.
+    groupConcurrencyLimit: parseInteger("GROUP_CONCURRENCY_LIMIT", 2, { min: 1, max: 10 }),
   };
 }
 

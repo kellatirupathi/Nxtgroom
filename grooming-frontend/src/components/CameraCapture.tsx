@@ -16,6 +16,8 @@ import {
 import FaceBoxOverlay from './FaceBoxOverlay';
 import type { FaceBox } from '../lib/faceBoxes';
 import { BODY_GUIDE_BOUNDS, bodyGuideSourceRect } from '../lib/cameraGeometry';
+import { openCameraStream } from '../lib/cameraStream';
+import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 
 type Facing = 'user' | 'environment';
 
@@ -131,6 +133,16 @@ export default function CameraCapture({
    * callback without restarting over it.
    */
   const shootRef = useRef<(options?: { viaAuto?: boolean }) => Promise<void>>(async () => {});
+  /** What this camera's still photographs can do; see stillCapture. */
+  const stillStateRef = useRef(createStillCaptureState());
+  /** True while the camera is being opened, so a wake-up does not open it twice. */
+  const openingRef = useRef(false);
+  /**
+   * Bumped to reopen the camera. The stream is released whenever the screen is
+   * hidden, and nothing used to open it again: a tablet that slept came back to
+   * a black preview until somebody left the page and returned.
+   */
+  const [streamGeneration, setStreamGeneration] = useState(0);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -150,13 +162,16 @@ export default function CameraCapture({
         setStarting(false);
         return;
       }
+      openingRef.current = true;
       try {
         // `ideal` rather than `exact`: a tablet with only one camera should
-        // still open it instead of failing the whole capture.
-        const stream = await navigator.mediaDevices.getUserMedia({
+        // still open it instead of failing the whole capture. Retried while
+        // the camera is busy, because the screen that last held it may have
+        // let go only a moment ago - see openCameraStream.
+        const stream = await openCameraStream({
           video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
-        });
+        }, { isCancelled: () => disposed });
         if (disposed) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -169,6 +184,7 @@ export default function CameraCapture({
       } catch (startError) {
         if (!disposed) setError(describeCameraError(startError));
       } finally {
+        openingRef.current = false;
         if (!disposed) setStarting(false);
       }
     };
@@ -178,7 +194,7 @@ export default function CameraCapture({
       disposed = true;
       stop();
     };
-  }, [facing, stop]);
+  }, [facing, stop, streamGeneration]);
 
   /**
    * Watches the live frame for a whole person, head to feet.
@@ -268,10 +284,15 @@ export default function CameraCapture({
   }, [error, facing, autoCapture]);
 
   // Releasing the camera when the screen is hidden matters on Android, where
-  // a held stream keeps the camera indicator on and blocks other apps.
+  // a held stream keeps the camera indicator on and blocks other apps. Coming
+  // back, it is opened again - unless an opening is already under way.
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === 'hidden') stop();
+      if (document.visibilityState === 'hidden') {
+        stop();
+      } else if (!streamRef.current && !openingRef.current) {
+        setStreamGeneration((generation) => generation + 1);
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
@@ -294,7 +315,6 @@ export default function CameraCapture({
     firingRef.current = true;
     setCapturing(true);
     try {
-      const canvas = document.createElement('canvas');
       const viewport = viewportRef.current;
       const crop = bodyGuideSourceRect(
         video.videoWidth,
@@ -302,32 +322,22 @@ export default function CameraCapture({
         viewport?.clientWidth || video.videoWidth,
         viewport?.clientHeight || video.videoHeight,
       );
-      canvas.width = Math.max(1, Math.round(crop.width));
-      canvas.height = Math.max(1, Math.round(crop.height));
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('no 2d context');
-      // The preview is mirrored for the front camera because an unmirrored
-      // self-view is disorienting, but the saved photo must not be: a mirrored
-      // image reverses text on a lanyard or badge.
-      context.drawImage(
+      // The same region as always - what the outline showed - but taken from
+      // the camera's full-resolution still where the device can take one, and
+      // from the video frame otherwise. Unmirrored either way: a mirrored
+      // photo reverses text on a lanyard or badge. See stillCapture.
+      const photo = await capturePhoto({
         video,
-        crop.x,
-        crop.y,
-        crop.width,
-        crop.height,
-        0,
-        0,
-        canvas.width,
-        canvas.height,
-      );
-      const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, 'image/jpeg', 0.92),
-      );
-      if (!blob) throw new Error('encode failed');
+        track: streamRef.current?.getVideoTracks()[0] ?? null,
+        region: crop,
+        maxDimension: SINGLE_UPLOAD_MAX_DIMENSION,
+        quality: 0.92,
+        state: stillStateRef.current,
+      });
       // Keep the shutter locked until the owner has finished handling the
       // photograph. In kiosk mode that includes identification and the
       // attendance response, so a slow request cannot trigger a second frame.
-      await onCapture(new File([blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {
@@ -451,7 +461,7 @@ export default function CameraCapture({
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
                   {guidance}
                 </p>
-              ) : autoCapture && steadyFrames > 0 && steadyFrames < AUTO_CAPTURE_CONFIRMATIONS ? (
+              ) : autoCapture && (capturing || (steadyFrames > 0 && steadyFrames < AUTO_CAPTURE_CONFIRMATIONS)) ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
                   Hold still…
                 </p>
