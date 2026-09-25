@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, CalendarDays, Check, ChevronDown } from 'lucide-react';
+import { floatingPanelPosition } from '../lib/floatingPanel';
 import {
   DATE_PRESETS,
   describeRange,
@@ -25,6 +26,8 @@ interface DateRangeFilterProps {
  * positioned against the trigger, because the toolbar sits inside the table's
  * horizontally scrolling container, which would otherwise clip it.
  */
+const PANEL_WIDTH = 256;
+
 export default function DateRangeFilter({ preset, range, today, onChange }: DateRangeFilterProps) {
   const [open, setOpen] = useState(false);
   const [panelView, setPanelView] = useState<'menu' | 'custom'>('menu');
@@ -35,10 +38,13 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
 
   const place = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
-    if (rect) setPosition({ top: rect.bottom + 6, left: rect.left });
+    // PANEL_WIDTH matches the panel's w-64 class.
+    if (rect) setPosition(floatingPanelPosition(rect, PANEL_WIDTH, window.innerWidth));
   };
 
-  useEffect(() => {
+  // A layout effect, so a re-measure on opening lands before the browser
+  // paints rather than a frame after it.
+  useLayoutEffect(() => {
     if (!open) return undefined;
     place();
     const onPointerDown = (event: MouseEvent) => {
@@ -91,6 +97,11 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
     // Every fresh opening starts at the compact preset menu. The custom form
     // is a deliberate second screen, not permanent content beneath the menu.
     setPanelView('menu');
+    // Measured in the same click that opens it, so the panel's first frame is
+    // already under the button. Opening first and measuring afterwards drew
+    // one frame at the starting position - the top-left corner of the screen -
+    // which showed as a flash there every time the filter was clicked.
+    place();
     setOpen(true);
   };
 
