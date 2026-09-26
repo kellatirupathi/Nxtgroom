@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>FacultyTrack</title>
+  <!--
+    Shown by the Android app, from inside the APK, when the site cannot be
+    opened: no connection, or a WebView too old to run it. Nothing here may
+    need the network, and the script is ES5 because an old WebView is one of
+    the two reasons this page exists.
+  -->
+  <style>
+    html, body { margin: 0; height: 100%; background: #f8f9fc; color: #1e293b;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { box-sizing: border-box; min-height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 32px 24px; text-align: center; }
+    section { display: flex; flex-direction: column; align-items: center; }
+    section.hidden { display: none; }
+    .mark { width: 72px; height: 72px; border-radius: 20px; background: #e0e7ff; color: #4f46e5;
+      display: flex; align-items: center; justify-content: center; margin-bottom: 20px; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { font-size: 15px; line-height: 1.5; color: #475569; margin: 0 0 24px; max-width: 360px; }
+    button, a.button { display: inline-block; border: 0; border-radius: 10px; background: #4f46e5; color: #fff;
+      font-size: 16px; font-weight: 600; padding: 12px 28px; text-decoration: none; cursor: pointer; }
+    .hint { font-size: 13px; color: #94a3b8; margin-top: 16px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <section id="offline">
+      <div class="mark" aria-hidden="true">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.43a5 5 0 0 1 7 0"/>
+          <path d="M5 12.86a10 10 0 0 1 5.17-2.69"/><path d="M19 12.86a10 10 0 0 0-2-1.4"/><path d="M2 8.82a15 15 0 0 1 4.18-2.64"/>
+          <path d="M22 8.82a15 15 0 0 0-11.29-3.76"/><path d="m2 2 20 20"/></svg>
+      </div>
+      <h1>Can't reach FacultyTrack</h1>
+      <p>Check that this device is connected to Wi-Fi or mobile data. The app will open by itself when the connection is back.</p>
+      <button type="button" id="retry">Try again</button>
+      <div class="hint" id="status">Waiting for a connection…</div>
+    </section>
+
+    <section id="outdated" class="hidden">
+      <div class="mark" aria-hidden="true">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="m7 10 5 5 5-5"/>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>
+      </div>
+      <h1>Update Android System WebView</h1>
+      <p>FacultyTrack needs a newer version of Android System WebView (or Google Chrome) than this device has. Update it from the Play Store, then open FacultyTrack again.</p>
+      <a class="button" href="market://details?id=com.google.android.webview">Open Play Store</a>
+      <div class="hint" id="version"></div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var SITE = 'https://nxtgroom-xi.vercel.app/';
+      // Keep in step with android.minWebViewVersion in capacitor.config.ts.
+      var MIN_VERSION = 111;
+      var match = /Chrome\/(\d+)/.exec(navigator.userAgent);
+      var version = match ? parseInt(match[1], 10) : 0;
+
+      if (version && version < MIN_VERSION) {
+        document.getElementById('offline').className = 'hidden';
+        document.getElementById('outdated').className = '';
+        document.getElementById('version').textContent = 'This device has version ' + version + '. Version ' + MIN_VERSION + ' or newer is needed.';
+        return;
+      }
+
+      var retrying = false;
+      function retry() {
+        if (retrying) return;
+        retrying = true;
+        document.getElementById('status').textContent = 'Connecting…';
+        window.location.replace(SITE);
+      }
+      document.getElementById('retry').onclick = retry;
+      window.addEventListener('online', retry);
+      // Some devices never fire "online" after a Wi-Fi change, so check now and then.
+      setInterval(function () { if (navigator.onLine) retry(); }, 15000);
+    })();
+  </script>
+</body>
+</html>

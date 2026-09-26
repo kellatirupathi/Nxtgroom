@@ -69,22 +69,47 @@ export function attendanceExportFileName(range: DateRange): string {
     : `daily-attendance-${from}_to_${to}.csv`;
 }
 
+interface CapacitorBridge {
+  getPlatform?: () => string;
+  nativePromise?: (plugin: string, method: string, options: Record<string, unknown>) => Promise<unknown>;
+}
+
 /**
- * Hands the file to the browser.
+ * The Android app's bridge, when the page is running inside the app.
+ *
+ * The app injects `window.Capacitor` into the page; the website never has it.
+ */
+export function androidAppBridge(scope: { Capacitor?: CapacitorBridge } = globalThis as never): CapacitorBridge | null {
+  const bridge = scope.Capacitor;
+  return bridge?.getPlatform?.() === 'android' && typeof bridge.nativePromise === 'function' ? bridge : null;
+}
+
+/**
+ * Hands the file to the browser, or to the Android app.
  *
  * The byte-order mark is what makes Excel read the file as UTF-8, without which
  * a name in Telugu or Hindi opens as mojibake.
+ *
+ * In the app a blob link does nothing - its WebView has no download manager -
+ * so the app saves the file itself, to Downloads, and says so.
  */
-export function downloadAttendanceCsv(records: AttendanceRecord[], range: DateRange): void {
-  const blob = new Blob([`﻿${attendanceCsv(records)}`], { type: 'text/csv;charset=utf-8' });
+export function downloadAttendanceCsv(records: AttendanceRecord[], range: DateRange): Promise<void> {
+  const content = `﻿${attendanceCsv(records)}`;
+  const fileName = attendanceExportFileName(range);
+  const app = androidAppBridge();
+  if (app?.nativePromise) {
+    return app.nativePromise('FileSaver', 'saveText', { fileName, mimeType: 'text/csv', content }).then(() => undefined);
+  }
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = attendanceExportFileName(range);
+  link.download = fileName;
   document.body.appendChild(link);
   link.click();
   link.remove();
   // Revoked on the next tick: revoking synchronously cancels the download in
   // some browsers before it has started.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+  return Promise.resolve();
 }

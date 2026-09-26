@@ -384,7 +384,13 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               so what is downloaded is what was being looked at. */}
           <button
             type="button"
-            onClick={() => downloadAttendanceCsv(filteredRecords, range)}
+            onClick={() => {
+              downloadAttendanceCsv(filteredRecords, range).catch((exportError) => {
+                toast.error('Could not export the records', {
+                  detail: exportError instanceof Error ? exportError.message : String(exportError),
+                });
+              });
+            }}
             disabled={loading || filteredRecords.length === 0}
             title={filteredRecords.length ? `Download ${filteredRecords.length} records as CSV` : 'Nothing to export'}
             className="flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
