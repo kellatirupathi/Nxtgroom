@@ -21,12 +21,13 @@
  *     that end at the knee lands just below that knee, and one invented for
  *     legs that end at the waist lands wherever the model likes.
  *
- * The bottom margin is the outline's own bottom edge, taken from the same
- * constant that draws it. A rule stricter than the outline is a rule nobody
- * can follow: somebody standing exactly where the screen told them to stand
- * would be told to step back, and stepping back would take them out of the
- * distance rule, and they would shuffle between the two until the manual
- * button appeared. That is the failure this file must never reintroduce.
+ * The bottom margin is a thin strip at the bottom of the camera view. It was
+ * the strip below the outline the person used to stand in; with no outline it
+ * keeps the same 2%, because it is what catches feet cut off by the screen
+ * edge. It must never grow into a rule stricter than what the screen shows:
+ * somebody standing in plain view would be told to step back, stepping back
+ * would take them out of the distance rule, and they would shuffle between the
+ * two until the manual button appeared.
  *
  * Imports only the geometry constant, which itself imports nothing, so both
  * detectors can use this without a cycle. The confidence floor arrives as an
@@ -62,13 +63,13 @@ export const ANKLE_CONFIDENCE = 0.45;
 /**
  * Feet must sit above the bottom of the frame by this much.
  *
- * Exactly the strip below the drawn outline, so the gate and the outline agree
- * about where feet may be. A joint the model could not see is pushed to the
- * frame edge, and this is what catches it - without ever refusing somebody
- * whose feet are inside the shape they were asked to stand in.
+ * A joint the model could not see is pushed to the frame edge, and this is
+ * what catches it. At least 2% - the strip the old outline left below it -
+ * and never less than any capture bounds leave below themselves.
  */
-export const FEET_BOTTOM_MARGIN = Number(
-  (1 - (BODY_GUIDE_BOUNDS.top + BODY_GUIDE_BOUNDS.height)).toFixed(4),
+export const FEET_BOTTOM_MARGIN = Math.max(
+  0.02,
+  Number((1 - (BODY_GUIDE_BOUNDS.top + BODY_GUIDE_BOUNDS.height)).toFixed(4)),
 );
 
 /** The eyes and nose must sit below the top of the frame by this much. */
