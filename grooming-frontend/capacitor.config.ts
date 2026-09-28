@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 /**
  * Wraps the live site in an Android shell. The app opens the deployed site,
- * which talks to the same Northflank API over HTTPS. No database or credential
+ * which talks to the same Lightsail-hosted API over HTTPS. No database or credential
  * ships in the APK.
  */
 const config: CapacitorConfig = {

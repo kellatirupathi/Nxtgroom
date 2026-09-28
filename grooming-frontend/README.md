@@ -19,7 +19,7 @@ builds intentionally fail when this value is missing or does not use HTTPS.
 - Install command: `npm ci`
 - Build command: `npm run build`
 - Output directory: `dist`
-- Environment variable: `VITE_API_BASE=https://<your-northflank-origin>`
+- Environment variable: `VITE_API_BASE=https://<your-api-hostname>`
 
 Include the final Vercel origin exactly in the backend `CORS_ORIGINS` setting.
 The checked-in `vercel.json` applies browser security headers and the application

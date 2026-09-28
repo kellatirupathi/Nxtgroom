@@ -18,3 +18,4 @@ grooming_api_v2/
 Thumbs.db
 .vscode/
 .idea/
+deploy/lightsail/.state/
