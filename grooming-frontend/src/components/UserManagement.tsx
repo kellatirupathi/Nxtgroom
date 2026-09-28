@@ -409,7 +409,37 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       {error && !showForm && !passwordFor && (
         <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>
       )}
-      <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+      {/* Phones: a card per account, with the email and institute the
+          table hides at this width. Tablets and desktops keep the table. */}
+      <div className="md:hidden">
+        {loading ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">Loading users…</p>
+        ) : rows.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">No users found.</p>
+        ) : (
+          <ul className="flex flex-col gap-3 pb-2">
+            {rows.map((row) => (
+              <li key={`${row.kind}-${row.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="truncate text-[15px] font-bold text-slate-800">{row.name}</h3>
+                    <div className="mt-1.5"><RoleTag role={row.role} /></div>
+                  </div>
+                  <RowActionsMenu label={row.name} actions={actionsFor(row)} />
+                </div>
+                {row.email && <p className="mt-2.5 truncate text-sm text-slate-600">{row.email}</p>}
+                {(row.collegeName || row.employeeId) && (
+                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
+                    {[row.collegeName, row.employeeId].filter((value) => value && value !== '--').join(' · ')}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="hidden md:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>

@@ -61,7 +61,7 @@ export default function Login({ onLogin }: LoginProps) {
   };
 
   return (
-    <main className="min-h-[100svh] flex items-center justify-center bg-[#f8f9fc] p-4 overflow-hidden">
+    <main className="min-h-[calc(100svh-var(--shell-offset-top))] flex items-center justify-center bg-[#f8f9fc] p-4 overflow-hidden">
       <div className="bg-white p-6 sm:p-8 md:p-10 rounded-md shadow-xl w-full max-w-md border border-slate-100 max-h-[100svh] overflow-y-auto">
         <div className="flex flex-col items-center mb-5 sm:mb-8">
           <div className="w-12 h-12 sm:w-16 sm:h-16 mb-3 sm:mb-4 flex items-center justify-center">

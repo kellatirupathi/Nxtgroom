@@ -88,7 +88,7 @@ export default function AttendanceFilterDrawer({
         onClick={onClose}
         className="absolute inset-0 h-full w-full cursor-default bg-slate-900/40"
       />
-      <aside className="absolute inset-y-0 right-0 flex w-full max-w-sm flex-col bg-white shadow-2xl">
+      <aside className="absolute inset-y-0 right-0 flex w-full max-w-sm flex-col bg-white pt-[var(--inset-top)] pb-[var(--inset-bottom)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <h3 id="attendance-filters-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
             <SlidersHorizontal size={18} className="text-indigo-600" aria-hidden="true" />

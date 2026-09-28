@@ -31,9 +31,20 @@ const navBar = nav.match(/aria-label="Primary"\s+className="([^"]*)"/)?.[1] ?? '
 test('the shell is exactly the visible viewport and does not scroll itself', () => {
   // 100vh counts a phone's retracting address bar, which makes the document
   // taller than the screen and puts the bar off-screen until you scroll.
-  assert.match(shell, /h-\[100dvh\]/);
+  assert.match(shell, /h-\[calc\(100dvh-var\(--shell-offset-top\)\)\]/);
   assert.doesNotMatch(shell, /className="flex h-screen/);
-  assert.match(shell, /h-\[100dvh\][^"]*overflow-hidden/);
+  assert.match(shell, /h-\[calc\(100dvh-var\(--shell-offset-top\)\)\][^"]*overflow-hidden/);
+});
+
+test('in the app, the shell is a screen tall less the status bar the document pads', () => {
+  // The app pads the document for the status bar. A shell a full screen tall
+  // on top of that padding pushed the bottom bar down by the status bar's
+  // height, and its labels disappeared under the gesture bar.
+  assert.match(css, /:root\s*\{[^}]*--shell-offset-top:\s*0px/);
+  assert.match(css, /\.native\s*\{[^}]*--shell-offset-top:\s*var\(--inset-top\)[^}]*padding-top:\s*var\(--inset-top\)/);
+  // Capacitor's variables as well as env(), for WebViews that report neither.
+  assert.match(css, /\.native\s*\{[^}]*--inset-top:\s*max\(env\(safe-area-inset-top, 0px\), var\(--safe-area-inset-top, 0px\)\)/);
+  assert.match(css, /\.native\s*\{[^}]*--inset-bottom:\s*max\(env\(safe-area-inset-bottom, 0px\), var\(--safe-area-inset-bottom, 0px\)\)/);
 });
 
 test('the content area and the bar are rows of one column', () => {
@@ -79,7 +90,8 @@ test('the bar is opaque and pads the home-indicator strip', () => {
   // A translucent fill or a blur would let the page read through the bar.
   assert.doesNotMatch(navBar, /bg-white\/\d/);
   assert.doesNotMatch(navBar, /backdrop-blur/);
-  assert.match(navBar, /pb-\[env\(safe-area-inset-bottom\)\]/);
+  assert.match(navBar, /pb-\[var\(--inset-bottom\)\]/);
+  assert.match(css, /:root\s*\{[^}]*--inset-bottom:\s*env\(safe-area-inset-bottom, 0px\)/);
 });
 
 test('the bar needs no stacking context now that it is in the flow', () => {
@@ -90,11 +102,24 @@ test('the bar needs no stacking context now that it is in the flow', () => {
 });
 
 test('the bar height is stated once, where the sheet can read it', () => {
-  assert.match(css, /--bottom-nav-height:\s*[\d.]+rem/);
-  // The bar sizes itself from the variable, and the overflow sheet clears
-  // exactly that much when it opens above it.
+  // Sized from the screen width, within fixed bounds.
+  assert.match(css, /--bottom-nav-height:\s*clamp\([\d.]+rem,[^;]+,\s*[\d.]+rem\)/);
+  // The bar sizes itself from the variable, and the overflow sheet and its
+  // backdrop stop exactly that far up - the bar, its border and the inset
+  // below it - so the bar stays visible and tappable under an open sheet
+  // without a layer of its own.
   assert.match(nav, /min-h-\[var\(--bottom-nav-height\)\]/);
-  assert.match(nav, /pb-\[calc\(env\(safe-area-inset-bottom\)\+var\(--bottom-nav-height\)/);
+  const resting = nav.match(/bottom-\[calc\(var\(--bottom-nav-height\)\+var\(--inset-bottom\)\+1px\)\]/g) || [];
+  assert.equal(resting.length, 2, 'the sheet and its backdrop both rest on the bar');
+});
+
+test('the bar icons and labels scale with the screen', () => {
+  assert.match(css, /--bottom-nav-icon:\s*clamp\(24px,/);
+  assert.match(css, /--bottom-nav-label:\s*clamp\(12px,/);
+  assert.match(nav, /size-\[var\(--bottom-nav-icon\)\]/);
+  assert.match(nav, /text-\[length:var\(--bottom-nav-label\)\]/);
+  // Active destination marked with a pill behind the icon.
+  assert.match(nav, /isActive \? 'bg-indigo-100' : ''/);
 });
 
 test('overlays still cover the bar rather than opening behind it', () => {

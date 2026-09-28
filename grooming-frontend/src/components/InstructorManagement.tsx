@@ -305,7 +305,72 @@ export default function InstructorManagement() {
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+      {/* Phones: a card per instructor, since the table's columns do not fit.
+          Tablets and desktops keep the table. */}
+      <div className="md:hidden">
+        {loading ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">Loading instructors...</p>
+        ) : filteredInstructors.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">No instructors found.</p>
+        ) : (
+          <>
+            <p className="mb-2 px-1 text-xs font-semibold text-slate-500">{filteredInstructors.length} {filteredInstructors.length === 1 ? 'instructor' : 'instructors'}</p>
+            <ul className="flex flex-col gap-3 pb-2">
+              {filteredInstructors.map((ins) => (
+                <li key={ins._id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800">
+                        <span className="truncate">{ins.name}</span>
+                        {!ins.face_count && (
+                          <span title="No reference photo: this instructor will not be recognised automatically" className="shrink-0">
+                            <CircleAlert size={15} className="text-amber-500" aria-label="No reference photo" />
+                          </span>
+                        )}
+                      </h3>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="inline-flex px-2 py-0.5 bg-indigo-50 text-indigo-700 font-bold text-[11px] rounded-md border border-indigo-100">
+                          {ins.instructor_role || ins.role || '--'}
+                        </span>
+                        {instituteFor(ins) && <span className="min-w-0 truncate text-xs font-medium text-slate-500">{instituteFor(ins)}</span>}
+                      </div>
+                    </div>
+                    <RowActionsMenu
+                      label={`Actions for ${ins.name}`}
+                      actions={[
+                        { key: 'edit', label: 'Edit', icon: 'edit', onSelect: () => openEditModal(ins) },
+                        { key: 'delete', label: 'Delete', icon: 'delete', destructive: true, onSelect: () => setConfirmTarget(ins) },
+                      ]}
+                    />
+                  </div>
+                  {ins.email && (
+                    <p className="mt-2 flex min-w-0 items-center gap-1.5 text-xs font-medium text-slate-500">
+                      <Mail size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
+                      <span className="truncate">{ins.email}</span>
+                    </p>
+                  )}
+                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Gender</span>
+                    <InstructorGenderCell
+                      instructorId={String(ins._id)}
+                      instructorName={ins.name}
+                      value={ins.gender}
+                      onSaved={(gender) => setInstructors((current) => current.map(
+                        (row) => (row._id === ins._id ? { ...row, gender } : row),
+                      ))}
+                    />
+                  </div>
+                  {ins.instructor_category && (
+                    <p className="mt-2 text-xs text-slate-500"><span className="font-semibold text-slate-400">Category:</span> {ins.instructor_category}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+
+      <div className="hidden md:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>

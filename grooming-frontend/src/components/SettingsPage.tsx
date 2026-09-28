@@ -183,11 +183,13 @@ function NotificationSettings() {
 export default function SettingsPage() {
   const [tab, setTab] = useState<'notifications' | 'identification' | 'colleges' | 'sync' | 'rp'>('notifications');
 
+  // Chips on a phone, which swipe sideways the way an app's section chips do;
+  // the underlined tab strip from sm up, as before.
   const tabClass = (value: string) =>
-    `px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+    `flex items-center gap-2 whitespace-nowrap text-sm font-semibold transition-colors rounded-full border px-3.5 py-2 sm:rounded-none sm:border-0 sm:border-b-2 sm:px-4 sm:py-2.5 ${
       tab === value
-        ? 'border-indigo-600 text-indigo-700'
-        : 'border-transparent text-slate-500 hover:text-slate-800'
+        ? 'border-indigo-600 bg-indigo-600 text-white sm:bg-transparent sm:text-indigo-700'
+        : 'border-slate-200 bg-white text-slate-600 hover:text-slate-800 sm:border-transparent sm:bg-transparent sm:text-slate-500'
     }`;
 
   return (
@@ -203,11 +205,16 @@ export default function SettingsPage() {
           them full size and lets the strip be swiped; the tabs themselves stop
           shrinking so a long label cannot be crushed by a neighbour. */}
       <div
-        className="border-b border-slate-200 mb-6 shrink-0 overflow-x-auto overscroll-x-contain"
+        className="-mx-4 mb-5 shrink-0 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:mb-6 sm:border-b sm:border-slate-200 sm:px-0 sm:pb-0"
         role="tablist"
         aria-label="Settings sections"
       >
-        <div className="flex gap-2 w-max min-w-full [&>button]:shrink-0">
+        {/* A chosen chip is brought fully into view, so the next one along
+            always peeks in from the edge. */}
+        <div
+          className="flex gap-2 w-max min-w-full [&>button]:shrink-0"
+          onClick={(event) => (event.target as HTMLElement).closest('button')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
+        >
           <button
             type="button"
             role="tab"

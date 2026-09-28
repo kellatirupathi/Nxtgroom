@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, UserRoundSearch, SlidersHorizontal, Download } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, UserRoundSearch, SlidersHorizontal, Download, ChevronRight } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import AttendanceFilterDrawer from './AttendanceFilterDrawer';
@@ -92,6 +92,129 @@ function EscalationTag({ escalation, today }: { escalation?: AttendanceEscalatio
       <TriangleAlert size={12} className="shrink-0" aria-hidden="true" />
       <span className="truncate">{label.text}</span>
     </span>
+  );
+}
+
+interface RecordCardProps {
+  record: AttendanceRecord;
+  today: string;
+  canOpen: boolean;
+  selectable: boolean;
+  selected: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+  onPhoto: (kind: 'checkin' | 'checkout') => void;
+}
+
+/**
+ * One record on a phone.
+ *
+ * The table's columns do not fit a phone: it showed a name and a role, and
+ * everything else sat off-screen to the right. A card carries the same record -
+ * status, escalation, times, attire, remark, photos and reports - in the width
+ * there is, and opens the evaluation on a tap, as a row does.
+ */
+function RecordCard({ record, today, canOpen, selectable, selected, onToggle, onOpen, onPhoto }: RecordCardProps) {
+  const name = record.instructor_name || 'Unknown person';
+  const place = [record.instructor_role, record.college_name].filter(Boolean).join(' · ');
+  const reportDay = localDateValue(new Date(record.date || record.check_in_time || Date.now()));
+  const hasAttire = ['FORMAL', 'SAREE', 'KURTI_WITH_DUPATTA'].includes(String(record.attire_type));
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  const actionClass = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border focus:outline-none focus:ring-2';
+
+  return (
+    <article
+      onClick={canOpen ? onOpen : undefined}
+      onKeyDown={(event) => {
+        if (canOpen && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      tabIndex={canOpen ? 0 : undefined}
+      aria-label={canOpen ? `Open evaluation for ${name}` : undefined}
+      className={`rounded-xl border bg-white p-4 shadow-sm transition-colors ${
+        selected ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-slate-200'
+      } ${canOpen ? 'cursor-pointer active:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500' : ''}`}
+    >
+      <div className="flex items-start gap-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={stop}
+            onChange={onToggle}
+            aria-label={`Select attendance record for ${name}`}
+            className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className={`min-w-0 truncate text-[15px] font-bold ${record.instructor_name ? 'text-slate-800' : 'italic text-slate-500'}`}>{name}</h3>
+            <span className="shrink-0"><StatusBadge status={record.status} /></span>
+          </div>
+          {place && <p className="mt-0.5 truncate text-xs font-medium text-slate-500" title={place}>{place}</p>}
+        </div>
+      </div>
+
+      {record.escalation && (
+        <div className="mt-2.5"><EscalationTag escalation={record.escalation} today={today} /></div>
+      )}
+
+      <dl className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 px-3 py-2.5">
+        <div className="min-w-0">
+          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Date</dt>
+          <dd className="mt-0.5 text-xs font-semibold text-slate-700">{attendanceSessionDateLabel(record.check_in_time, record.check_out_time, record.date)}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-in</dt>
+          <dd className="mt-0.5 text-xs font-bold text-slate-800">{formatAttendanceTime(record.check_in_time)}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-out</dt>
+          <dd className="mt-0.5 text-xs font-bold text-slate-800">{checkoutDateTimeLabel(record.check_in_time, record.check_out_time, record.checkout_status)}</dd>
+        </div>
+      </dl>
+
+      {record.remarks && (
+        <p className="mt-3 line-clamp-2 text-sm leading-snug text-slate-600" title={record.remarks}>{record.remarks}</p>
+      )}
+
+      {record.location_coordinates && (
+        <p className="mt-2 flex min-w-0 items-center gap-1 text-xs font-medium text-indigo-600" title={formatCoordinates(record.location_coordinates)}>
+          <MapPin size={13} className="shrink-0" aria-hidden="true" />
+          <span className="truncate">{record.location_address || formatCoordinates(record.location_coordinates)}</span>
+        </p>
+      )}
+
+      <div className="mt-3 flex items-center gap-2">
+        {hasAttire && <AttireTag attire={record.attire_type} />}
+        {/* Kept off the card's own tap, as the table keeps them off the row. */}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5" onClick={stop}>
+          {record.check_in_photo_key && (
+            <button type="button" title="View check-in photo" aria-label={`View check-in photo for ${name}`} onClick={() => onPhoto('checkin')} className={`${actionClass} border-indigo-100 bg-indigo-50 text-indigo-700 focus:ring-indigo-500`}>
+              <ImageIcon size={17} aria-hidden="true" />
+            </button>
+          )}
+          {record.check_out_photo_key && (
+            <button type="button" title="View check-out photo" aria-label={`View check-out photo for ${name}`} onClick={() => onPhoto('checkout')} className={`${actionClass} border-rose-100 bg-rose-50 text-rose-700 focus:ring-rose-500`}>
+              <LogOut size={17} aria-hidden="true" />
+            </button>
+          )}
+          {record.report_token && (
+            <a href={publicDayReportPath(record.report_token, reportDay, 'checkin')} target="_blank" rel="noopener noreferrer" title="Open the check-in report" aria-label={`Open the check-in report for ${name}`} className={`${actionClass} border-indigo-100 bg-indigo-50 text-indigo-700 focus:ring-indigo-500`}>
+              <FileText size={17} aria-hidden="true" />
+            </a>
+          )}
+          {record.report_token && record.check_out_time && (
+            <a href={publicDayReportPath(record.report_token, reportDay, 'checkout')} target="_blank" rel="noopener noreferrer" title="Open the check-out report" aria-label={`Open the check-out report for ${name}`} className={`${actionClass} border-rose-100 bg-rose-50 text-rose-700 focus:ring-rose-500`}>
+              <FileText size={17} aria-hidden="true" />
+            </a>
+          )}
+        </div>
+        {canOpen && <ChevronRight size={18} className="shrink-0 text-slate-300" aria-hidden="true" />}
+      </div>
+    </article>
   );
 }
 
@@ -332,25 +455,27 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
           subtitle is gone and the heading no longer wraps, so the filters stay
           on the same line instead of pushing the table down a row. Labels live
           in aria-label, since the controls read clearly without visible ones. */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-        <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-xl font-bold text-slate-800">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 md:mb-5">
+        <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
           <History size={22} className="text-indigo-600" aria-hidden="true" />
           Daily Attendance Records
         </h2>
 
-        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+        {/* On a phone: search takes the row, Filters and Export become icon
+            buttons beside it, and every control is a full touch target. */}
+        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-1">
           {canBulkDelete && selectedIds.size > 0 && (
             <button
               type="button"
               onClick={() => setConfirmBulkDelete(true)}
-              className="flex h-9 items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+              className="order-last flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/20 sm:order-none sm:h-9 sm:w-auto sm:rounded-md"
             >
               <Trash2 size={16} aria-hidden="true" />
               Delete selected ({selectedIds.size})
             </button>
           )}
-          <span className="relative flex-1 min-w-[10rem] sm:flex-none">
-            <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+          <span className="relative min-w-0 flex-1 sm:min-w-[10rem] sm:flex-none">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 sm:left-2.5" aria-hidden="true" />
             <input
               type="search"
               aria-label="Search attendance records"
@@ -358,7 +483,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               placeholder="Search name, institute, remarks…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-9 w-full sm:w-56 rounded-md border border-slate-300 bg-white py-0 pl-8 pr-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              className="h-11 w-full rounded-lg border border-slate-300 bg-white py-0 pl-9 pr-3 text-base font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:w-56 sm:rounded-md sm:pl-8 sm:text-sm"
             />
           </span>
           <button
@@ -366,16 +491,17 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             onClick={() => setFiltersOpen(true)}
             aria-haspopup="dialog"
             aria-expanded={filtersOpen}
-            className={`flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+            aria-label={activeFilterCount ? `Filters, ${activeFilterCount} active` : 'Filters'}
+            className={`relative flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:justify-start sm:rounded-md ${
               activeFilterCount
                 ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
             }`}
           >
-            <SlidersHorizontal size={16} aria-hidden="true" />
-            Filters
+            <SlidersHorizontal size={18} className="sm:size-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Filters</span>
             {activeFilterCount > 0 && (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-bold text-white">
+              <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-indigo-600 px-1.5 text-[11px] font-bold text-white sm:static">
                 {activeFilterCount}
               </span>
             )}
@@ -393,10 +519,11 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             }}
             disabled={loading || filteredRecords.length === 0}
             title={filteredRecords.length ? `Download ${filteredRecords.length} records as CSV` : 'Nothing to export'}
-            className="flex h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Export"
+            className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:h-9 sm:justify-start sm:rounded-md"
           >
-            <Download size={16} aria-hidden="true" />
-            Export
+            <Download size={18} className="sm:size-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Export</span>
           </button>
         </div>
       </div>
@@ -424,7 +551,59 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
+      {/* Phones and tablets: a card per record, two across on a tablet. The
+          table needs a desktop's width - on a tablet it still scrolled
+          sideways - so it starts at lg, where the sidebar does. */}
+      <div className="lg:hidden">
+        {loading && records.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Loading attendance records…</p>
+        ) : records.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">No attendance records found for the selected dates.</p>
+        ) : filteredRecords.length === 0 ? (
+          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">No records match the selected filters.</p>
+        ) : (
+          <>
+            <div className="mb-2 flex min-h-8 items-center justify-between px-1 text-xs font-semibold text-slate-500">
+              <span>{filteredRecords.length} {filteredRecords.length === 1 ? 'record' : 'records'}</span>
+              {canBulkDelete && (
+                <label className="flex items-center gap-2 py-1">
+                  <input
+                    type="checkbox"
+                    ref={(input) => {
+                      if (input) input.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
+                    }}
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Select all
+                </label>
+              )}
+            </div>
+            <ul className="grid gap-3 pb-2 md:grid-cols-2">
+              {filteredRecords.map((record) => {
+                const attendanceId = String(record._id);
+                return (
+                  <li key={record._id}>
+                    <RecordCard
+                      record={record}
+                      today={today}
+                      canOpen={canOpenRecord(record.status)}
+                      selectable={canBulkDelete}
+                      selected={selectedIds.has(attendanceId)}
+                      onToggle={() => toggleRecord(attendanceId)}
+                      onOpen={() => openRecord(record)}
+                      onPhoto={(kind) => setPhotoTarget({ record, kind })}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </div>
+
+      <div className="hidden lg:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">
         <div className="overflow-x-auto flex-1">
           {/*
             table-fixed with explicit widths, because auto layout was sizing

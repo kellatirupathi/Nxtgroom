@@ -322,7 +322,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-[100dvh] bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
+    <div className="flex h-[calc(100dvh-var(--shell-offset-top))] bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
       {/* Desktop keeps the full sidebar; below lg it is hidden entirely in
           favour of the app-style bottom navigation bar. */}
       <Sidebar
@@ -348,8 +348,9 @@ export default function App() {
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
       {/* The shell is exactly the visible viewport — 100dvh, not 100vh, which
           on phones counts the retracting address bar and makes the document
-          taller than the screen. Only this element scrolls; overscroll-contain
-          stops a list reaching its end from dragging the page behind it. */}
+          taller than the screen, less the status bar the app pads for. Only
+          this element scrolls; overscroll-contain stops a list reaching its
+          end from dragging the page behind it. */}
       <main className="flex-1 min-h-0 overflow-auto overscroll-contain p-4 md:p-6 pb-6 flex flex-col w-full">
         {loadError && (
           <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
@@ -369,7 +370,7 @@ export default function App() {
           )}
 
           {activeTab === 'overview' && !session.faceIdentification && (
-            <div className="w-full h-full flex justify-center items-start pt-10">
+            <div className="w-full h-full flex justify-center items-start pt-0 md:pt-10">
               <div className="w-full max-w-2xl shrink-0">
                 <EvaluateCard
                   instructors={instructors}

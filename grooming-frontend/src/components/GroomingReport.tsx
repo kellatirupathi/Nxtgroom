@@ -40,7 +40,22 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
   return (
     <section className="mb-6" aria-labelledby={anchor}>
       <h4 id={anchor} className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-100 pb-2">{title}</h4>
-      <div className="bg-white rounded-md border border-slate-200 overflow-x-auto shadow-sm">
+      {/* Phones: each checkpoint stacked - name and result, then what was
+          seen and why - since four columns do not fit and the reason column
+          ended up off-screen. Wider screens keep the table. */}
+      <ul className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white shadow-sm md:hidden">
+        {rows.map((item) => (
+          <li key={item.key} className="p-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <span className="text-sm font-bold text-slate-700">{item.name}</span>
+              <span className="shrink-0"><CheckStatus status={item.status} /></span>
+            </div>
+            <p className="mt-1 text-sm text-slate-600">{String(item.observation ?? '--')}</p>
+            {item.reasoning && <p className="mt-1 text-xs leading-snug text-slate-500">{item.reasoning}</p>}
+          </li>
+        ))}
+      </ul>
+      <div className="hidden md:block bg-white rounded-md border border-slate-200 overflow-x-auto shadow-sm">
         <table className="w-full text-left text-sm min-w-[520px]">
           <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
             <tr>

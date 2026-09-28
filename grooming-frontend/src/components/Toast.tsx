@@ -101,7 +101,7 @@ function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
       // Top-centre on phones/tablets where there is no room beside content, and
       // top-right on desktop. pointer-events-none lets clicks reach the page
       // behind the empty part of the column.
-      className="pointer-events-none fixed inset-x-0 top-0 z-[100] flex flex-col items-center gap-2 p-3 sm:inset-x-auto sm:right-0 sm:items-end sm:p-4"
+      className="pointer-events-none fixed inset-x-0 top-0 z-[100] flex flex-col items-center gap-2 p-3 pt-[max(0.75rem,var(--inset-top))] sm:inset-x-auto sm:right-0 sm:items-end sm:p-4 sm:pt-[max(1rem,var(--inset-top))]"
       role="region"
       aria-label="Notifications"
     >

@@ -177,14 +177,16 @@ export default function InstructorSyncPanel() {
 
       <div className="bg-white rounded-md border border-slate-200 overflow-hidden flex-1 flex flex-col min-h-0">
         <div className="overflow-auto">
-          <table className="w-full text-left border-collapse min-w-[720px]">
+          {/* A phone shows the name, with role and category under it, and the
+              institute; the id, role and category columns return from md up. */}
+          <table className="w-full text-left border-collapse md:min-w-[720px]">
             <thead className="sticky top-0 bg-slate-50 z-10">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-3">Instructor User ID</th>
+                <th className="p-3 hidden md:table-cell">Instructor User ID</th>
                 <th className="p-3">Instructor Name</th>
-                <th className="p-3">Instructor Role</th>
+                <th className="p-3 hidden md:table-cell">Instructor Role</th>
                 <th className="p-3">Institute Name</th>
-                <th className="p-3">Category</th>
+                <th className="p-3 hidden md:table-cell">Category</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -200,11 +202,16 @@ export default function InstructorSyncPanel() {
                 </tr>
               ) : rows.map((row) => (
                 <tr key={row._id} className="hover:bg-slate-50 transition-colors">
-                  <td className="p-3 text-xs font-mono text-slate-500">{row.instructor_user_id || '--'}</td>
-                  <td className="p-3 text-sm font-bold text-slate-800">{row.name || '--'}</td>
-                  <td className="p-3 text-sm text-slate-600">{row.instructor_role || '--'}</td>
+                  <td className="p-3 text-xs font-mono text-slate-500 hidden md:table-cell">{row.instructor_user_id || '--'}</td>
+                  <td className="p-3 text-sm font-bold text-slate-800">
+                    {row.name || '--'}
+                    <span className="mt-0.5 block text-xs font-medium text-slate-500 md:hidden">
+                      {[row.instructor_role, row.instructor_category].filter(Boolean).join(' · ') || '--'}
+                    </span>
+                  </td>
+                  <td className="p-3 text-sm text-slate-600 hidden md:table-cell">{row.instructor_role || '--'}</td>
                   <td className="p-3 text-sm text-slate-600">{row.institute_name || '--'}</td>
-                  <td className="p-3 text-sm text-slate-600">{row.instructor_category || '--'}</td>
+                  <td className="p-3 text-sm text-slate-600 hidden md:table-cell">{row.instructor_category || '--'}</td>
                 </tr>
               ))}
             </tbody>

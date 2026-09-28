@@ -106,9 +106,11 @@ export default function IdentificationSettingsSection() {
               {/* Fixed widths so a long college name truncates on one line
                   rather than wrapping and making its row twice the height of
                   every other. */}
-              <th className="px-3 py-2.5 w-[56%]">College</th>
-              <th className="px-3 py-2.5 w-[22%]">Instructors</th>
-              <th className="px-3 py-2.5 w-[22%]">Photos</th>
+              {/* Narrower type and padding on a phone, where "Instructors"
+                  ran into "Photos" at the desktop size. */}
+              <th className="px-2 py-2.5 w-[48%] text-[10px] tracking-wide sm:px-3 sm:w-[56%] sm:text-xs sm:tracking-wider">College</th>
+              <th className="px-2 py-2.5 w-[26%] text-[10px] tracking-wide sm:px-3 sm:w-[22%] sm:text-xs sm:tracking-wider">Instructors</th>
+              <th className="px-2 py-2.5 w-[26%] text-[10px] tracking-wide sm:px-3 sm:w-[22%] sm:text-xs sm:tracking-wider">Photos</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
