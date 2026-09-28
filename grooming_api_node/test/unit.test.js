@@ -20,6 +20,20 @@ afterEach(() => {
   Object.assign(process.env, originalEnvironment);
 });
 
+test("startup refuses to guess the mode when NODE_ENV is unset", () => {
+  delete process.env.NODE_ENV;
+  assert.throws(() => validateEnvironment(), /NODE_ENV must be set explicitly/);
+});
+
+test("trusted proxy hops default to one and reject out-of-range values", () => {
+  delete process.env.TRUST_PROXY_HOPS;
+  assert.equal(runtimeConfig().trustProxyHops, 1);
+  process.env.TRUST_PROXY_HOPS = "2";
+  assert.equal(runtimeConfig().trustProxyHops, 2);
+  process.env.TRUST_PROXY_HOPS = "9";
+  assert.throws(() => runtimeConfig(), /TRUST_PROXY_HOPS/);
+});
+
 test("production configuration fails closed when secrets are missing", () => {
   process.env.NODE_ENV = "production";
   for (const name of [

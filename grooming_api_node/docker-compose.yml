@@ -1,0 +1,33 @@
+# Production runtime for a single Lightsail instance (2 GB plan).
+#
+# Started and updated by deploy/lightsail/deploy.sh; see DEPLOYMENT.md.
+# Nginx on the host terminates HTTPS and forwards to 127.0.0.1:8000, so the
+# API port is never reachable from the internet.
+services:
+  api:
+    build: .
+    # deploy.sh tags every build with its git commit so a failed release can be
+    # rolled back to the previous image without rebuilding.
+    image: facultytrack-api:${IMAGE_TAG:-latest}
+    container_name: facultytrack-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides .env so a copied development file can never start the
+      # server in development mode with the public fallback secret.
+      NODE_ENV: production
+      PORT: "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    # Peak use is ~0.6 GB (10 photographs decoding at once). The cap leaves
+    # the OS, Docker and Nginx their share of the 2 GB instance, so a runaway
+    # process is restarted instead of freezing the whole machine.
+    mem_limit: 1400m
+    # server.js forces exit 20 s after SIGTERM; give it time to finish
+    # in-flight check-ins and hand queued jobs back cleanly.
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"

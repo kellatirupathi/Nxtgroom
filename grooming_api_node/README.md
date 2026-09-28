@@ -43,15 +43,16 @@ Health endpoints:
 
 The included multi-stage Dockerfile installs production dependencies only,
 runs as the unprivileged `node` user, uses `dumb-init` for signal handling, and
-starts Node directly. Its Docker health check tests process liveness;
-Northflank separately checks database readiness. The image does not bake
+starts Node directly. Its Docker health check tests process liveness; an
+external uptime monitor watches `/health/ready` for database, storage and
+worker readiness. The image does not bake
 `.env`, tests, temporary uploads, or documentation into its layers.
 
-Deploy the API as a continuously running container with at least one replica.
-The in-process evaluation and email workers stop when the service scales to
-zero. Photos waiting for analysis and notification jobs are stored in MongoDB;
+Deploy the API as a continuously running container (on Lightsail,
+`docker-compose.yml` restarts it automatically). The in-process evaluation and
+email workers stop whenever the container stops. Photos waiting for analysis and notification jobs are stored in MongoDB;
 no persistent filesystem volume is required.
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for the exact Northflank, Vercel, MongoDB,
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for the exact AWS Lightsail, Vercel, MongoDB,
 Gemini, and Amazon SES settings and the complete production environment
 contract.

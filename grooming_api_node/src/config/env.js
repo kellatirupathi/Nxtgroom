@@ -79,6 +79,13 @@ export function runtimeConfig() {
   return {
     nodeEnv: process.env.NODE_ENV || "development",
     port: parseInteger("PORT", 8000, { min: 1, max: 65535 }),
+    // Reverse proxies between the internet and this process. req.ip, and so
+    // every rate limiter, is read that many hops from the right of
+    // X-Forwarded-For. Too few and all users share the proxy's address and one
+    // limit; too many and a client can forge its own address past the
+    // limiter. Nginx alone is 1; a load balancer or Cloudflare in front of
+    // Nginx adds one each.
+    trustProxyHops: parseInteger("TRUST_PROXY_HOPS", 1, { min: 0, max: 5 }),
     mongoUri: process.env.MONGODB_URI || "",
     dbName: process.env.DB_NAME || "grooming_standards",
     jwtSecret: process.env.SECRET_KEY || DEV_JWT_SECRET,
@@ -207,6 +214,13 @@ export function runtimeConfig() {
 }
 
 export function validateEnvironment() {
+  // An unset NODE_ENV reads as development, and development skips every check
+  // below and signs tokens with the public DEV_JWT_SECRET. A server started by
+  // hand without the variable would therefore accept forged administrator
+  // tokens and say nothing, so the mode has to be chosen explicitly.
+  if (!process.env.NODE_ENV?.trim()) {
+    throw new Error("NODE_ENV must be set explicitly: production on a server, development locally");
+  }
   const config = runtimeConfig();
   if (!["development", "test", "production"].includes(config.nodeEnv)) {
     throw new Error("NODE_ENV must be development, test, or production");

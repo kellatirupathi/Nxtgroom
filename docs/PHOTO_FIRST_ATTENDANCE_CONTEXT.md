@@ -13,7 +13,7 @@ A photo is taken at check-in and check-out, Google Gemini evaluates it against
 written grooming standards, and the verdict is emailed and published to a
 tokenised report link.
 
-- `grooming_api_node/` — Node 24 + Express, ESM, no build step → Northflank
+- `grooming_api_node/` — Node 24 + Express, ESM, no build step → AWS Lightsail
 - `grooming-frontend/` — React 19 + Vite + Tailwind v4 + Capacitor → Vercel
 
 ## What I am changing, and why

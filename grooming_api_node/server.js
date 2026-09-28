@@ -44,14 +44,20 @@ const config = runtimeConfig();
  * every log sink and retention system downstream. The shape of the request is
  * all the log needs; the cron paths under the same prefix carry no secret and
  * stay readable so an operator can still tell the jobs apart.
+ *
+ * Password-reset and invitation links carry their token the same way, and a
+ * logged invitation token lets anyone who can read the logs activate the
+ * account before its owner does.
  */
 export function loggedPath(path) {
-  return String(path).replace(/^(\/api\/v2\/reports\/)(?!cron(?:\/|$))[^/]+/, "$1<token>");
+  return String(path)
+    .replace(/^(\/api\/v2\/reports\/)(?!cron(?:\/|$))[^/]+/, "$1<token>")
+    .replace(/^(\/api\/v2\/auth\/reset-password\/)[^/]+/, "$1<token>");
 }
 
 export const app = express();
 app.disable("x-powered-by");
-if (isProduction()) app.set("trust proxy", 1);
+if (isProduction()) app.set("trust proxy", config.trustProxyHops);
 
 app.use((req, res, next) => {
   const startedAt = Date.now();

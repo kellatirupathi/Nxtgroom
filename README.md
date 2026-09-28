@@ -7,7 +7,8 @@ reports through Amazon SES.
 ## Applications
 
 - `grooming-frontend/`: React 19 and Vite web application, deployed to Vercel.
-- `grooming_api_node/`: Node.js 24 and Express API, deployed to Northflank.
+- `grooming_api_node/`: Node.js 24 and Express API, deployed to AWS Lightsail
+  (Docker behind Nginx).
 
 The retired Python API has been removed; Python is not required to run or
 deploy this application.
@@ -46,5 +47,6 @@ profile classifications, not application login roles.
 ## Deployment
 
 Follow [the production deployment guide](./grooming_api_node/DEPLOYMENT.md).
-It contains the exact Vercel and Northflank configuration, environment
-variables, health checks, and pre-launch security checklist.
+It contains the exact Vercel and AWS Lightsail configuration, environment
+variables, health checks, and pre-launch security checklist. Monthly cost and
+sizing are explained in [docs/COST_ESTIMATION.md](./docs/COST_ESTIMATION.md).

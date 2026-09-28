@@ -46,6 +46,16 @@ test("cron paths under the same prefix stay readable", () => {
   }
 });
 
+test("a password-reset or invitation token never reaches the log", () => {
+  const token = "tokentokentokentoken";
+  assert.equal(
+    loggedPath(`/api/v2/auth/reset-password/${token}`),
+    "/api/v2/auth/reset-password/<token>"
+  );
+  // The POST that completes a reset has no token in its path.
+  assert.equal(loggedPath("/api/v2/auth/reset-password"), "/api/v2/auth/reset-password");
+});
+
 test("paths outside the report prefix are untouched", () => {
   for (const path of ["/api/v2/attendance/today", "/health/ready", "/api/v2/auth/login", "/"]) {
     assert.equal(loggedPath(path), path);

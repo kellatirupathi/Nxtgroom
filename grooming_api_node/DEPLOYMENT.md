@@ -1,14 +1,22 @@
-# Production deployment: Northflank + Vercel
+# Production deployment: AWS Lightsail + Vercel
 
-`PROCESS_ROLE=all` preserves the current single-service deployment. To scale
-independently, run the public service with `PROCESS_ROLE=api` and `npm start`,
-then run a private worker service with `PROCESS_ROLE=worker` and
-`npm run start:worker`. Check-out image analysis remains direct in the HTTP
-request and is never placed on an evaluation queue.
+`PROCESS_ROLE=all` runs the API and all four background workers in one
+container, which is the intended setup on a single Lightsail instance. To scale
+independently later, run the public service with `PROCESS_ROLE=api` and
+`npm start`, then run a private worker service with `PROCESS_ROLE=worker` and
+`npm run start:worker`; the image contains both entry points.
 
-This guide deploys the Express API as a Northflank container and the Vite
+Check-in and check-out photographs are both analysed by the evaluation worker,
+not inside the HTTP request. The tablet gets its answer once the photograph is
+identified and stored; the Gemini report and its email follow from the queue.
+Only two administrative recovery actions still run Gemini inside the request:
+attaching a missing check-out photo and re-analysing a check-out.
+
+This guide deploys the Express API as a Docker container behind Nginx on an
+AWS Lightsail instance (Mumbai, $12 plan: 2 GB RAM, 2 vCPU) and the Vite
 frontend as a Vercel project. It assumes the repository has been committed and
-pushed to a Git provider visible to both platforms.
+pushed to a Git provider that the instance and Vercel can both read. The sizing
+and cost reasoning is in [docs/COST_ESTIMATION.md](../docs/COST_ESTIMATION.md).
 
 ## 1. Rotate credentials before deploying
 
@@ -17,7 +25,8 @@ issue trackers, or build logs as compromised. Before the first production
 deployment, revoke and replace the MongoDB password, Gemini API key, AWS access
 key, JWT secret, and administrator password. Do not reuse development values.
 
-Store runtime secrets in Northflank's secret manager. Do not put them in Git,
+Store runtime secrets only in `grooming_api_node/.env` on the instance, owned by
+the deploy user with mode `600` (`deploy.sh` enforces this). Do not put them in Git,
 the Dockerfile, build arguments, Vercel frontend variables, or container image
 layers. Only `VITE_API_BASE` belongs in Vercel; Vite variables are embedded in
 the browser bundle and are public.
@@ -73,9 +82,9 @@ rebase their old clones; merging an old branch can restore the purged blobs.
 
 After the push, contact GitHub Support with the `git-filter-repo` first-changed
 commit report so cached views can be removed. Delete earlier Vercel deployments
-created from affected commits and rebuild without the old cache. On Northflank,
-leave **Include Git folder** and **Full Git clone** disabled, delete any build
-created from an affected commit, and rebuild only from the cleaned commit.
+created from affected commits and rebuild without the old cache. On the API
+server, delete any image built from an affected commit and rebuild only from
+the cleaned commit.
 
 ## 2. Prepare external services
 
@@ -84,9 +93,13 @@ created from an affected commit, and rebuild only from the cleaned commit.
 1. Create a dedicated production database user with `readWrite` access only to
    the `grooming_standards` database.
 2. Use a TLS `mongodb+srv://` connection string with retryable writes enabled.
-3. Add Northflank's static egress IP address to Atlas as a single `/32` network
-   entry. Do not leave `0.0.0.0/0` enabled.
-4. Run the database preflight before starting a production revision. Its
+3. Add the Lightsail instance's static IP address to Atlas as a single `/32`
+   network entry. Do not leave `0.0.0.0/0` enabled. Without this entry the API
+   cannot connect and refuses to start.
+4. Use a paid tier (Flex or above). The free M0 tier holds 512 MB, which this
+   workload fills in about 5–7 weeks, caps throughput at 100 operations per
+   second, and has no backups.
+5. Run the database preflight before starting a production revision. Its
    default mode is read-only and reports document IDs without printing email
    addresses:
 
@@ -106,7 +119,7 @@ authoritative active record and give the other records an accurate
 `check_out_time`; do not delete them blindly.
 
 After the read-only report says `safe_to_apply_indexes`, run the index step in a
-one-off Northflank job or a trusted administrative environment using the same
+one-off container on the instance or a trusted administrative environment using the same
 database settings:
 
 ```powershell
@@ -140,10 +153,11 @@ startup may create missing indexes automatically after the same audit passes.
    complaint telemetry.
 
 The API queues check-in mail after AI analysis completes. A photographed
-checkout is analysed directly in its HTTP request and its report mail is
+checkout is analysed by the same evaluation worker, and its report mail is
 queued only after that report is stored; a checkout without a photo queues a
-plain confirmation. Sending is retried from MongoDB, so the Northflank service
-must keep at least one worker replica running (`PROCESS_ROLE=all` also counts).
+plain confirmation. Sending is retried from MongoDB, so at least one process
+with the workers must keep running (`PROCESS_ROLE=all` on the single instance
+covers this).
 
 SES `SendEmail` does not provide an idempotency key. The worker is durable and
 records an explicit `delivery_unknown` state after an ambiguous final attempt,
@@ -157,48 +171,147 @@ Create a Gemini API key with an appropriate spend limit. The configured model
 is pinned to `gemini-2.5-flash-lite`. Validate that the model is available to
 the Google AI project before launch.
 
-## 3. Deploy the API on Northflank
+## 3. Deploy the API on AWS Lightsail
 
-Create a combined service from the Git repository with these settings:
+Files used in this section:
+
+| File | Purpose |
+| --- | --- |
+| `grooming_api_node/Dockerfile` | Builds the API image (API and worker entry points) |
+| `grooming_api_node/docker-compose.yml` | Runs the container: auto-restart, `127.0.0.1:8000` only, `NODE_ENV=production`, 1.4 GB memory cap, rotated logs |
+| `deploy/lightsail/nginx/facultytrack-api.conf` | HTTPS, 10 MB uploads, 90 s timeout, real client IP, token-free access log |
+| `deploy/lightsail/setup-server.sh` | One-time instance setup: Docker, Nginx, Certbot, 2 GB swap, certificate |
+| `deploy/lightsail/deploy.sh` | Every release: build, start, health check, automatic rollback |
+
+### 3.1 Create the instance (Lightsail console)
 
 | Setting | Value |
 | --- | --- |
-| Region | Asia South Delhi (`asia-south-delhi`) |
-| Build type | Dockerfile |
-| Build context | `grooming_api_node` |
-| Dockerfile path | `grooming_api_node/Dockerfile` |
-| Public port | HTTP `8000` |
-| Minimum replicas | `1` (do not scale to zero) |
-| Memory | At least `1 GiB` |
-| Start command | Leave empty; use the image `CMD` |
+| Region | Asia Pacific (Mumbai) `ap-south-1`, the same region as SES and Rekognition |
+| Platform / blueprint | Linux, OS only, **Ubuntu 24.04 LTS** |
+| Plan | **$12/month, dual-stack (IPv4)**: 2 GB RAM, 2 vCPU, 60 GB SSD |
+| Static IP | Create one and attach it (free while attached) |
+| Automatic snapshots | Enable (daily) |
 
-For repositories where Northflank interprets the Dockerfile path relative to
-the selected build context, enter `Dockerfile` instead. Keep the context set to
-`grooming_api_node`.
+**Networking → IPv4 firewall:**
 
-Configure health checks after the first deployment:
-
-| Check | Path | Suggested settings |
+| Port | Source | Why |
 | --- | --- | --- |
-| Liveness | `/health/live` | 30-second interval, 5-second timeout, 3 failures |
-| Readiness | `/health/ready` | 15-second interval, 5-second timeout, 3 failures |
+| 22 (SSH) | Your office/VPN IP only | Administration |
+| 80 (HTTP) | Anywhere | Certificate issue/renewal and redirect to HTTPS |
+| 443 (HTTPS) | Anywhere | The API |
+| 8000 | **Do not open** | The API is reachable only through Nginx |
 
-Use a startup grace period of at least 30 seconds. Publish port 8000 and copy
-the resulting HTTPS service URL; Northflank commonly provides a `code.run`
-hostname. Do not append `/api/v2` to the origin used by the frontend.
+### 3.2 DNS
 
-Readiness covers MongoDB connectivity, both durable-worker progress markers,
+Create an `A` record for the API hostname (for example `api.example.com`)
+pointing at the static IP. Let's Encrypt cannot issue a certificate for a bare
+IP address, so a hostname is required. Wait until `nslookup <hostname>` returns
+the static IP before continuing.
+
+### 3.3 Prepare the instance (once)
+
+SSH in as `ubuntu`, then:
+
+```bash
+sudo mkdir -p /opt/facultytrack && sudo chown ubuntu:ubuntu /opt/facultytrack
+# Private repository: add a read-only deploy key to GitHub first.
+git clone <repository-url> /opt/facultytrack
+cd /opt/facultytrack
+sudo deploy/lightsail/setup-server.sh api.example.com ops@example.com
+exit   # log in again so the ubuntu user can run Docker
+```
+
+The script installs Docker, Nginx and Certbot, adds a 2 GB swap file, obtains
+the certificate, installs the Nginx site with the real hostname, and sets up
+automatic certificate renewal. It is safe to re-run.
+
+### 3.4 Create the environment file (once)
+
+```bash
+cd /opt/facultytrack/grooming_api_node
+cp .env.example .env
+chmod 600 .env
+nano .env   # fill in every Required row of the table below
+```
+
+Copy the production values from the current deployment and use the table in
+"API environment contract" below. `docker-compose.yml` forces
+`NODE_ENV=production` regardless of the file. Recommended values for the $12
+plan:
+
+```dotenv
+PROCESS_ROLE=all
+TRUST_PROXY_HOPS=1
+EVALUATION_CONCURRENCY=4
+CHECKIN_CONCURRENCY_LIMIT=10
+```
+
+### 3.5 Deploy and update
+
+```bash
+cd /opt/facultytrack
+deploy/lightsail/deploy.sh               # latest origin/main
+deploy/lightsail/deploy.sh <commit|tag>  # a specific revision
+deploy/lightsail/deploy.sh --rollback    # the previous release
+```
+
+`deploy.sh` builds an image tagged with the commit, starts it, waits for
+`/health/live`, prints `/health/ready`, and restarts the previous image
+automatically if the new one does not come up within 90 seconds. It keeps the
+three newest images for rollback. Deploy outside the 9 AM and 6 PM attendance
+rushes: a restart drops requests that are in flight.
+
+### 3.6 Health checks and monitoring
+
+| Check | Path | Use |
+| --- | --- | --- |
+| Liveness | `/health/live` | Docker `HEALTHCHECK` in the image; `deploy.sh` |
+| Readiness | `/health/ready` | External uptime monitor, every 1–5 minutes |
+
+Docker restarts the container automatically when the process exits
+(`restart: unless-stopped`), including after an instance reboot. Point an
+uptime monitor at `https://<api-hostname>/health/ready` so someone is alerted
+when it returns 503.
+
+Readiness covers MongoDB and Cloudflare R2 connectivity, the progress markers
+of all four durable workers (evaluation, notification, storage cleanup, mail),
 and the age of evaluation/email queues and private attendance outboxes. A queue
 at least 15 minutes old is reported as a warning; readiness fails at 23 hours,
 before the 24-hour terminal privacy deadline. Alert on warnings rather than
-waiting for Northflank to remove a replica from traffic. Run at least one
-replica continuously so another healthy replica or an operator can drain old
-work if one replica becomes unready.
+waiting for a failure.
 
-### Northflank environment contract
+In the Lightsail console, watch the **CPU** graph (stay out of the burstable
+zone for long periods) and add a memory alarm if available. Move to the $24
+plan (4 GB) when peak memory stays above ~75%, or at roughly 2,000 instructors.
 
-Set these in a runtime secret group and link it to the service. Set every row
-marked required. Once `NODE_ENV=production`, the API also validates the
+Useful commands on the instance:
+
+```bash
+docker logs -f --tail 100 facultytrack-api              # application log
+sudo tail -f /var/log/nginx/facultytrack-api.access.log  # request log (tokens redacted)
+docker stats facultytrack-api                            # live CPU and memory
+curl -s http://127.0.0.1:8000/health/ready               # readiness from inside
+```
+
+### 3.7 Cutover from the previous host
+
+1. Set up and verify Lightsail while the old API keeps running. Both can share
+   the same Atlas database safely: jobs are claimed with leases, so none is
+   processed twice.
+2. Verify section 5 against `https://<api-hostname>`.
+3. Change `VITE_API_BASE` in Vercel to the new hostname and **redeploy** the
+   frontend (the value is compiled into the bundle).
+4. Change every cron-job.org job URL to the new hostname (the `x-cron-secret`
+   header is unchanged).
+5. Do this outside the attendance rushes. After one or two quiet days, stop the
+   old API and remove its IP address from the Atlas access list.
+
+### API environment contract
+
+Set these in `grooming_api_node/.env` on the instance. Set every row marked
+required. The API refuses to start when `NODE_ENV` is unset, and once
+`NODE_ENV=production` it also validates the
 security-sensitive required values at startup and exits instead of starting
 with an insecure fallback.
 
@@ -206,6 +319,7 @@ with an insecure fallback.
 | --- | --- | --- |
 | `NODE_ENV` | Required | `production` |
 | `PORT` | Optional | `8000` (container default) |
+| `TRUST_PROXY_HOPS` | Optional | Defaults to `1` (Nginx only). Add one per extra proxy layer, such as a Lightsail load balancer or Cloudflare; permitted range is 0–5 |
 | `PROCESS_ROLE` | Optional | Defaults to `all`; set only when API and worker run separately |
 | `MONGODB_URI` | Required, secret | Rotated Atlas connection URI |
 | `DB_NAME` | Optional | Defaults to `grooming_standards` |
@@ -224,19 +338,24 @@ with an insecure fallback.
 | `GEMINI_MODEL` | Optional | Defaults to pinned `gemini-2.5-flash-lite` |
 | `GEMINI_TIMEOUT_MS` | Optional | Defaults to `120000`; permitted range is 10000–600000 |
 | `GEMINI_MAX_RETRIES` | Optional | Defaults to `2`; permitted range is 0–2 |
-| `GEMINI_INTERACTIVE_TIMEOUT_MS` | Optional | Defaults to `20000`; used by check-out analysis, which runs inside the HTTP request. Timeout times attempts must stay under the 60000ms request timeout or startup fails |
+| `GEMINI_INTERACTIVE_TIMEOUT_MS` | Optional | Defaults to `20000`; used only by the administrative check-out photo recovery and re-analysis actions, which run inside the HTTP request. Timeout times attempts must stay under the 60000ms request timeout or startup fails |
 | `GEMINI_INTERACTIVE_MAX_RETRIES` | Optional | Defaults to `1`; permitted range is 0–2 |
 | `GEMINI_EXPLICIT_CACHE` | Optional | Defaults to `true`; set to `false` to disable explicit male/female prompt caching. Cache failures automatically use the normal request path. |
 | `GEMINI_CACHE_TTL_SECONDS` | Optional | Defaults to `3600`; permitted range is 600–86400. Prompt changes automatically create a new cache identity. |
 | `EVALUATION_POLL_MS` | Optional | Defaults to `2000`; permitted range is 250–60000 |
 | `EVALUATION_LEASE_MS` | Optional | Defaults to `600000`; must cover all Gemini attempts plus 60000 |
 | `EVALUATION_MAX_ATTEMPTS` | Optional | Defaults to `3`; permitted range is 1–10 |
-| `EVALUATION_CONCURRENCY` | Optional | Defaults to `2` |
-| `CHECKIN_CONCURRENCY_LIMIT` | Optional | Defaults to `5` per API replica |
+| `EVALUATION_CONCURRENCY` | Optional | Defaults to `2`; `4` recommended on the $12 plan for ~1,000 instructors; permitted range is 1–20. Gemini jobs one worker runs at once, shared by check-in and check-out |
+| `CHECKIN_CONCURRENCY_LIMIT` | Optional | Defaults to `10` per API replica; permitted range is 1–50. Photographs decoded at once across check-in, check-out and the kiosk; extra requests get HTTP 503 with `Retry-After: 5`. Raise only with more memory |
+| `GROUP_ATTENDANCE_MAX_PEOPLE` | Optional | Defaults to `6`; permitted range is 2–12 |
+| `GROUP_CONCURRENCY_LIMIT` | Optional | Defaults to `2`; group photographs processed at once |
+| `GROUP_CROP_CONCURRENCY` | Optional | Defaults to `3`; faces cropped at once within one group photograph |
+| `GROUP_MIN_FACE_PIXELS` | Optional | Defaults to `72` |
 | `R2_ENDPOINT` | Required | Cloudflare R2 HTTPS S3 endpoint without a path |
 | `R2_BUCKET` | Required | Private attendance-photo bucket name |
 | `R2_ACCESS_KEY_ID` | Required, secret | R2 object read/write/delete credential |
 | `R2_SECRET_ACCESS_KEY` | Required, secret | Matching R2 secret credential |
+| `R2_TIMEOUT_MS` | Optional | Defaults to `15000`; permitted range is 2000–60000 |
 | `AWS_REGION` | Required | SES region, for example `ap-south-1` |
 | `AWS_ACCESS_KEY_ID` | Required, secret | Rotated dedicated IAM access key |
 | `AWS_SECRET_ACCESS_KEY` | Required, secret | Matching IAM secret key |
@@ -249,6 +368,19 @@ with an insecure fallback.
 | `NOTIFICATION_MAX_ATTEMPTS` | Optional | Defaults to `5`; durable worker delivery attempts |
 | `NOTIFICATION_CONCURRENCY` | Optional | Defaults to `2` |
 | `APP_TIME_ZONE` | Optional | Defaults to `Asia/Kolkata` |
+| `ADMIN_PASSWORD_RESET` | Break-glass only | `true` overwrites the stored administrator password from `ADMIN_PASSWORD` on every start. Unset it immediately after use |
+| `GOOGLE_CLIENT_ID` | Optional | Enables Google sign-in for existing active users; leave blank to hide it |
+| `REKOGNITION_COLLECTION_ID` | Optional | Face-identification collection. While blank, face identification reports `NOT_CONFIGURED` |
+| `AWS_REKOGNITION_REGION` | With Rekognition | Region of the collection, for example `ap-south-1` |
+| `REKOGNITION_ACCESS_KEY_ID` | With Rekognition, secret | Rekognition lives in its own AWS account; the SES key is never reused |
+| `REKOGNITION_SECRET_ACCESS_KEY` | With Rekognition, secret | Matching Rekognition secret key |
+| `REKOGNITION_MATCH_THRESHOLD` | Optional | Defaults to `95`; below this a check-in is saved unidentified |
+| `REKOGNITION_MAX_FACES_PER_INSTRUCTOR` | Optional | Defaults to `6` |
+| `REKOGNITION_TIMEOUT_MS` | Optional | Defaults to `10000`; runs inside the check-in request |
+| `REKOGNITION_MAX_ATTEMPTS` | Optional | Defaults to `2` |
+| `BIGQUERY_CREDENTIALS_JSON` | Optional, secret | Service-account JSON (plain or base64) for instructor sync |
+| `BIGQUERY_PROJECT_ID` | Optional | Defaults to the credential's `project_id` |
+| `BIGQUERY_LOCATION` | Optional | BigQuery dataset location |
 
 Example non-secret values (replace both origins with real domains):
 
@@ -280,7 +412,7 @@ Import the same repository as a separate Vercel project:
 Create one Vercel environment variable:
 
 ```dotenv
-VITE_API_BASE=https://YOUR_NORTHFLANK_API_HOST
+VITE_API_BASE=https://YOUR_API_HOSTNAME
 ```
 
 Use the HTTPS origin only, with no trailing slash and no `/api/v2` suffix.
@@ -289,8 +421,9 @@ add each exact preview/custom-domain origin to `CORS_ORIGINS`; dynamic wildcard
 origins are intentionally rejected. A stable preview domain or a separate
 staging API is safer than broad production CORS.
 
-Deploy the frontend, note its final production domain, update the Northflank
-`CORS_ORIGINS` value to that exact origin, and redeploy/restart the API. If the
+Deploy the frontend, note its final production domain, update `CORS_ORIGINS`
+in the API's `.env` to that exact origin, and run `deploy/lightsail/deploy.sh`
+to restart the API. If the
 Vercel domain later changes, repeat this step.
 
 ## 5. Release verification
@@ -308,7 +441,7 @@ cd ..\grooming-frontend
 npm ci
 npm run lint
 npm test
-$env:VITE_API_BASE="https://YOUR_NORTHFLANK_API_HOST"
+$env:VITE_API_BASE="https://YOUR_API_HOSTNAME"
 npm run build
 Remove-Item Env:VITE_API_BASE
 npm audit
@@ -325,10 +458,11 @@ Then verify the deployed services:
 5. A BOA cannot read or modify instructors belonging to another college.
 6. MongoDB contains one evaluation and the expected email delivery status for
    the test attendance record.
-7. `/health/ready` reports both workers as `ok`, no critical queue ages, and no
+7. `/health/ready` reports all four workers as `ok`, no critical queue ages, and no
    `QUEUE_METRICS_UNAVAILABLE` reason.
-8. Northflank logs contain request/job identifiers but no credentials or photo
-   data.
+8. `docker logs facultytrack-api` and the Nginx access log contain request/job
+   identifiers but no credentials, report/reset tokens, or photo data.
+9. A photo upload of about 5 MB succeeds (confirms the Nginx body-size limit).
 
 After verification, remove test data according to the organization's retention
 policy and monitor SES bounces/complaints, Gemini errors and spend, MongoDB
@@ -336,7 +470,9 @@ capacity, HTTP error rate, and worker queue age.
 
 ## 6. Rollback
 
-Keep the previous Northflank image revision and Vercel deployment available.
+`deploy/lightsail/deploy.sh --rollback` restarts the previous API image, and
+Lightsail snapshots restore the whole instance. Keep the previous Vercel
+deployment available too.
 If a release fails, roll back both services as a pair when their API contract
 changed. Do not roll back database data blindly. The confirmed preflight job
 creates indexes but does not include destructive down-migrations; inspect the
