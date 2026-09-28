@@ -5,12 +5,19 @@ export interface SourceRect {
   height: number;
 }
 
-/** The normalized bounds of the visible full-body guide in the preview. */
+/**
+ * The part of the preview that is checked and photographed: all of it.
+ *
+ * This was a tall outline drawn on the preview, inset from the sides, that the
+ * person had to stand inside. No outline is drawn now. The whole camera view
+ * is the frame, so whoever the camera sees head to feet is photographed, and
+ * the saved photo is exactly what the preview showed.
+ */
 export const BODY_GUIDE_BOUNDS = {
-  left: 0.13,
-  top: 0.02,
-  width: 0.74,
-  height: 0.96,
+  left: 0,
+  top: 0,
+  width: 1,
+  height: 1,
 } as const;
 
 /**
@@ -46,9 +53,10 @@ export function coverSourceRect(
 }
 
 /**
- * Returns only the sensor pixels shown inside the full-body guide bounds.
- * This composes the guide with the preview's `object-fit: cover` crop, keeping
- * the saved photograph pixel-for-pixel aligned with what the user framed.
+ * Returns only the sensor pixels shown inside the capture bounds - with the
+ * bounds now the whole preview, exactly what the preview shows. Composed with
+ * the preview's `object-fit: cover` crop, keeping the saved photograph
+ * pixel-for-pixel aligned with what the user saw.
  */
 export function bodyGuideSourceRect(
   sourceWidth: number,

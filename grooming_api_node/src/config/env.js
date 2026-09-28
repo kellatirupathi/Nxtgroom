@@ -7,6 +7,9 @@ const DEV_JWT_SECRET = "development-only-secret-change-before-production";
 const EXAMPLE_JWT_SECRET = "replace-with-at-least-32-random-characters";
 const EXAMPLE_ADMIN_PASSWORD = "replace-with-a-unique-password-of-at-least-12-characters";
 
+/** 365 days, the default and the longest a sign-in may last. */
+export const JWT_ONE_YEAR_MINUTES = 365 * 24 * 60;
+
 function parseInteger(name, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
   const raw = process.env[name];
   const normalized = raw == null ? "" : String(raw).trim();
@@ -86,10 +89,11 @@ export function runtimeConfig() {
     mongoUri: process.env.MONGODB_URI || "",
     dbName: process.env.DB_NAME || "grooming_standards",
     jwtSecret: process.env.SECRET_KEY || DEV_JWT_SECRET,
-    // Ceiling raised to 43200 (30 days) so operators can trade re-login
-    // friction for a longer-lived token. session_version still revokes every
-    // token instantly on password change or account disable.
-    jwtExpiresMinutes: parseInteger("JWT_EXPIRE_MINUTES", 480, { min: 5, max: 43200 }),
+    // A sign-in lasts a year by default. Tablets and phones stay signed in
+    // instead of asking every morning, which is what an app is expected to do.
+    // session_version still revokes every token instantly on password change,
+    // password reset or account disable, so a lost device is ended that way.
+    jwtExpiresMinutes: parseInteger("JWT_EXPIRE_MINUTES", JWT_ONE_YEAR_MINUTES, { min: 5, max: JWT_ONE_YEAR_MINUTES }),
     jwtIssuer: process.env.JWT_ISSUER || "facultytrack-api",
     jwtAudience: process.env.JWT_AUDIENCE || "facultytrack-web",
     adminEmail: (process.env.ADMIN_EMAIL || "admin@nxtwave.com").trim().toLowerCase(),

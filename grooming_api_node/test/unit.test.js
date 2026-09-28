@@ -133,6 +133,23 @@ test("production configuration accepts an exact secure contract", () => {
   assert.equal(compact.geminiExplicitCache, true);
   assert.equal(compact.geminiCacheTtlSeconds, 3600);
   assert.equal(compact.appTimeZone, "Asia/Kolkata");
+  // Signed in for a year unless told otherwise, not logged out every day.
+  assert.equal(compact.jwtExpiresMinutes, 525600);
+});
+
+test("a sign-in may last up to one year, and no longer", () => {
+  const previous = process.env.JWT_EXPIRE_MINUTES;
+  try {
+    process.env.JWT_EXPIRE_MINUTES = "525600";
+    assert.equal(runtimeConfig().jwtExpiresMinutes, 525600);
+    process.env.JWT_EXPIRE_MINUTES = "43200";
+    assert.equal(runtimeConfig().jwtExpiresMinutes, 43200, "a shorter session can still be chosen");
+    process.env.JWT_EXPIRE_MINUTES = "525601";
+    assert.throws(() => runtimeConfig(), /JWT_EXPIRE_MINUTES must be an integer between 5 and 525600/);
+  } finally {
+    if (previous === undefined) delete process.env.JWT_EXPIRE_MINUTES;
+    else process.env.JWT_EXPIRE_MINUTES = previous;
+  }
 });
 
 test("Gemini explicit cache configuration validates boolean and TTL overrides", () => {

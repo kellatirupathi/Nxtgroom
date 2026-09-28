@@ -15,7 +15,7 @@ import {
 } from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
 import type { FaceBox } from '../lib/faceBoxes';
-import { BODY_GUIDE_BOUNDS, bodyGuideSourceRect } from '../lib/cameraGeometry';
+import { bodyGuideSourceRect } from '../lib/cameraGeometry';
 import { openCameraStream } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 
@@ -322,7 +322,7 @@ export default function CameraCapture({
         viewport?.clientWidth || video.videoWidth,
         viewport?.clientHeight || video.videoHeight,
       );
-      // The same region as always - what the outline showed - but taken from
+      // Exactly what the preview showed - the whole camera view - taken from
       // the camera's full-resolution still where the device can take one, and
       // from the video frame otherwise. Unmirrored either way: a mirrored
       // photo reverses text on a lanyard or badge. See stillCapture.
@@ -418,37 +418,10 @@ export default function CameraCapture({
                 coordinates arrive already flipped. */}
             {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
-            {/* A head-to-toe outline to stand inside. It occupies nearly the
-                full preview height so the instructor, rather than the room,
-                supplies most of the pixels sent for appearance analysis.
-                The gate tells people
-                when they are wrong; this shows them what right looks like,
-                which is what stops the two fighting each other. */}
-            {!starting && (
-              <svg
-                className="pointer-events-none absolute inset-0 h-full w-full"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-              >
-                <rect
-                  x={BODY_GUIDE_BOUNDS.left * 100}
-                  y={BODY_GUIDE_BOUNDS.top * 100}
-                  width={BODY_GUIDE_BOUNDS.width * 100}
-                  height={BODY_GUIDE_BOUNDS.height * 100}
-                  rx={BODY_GUIDE_BOUNDS.width * 50}
-                  fill="none"
-                  strokeWidth="0.8"
-                  className={
-                    verdict === 'MULTIPLE_PEOPLE'
-                      ? 'stroke-rose-400/95'
-                      : verdict === 'FULL_BODY'
-                        ? 'stroke-emerald-400/90'
-                        : 'stroke-white/55'
-                  }
-                />
-              </svg>
-            )}
+            {/* No outline to stand in: the whole camera view is the frame,
+                and the whole view is what is checked and photographed. The
+                face box above and the one line of guidance below say what
+                needs changing. */}
 
             {/* One line, only when something needs changing. A running
                 commentary on a correct frame is noise.
@@ -467,7 +440,7 @@ export default function CameraCapture({
                 </p>
               ) : autoCapture ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-sm font-semibold text-white" role="status">
-                  Stand in the outline to be photographed automatically
+                  Stand in front of the camera, head to feet, to be photographed automatically
                 </p>
               ) : ready ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">

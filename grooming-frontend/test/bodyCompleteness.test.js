@@ -116,16 +116,14 @@ test('knees at or above the hips are legs the model did not see', () => {
 
 import { BODY_GUIDE_BOUNDS } from '../src/lib/cameraGeometry.ts';
 
-test('the feet margin is the outline the person was asked to stand in', () => {
-  // A gate stricter than the outline drawn on screen is a rule nobody can
-  // follow: standing where the outline says is answered with "step back", and
-  // stepping back drops out of the distance rule, and the person shuffles
-  // between the two until the manual button appears. One constant, not two.
-  const outlineBottom = 1 - (BODY_GUIDE_BOUNDS.top + BODY_GUIDE_BOUNDS.height);
-  assert.ok(
-    Math.abs(FEET_BOTTOM_MARGIN - outlineBottom) < 1e-6,
-    `feet margin ${FEET_BOTTOM_MARGIN} disagrees with the outline's ${outlineBottom}`,
-  );
+test('the feet margin is a thin strip at the bottom of the camera view', () => {
+  // No outline is drawn any more; the whole view is the frame. Feet still have
+  // to clear the bottom 2%, which is what catches a foot cut off by the screen
+  // edge - and never more than that, or somebody in plain view would be told
+  // to step back.
+  const boundsBottom = 1 - (BODY_GUIDE_BOUNDS.top + BODY_GUIDE_BOUNDS.height);
+  assert.equal(FEET_BOTTOM_MARGIN, 0.02);
+  assert.ok(FEET_BOTTOM_MARGIN >= boundsBottom);
 });
 
 test('nothing at all is a missing body, not a crash', () => {

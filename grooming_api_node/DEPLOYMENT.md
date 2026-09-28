@@ -325,7 +325,7 @@ with an insecure fallback.
 | `DB_NAME` | Optional | Defaults to `grooming_standards` |
 | `DATABASE_PREFLIGHT_APPLY` | One-off only | Leave unset on the API service. Set to `CREATE_INDEXES` only for the confirmed migration job, then remove it. |
 | `SECRET_KEY` | Required, secret | Unique random value, at least 32 characters |
-| `JWT_EXPIRE_MINUTES` | Optional | Defaults to `480`; permitted range is 5–43200 |
+| `JWT_EXPIRE_MINUTES` | Optional | Defaults to `525600` (one year); permitted range is 5–525600. Leave unset for one-year sign-ins; a password change or reset still signs every device out |
 | `JWT_ISSUER` | Optional | Defaults to `facultytrack-api` |
 | `JWT_AUDIENCE` | Optional | Defaults to `facultytrack-web` |
 | `ADMIN_EMAIL` | Required | Production superadmin email |

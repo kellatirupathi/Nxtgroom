@@ -200,7 +200,7 @@ export function readKeypoints(
           // instruction that works is the one the body check would give.
           guidance: belowOutline && !outsideElsewhere
             ? describeBodyProblem('FEET')
-            : 'Center your complete body inside the outline',
+            : 'Center your complete body in the camera',
           poseSignals: poseSignals(keypoints, frameHeight),
         };
       }
@@ -215,14 +215,14 @@ export function readKeypoints(
       if ((ankleY - headY) / frameHeight < MIN_BODY_SPAN_RATIO) {
         return {
           verdict: 'TOO_FAR',
-          guidance: 'Move closer while keeping your full body in the outline',
+          guidance: 'Move closer while keeping your full body in the camera',
           poseSignals: poseSignals(keypoints, frameHeight),
         };
       }
     }
 
     /**
-     * The keypoints are all present and inside the outline, and the person is
+     * The keypoints are all present and inside the frame, and the person is
      * close enough. What is left to rule out is a body the model completed by
      * guessing: MoveNet predicts joints it cannot see, so somebody cut off at
      * the knees still arrives with two ankles. This is the check that tells a

@@ -65,10 +65,16 @@ test('a large head-to-feet subject is ready', () => {
   assert.equal(readKeypoints(framedPerson, 1000, 240).verdict, 'FULL_BODY');
 });
 
-test('a body outside the saved-photo outline is rejected', () => {
+test('somebody off to one side but fully in view is photographed', () => {
+  // The whole camera view is the frame now, not a centred outline.
   const offCenter = framedPerson.map((keypoint) => ({ ...keypoint, x: keypoint.x - 75 }));
-  assert.equal(readKeypoints(offCenter, 1000, 240).verdict, 'PARTIAL');
-  assert.match(readKeypoints(offCenter, 1000, 240).guidance, /inside the outline/i);
+  assert.equal(readKeypoints(offCenter, 1000, 240).verdict, 'FULL_BODY');
+});
+
+test('a body partly outside the camera view is rejected', () => {
+  const pastTheEdge = framedPerson.map((keypoint) => ({ ...keypoint, x: keypoint.x - 95 }));
+  assert.equal(readKeypoints(pastTheEdge, 1000, 240).verdict, 'PARTIAL');
+  assert.match(readKeypoints(pastTheEdge, 1000, 240).guidance, /in the camera/i);
 });
 
 test('missing middle-body landmarks cannot pass as a full person', () => {
