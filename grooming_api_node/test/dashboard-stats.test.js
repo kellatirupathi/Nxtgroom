@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import express from "express";
 import {
-  arrivalSlots,
   buildDashboard,
   buildInstituteRows,
   checkpointAudience,
@@ -232,25 +231,6 @@ test("each institute reports its own day, mode and enrolment", () => {
   assert.equal(warangal.unidentified, 1, "today's unnamed arrival there; the queue total is on the tile");
   assert.equal(warangal.enrolled_percent, 50);
   assert.equal(warangal.low_enrolment, false, "a SELECTOR college is never flagged, matching Settings");
-});
-
-test("check-ins are bucketed by local quarter hour with empty slots kept", () => {
-  const slots = arrivalSlots(
-    [
-      { check_in_time: at(TODAY, "08:50") },
-      { check_in_time: at(TODAY, "08:52") },
-      { check_in_time: at(TODAY, "09:31") },
-    ],
-    ZONE
-  );
-  assert.deepEqual(slots.map((slot) => [slot.label, slot.count]), [
-    ["8:45 AM", 2],
-    ["9:00 AM", 0],
-    ["9:15 AM", 0],
-    ["9:30 AM", 1],
-  ]);
-  assert.equal(slots[0].end_label, "9:00 AM");
-  assert.deepEqual(arrivalSlots([], ZONE), []);
 });
 
 test("working days in a range skip Sundays, and a lone Sunday still counts once", () => {

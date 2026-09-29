@@ -33,8 +33,6 @@ import { localDateKey } from "./instructorReports.js";
 export const TREND_WORKING_DAYS = 30;
 /** Rows in the most-failed checkpoints list. */
 export const FAILED_CHECKPOINT_LIMIT = 8;
-/** Width of one bar on the check-ins-by-time chart. */
-export const ARRIVAL_SLOT_MINUTES = 15;
 
 const COMPLIANT_STATUSES = new Set(["compliant", "done", "needs_review", "review_required"]);
 const NON_COMPLIANT_STATUSES = new Set(["non_compliant", "fail"]);
@@ -104,54 +102,6 @@ function dayKeyOf(record, timeZone) {
 
 function identified(record) {
   return record.instructor_id != null && record.instructor_id !== "";
-}
-
-/** Minutes past local midnight, in the application's time zone. */
-function localMinutes(moment, timeZone) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      hour: "2-digit",
-      minute: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(moment)).map((part) => [part.type, part.value])
-  );
-  return Number(parts.hour) * 60 + Number(parts.minute);
-}
-
-function clockLabel(minutes) {
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  const suffix = hour < 12 ? "AM" : "PM";
-  return `${((hour + 11) % 12) + 1}:${String(minute).padStart(2, "0")} ${suffix}`;
-}
-
-/**
- * Check-ins per slot today, from the first occupied slot to the last, with the
- * empty slots between them kept so the chart's time axis stays even.
- */
-export function arrivalSlots(records, timeZone, slotMinutes = ARRIVAL_SLOT_MINUTES) {
-  const counts = new Map();
-  for (const record of records) {
-    if (!record.check_in_time) continue;
-    const slot = Math.floor(localMinutes(record.check_in_time, timeZone) / slotMinutes);
-    counts.set(slot, (counts.get(slot) || 0) + 1);
-  }
-  if (!counts.size) return [];
-  const slots = [...counts.keys()];
-  const first = Math.min(...slots);
-  const last = Math.max(...slots);
-  const result = [];
-  for (let slot = first; slot <= last; slot += 1) {
-    const start = slot * slotMinutes;
-    result.push({
-      start_minutes: start,
-      label: clockLabel(start),
-      end_label: clockLabel(Math.min(start + slotMinutes, 24 * 60 - 1)),
-      count: counts.get(slot) || 0,
-    });
-  }
-  return result;
 }
 
 function mostFrequent(values) {
@@ -461,7 +411,6 @@ export function buildDashboard({
       { key: "error", count: byStatus.error },
     ],
     trend,
-    arrivals: arrivalSlots(today, timeZone),
     failed_checkpoints: failedCheckpoints,
     escalations,
     attire,
