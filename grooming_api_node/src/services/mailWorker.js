@@ -136,7 +136,7 @@ async function deliver(job) {
   return sendAttendanceReminderEmail(job.to_email, job.payload);
 }
 
-async function recordRunTerminal(db, runId, outcome, now) {
+export async function recordRunTerminal(db, runId, outcome, now) {
   const result = await db.collection("report_delivery_runs").findOneAndUpdate(
     { _id: runId },
     {

@@ -348,7 +348,25 @@ reportRouter.get(
  * A timed-out call would be recorded as a failure even though the send was
  * proceeding normally.
  */
-async function deliverWeeklyReports(db, startKey) {
+/**
+ * The run record is created before any email is queued. The mail worker
+ * counts each delivery into it as it happens, and it now starts sending the
+ * moment a job is queued: a record created only after production finished
+ * lost every count that landed before it existed, and the run then never
+ * reached "completed".
+ */
+async function startDeliveryRun(db, runId, fields) {
+  await db.collection("report_delivery_runs").updateOne(
+    { _id: runId },
+    {
+      $set: { ...fields, status: "producing", updated_at: new Date() },
+      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+    },
+    { upsert: true }
+  );
+}
+
+export async function deliverWeeklyReports(db, startKey) {
   const notificationSettings = await getNotificationSettings(db);
   if (!shouldSendWeeklyReport(notificationSettings)) {
     console.log(`Weekly reports for ${startKey}: disabled by notification settings`);
@@ -366,6 +384,7 @@ async function deliverWeeklyReports(db, startKey) {
   });
 
   const runId = `weekly:${startKey}`;
+  await startDeliveryRun(db, runId, { type: "weekly_report", week_start: startKey });
   let queued = 0;
   let skipped = 0;
   const failures = [];
@@ -469,7 +488,7 @@ reportRouter.post(
  * Sends the missed-check-out nudges. Detached for the same reason as the
  * weekly run: one email per open check-in outlives a scheduler timeout.
  */
-async function deliverAttendanceReminders(db) {
+export async function deliverAttendanceReminders(db) {
   const timeZone = runtimeConfig().appTimeZone;
   const today = localDateKey(new Date(), timeZone);
   const from = new Date(`${today}T00:00:00.000Z`);
@@ -485,6 +504,7 @@ async function deliverAttendanceReminders(db) {
   ));
 
   const runId = `attendance-reminders:${today}`;
+  await startDeliveryRun(db, runId, { type: "attendance_reminder", date: today });
   let queued = 0;
   const failures = [];
   for (const record of todays) {
@@ -516,22 +536,26 @@ async function deliverAttendanceReminders(db) {
   await db.collection("report_delivery_runs").updateOne(
     { _id: runId },
     {
-      $set: { type: "attendance_reminder", date: today, production_finished_at: new Date(), checked: todays.length, queued, producer_failures: failures.slice(0, 20), updated_at: new Date() },
+      $set: {
+        type: "attendance_reminder",
+        date: today,
+        production_finished_at: new Date(),
+        checked: todays.length,
+        queued,
+        producer_failures: failures.slice(0, 20),
+        status: "queued",
+        updated_at: new Date(),
+      },
       $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
     },
     { upsert: true }
   );
-  if (!queued) {
-    await db.collection("report_delivery_runs").updateOne(
-      { _id: runId },
-      { $set: { status: "completed", finished_at: new Date() } }
-    );
-  } else {
-    await db.collection("report_delivery_runs").updateOne(
-      { _id: runId },
-      { $set: { status: "queued" } }
-    );
-  }
+  // Every reminder may already have been delivered while production was
+  // still running, in which case no later delivery will close the run.
+  await db.collection("report_delivery_runs").updateOne(
+    { _id: runId, $expr: { $gte: ["$terminal", "$queued"] } },
+    { $set: { status: "completed", finished_at: new Date(), updated_at: new Date() } }
+  );
   console.log(`Attendance reminders for ${today}: ${queued} queued of ${todays.length} open check-ins`);
   return { queued, failures };
 }
