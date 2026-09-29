@@ -6,7 +6,6 @@ import {
   formatPercent,
   formatWait,
   INSTITUTE_VISIBLE_ROWS,
-  niceAxis,
   shortDayLabel,
   sortInstitutes,
   weekdayLabel,
@@ -80,14 +79,4 @@ test('institutes sort with missing values last in both directions', () => {
 
 test('the institutes table shows ten rows before it scrolls', () => {
   assert.equal(INSTITUTE_VISIBLE_ROWS, 10);
-});
-
-test('count axes use whole-number steps that cover the peak', () => {
-  for (const peak of [0, 1, 3, 7, 18, 121, 999]) {
-    const axis = niceAxis(peak);
-    assert.ok(axis.max >= peak, `${peak} fits under ${axis.max}`);
-    assert.ok(Number.isInteger(axis.step) && axis.step >= 1);
-    assert.equal(axis.max, axis.step * 4);
-  }
-  assert.deepEqual(niceAxis(121), { max: 200, step: 50 });
 });

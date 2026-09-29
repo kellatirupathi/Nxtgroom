@@ -133,14 +133,3 @@ export function sortInstitutes(rows: DashboardInstitute[], sort: InstituteSort):
     return ((a as number) - (b as number)) * sort.direction || left.name.localeCompare(right.name);
   });
 }
-
-/** A rounded axis maximum and step for a count chart with `ticks` gridlines. */
-export function niceAxis(max: number, ticks = 4): { max: number; step: number } {
-  const safe = Math.max(1, max);
-  const rough = safe / ticks;
-  const magnitude = 10 ** Math.floor(Math.log10(rough));
-  const nice = [1, 2, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate >= rough) ?? rough;
-  // Counts are whole numbers, so a gridline never falls between two of them.
-  const step = Math.max(1, Math.ceil(nice));
-  return { max: step * ticks, step };
-}
