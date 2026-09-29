@@ -322,7 +322,6 @@ export interface DashboardSummary {
   compliance_same_day_last_week: number | null;
   unassessed: number;
   pending: number;
-  oldest_pending_seconds: number | null;
   errors: number;
   checked_out: number;
   on_duty: number;
