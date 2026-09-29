@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowRight,
+  CircleAlert,
+  CircleCheck,
   CircleX,
   Clock,
   LayoutDashboard,
@@ -9,6 +11,7 @@ import {
   Shirt,
   TrendingDown,
   TrendingUp,
+  TriangleAlert,
   UserCheck,
   UserRoundSearch,
 } from 'lucide-react';
@@ -28,6 +31,7 @@ import {
 } from '../dashboardFormat';
 import type {
   DashboardData,
+  DashboardStatusKey,
   DashboardTrendDay,
 } from '../types';
 
@@ -46,6 +50,14 @@ const TEXT_MUTED = '#94a3b8';
 const TEXT_STRONG = '#1e293b';
 const GRID = '#eef2f7';
 const AXIS = '#cbd5e1';
+
+const STATUS_META: Record<DashboardStatusKey, { label: string; color: string; badge: string; icon: LucideIcon }> = {
+  compliant: { label: 'Compliant', color: '#059669', badge: 'bg-emerald-50 text-emerald-600 border-emerald-200', icon: CircleCheck },
+  unassessed: { label: 'Not assessed', color: '#f59e0b', badge: 'bg-amber-50 text-amber-700 border-amber-200', icon: CircleAlert },
+  non_compliant: { label: 'Non-compliant', color: '#e11d48', badge: 'bg-rose-50 text-rose-600 border-rose-200', icon: CircleX },
+  pending: { label: 'Pending AI', color: '#6366f1', badge: 'bg-amber-50 text-amber-600 border-amber-200', icon: Clock },
+  error: { label: 'Analysis error', color: '#94a3b8', badge: 'bg-slate-100 text-slate-600 border-slate-200', icon: TriangleAlert },
+};
 
 const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
 const TREND_RANGES = [7, 14, 30] as const;
@@ -300,6 +312,59 @@ function TrendChart({ trend }: { trend: DashboardTrendDay[] }) {
   );
 }
 
+function StatusCard({ data }: { data: DashboardData }) {
+  const [hover, setHover] = useState<DashboardStatusKey | null>(null);
+  const total = data.status_breakdown.reduce((sum, row) => sum + row.count, 0);
+  const segments = data.status_breakdown.filter((row) => row.count > 0);
+  const hovered = hover ? data.status_breakdown.find((row) => row.key === hover) : null;
+  return (
+    <section className={`${CARD} p-4 md:p-5`} aria-labelledby="dashboard-status-title">
+      <h3 id="dashboard-status-title" className="text-base font-bold text-slate-800">Today&apos;s check-ins by result</h3>
+      <p className="text-xs text-slate-500 tabular-nums">{formatCount(total)} check-in{total === 1 ? '' : 's'} recorded</p>
+      <div className="relative mt-4">
+        {total > 0 ? (
+          <div className="flex h-3 w-full gap-[2px]" role="img" aria-label="Check-in results today">
+            {segments.map((row, index) => (
+              <div
+                key={row.key}
+                onPointerEnter={() => setHover(row.key)}
+                onPointerLeave={() => setHover(null)}
+                className={`${index === 0 ? 'rounded-l' : ''} ${index === segments.length - 1 ? 'rounded-r' : ''}`}
+                style={{ flex: `${row.count} 1 0`, minWidth: 3, background: STATUS_META[row.key].color }}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="h-3 w-full rounded bg-slate-100" aria-hidden="true" />
+        )}
+        {hovered && (
+          <div className="pointer-events-none absolute -top-2 left-1/2 z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-slate-900 px-2.5 py-1.5 text-xs text-slate-50 shadow-lg">
+            <Swatch color={STATUS_META[hovered.key].color} />{STATUS_META[hovered.key].label} <b>{formatCount(hovered.count)}</b> ({formatPercent(total ? (hovered.count / total) * 100 : null)})
+          </div>
+        )}
+      </div>
+      <ul className="mt-4 divide-y divide-slate-100">
+        {data.status_breakdown.map((row) => {
+          const meta = STATUS_META[row.key];
+          const Icon = meta.icon;
+          return (
+            <li key={row.key} className="flex items-center justify-between gap-3 py-2.5">
+              <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${meta.badge}`}>
+                <Icon size={12} aria-hidden="true" />{meta.label}
+              </span>
+              <span className="flex items-center gap-2 text-sm tabular-nums">
+                <span aria-hidden="true" className="h-2 w-2 rounded-sm" style={{ background: meta.color }} />
+                <b className="text-slate-800">{formatCount(row.count)}</b>
+                <span className="w-14 text-right text-slate-400">{total ? formatPercent((row.count / total) * 100) : '—'}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function ComplianceDelta({ data }: { data: DashboardData }) {
   const change = complianceChange(data.summary.compliance_percent, data.summary.compliance_same_day_last_week);
   const weekday = weekdayLabel(data.same_day_last_week);
@@ -489,6 +554,7 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <TrendChart trend={data.trend} />
+        <StatusCard data={data} />
       </div>
     </section>
   );
