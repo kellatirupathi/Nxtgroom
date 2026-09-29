@@ -43,7 +43,7 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
 ];
 
 /**
- * Institute Analytics: every institute side by side, for today or any range.
+ * Analytics: every institute side by side, for today or any range.
  *
  * Its own screen rather than a section of the Dashboard, so the Dashboard
  * stays a summary and the comparison has the whole page. Every range, today
@@ -141,10 +141,10 @@ export default function InstituteAnalytics() {
   const scrolls = rows.length > INSTITUTE_VISIBLE_ROWS;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 pb-2" aria-labelledby="institute-analytics-title">
-      <h2 id="institute-analytics-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
+    <section className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 pb-2" aria-labelledby="analytics-title">
+      <h2 id="analytics-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
         <ChartColumnBig size={22} className="text-indigo-600" aria-hidden="true" />
-        Institute Analytics
+        Analytics
       </h2>
 
       <section className={CARD} aria-label="Institutes">
