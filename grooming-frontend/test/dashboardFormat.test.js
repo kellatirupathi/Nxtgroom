@@ -4,7 +4,6 @@ import {
   complianceChange,
   formatCount,
   formatPercent,
-  formatWait,
   INSTITUTE_VISIBLE_ROWS,
   shortDayLabel,
   sortInstitutes,
@@ -26,14 +25,6 @@ test('percentages and counts', () => {
   assert.equal(formatPercent(null), '—');
   assert.equal(formatCount(1184), '1,184');
   assert.equal(formatCount(125000), '1,25,000');
-});
-
-test('waiting times read naturally', () => {
-  assert.equal(formatWait(48), '48 s');
-  assert.equal(formatWait(12 * 60 + 5), '12 min');
-  assert.equal(formatWait(2 * 3600 + 5 * 60), '2 h 5 min');
-  assert.equal(formatWait(3600), '1 h');
-  assert.equal(formatWait(null), '—');
 });
 
 test('compliance change against the same weekday last week', () => {

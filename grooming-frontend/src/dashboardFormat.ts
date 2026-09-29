@@ -51,17 +51,6 @@ export function formatCount(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-IN').format(Number(value) || 0);
 }
 
-/** "48 s", "12 min", "2 h 5 min". */
-export function formatWait(seconds: number | null | undefined): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
-  if (seconds < 60) return `${Math.round(seconds)} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
-}
-
 /** The time a response was generated, in the app's time zone: "5:20:14 pm". */
 export function updatedAtLabel(isoTimestamp: string, timeZone: string): string {
   const date = new Date(isoTimestamp);
