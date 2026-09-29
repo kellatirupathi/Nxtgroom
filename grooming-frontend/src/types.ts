@@ -305,3 +305,107 @@ export interface PaginatedOptions extends ApiRequestOptions {
   /** Optional per-page GET cache; also deduplicates concurrent pagination. */
   cacheMs?: number;
 }
+
+/** GET /api/v2/dashboard. SUPER_ADMIN and ADMIN only. */
+export type DashboardStatusKey = 'compliant' | 'unassessed' | 'non_compliant' | 'pending' | 'error';
+
+export interface DashboardSummary {
+  total_instructors: number;
+  present: number;
+  present_percent: number | null;
+  not_checked_in: number;
+  check_ins: number;
+  analysed: number;
+  compliant: number;
+  non_compliant: number;
+  compliance_percent: number | null;
+  compliance_same_day_last_week: number | null;
+  unassessed: number;
+  pending: number;
+  oldest_pending_seconds: number | null;
+  errors: number;
+  retake_recommended: number;
+  checked_out: number;
+  on_duty: number;
+  missed_checkout_previous_day: number;
+  unidentified_waiting: number;
+  unidentified_today: number;
+}
+
+export interface DashboardTrendDay {
+  day: string;
+  present: number;
+  present_percent: number | null;
+  compliant: number;
+  non_compliant: number;
+  compliance_percent: number | null;
+}
+
+export interface DashboardArrivalSlot {
+  start_minutes: number;
+  label: string;
+  end_label: string;
+  count: number;
+}
+
+export interface DashboardFailedCheckpoint {
+  code: string;
+  name: string;
+  audience: string;
+  count: number;
+}
+
+export interface DashboardEscalation {
+  instructor_id: string;
+  name: string;
+  college_name: string;
+  count: number;
+  top_checkpoint: string | null;
+  attendance_id: string;
+}
+
+export interface DashboardInstitute {
+  college_id: string;
+  name: string;
+  mode: 'FACE_ONLY' | 'SELECTOR';
+  /** Instructor-days checked in over the range; for one day, instructors present. */
+  present: number;
+  /** Roster size times the working days in the range. */
+  expected: number;
+  instructors: number;
+  present_percent: number | null;
+  compliant: number;
+  non_compliant: number;
+  compliance_percent: number | null;
+  /** Unnamed arrivals at this institute within the range. */
+  unidentified: number;
+  enrolled: number;
+  enrolled_percent: number;
+  low_enrolment: boolean;
+}
+
+export interface DashboardData {
+  generated_at: string;
+  time_zone: string;
+  today: string;
+  week_start: string;
+  previous_working_day: string;
+  same_day_last_week: string;
+  college: { college_id: string; name: string } | null;
+  summary: DashboardSummary;
+  status_breakdown: { key: DashboardStatusKey; count: number }[];
+  trend: DashboardTrendDay[];
+  arrivals: DashboardArrivalSlot[];
+  failed_checkpoints: DashboardFailedCheckpoint[];
+  escalations: DashboardEscalation[];
+  attire: { analysed: number; saree: number; kurti: number; formal: number };
+  institutes: DashboardInstitute[];
+}
+
+/** GET /api/v2/dashboard/institutes?from=&to= */
+export interface DashboardInstitutesRange {
+  from: string;
+  to: string;
+  working_days: number;
+  institutes: DashboardInstitute[];
+}
