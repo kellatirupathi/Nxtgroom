@@ -64,15 +64,50 @@ function sameKeySchema(actual = [], expected = []) {
  *
  * Pay-per-request billing (no capacity to plan, no throttling at the 9 AM
  * rush). Deletion protection and point-in-time recovery are on for real AWS
- * tables; DynamoDB Local and test doubles do not support them.
+ * tables; DynamoDB Local and test doubles do not support them. With apply,
+ * backups are switched on for existing tables too, so a table created before
+ * backups could be enabled is fixed by running the command again.
  */
+// Right after CreateTable, AWS is still setting up backups for the table and
+// refuses to change them for a minute or two.
+const BACKUP_RETRY_DELAYS_MS = [5_000, 10_000, 20_000, 30_000, 30_000, 30_000, 30_000, 30_000];
+
+const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+/**
+ * Turns point-in-time recovery on. Asking again when it is already on
+ * changes nothing, so this runs for every table on each --apply: a table
+ * whose first attempt failed is fixed by simply running the command again.
+ */
+async function enableBackups(client, name, sleep) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await client.send(new UpdateContinuousBackupsCommand({
+        TableName: name,
+        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      }));
+      return true;
+    } catch (error) {
+      if (error?.name !== "ContinuousBackupsUnavailableException") throw error;
+      if (attempt >= BACKUP_RETRY_DELAYS_MS.length) return false;
+      await sleep(BACKUP_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
 export async function ensureDynamoTables(client, {
   prefix = "facultytrack-",
   apply = false,
   protect = true,
   tables = DYNAMO_TABLES,
+  sleep = wait,
 } = {}) {
-  const report = { existing: [], created: [], missing: [], conflicts: [] };
+  const report = { existing: [], created: [], missing: [], conflicts: [], backups: [], backupsPending: [] };
+  const protectTable = async (name) => {
+    if (!apply || !protect) return;
+    if (await enableBackups(client, name, sleep)) report.backups.push(name);
+    else report.backupsPending.push(name);
+  };
   for (const definition of tables) {
     const name = `${prefix}${definition.store}`;
     let description = null;
@@ -83,8 +118,12 @@ export async function ensureDynamoTables(client, {
     }
 
     if (description) {
-      if (sameKeySchema(description.KeySchema, definition.keySchema)) report.existing.push(name);
-      else report.conflicts.push(`${name}: key schema differs from the definition`);
+      if (sameKeySchema(description.KeySchema, definition.keySchema)) {
+        report.existing.push(name);
+        await protectTable(name);
+      } else {
+        report.conflicts.push(`${name}: key schema differs from the definition`);
+      }
       continue;
     }
     if (!apply) {
@@ -101,13 +140,8 @@ export async function ensureDynamoTables(client, {
       Tags: [{ Key: "app", Value: "facultytrack" }],
     }));
     await waitUntilTableExists({ client, maxWaitTime: 120 }, { TableName: name });
-    if (protect) {
-      await client.send(new UpdateContinuousBackupsCommand({
-        TableName: name,
-        PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
-      }));
-    }
     report.created.push(name);
+    await protectTable(name);
   }
   return report;
 }
