@@ -8,9 +8,13 @@ import {
   sendWeeklyReportEmail,
 } from "./emailService.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { createIdleBackoff, createWakeSignal } from "./workerPacing.js";
 import { openSecret } from "./secretBox.js";
 
 const WORKER_ID = randomUUID();
+// Lets a queued email go out at once rather than on the next idle poll. See
+// workerPacing.js.
+const mailQueued = createWakeSignal();
 const SUPPORTED_TYPES = new Set([
   "password_reset",
   "weekly_report",
@@ -83,6 +87,7 @@ export async function enqueueMailJob(db, { id, type, toEmail, payload, attendanc
     },
     { upsert: true }
   );
+  mailQueued.notify();
   return true;
 }
 
@@ -238,8 +243,39 @@ export function startMailWorker(db) {
   let inFlight = Promise.resolve();
   const config = runtimeConfig();
   const monitor = createWorkerMonitor("mail", { busyStaleAfterMs: config.notificationLeaseMs + 60_000 });
+  const backoff = createIdleBackoff({
+    minMs: Math.max(1000, config.evaluationPollMs),
+    maxMs: config.workerIdleMaxPollMs,
+  });
+  // Set while sleeping on an empty queue: only then is there a timer worth
+  // cancelling, and re-entering tick() mid-cycle would run two at once.
+  let idle = false;
+  let wokenMidCycle = false;
+  const schedule = (delay) => {
+    if (stopped) return;
+    idle = delay > 0;
+    timer = setTimeout(() => {
+      idle = false;
+      tick();
+    }, delay);
+  };
+  const wake = () => {
+    if (stopped) return;
+    if (!idle) {
+      // Mid-cycle: this cycle may already have looked for jobs. Remember the
+      // wake-up so it runs again at once instead of backing off.
+      wokenMidCycle = true;
+      return;
+    }
+    idle = false;
+    backoff.reset();
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(tick, 0);
+  };
+  const stopListening = mailQueued.listen(wake);
   const tick = () => {
     monitor.cycleStarted();
+    wokenMidCycle = false;
     let loopError = null;
     let count = 0;
     inFlight = (async () => {
@@ -255,14 +291,15 @@ export function startMailWorker(db) {
         console.error(`Mail worker error (${loopError})`);
       } finally {
         monitor.cycleCompleted(loopError);
-        if (!stopped) timer = setTimeout(tick, count ? 0 : Math.max(1000, config.evaluationPollMs));
+        schedule(backoff.afterCycle(count > 0 || wokenMidCycle));
       }
     })();
   };
-  timer = setTimeout(tick, 0);
+  schedule(0);
   return {
     async stop() {
       stopped = true;
+      stopListening();
       if (timer) clearTimeout(timer);
       await inFlight;
       monitor.stop();

@@ -118,6 +118,11 @@ export function runtimeConfig() {
     geminiExplicitCache: parseBoolean("GEMINI_EXPLICIT_CACHE", true),
     geminiCacheTtlSeconds: parseInteger("GEMINI_CACHE_TTL_SECONDS", 3600, { min: 600, max: 86400 }),
     evaluationPollMs: parseInteger("EVALUATION_POLL_MS", 2000, { min: 250, max: 60000 }),
+    // An idle worker backs off from the poll interval above to this ceiling
+    // (see workerPacing.js). Capped below the 60 s heartbeat staleness window.
+    workerIdleMaxPollMs: parseInteger("WORKER_IDLE_MAX_POLL_MS", 15000, { min: 1000, max: 30000 }),
+    // Recovery sweeps (outboxes, deadlines, expired leases) run at most this often.
+    workerSweepIntervalMs: parseInteger("WORKER_SWEEP_INTERVAL_MS", 60000, { min: 5000, max: 600000 }),
     evaluationLeaseMs: parseInteger("EVALUATION_LEASE_MS", 600000, { min: 60000, max: 3600000 }),
     evaluationMaxAttempts: parseInteger("EVALUATION_MAX_ATTEMPTS", 3, { min: 1, max: 10 }),
     evaluationConcurrency: parseInteger("EVALUATION_CONCURRENCY", 2, { min: 1, max: 20 }),
