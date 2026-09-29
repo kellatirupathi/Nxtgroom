@@ -21,7 +21,6 @@ import {
   DASHBOARD_REFRESH_MS,
   formatCount,
   formatPercent,
-  INSTITUTE_VISIBLE_ROWS,
   sortInstitutes,
   type InstituteSort,
   type InstituteSortKey,
@@ -138,16 +137,18 @@ export default function InstituteAnalytics() {
         : { key, direction: key === 'name' || key === 'mode' || key === 'present_percent' || key === 'compliance_percent' || key === 'enrolled_percent' ? 1 : -1 }
     ));
   };
-  const scrolls = rows.length > INSTITUTE_VISIBLE_ROWS;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 pb-2" aria-labelledby="analytics-title">
+    // As tall as the screen allows, like Daily Records: the page itself does
+    // not scroll, the table does, so every institute is reachable without the
+    // heading or the date filter leaving the screen.
+    <section className="mx-auto flex h-full min-h-0 w-full max-w-[1400px] flex-col gap-5" aria-labelledby="analytics-title">
       <h2 id="analytics-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
         <ChartColumnBig size={22} className="text-indigo-600" aria-hidden="true" />
         Analytics
       </h2>
 
-      <section className={CARD} aria-label="Institutes">
+      <section className={`${CARD} flex min-h-0 flex-1 flex-col`} aria-label="Institutes">
         {/* No wrapping: the filter holds the top-right corner whatever range is
             chosen, and the longer description a range brings wraps beside it
             instead of pushing the filter onto a line of its own. */}
@@ -174,14 +175,13 @@ export default function InstituteAnalytics() {
         ) : rows.length === 0 ? (
           <p className="p-6 text-sm text-slate-400">No institutes have been added yet.</p>
         ) : (
-          // Ten rows tall, then the rest scroll inside the card with the header
-          // pinned, so the page below keeps its place however many institutes
-          // there are.
+          // Fills the rest of the card and scrolls under a pinned header. A
+          // floor keeps a few rows visible on a very short screen, where the
+          // page then scrolls as well.
           <div
-            className="overflow-auto overscroll-contain"
-            style={{ maxHeight: INSTITUTE_HEADER_HEIGHT + INSTITUTE_ROW_HEIGHT * INSTITUTE_VISIBLE_ROWS }}
-            tabIndex={scrolls ? 0 : undefined}
-            aria-label={scrolls ? 'Institutes, scrollable' : undefined}
+            className="min-h-[18rem] flex-1 overflow-auto overscroll-contain"
+            tabIndex={0}
+            aria-label="Institutes, scrollable"
           >
             <table className="w-full min-w-[860px] text-left text-sm">
               <thead>
