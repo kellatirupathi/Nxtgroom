@@ -29,6 +29,7 @@ import {
   SESSION_EXPIRED_EVENT,
 } from './api';
 import { isElevatedRole, type AttendanceRecord, type CurrentUser, type Instructor, type Role } from './types';
+import type { SettingsTab } from './components/SettingsPage';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const InstituteAnalytics = lazy(() => import('./components/InstituteAnalytics'));
@@ -67,6 +68,16 @@ const ADMIN_TABS = new Set(['dashboard', 'institute-analytics', 'boa-management'
  */
 const IDENTIFY_TABS = new Set(['unidentified']);
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
+
+/**
+ * Administrators find the Unidentified queue in Settings rather than in the
+ * menu, so anything that still points at it for them - the Dashboard's "Open
+ * queue", a bookmark of /unidentified, Back and Forward - opens that tab. A
+ * BOA with the permission cannot open Settings and keeps the screen itself.
+ */
+function opensInSettings(tab: string, role: Role | null): boolean {
+  return tab === 'unidentified' && isElevatedRole(role);
+}
 
 function initialSession(): SessionState {
   try {
@@ -110,6 +121,7 @@ export default function App() {
   const [sessionCheckError, setSessionCheckError] = useState('');
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('notifications');
 
   const handleLogin = (token: string, role: Role) => {
     // validated: false so /me runs. Marking a fresh sign-in as validated
@@ -190,6 +202,15 @@ export default function App() {
    * always reflects what is actually rendered.
    */
   const navigate = useCallback((tab: string, { replace = false } = {}) => {
+    if (opensInSettings(tab, session.role)) {
+      setSettingsTab('unidentified');
+      setActiveTab('settings');
+      if (replace) replaceTabPath('settings');
+      else pushTabPath('settings');
+      return;
+    }
+    // Choosing Settings itself opens its first tab, as it always has.
+    if (tab === 'settings') setSettingsTab('notifications');
     let target = tab;
     if (ADMIN_TABS.has(tab) && !isElevatedRole(session.role)) target = 'overview';
     else if (IDENTIFY_TABS.has(tab) && !session.canIdentify) target = 'overview';
@@ -235,6 +256,12 @@ export default function App() {
     if (publicReport || resetToken) return undefined;
     const onPopState = () => {
       const tab = currentTabFromLocation();
+      if (opensInSettings(tab, session.role)) {
+        setSettingsTab('unidentified');
+        setActiveTab('settings');
+        replaceTabPath('settings');
+        return;
+      }
       setActiveTab(
         (ADMIN_TABS.has(tab) && !isElevatedRole(session.role))
           || (IDENTIFY_TABS.has(tab) && !session.canIdentify)
@@ -258,7 +285,9 @@ export default function App() {
     // The bare root opens the role's home screen: the Dashboard for an
     // administrator, Attendance for a BOA. Any other path keeps its own screen.
     const atRoot = (window.location.pathname.replace(/\/+$/, '') || '/') === '/';
-    const tab = atRoot ? homeTabForRole(isElevatedRole(session.role)) : currentTabFromLocation();
+    const requested = atRoot ? homeTabForRole(isElevatedRole(session.role)) : currentTabFromLocation();
+    if (opensInSettings(requested, session.role)) setSettingsTab('unidentified');
+    const tab = opensInSettings(requested, session.role) ? 'settings' : requested;
     const allowed = (ADMIN_TABS.has(tab) && !isElevatedRole(session.role))
       || (IDENTIFY_TABS.has(tab) && !session.canIdentify)
       ? 'overview'
@@ -437,7 +466,7 @@ export default function App() {
           )}
 
           {activeTab === 'settings' && isElevatedRole(session.role) && (
-            <div className="w-full h-full"><SettingsPage /></div>
+            <div className="w-full h-full"><SettingsPage key={settingsTab} initialTab={settingsTab} /></div>
           )}
 
           {/* Gated on the capability, not the role: a BOA granted it is often
