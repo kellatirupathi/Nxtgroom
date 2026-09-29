@@ -8,7 +8,6 @@ import {
   clearDashboardCache,
   countWorkingDays,
   DashboardRangeError,
-  instituteGroupsFromRecords,
   normalizeInstituteRange,
   dashboardStatus,
   previousWorkingDayKey,
@@ -82,8 +81,6 @@ function build(extra = {}) {
     timeZone: ZONE,
     colleges,
     roster,
-    identificationSettings: { default_mode: "FACE_ONLY", college_modes: { c2: "SELECTOR" } },
-    enrolment: new Map([["c1", { total: 2, enrolled: 2 }], ["c2", { total: 2, enrolled: 1 }]]),
     weekRecords,
     trendRows: [
       { _id: TODAY, present: 3, compliant: 1, non_compliant: 1 },
@@ -204,8 +201,20 @@ test("escalation uses the same count as the URGENT email", () => {
 });
 
 test("each institute reports its own day, mode and enrolment", () => {
-  const { institutes } = build();
-  const [hyderabad, warangal] = institutes;
+  // Today's totals as the database groups them: Hyderabad has i1 and i2 in,
+  // one compliant and one not; Warangal has i3 in, still pending, plus one
+  // unnamed arrival.
+  const [hyderabad, warangal] = buildInstituteRows({
+    colleges,
+    roster,
+    identificationSettings: { default_mode: "FACE_ONLY", college_modes: { c2: "SELECTOR" } },
+    enrolment: new Map([["c1", { total: 2, enrolled: 2 }], ["c2", { total: 2, enrolled: 1 }]]),
+    groups: [
+      { _id: "c1", check_ins: 2, compliant: 1, non_compliant: 1, unidentified: 0 },
+      { _id: "c2", check_ins: 1, compliant: 0, non_compliant: 0, unidentified: 1 },
+    ],
+    workingDays: 1,
+  });
   assert.deepEqual(
     {
       present: hyderabad.present,
@@ -222,7 +231,7 @@ test("each institute reports its own day, mode and enrolment", () => {
   assert.equal(warangal.mode, "SELECTOR");
   assert.equal(warangal.present, 1);
   assert.equal(warangal.compliance_percent, null, "nothing analysed yet at Warangal today");
-  assert.equal(warangal.unidentified, 1, "today's unnamed arrival there; the queue total is on the tile");
+  assert.equal(warangal.unidentified, 1);
   assert.equal(warangal.enrolled_percent, 50);
   assert.equal(warangal.low_enrolment, false, "a SELECTOR college is never flagged, matching Settings");
 });
@@ -246,12 +255,15 @@ test("a range is validated, and its end is held at today", () => {
 });
 
 test("over several days, present counts instructor-days against roster times working days", () => {
-  const groups = instituteGroupsFromRecords(weekRecords.filter((row) => row.attendance_day >= MONDAY));
+  // Monday and today: Hyderabad has i1 and i2 today and i1 on Monday;
+  // Warangal has i3 on both days, i4 on Monday and one unnamed arrival.
+  const groups = [
+    { _id: "c1", check_ins: 3, compliant: 1, non_compliant: 2, unidentified: 0 },
+    { _id: "c2", check_ins: 3, compliant: 2, non_compliant: 0, unidentified: 1 },
+  ];
   const [hyderabad, warangal] = buildInstituteRows({ colleges, roster, groups, workingDays: 2 });
-  // Hyderabad: i1 and i2 today, i1 Monday.
   assert.deepEqual([hyderabad.present, hyderabad.expected, hyderabad.present_percent], [3, 4, 75]);
   assert.deepEqual([hyderabad.compliant, hyderabad.non_compliant], [1, 2]);
-  // Warangal: i3 today and Monday, i4 Monday, plus one unnamed arrival.
   assert.deepEqual([warangal.present, warangal.expected, warangal.unidentified], [3, 4, 1]);
 });
 
@@ -296,7 +308,7 @@ test("only administrators can open the dashboard", async () => {
   const { status, body } = await request("SUPER_ADMIN");
   assert.equal(status, 200);
   assert.equal(body.summary.total_instructors, 0);
-  assert.equal(body.institutes.length, 2);
+  assert.equal(body.institutes, undefined, "institutes come from /institutes, for Institute Analytics");
   assert.equal(body.trend.length, TREND_WORKING_DAYS);
 });
 

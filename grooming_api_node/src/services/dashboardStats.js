@@ -130,29 +130,6 @@ export function countWorkingDays(fromKey, toKey) {
 }
 
 /**
- * Per-institute totals from attendance records, in the shape the database
- * aggregation in loadInstituteStats returns, so today's table and a chosen
- * range are built by the same function.
- */
-export function instituteGroupsFromRecords(records) {
-  const groups = new Map();
-  for (const record of records) {
-    const key = record.college_id == null ? "" : String(record.college_id);
-    const group = groups.get(key) || { _id: key, check_ins: 0, compliant: 0, non_compliant: 0, unidentified: 0 };
-    const status = dashboardStatus(record.status);
-    if (identified(record)) {
-      group.check_ins += 1;
-      if (status === "compliant") group.compliant += 1;
-      if (status === "non_compliant") group.non_compliant += 1;
-    } else if (status === "unidentified") {
-      group.unidentified += 1;
-    }
-    groups.set(key, group);
-  }
-  return [...groups.values()];
-}
-
-/**
  * One row per active institute for the Institutes table.
  *
  * `present` counts instructor-days: one per instructor per day they checked
@@ -222,8 +199,6 @@ export function buildDashboard({
   college = null,
   colleges = [],
   roster = [],
-  identificationSettings = {},
-  enrolment = new Map(),
   weekRecords = [],
   trendRows = [],
   unidentifiedByCollege = [],
@@ -340,18 +315,10 @@ export function buildDashboard({
   }
   escalations.sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
 
-  // ---- Institutes, today -----------------------------------------------------
-  // The whole unidentified queue, whatever day each arrival was on, is the
-  // figure on the Unidentified tile. The table counts only the day it shows.
+  // ---- Unidentified queue --------------------------------------------------------
+  // The whole queue, whatever day each arrival was on: this is the figure on
+  // the Unidentified tile, not a count of today.
   const unidentifiedTotal = unidentifiedByCollege.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
-  const institutes = buildInstituteRows({
-    colleges,
-    roster,
-    identificationSettings,
-    enrolment,
-    groups: instituteGroupsFromRecords(today),
-    workingDays: 1,
-  });
 
   return {
     generated_at: now.toISOString(),
@@ -394,7 +361,6 @@ export function buildDashboard({
     trend,
     failed_checkpoints: failedCheckpoints,
     escalations,
-    institutes,
   };
 }
 
@@ -447,12 +413,10 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
   const trendFrom = [trendDays[0], addDaysToKey(todayKey, -7)].sort()[0];
   const trendBounds = dateRangeBoundsInTimeZone(trendFrom, todayKey, timeZone);
 
-  const [roster, enrolment, identificationSettings, weekRecords, trendRows, unidentifiedByCollege] = await Promise.all([
+  const [roster, weekRecords, trendRows, unidentifiedByCollege] = await Promise.all([
     db.collection("instructors")
       .find({ $and: [ACTIVE, collegeScope] }, { projection: { name: 1, college_id: 1 } })
       .toArray(),
-    loadCollegeEnrolment(db),
-    getIdentificationSettings(db),
     db.collection("attendance")
       .find(
         {
@@ -578,8 +542,6 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
     college,
     colleges,
     roster,
-    identificationSettings,
-    enrolment,
     weekRecords,
     trendRows,
     unidentifiedByCollege,
@@ -620,8 +582,9 @@ export function normalizeInstituteRange({ from = "", to = "" } = {}, todayKey) {
  * The Institutes table for any date range, counted by the database.
  *
  * Grouped in one aggregation rather than read record by record, because "All
- * time" covers every attendance record ever written. The figures are defined
- * exactly as today's table defines them (see instituteGroupsFromRecords).
+ * time" covers every attendance record ever written. An identified record is a
+ * check-in, counted as compliant or non-compliant by the same statuses
+ * dashboardStatus reads; an unnamed one counts only as an unidentified arrival.
  */
 export async function loadInstituteStats(db, { from = "", to = "", now = new Date() } = {}) {
   const timeZone = runtimeConfig().appTimeZone;
