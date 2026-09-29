@@ -83,7 +83,9 @@ export default function BottomNav({
   const visible = (items: NavItem[]) =>
     items.filter((item) => {
       if (item.adminOnly && !isElevatedRole(role)) return false;
-      if (item.identifyOnly && !canIdentify) return false;
+      // Administrators reach the queue from Settings; a BOA with the
+      // permission cannot open Settings, so it stays in their menu.
+      if (item.identifyOnly && (!canIdentify || isElevatedRole(role))) return false;
       return true;
     });
 
