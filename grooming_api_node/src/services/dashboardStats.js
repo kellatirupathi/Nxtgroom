@@ -660,6 +660,116 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
   });
 }
 
+export class DashboardRangeError extends Error {}
+
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+function validDayKey(value) {
+  if (!DAY_KEY.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+/**
+ * Normalises the Institutes table's date range. Either end may be empty, which
+ * leaves that side open ("All time" sends both empty). The end is capped at
+ * today: a day that has not happened has no attendance to count, and counting
+ * it as a working day would drag every institute's figure down.
+ */
+export function normalizeInstituteRange({ from = "", to = "" } = {}, todayKey) {
+  for (const [name, value] of [["from", from], ["to", to]]) {
+    if (typeof value !== "string" || (value !== "" && !validDayKey(value))) {
+      throw new DashboardRangeError(`${name} must be a date in YYYY-MM-DD format`);
+    }
+  }
+  if (from && to && from > to) throw new DashboardRangeError("from must be on or before to");
+  if (from && from > todayKey) throw new DashboardRangeError("The range starts after today");
+  const end = !to || to > todayKey ? todayKey : to;
+  return { from, to: end };
+}
+
+/**
+ * The Institutes table for any date range, counted by the database.
+ *
+ * Grouped in one aggregation rather than read record by record, because "All
+ * time" covers every attendance record ever written. The figures are defined
+ * exactly as today's table defines them (see instituteGroupsFromRecords).
+ */
+export async function loadInstituteStats(db, { from = "", to = "", now = new Date() } = {}) {
+  const timeZone = runtimeConfig().appTimeZone;
+  const todayKey = localDateKey(now, timeZone);
+  const range = normalizeInstituteRange({ from, to }, todayKey);
+  const bounds = dateRangeBoundsInTimeZone(range.from || undefined, range.to, timeZone);
+  const date = { $lt: bounds.end, ...(bounds.start ? { $gte: bounds.start } : {}) };
+
+  const [colleges, roster, enrolment, identificationSettings, groups] = await Promise.all([
+    db.collection("colleges").find(ACTIVE, { projection: { name: 1 } }).sort({ name: 1 }).toArray(),
+    db.collection("instructors").find(ACTIVE, { projection: { college_id: 1 } }).toArray(),
+    loadCollegeEnrolment(db),
+    getIdentificationSettings(db),
+    db.collection("attendance").aggregate([
+      { $match: { date, deleting_at: { $exists: false } } },
+      {
+        $project: {
+          college: {
+            $cond: [{ $eq: [{ $ifNull: ["$college_id", null] }, null] }, null, { $toString: "$college_id" }],
+          },
+          identified: { $ne: [{ $ifNull: ["$instructor_id", null] }, null] },
+          status: { $toLower: { $ifNull: ["$status", ""] } },
+          day: {
+            $ifNull: [
+              "$attendance_day",
+              {
+                $dateToString: {
+                  date: { $ifNull: ["$check_in_time", "$date"] },
+                  format: "%Y-%m-%d",
+                  timezone: timeZone,
+                },
+              },
+            ],
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$college",
+          check_ins: { $sum: { $cond: ["$identified", 1, 0] } },
+          compliant: {
+            $sum: { $cond: [{ $and: ["$identified", { $in: ["$status", [...COMPLIANT_STATUSES]] }] }, 1, 0] },
+          },
+          non_compliant: {
+            $sum: { $cond: [{ $and: ["$identified", { $in: ["$status", [...NON_COMPLIANT_STATUSES]] }] }, 1, 0] },
+          },
+          unidentified: {
+            $sum: { $cond: [{ $and: [{ $not: ["$identified"] }, { $eq: ["$status", "unidentified"] }] }, 1, 0] },
+          },
+          first_day: { $min: "$day" },
+        },
+      },
+    ]).toArray(),
+  ]);
+
+  // "All time" starts at the first recorded day rather than an invented date.
+  const firstRecorded = groups.map((row) => row.first_day).filter(Boolean).sort()[0] || range.to;
+  const start = range.from || (firstRecorded < range.to ? firstRecorded : range.to);
+  const workingDays = countWorkingDays(start, range.to);
+
+  return {
+    from: start,
+    to: range.to,
+    working_days: workingDays,
+    institutes: buildInstituteRows({
+      colleges,
+      roster,
+      identificationSettings,
+      enrolment,
+      groups,
+      workingDays,
+    }),
+  };
+}
+
 /**
  * The page refreshes itself every 30 seconds for every administrator who has
  * it open, so a response is shared for a few seconds rather than recomputed
@@ -671,6 +781,25 @@ const cache = new Map();
 
 export function clearDashboardCache() {
   cache.clear();
+  rangeCache.clear();
+}
+
+const rangeCache = new Map();
+
+/** Same short sharing as the Dashboard, keyed by the requested range. */
+export async function cachedInstituteStats(db, { from = "", to = "", now = new Date() } = {}) {
+  const key = `${from}|${to}`;
+  const hit = rangeCache.get(key);
+  if (hit && now.getTime() - hit.at < CACHE_MS) return hit.promise;
+  // Validated before anything is cached, so a bad range is never stored.
+  normalizeInstituteRange({ from, to }, localDateKey(now, runtimeConfig().appTimeZone));
+  if (rangeCache.size > 50) rangeCache.clear();
+  const promise = loadInstituteStats(db, { from, to, now });
+  rangeCache.set(key, { at: now.getTime(), promise });
+  promise.catch(() => {
+    if (rangeCache.get(key)?.promise === promise) rangeCache.delete(key);
+  });
+  return promise;
 }
 
 export async function cachedDashboard(db, { collegeId = null, now = new Date() } = {}) {

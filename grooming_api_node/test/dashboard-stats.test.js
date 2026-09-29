@@ -8,7 +8,9 @@ import {
   checkpointAudience,
   clearDashboardCache,
   countWorkingDays,
+  DashboardRangeError,
   instituteGroupsFromRecords,
+  normalizeInstituteRange,
   dashboardStatus,
   previousWorkingDayKey,
   TREND_WORKING_DAYS,
@@ -257,6 +259,16 @@ test("working days in a range skip Sundays, and a lone Sunday still counts once"
   assert.equal(countWorkingDays("2026-09-27", "2026-09-27"), 1, "a chosen Sunday is measured as one day");
   assert.equal(countWorkingDays("2026-09-01", "2026-09-30"), 26);
   assert.equal(countWorkingDays("2026-09-30", "2026-09-01"), 0);
+});
+
+test("a range is validated, and its end is held at today", () => {
+  assert.deepEqual(normalizeInstituteRange({ from: "2026-09-23", to: "2026-09-29" }, TODAY), { from: "2026-09-23", to: TODAY });
+  assert.deepEqual(normalizeInstituteRange({ from: "", to: "" }, TODAY), { from: "", to: TODAY }, "all time");
+  assert.deepEqual(normalizeInstituteRange({ from: "2026-09-20", to: "2026-12-31" }, TODAY), { from: "2026-09-20", to: TODAY });
+  assert.throws(() => normalizeInstituteRange({ from: "2026-09-29", to: "2026-09-01" }, TODAY), DashboardRangeError);
+  assert.throws(() => normalizeInstituteRange({ from: "2026-10-05", to: "" }, TODAY), DashboardRangeError);
+  assert.throws(() => normalizeInstituteRange({ from: "2026-02-30", to: "" }, TODAY), DashboardRangeError);
+  assert.throws(() => normalizeInstituteRange({ from: "29-09-2026", to: "" }, TODAY), DashboardRangeError);
 });
 
 test("over several days, present counts instructor-days against roster times working days", () => {
