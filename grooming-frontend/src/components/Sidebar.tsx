@@ -128,7 +128,9 @@ export default function Sidebar({
           Daily Records
         </button>
 
-        {canIdentify && (
+        {/* Administrators reach the queue from Settings. A BOA with the
+            permission cannot open Settings, so it stays in their menu. */}
+        {canIdentify && !isElevatedRole(role) && (
           <button
             type="button"
             onClick={() => navigate('unidentified')}
