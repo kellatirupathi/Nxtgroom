@@ -6,6 +6,7 @@ import ResetPassword from './components/ResetPassword';
 import BrandedLoader from './components/BrandedLoader';
 import {
   currentTabFromLocation,
+  homeTabForRole,
   publicReportFromLocation,
   pushTabPath,
   recordIdFromLocation,
@@ -29,6 +30,7 @@ import {
 } from './api';
 import { isElevatedRole, type AttendanceRecord, type CurrentUser, type Instructor, type Role } from './types';
 
+const Dashboard = lazy(() => import('./components/Dashboard'));
 const EvaluateCard = lazy(() => import('./components/EvaluateCard'));
 const InstructorDetail = lazy(() => import('./components/InstructorDetail'));
 const PublicReportPage = lazy(() => import('./components/PublicReportPage'));
@@ -57,7 +59,7 @@ interface SessionState {
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
-const ADMIN_TABS = new Set(['boa-management', 'settings', 'instructor-management']);
+const ADMIN_TABS = new Set(['dashboard', 'boa-management', 'settings', 'instructor-management']);
 /**
  * Gated on a capability rather than a role, so a URL typed by hand is refused
  * the same way the navigation hides it.
@@ -114,8 +116,10 @@ export default function App() {
     // arrived — the delete capability unset until the next full page load.
     setSession({ token, role, email: null, collegeId: null, validated: false });
     setSessionCheckError('');
-    setActiveTab('overview');
-    replaceTabPath('overview');
+    // Administrators start on the Dashboard, their first menu item.
+    const home = homeTabForRole(isElevatedRole(role));
+    setActiveTab(home);
+    replaceTabPath(home);
   };
 
   const handleLogout = useCallback(() => {
@@ -241,8 +245,8 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [session.role, session.canIdentify, publicReport, resetToken]);
 
-  // Normalise the entry URL once the session is known: "/" becomes
-  // "/attendance", and a deep link the role cannot open is rewritten rather
+  // Normalise the entry URL once the session is known: "/" becomes the role's
+  // home screen, and a deep link the role cannot open is rewritten rather
   // than left pointing at a screen that is not being shown.
   useEffect(() => {
     // A report or password link is not a tab. Without this guard the effect
@@ -250,7 +254,10 @@ export default function App() {
     // report rendered under the wrong URL and a refresh lost it entirely.
     if (publicReport || resetToken) return;
     if (!session.validated || !session.token) return;
-    const tab = currentTabFromLocation();
+    // The bare root opens the role's home screen: the Dashboard for an
+    // administrator, Attendance for a BOA. Any other path keeps its own screen.
+    const atRoot = (window.location.pathname.replace(/\/+$/, '') || '/') === '/';
+    const tab = atRoot ? homeTabForRole(isElevatedRole(session.role)) : currentTabFromLocation();
     const allowed = (ADMIN_TABS.has(tab) && !isElevatedRole(session.role))
       || (IDENTIFY_TABS.has(tab) && !session.canIdentify)
       ? 'overview'
@@ -363,6 +370,12 @@ export default function App() {
           {/* A face-only college has no selector and no buttons: the camera is
               the whole screen. Everywhere else keeps the card, which is still
               how a college mid-enrolment records attendance. */}
+          {activeTab === 'dashboard' && isElevatedRole(session.role) && (
+            <div className="w-full h-full">
+              <Dashboard onNavigate={navigate} canIdentify={Boolean(session.canIdentify)} />
+            </div>
+          )}
+
           {activeTab === 'overview' && session.faceIdentification && (
             <div className="w-full h-full">
               <AttendanceScreen onExit={() => navigate('daily-records')} />
