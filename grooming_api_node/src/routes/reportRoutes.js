@@ -36,7 +36,11 @@ const PHOTO_PURGE_BATCH = 200;
 const PHOTO_PURGE_DEADLINE_MS = 20_000;
 /** Bounds how many undeletable records one run will carry as exclusions. */
 const PHOTO_PURGE_MAX_STUCK = 500;
-import { evaluationFilter } from "../services/evaluationWorker.js";
+import { getEvaluation } from "../stores/evaluationStore.js";
+import {
+  completeDeliveryRunIfDone,
+  saveDeliveryRun,
+} from "../stores/deliveryRunStore.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
 import { enqueueMailJob } from "../services/mailWorker.js";
 import {
@@ -225,9 +229,7 @@ reportRouter.get(
     ));
     if (!record) return res.status(404).json({ detail: "No check-in was recorded that day" });
 
-    const evaluation = await db.collection("evaluations").findOne(
-      evaluationFilter(String(record._id), half)
-    );
+    const evaluation = await getEvaluation(db, String(record._id), half);
     // The saree/kurti rotation is a claim about the week, not about this
     // photograph, so it is counted from the week the day falls in. Null for
     // men, who have no rotation to satisfy.
@@ -356,14 +358,10 @@ reportRouter.get(
  * reached "completed".
  */
 async function startDeliveryRun(db, runId, fields) {
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId },
-    {
-      $set: { ...fields, status: "producing", updated_at: new Date() },
-      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
-    },
-    { upsert: true }
-  );
+  await saveDeliveryRun(db, runId, {
+    set: { ...fields, status: "producing", updated_at: new Date() },
+    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  });
 }
 
 export async function deliverWeeklyReports(db, startKey) {
@@ -419,28 +417,25 @@ export async function deliverWeeklyReports(db, startKey) {
     }
   }
 
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId },
-    {
-      $set: {
-        type: "weekly_report",
-        week_start: startKey,
-        production_finished_at: new Date(),
-        considered: instructorIds.length,
-        queued,
-        skipped,
-        producer_failures: failures.slice(0, 20),
-        status: queued ? "queued" : "completed",
-        updated_at: new Date(),
-      },
-      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  await saveDeliveryRun(db, runId, {
+    set: {
+      type: "weekly_report",
+      week_start: startKey,
+      production_finished_at: new Date(),
+      considered: instructorIds.length,
+      queued,
+      skipped,
+      producer_failures: failures.slice(0, 20),
+      status: queued ? "queued" : "completed",
+      updated_at: new Date(),
     },
-    { upsert: true }
-  );
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId, $expr: { $gte: ["$terminal", "$queued"] } },
-    { $set: { status: "completed", finished_at: new Date(), updated_at: new Date() } }
-  );
+    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  });
+  await completeDeliveryRunIfDone(db, runId, {
+    status: "completed",
+    finished_at: new Date(),
+    updated_at: new Date(),
+  });
   console.log(`Weekly reports for ${startKey}: ${queued} queued, ${skipped} skipped, ${failures.length} producer failures`);
   return { queued, skipped, failures };
 }
@@ -533,29 +528,26 @@ export async function deliverAttendanceReminders(db) {
     }
   }
 
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId },
-    {
-      $set: {
-        type: "attendance_reminder",
-        date: today,
-        production_finished_at: new Date(),
-        checked: todays.length,
-        queued,
-        producer_failures: failures.slice(0, 20),
-        status: "queued",
-        updated_at: new Date(),
-      },
-      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  await saveDeliveryRun(db, runId, {
+    set: {
+      type: "attendance_reminder",
+      date: today,
+      production_finished_at: new Date(),
+      checked: todays.length,
+      queued,
+      producer_failures: failures.slice(0, 20),
+      status: "queued",
+      updated_at: new Date(),
     },
-    { upsert: true }
-  );
+    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  });
   // Every reminder may already have been delivered while production was
   // still running, in which case no later delivery will close the run.
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId, $expr: { $gte: ["$terminal", "$queued"] } },
-    { $set: { status: "completed", finished_at: new Date(), updated_at: new Date() } }
-  );
+  await completeDeliveryRunIfDone(db, runId, {
+    status: "completed",
+    finished_at: new Date(),
+    updated_at: new Date(),
+  });
   console.log(`Attendance reminders for ${today}: ${queued} queued of ${todays.length} open check-ins`);
   return { queued, failures };
 }

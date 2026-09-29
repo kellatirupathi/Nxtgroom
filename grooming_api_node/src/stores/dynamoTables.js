@@ -4,21 +4,53 @@ import {
   UpdateContinuousBackupsCommand,
   waitUntilTableExists,
 } from "@aws-sdk/client-dynamodb";
+import { toItem } from "./dynamoItems.js";
 
 /**
  * Every DynamoDB table the application uses, in one place, so the setup
  * script, the tests and the migration plan cannot drift apart. Names are
  * prefixed with DYNAMODB_TABLE_PREFIX (facultytrack- by default).
  *
- * Tables are added here as their stores move off MongoDB.
+ * Tables are added here as their stores move off MongoDB. itemFromDocument
+ * turns a MongoDB document into its DynamoDB item for the copy and compare
+ * scripts, and keyOf identifies an item for the comparison.
  */
+const byId = {
+  attributes: [{ AttributeName: "_id", AttributeType: "S" }],
+  keySchema: [{ AttributeName: "_id", KeyType: "HASH" }],
+  itemFromDocument: (document) => toItem(document),
+  keyOf: (item) => String(item._id),
+};
+
 export const DYNAMO_TABLES = Object.freeze([
+  { store: "app_settings", ...byId },
+  { store: "report_delivery_runs", ...byId },
   {
-    store: "app_settings",
-    attributes: [{ AttributeName: "_id", AttributeType: "S" }],
-    keySchema: [{ AttributeName: "_id", KeyType: "HASH" }],
+    store: "evaluations",
+    // The pair is the MongoDB unique index (attendance_id, kind).
+    attributes: [
+      { AttributeName: "attendance_id", AttributeType: "S" },
+      { AttributeName: "kind", AttributeType: "S" },
+    ],
+    keySchema: [
+      { AttributeName: "attendance_id", KeyType: "HASH" },
+      { AttributeName: "kind", KeyType: "RANGE" },
+    ],
+    // Evaluations stored before check-out analysis existed have no kind;
+    // all of them are check-ins (see evaluationFilter).
+    itemFromDocument: (document) => {
+      const item = toItem(document);
+      return { ...item, attendance_id: String(item.attendance_id), kind: item.kind === "checkout" ? "checkout" : "checkin" };
+    },
+    keyOf: (item) => `${item.attendance_id}#${item.kind}`,
   },
 ]);
+
+export function dynamoTableDefinition(store) {
+  const definition = DYNAMO_TABLES.find((table) => table.store === store);
+  if (!definition) throw new Error(`No DynamoDB table is defined for ${store}`);
+  return definition;
+}
 
 function sameKeySchema(actual = [], expected = []) {
   const normalise = (schema) => schema.map((key) => `${key.AttributeName}:${key.KeyType}`).join(",");
