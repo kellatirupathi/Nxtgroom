@@ -18,8 +18,9 @@ if (!config.region && !config.endpoint) {
   console.error("Set DYNAMODB_REGION (or DYNAMODB_ENDPOINT for DynamoDB Local).");
   process.exitCode = 2;
 } else {
-  const client = createDynamoClient(config);
+  let client;
   try {
+    client = createDynamoClient(config);
     const report = await ensureDynamoTables(client, {
       prefix: config.tablePrefix,
       apply,
@@ -37,6 +38,6 @@ if (!config.region && !config.endpoint) {
     console.error(`DynamoDB table check failed (${error?.name || "Error"}): ${error?.message || ""}`);
     process.exitCode = 2;
   } finally {
-    client.destroy();
+    client?.destroy();
   }
 }

@@ -34,9 +34,10 @@ if (!["copy", "compare"].includes(mode)) {
     maxPoolSize: 2,
     serverSelectionTimeoutMS: 10000,
   });
-  const rawClient = createDynamoClient(dynamo);
-  const client = DynamoDBDocumentClient.from(rawClient, { marshallOptions: { removeUndefinedValues: true } });
+  let rawClient;
   try {
+    rawClient = createDynamoClient(dynamo);
+    const client = DynamoDBDocumentClient.from(rawClient, { marshallOptions: { removeUndefinedValues: true } });
     await mongoClient.connect();
     const db = mongoClient.db(config.dbName);
     for (const store of stores) {
@@ -62,6 +63,6 @@ if (!["copy", "compare"].includes(mode)) {
     process.exitCode = 2;
   } finally {
     await mongoClient.close().catch(() => {});
-    rawClient.destroy();
+    rawClient?.destroy();
   }
 }

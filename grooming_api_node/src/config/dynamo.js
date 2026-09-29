@@ -104,15 +104,29 @@ export function dynamoTableName(store) {
 
 let documentClient = null;
 
+/**
+ * Credentials are always passed explicitly. Left out, the AWS SDK would look
+ * for AWS_ACCESS_KEY_ID, which on the server is the SES sender's key: a
+ * missing DynamoDB key then surfaced as AccessDenied for the mail user, as
+ * though the policy were wrong. That is refused here with the actual cause.
+ */
 export function createDynamoClient(config = dynamoConfig()) {
-  const credentials = config.accessKeyId && config.secretAccessKey
-    ? { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey }
+  let credentials;
+  if (config.accessKeyId && config.secretAccessKey) {
+    credentials = { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey };
+  } else if (config.endpoint) {
     // DynamoDB Local accepts any credentials; they only have to be present.
-    : config.endpoint ? { accessKeyId: "local", secretAccessKey: "local" } : undefined;
+    credentials = { accessKeyId: "local", secretAccessKey: "local" };
+  } else {
+    throw new Error(
+      "DYNAMODB_ACCESS_KEY_ID and DYNAMODB_SECRET_ACCESS_KEY must both be set "
+      + "(the SES key is never used for DynamoDB)"
+    );
+  }
   return new DynamoDBClient({
     region: config.region || "ap-south-1",
     ...(config.endpoint ? { endpoint: config.endpoint } : {}),
-    ...(credentials ? { credentials } : {}),
+    credentials,
     maxAttempts: 3,
   });
 }
