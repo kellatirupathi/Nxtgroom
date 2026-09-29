@@ -25,6 +25,8 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { apiFetch } from '../api';
 import BrandedLoader from './BrandedLoader';
+import DateRangeFilter from './DateRangeFilter';
+import { isCompleteRange, rangeForPreset, type DatePreset, type DateRange } from '../attendanceFilters';
 import {
   complianceChange,
   DASHBOARD_REFRESH_MS,
@@ -44,6 +46,7 @@ import {
 import type {
   DashboardArrivalSlot,
   DashboardData,
+  DashboardInstitutesRange,
   DashboardStatusKey,
   DashboardTrendDay,
 } from '../types';
@@ -512,7 +515,53 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
 
 function InstitutesTable({ data }: { data: DashboardData }) {
   const [sort, setSort] = useState<InstituteSort>({ key: 'present_percent', direction: 1 });
-  const rows = useMemo(() => sortInstitutes(data.institutes, sort), [data.institutes, sort]);
+  const [preset, setPreset] = useState<DatePreset>('today');
+  const [range, setRange] = useState<DateRange>(() => rangeForPreset('today', data.today));
+  const [ranged, setRanged] = useState<DashboardInstitutesRange | null>(null);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [rangeError, setRangeError] = useState('');
+
+  // Today's table arrives with the Dashboard and refreshes with it. Any other
+  // range is fetched on its own; one that reaches today is fetched again each
+  // time the page refreshes, so it stays as current as the rest of the page.
+  const showingToday = preset === 'today';
+  const reachesToday = !range.to || range.to >= data.today;
+  const refreshKey = !showingToday && reachesToday ? data.generated_at : '';
+  useEffect(() => {
+    if (showingToday || !isCompleteRange(range, preset)) return undefined;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ from: range.from, to: range.to });
+    setRangeLoading(true);
+    apiFetch<DashboardInstitutesRange>(`/api/v2/dashboard/institutes?${params.toString()}`, { signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setRanged(result);
+        setRangeError('');
+      })
+      .catch((requestError) => {
+        if (controller.signal.aborted || (requestError as { status?: number })?.status === 401) return;
+        setRangeError(requestError instanceof Error ? requestError.message : String(requestError));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setRangeLoading(false);
+      });
+    return () => controller.abort();
+  }, [showingToday, preset, range, refreshKey]);
+
+  const changeRange = (nextPreset: DatePreset, nextRange: DateRange) => {
+    setPreset(nextPreset);
+    setRange(nextRange);
+    // Rows for the previous range must not stand in for the new one.
+    setRanged(null);
+    setRangeError('');
+  };
+
+  const workingDays = showingToday ? 1 : ranged?.working_days ?? 0;
+  const waiting = !showingToday && !ranged && (rangeLoading || !rangeError);
+  const rows = useMemo(
+    () => sortInstitutes(showingToday ? data.institutes : ranged?.institutes ?? [], sort),
+    [showingToday, data.institutes, ranged, sort],
+  );
   const toggle = (key: InstituteSortKey) => {
     setSort((current) => (
       current.key === key
@@ -524,25 +573,41 @@ function InstitutesTable({ data }: { data: DashboardData }) {
 
   return (
     <section className={CARD} aria-labelledby="dashboard-institutes-title">
+      {/* No wrapping: the filter holds the top-right corner whatever range is
+          chosen, and the longer description a range brings wraps under the
+          title instead of pushing the filter onto a line of its own. */}
       <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4 md:px-5">
         <div className="min-w-0 flex-1">
           <h3 id="dashboard-institutes-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
             <Building2 size={18} className="text-indigo-600" aria-hidden="true" />
-            Institutes today
+            Institutes
           </h3>
           <p className="text-xs text-slate-500">
+            {workingDays > 1
+              ? `Present counts each instructor once per day they checked in, out of ${formatCount(workingDays)} working days. `
+              : ''}
             Select a column heading to sort. Face enrolment under 80% is flagged for face-only institutes.
           </p>
         </div>
+        <div className="shrink-0">
+          <DateRangeFilter preset={preset} range={range} today={data.today} onChange={changeRange} />
+        </div>
       </div>
-      {rows.length === 0 ? (
-        <p className="p-6 text-sm text-slate-400">No institutes have been added yet.</p>
+      {rangeError && (
+        <p role="alert" className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm text-rose-700 md:px-5">
+          {rangeError}
+        </p>
+      )}
+      {waiting ? (
+        <p className="p-6 text-sm text-slate-400" aria-live="polite">Loading institutes for this range…</p>
+      ) : rows.length === 0 ? (
+        <p className="p-6 text-sm text-slate-400">{rangeError ? 'No figures to show.' : 'No institutes have been added yet.'}</p>
       ) : (
         // Ten rows tall, then the rest scroll inside the card with the header
         // pinned, so the page below keeps its place however many institutes
         // there are.
         <div
-          className="overflow-auto overscroll-contain"
+          className={`overflow-auto overscroll-contain transition-opacity ${rangeLoading ? 'opacity-60' : ''}`}
           style={{ maxHeight: INSTITUTE_HEADER_HEIGHT + INSTITUTE_ROW_HEIGHT * INSTITUTE_VISIBLE_ROWS }}
           tabIndex={scrolls ? 0 : undefined}
           aria-label={scrolls ? 'Institutes, scrollable' : undefined}
