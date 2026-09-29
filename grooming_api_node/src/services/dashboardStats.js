@@ -1,6 +1,9 @@
 import {
   addDaysToKey,
 } from "./evaluationWorker.js";
+import {
+  describeCollegeIdentification,
+} from "./identificationSettings.js";
 import { localDateKey } from "./instructorReports.js";
 
 /**
@@ -151,4 +154,98 @@ function mostFrequent(values) {
     if (!best || count > best.count) best = { value, count };
   }
   return best?.value ?? null;
+}
+
+/**
+ * Mon–Sat days from `fromKey` to `toKey`, both inclusive. A range that holds
+ * no working day at all - a single Sunday someone chose - counts as the one
+ * day it is, so its check-ins are still measured against the roster.
+ */
+export function countWorkingDays(fromKey, toKey) {
+  if (!fromKey || !toKey || fromKey > toKey) return 0;
+  let count = 0;
+  let calendarDays = 0;
+  for (let key = fromKey; key <= toKey; key = addDaysToKey(key, 1)) {
+    calendarDays += 1;
+    if (!isSundayKey(key)) count += 1;
+  }
+  return count || (calendarDays ? 1 : 0);
+}
+
+/**
+ * Per-institute totals from attendance records, in the shape the database
+ * aggregation in loadInstituteStats returns, so today's table and a chosen
+ * range are built by the same function.
+ */
+export function instituteGroupsFromRecords(records) {
+  const groups = new Map();
+  for (const record of records) {
+    const key = record.college_id == null ? "" : String(record.college_id);
+    const group = groups.get(key) || { _id: key, check_ins: 0, compliant: 0, non_compliant: 0, unidentified: 0 };
+    const status = dashboardStatus(record.status);
+    if (identified(record)) {
+      group.check_ins += 1;
+      if (status === "compliant") group.compliant += 1;
+      if (status === "non_compliant") group.non_compliant += 1;
+    } else if (status === "unidentified") {
+      group.unidentified += 1;
+    }
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+/**
+ * One row per active institute for the Institutes table.
+ *
+ * `present` counts instructor-days: one per instructor per day they checked
+ * in, which the one-record-per-day rule makes the same as their identified
+ * check-ins. `expected` is the roster times the working days in the range, so
+ * over one day the column reads "present / instructors" as it always has, and
+ * over a week it reads instructor-days against the days that were possible.
+ */
+export function buildInstituteRows({
+  colleges = [],
+  roster = [],
+  identificationSettings = {},
+  enrolment = new Map(),
+  groups = [],
+  workingDays = 1,
+}) {
+  const totals = new Map(groups.map((row) => [row._id == null ? "" : String(row._id), row]));
+  const rosterByCollege = new Map();
+  for (const instructor of roster) {
+    const key = instructor.college_id == null ? "" : String(instructor.college_id);
+    rosterByCollege.set(key, (rosterByCollege.get(key) || 0) + 1);
+  }
+  const identification = new Map(
+    describeCollegeIdentification(identificationSettings, colleges, enrolment)
+      .map((row) => [row.college_id, row])
+  );
+  return colleges.map((row) => {
+    const collegeId = String(row._id);
+    const group = totals.get(collegeId) || {};
+    const present = Number(group.check_ins) || 0;
+    const compliant = Number(group.compliant) || 0;
+    const nonCompliant = Number(group.non_compliant) || 0;
+    const instructors = rosterByCollege.get(collegeId) || 0;
+    const expected = instructors * workingDays;
+    const described = identification.get(collegeId);
+    return {
+      college_id: collegeId,
+      name: row.name || "Unnamed institute",
+      mode: described?.mode || "FACE_ONLY",
+      present,
+      expected,
+      instructors,
+      present_percent: percent(present, expected),
+      compliant,
+      non_compliant: nonCompliant,
+      compliance_percent: percent(compliant, compliant + nonCompliant),
+      unidentified: Number(group.unidentified) || 0,
+      enrolled: described?.enrolled ?? 0,
+      enrolled_percent: described?.enrolled_percent ?? 0,
+      low_enrolment: Boolean(described?.low_enrolment),
+    };
+  });
 }
