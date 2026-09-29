@@ -4,7 +4,6 @@ import {
   complianceChange,
   formatCount,
   formatPercent,
-  INSTITUTE_VISIBLE_ROWS,
   shortDayLabel,
   sortInstitutes,
   weekdayLabel,
@@ -66,8 +65,4 @@ test('institutes sort with missing values last in both directions', () => {
   const byName = sortInstitutes(rows, { key: 'name', direction: -1 }).map((row) => row.name);
   assert.deepEqual(byName, ['Empty', 'Coimbatore', 'Bidar', 'Anantapur']);
   assert.notEqual(sortInstitutes(rows, { key: 'name', direction: 1 }), rows, 'the input is not mutated');
-});
-
-test('the institutes table shows ten rows before it scrolls', () => {
-  assert.equal(INSTITUTE_VISIBLE_ROWS, 10);
 });

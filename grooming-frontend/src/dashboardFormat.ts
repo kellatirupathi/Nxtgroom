@@ -9,9 +9,6 @@ import type { DashboardInstitute } from './types.ts';
  * a local Date would move it to the previous day for any viewer west of UTC.
  */
 
-/** Rows the Institutes table shows before it scrolls. */
-export const INSTITUTE_VISIBLE_ROWS = 10;
-
 /** How often the page refreshes itself while it is on screen. */
 export const DASHBOARD_REFRESH_MS = 30_000;
 
