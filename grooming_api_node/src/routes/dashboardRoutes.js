@@ -1,6 +1,11 @@
 import { Router } from "express";
 import { requireSuperAdmin } from "../middleware/auth.js";
-import { cachedDashboard, DashboardCollegeNotFound } from "../services/dashboardStats.js";
+import {
+  cachedDashboard,
+  cachedInstituteStats,
+  DashboardCollegeNotFound,
+  DashboardRangeError,
+} from "../services/dashboardStats.js";
 import { asyncRoute } from "../utils.js";
 
 export const dashboardRouter = Router();
@@ -33,3 +38,25 @@ dashboardRouter.get(
   })
 );
 
+/**
+ * The Institutes table for a chosen date range. `from` and `to` are inclusive
+ * local dates; either may be empty to leave that side open, and both empty is
+ * "All time". Today's table arrives with the Dashboard itself, so the page
+ * calls this only for another range.
+ */
+dashboardRouter.get(
+  "/institutes",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const { from = "", to = "" } = req.query;
+    if (typeof from !== "string" || typeof to !== "string") {
+      return res.status(422).json({ detail: "from and to must each be given once" });
+    }
+    try {
+      return res.json(await cachedInstituteStats(req.app.locals.db, { from, to }));
+    } catch (error) {
+      if (error instanceof DashboardRangeError) return res.status(422).json({ detail: error.message });
+      throw error;
+    }
+  })
+);

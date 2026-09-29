@@ -326,6 +326,17 @@ test("only administrators can open the dashboard", async () => {
   assert.equal(body.trend.length, TREND_WORKING_DAYS);
 });
 
+test("the institutes range endpoint validates its dates", async () => {
+  assert.equal((await request("BOA", "/institutes?from=2026-09-01&to=2026-09-02")).status, 403);
+  const ok = await request("ADMIN", "/institutes?from=&to=");
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.institutes.length, 2);
+  assert.equal(ok.body.working_days >= 1, true);
+  assert.equal((await request("ADMIN", "/institutes?from=2026-09-10&to=2026-09-01")).status, 422);
+  assert.equal((await request("ADMIN", "/institutes?from=a&from=b")).status, 422);
+  assert.equal((await request("ADMIN", "/institutes?from=not-a-date")).status, 422);
+});
+
 test("the institute filter is validated", async () => {
   assert.equal((await request("ADMIN", "?college_id=all")).status, 200);
   assert.equal((await request("ADMIN", "?college_id=a&college_id=b")).status, 422);
