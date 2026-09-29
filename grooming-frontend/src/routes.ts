@@ -12,7 +12,7 @@
 
 export const TABS = {
   DASHBOARD: 'dashboard',
-  ANALYTICS: 'analytics',
+  INSTITUTES: 'institutes',
   OVERVIEW: 'overview',
   DAILY_RECORDS: 'daily-records',
   INSTRUCTOR_DETAIL: 'instructor-detail',
@@ -27,7 +27,7 @@ export type Tab = (typeof TABS)[keyof typeof TABS];
 /** Canonical path for each tab. The order here is the order of resolution. */
 const TAB_TO_PATH: Record<Tab, string> = {
   [TABS.DASHBOARD]: '/dashboard',
-  [TABS.ANALYTICS]: '/analytics',
+  [TABS.INSTITUTES]: '/institutes',
   [TABS.OVERVIEW]: '/attendance',
   [TABS.DAILY_RECORDS]: '/daily-records',
   [TABS.INSTRUCTOR_DETAIL]: '/daily-records/record',  // suffixed with the record id

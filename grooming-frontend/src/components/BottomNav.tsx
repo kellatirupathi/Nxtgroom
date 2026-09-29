@@ -40,7 +40,7 @@ const PRIMARY_ITEMS: NavItem[] = [
 ];
 
 const OVERFLOW_ITEMS: NavItem[] = [
-  { tab: 'analytics', label: 'Institutes', icon: ChartColumnBig, adminOnly: true },
+  { tab: 'institutes', label: 'Institutes', icon: ChartColumnBig, adminOnly: true },
   // Gated on the identify permission rather than on role, so a BOA who has been
   // granted it still reaches the queue.
   { tab: 'unidentified', label: 'Unidentified', icon: UserRoundSearch, identifyOnly: true },
