@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, Database, ScanFace, Users } from 'lucide-react';
+import { Bell, Building2, Database, ScanFace, UserRoundSearch, Users } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import IdentificationSettingsSection from './IdentificationSettingsSection';
 import InstructorSyncPanel from './InstructorSyncPanel';
 import ReportRecipients from './ReportRecipients';
 import AccessSettingsSection from './AccessSettingsSection';
+import UnidentifiedQueue from './UnidentifiedQueue';
 import type { NotificationSettings } from '../types';
 
 export interface ToggleProps {
@@ -180,8 +181,15 @@ function NotificationSettings() {
   );
 }
 
-export default function SettingsPage() {
-  const [tab, setTab] = useState<'notifications' | 'identification' | 'colleges' | 'sync' | 'rp'>('notifications');
+export type SettingsTab = 'notifications' | 'identification' | 'unidentified' | 'colleges' | 'sync' | 'rp';
+
+/**
+ * `initialTab` lets another screen open Settings on a particular tab: the
+ * Dashboard's "Open queue" link lands on Unidentified, which is where the
+ * queue lives for administrators.
+ */
+export default function SettingsPage({ initialTab = 'notifications' }: { initialTab?: SettingsTab }) {
+  const [tab, setTab] = useState<SettingsTab>(initialTab);
 
   // Chips on a phone, which swipe sideways the way an app's section chips do;
   // the underlined tab strip from sm up, as before.
@@ -196,10 +204,10 @@ export default function SettingsPage() {
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
       <div className="mb-5 shrink-0">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync and reporting partners.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, unidentified check-ins, institutes, data sync and reporting partners.</p>
       </div>
 
-      {/* Scrolls sideways rather than compressing. Five tabs need more width
+      {/* Scrolls sideways rather than compressing. Six tabs need more width
           than a phone has, and a flex row without this squeezed every label
           until the strip was unreadable and unhittable. overflow-x-auto keeps
           them full size and lets the strip be swiped; the tabs themselves stop
@@ -238,6 +246,16 @@ export default function SettingsPage() {
           <button
             type="button"
             role="tab"
+            aria-selected={tab === 'unidentified'}
+            onClick={() => setTab('unidentified')}
+            className={tabClass('unidentified')}
+          >
+            <UserRoundSearch size={16} aria-hidden="true" />
+            Unidentified
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={tab === 'colleges'}
             onClick={() => setTab('colleges')}
             className={tabClass('colleges')}
@@ -271,6 +289,7 @@ export default function SettingsPage() {
       <div className="flex-1 min-h-0 overflow-auto">
         {tab === 'notifications' && <NotificationSettings />}
         {tab === 'identification' && <IdentificationSettingsSection />}
+        {tab === 'unidentified' && <UnidentifiedQueue />}
         {tab === 'colleges' && <CollegeManagement />}
         {tab === 'sync' && <InstructorSyncPanel />}
         {tab === 'rp' && <ReportRecipients />}
