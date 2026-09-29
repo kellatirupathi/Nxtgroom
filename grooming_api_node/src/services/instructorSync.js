@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { BigQuery } from "@google-cloud/bigquery";
+import { getSetting, saveSetting } from "../stores/settingsStore.js";
 
 /**
  * Pulls the instructor roster from BigQuery into MongoDB.
@@ -238,15 +239,11 @@ export async function saveInstructorRoster(db, records) {
 }
 
 export async function readSyncState(db) {
-  return db.collection("app_settings").findOne({ _id: SYNC_STATE_ID });
+  return getSetting(db, SYNC_STATE_ID);
 }
 
 export async function writeSyncState(db, state) {
-  await db.collection("app_settings").updateOne(
-    { _id: SYNC_STATE_ID },
-    { $set: { ...state, _id: SYNC_STATE_ID } },
-    { upsert: true }
-  );
+  await saveSetting(db, SYNC_STATE_ID, { set: { ...state, _id: SYNC_STATE_ID } });
 }
 
 /** Runs one sync end to end and records the outcome for the Settings screen. */
@@ -472,11 +469,7 @@ export async function runInstituteSync(db, { triggeredBy } = {}) {
       instructors_ambiguous: ambiguous,
       duration_ms: Date.now() - startedAt.getTime(),
     };
-    await db.collection("app_settings").updateOne(
-      { _id: "institute_sync" },
-      { $set: { ...state, _id: "institute_sync" } },
-      { upsert: true }
-    );
+    await saveSetting(db, "institute_sync", { set: { ...state, _id: "institute_sync" } });
     return { ok: true, ...state };
   } catch (error) {
     const state = {
@@ -485,11 +478,7 @@ export async function runInstituteSync(db, { triggeredBy } = {}) {
       last_sync_error: error?.message?.slice(0, 300) || "Sync failed",
       duration_ms: Date.now() - startedAt.getTime(),
     };
-    await db.collection("app_settings").updateOne(
-      { _id: "institute_sync" },
-      { $set: { ...state, _id: "institute_sync" } },
-      { upsert: true }
-    );
+    await saveSetting(db, "institute_sync", { set: { ...state, _id: "institute_sync" } });
     return { ok: false, ...state };
   }
 }

@@ -1,3 +1,5 @@
+import { getSetting, saveSetting } from "../stores/settingsStore.js";
+
 /**
  * Workspace-wide email notification preferences.
  *
@@ -53,20 +55,16 @@ export function validateNotificationSettings(body) {
 
 export async function getNotificationSettings(db) {
   if (!db) return { ...DEFAULT_NOTIFICATION_SETTINGS };
-  const stored = await db.collection("app_settings").findOne({ _id: SETTINGS_ID });
+  const stored = await getSetting(db, SETTINGS_ID);
   return normalizeNotificationSettings(stored);
 }
 
 export async function saveNotificationSettings(db, settings, updatedBy) {
   const value = normalizeNotificationSettings(settings);
-  await db.collection("app_settings").updateOne(
-    { _id: SETTINGS_ID },
-    {
-      $set: { ...value, updated_at: new Date(), updated_by: updatedBy || null },
-      $setOnInsert: { _id: SETTINGS_ID, created_at: new Date() },
-    },
-    { upsert: true }
-  );
+  await saveSetting(db, SETTINGS_ID, {
+    set: { ...value, updated_at: new Date(), updated_by: updatedBy || null },
+    setOnInsert: { _id: SETTINGS_ID, created_at: new Date() },
+  });
   return value;
 }
 

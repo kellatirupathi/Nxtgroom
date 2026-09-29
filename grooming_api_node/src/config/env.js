@@ -1,3 +1,5 @@
+import { dynamoConfigurationErrors } from "./dynamo.js";
+
 // The server destroys a socket that outlives this, so anything running inside
 // a request must finish first. Exported so server.js and the check below can
 // never drift apart.
@@ -230,6 +232,8 @@ export function validateEnvironment() {
   if (!["development", "test", "production"].includes(config.nodeEnv)) {
     throw new Error("NODE_ENV must be development, test, or production");
   }
+  const dynamoErrors = dynamoConfigurationErrors();
+  if (dynamoErrors.length) throw new Error(dynamoErrors.join("; "));
   if (!isProduction()) return config;
 
   const errors = [];
