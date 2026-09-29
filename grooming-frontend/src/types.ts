@@ -324,7 +324,6 @@ export interface DashboardSummary {
   pending: number;
   oldest_pending_seconds: number | null;
   errors: number;
-  retake_recommended: number;
   checked_out: number;
   on_duty: number;
   missed_checkout_previous_day: number;
@@ -339,13 +338,6 @@ export interface DashboardTrendDay {
   compliant: number;
   non_compliant: number;
   compliance_percent: number | null;
-}
-
-export interface DashboardArrivalSlot {
-  start_minutes: number;
-  label: string;
-  end_label: string;
-  count: number;
 }
 
 export interface DashboardFailedCheckpoint {
@@ -395,11 +387,8 @@ export interface DashboardData {
   summary: DashboardSummary;
   status_breakdown: { key: DashboardStatusKey; count: number }[];
   trend: DashboardTrendDay[];
-  arrivals: DashboardArrivalSlot[];
   failed_checkpoints: DashboardFailedCheckpoint[];
   escalations: DashboardEscalation[];
-  attire: { analysed: number; saree: number; kurti: number; formal: number };
-  institutes: DashboardInstitute[];
 }
 
 /** GET /api/v2/dashboard/institutes?from=&to= */
