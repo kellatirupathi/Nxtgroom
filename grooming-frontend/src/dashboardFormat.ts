@@ -9,9 +9,6 @@ import type { DashboardInstitute } from './types.ts';
  * a local Date would move it to the previous day for any viewer west of UTC.
  */
 
-/** Rows the Institutes table shows before it scrolls. */
-export const INSTITUTE_VISIBLE_ROWS = 10;
-
 /** How often the page refreshes itself while it is on screen. */
 export const DASHBOARD_REFRESH_MS = 30_000;
 
@@ -49,17 +46,6 @@ export function formatPercent(value: number | null | undefined): string {
 /** Whole numbers with Indian digit grouping: "1,184". */
 export function formatCount(value: number | null | undefined): string {
   return new Intl.NumberFormat('en-IN').format(Number(value) || 0);
-}
-
-/** "48 s", "12 min", "2 h 5 min". */
-export function formatWait(seconds: number | null | undefined): string {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '—';
-  if (seconds < 60) return `${Math.round(seconds)} s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
 
 /** The time a response was generated, in the app's time zone: "5:20:14 pm". */

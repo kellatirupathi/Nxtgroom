@@ -61,7 +61,7 @@ interface SessionState {
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
-const ADMIN_TABS = new Set(['dashboard', 'institute-analytics', 'boa-management', 'settings', 'instructor-management']);
+const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management']);
 /**
  * Gated on a capability rather than a role, so a URL typed by hand is refused
  * the same way the navigation hides it.
@@ -406,7 +406,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'institute-analytics' && isElevatedRole(session.role) && (
+          {activeTab === 'institutes' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><InstituteAnalytics /></div>
           )}
 

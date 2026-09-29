@@ -109,11 +109,11 @@ export default function Sidebar({
             </button>
             <button
               type="button"
-              onClick={() => navigate('institute-analytics')}
-              className={navClass(activeTab === 'institute-analytics')}
+              onClick={() => navigate('institutes')}
+              className={navClass(activeTab === 'institutes')}
             >
               <ChartColumnBig size={20} aria-hidden="true" />
-              Institute Analytics
+              Institutes
             </button>
           </>
         )}

@@ -140,7 +140,6 @@ test("today's summary counts identified check-ins against the roster", () => {
   assert.equal(summary.analysed, 2);
   assert.equal(summary.compliance_percent, 50);
   assert.equal(summary.pending, 1);
-  assert.equal(summary.oldest_pending_seconds, 8 * 3600 + 10 * 60, "pending since 9:10 AM, now 5:20 PM");
   assert.equal(summary.checked_out, 1);
   assert.equal(summary.on_duty, 2);
   assert.equal(summary.missed_checkout_previous_day, 1, "i4 never checked out on Monday");

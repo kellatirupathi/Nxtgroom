@@ -223,15 +223,10 @@ export function buildDashboard({
       .filter((id) => rosterById.has(id))
   );
   const byStatus = { compliant: 0, unassessed: 0, non_compliant: 0, pending: 0, error: 0 };
-  let oldestPending = null;
   let checkedOut = 0;
   for (const record of todayIdentified) {
     const status = dashboardStatus(record.status);
     if (status in byStatus) byStatus[status] += 1;
-    if (status === "pending" && record.check_in_time) {
-      const at = new Date(record.check_in_time).getTime();
-      if (oldestPending === null || at < oldestPending) oldestPending = at;
-    }
     if (record.check_out_time) checkedOut += 1;
   }
   const analysed = byStatus.compliant + byStatus.non_compliant;
@@ -341,9 +336,6 @@ export function buildDashboard({
       compliance_same_day_last_week: lastWeekCompliance,
       unassessed: byStatus.unassessed,
       pending: byStatus.pending,
-      oldest_pending_seconds: oldestPending === null
-        ? null
-        : Math.max(0, Math.round((now.getTime() - oldestPending) / 1000)),
       errors: byStatus.error,
       checked_out: checkedOut,
       on_duty: Math.max(0, todayIdentified.length - checkedOut),
