@@ -11,6 +11,8 @@
  */
 
 export const TABS = {
+  DASHBOARD: 'dashboard',
+  INSTITUTE_ANALYTICS: 'institute-analytics',
   OVERVIEW: 'overview',
   DAILY_RECORDS: 'daily-records',
   INSTRUCTOR_DETAIL: 'instructor-detail',
@@ -24,6 +26,8 @@ export type Tab = (typeof TABS)[keyof typeof TABS];
 
 /** Canonical path for each tab. The order here is the order of resolution. */
 const TAB_TO_PATH: Record<Tab, string> = {
+  [TABS.DASHBOARD]: '/dashboard',
+  [TABS.INSTITUTE_ANALYTICS]: '/institute-analytics',
   [TABS.OVERVIEW]: '/attendance',
   [TABS.DAILY_RECORDS]: '/daily-records',
   [TABS.INSTRUCTOR_DETAIL]: '/daily-records/record',  // suffixed with the record id
@@ -110,6 +114,16 @@ export function tabForPath(pathname: string): Tab {
   // A record id follows the detail path, so match the prefix before the map.
   if (/^\/daily-records\/record(\/|$)/.test(normalized)) return TABS.INSTRUCTOR_DETAIL;
   return PATH_TO_TAB.get(normalized) ?? TABS.OVERVIEW;
+}
+
+/**
+ * The screen a signed-in person starts on. Administrators open on the
+ * Dashboard, which is their first menu item; a BOA, who cannot see it, opens
+ * on Attendance as before. Only "/" and the post-sign-in landing use this: a
+ * deep link or a bookmark still opens exactly the screen it names.
+ */
+export function homeTabForRole(elevated: boolean): Tab {
+  return elevated ? TABS.DASHBOARD : TABS.OVERVIEW;
 }
 
 export function currentTabFromLocation(): Tab {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   pathForTab,
   tabForPath,
+  homeTabForRole,
   TABS,
   RESET_PASSWORD_PATH,
   publicDayReportPath,
@@ -119,6 +120,8 @@ test('every route resolves to the screen that owns it', () => {
 
   const expected = [
     ['/', TABS.OVERVIEW],
+    ['/dashboard', TABS.DASHBOARD],
+    ['/institute-analytics', TABS.INSTITUTE_ANALYTICS],
     ['/attendance', TABS.OVERVIEW],
     ['/daily-records', TABS.DAILY_RECORDS],
     ['/daily-records/record/abc-123', TABS.INSTRUCTOR_DETAIL],
@@ -210,4 +213,13 @@ test('every parsed report route carries a half the page can render', () => {
   // builder, so the link the email sends reopens the same report.
   const built = publicDayReportPath('abcdefgh12345678', '2026-08-18', 'checkout');
   assert.equal(at(built).half, 'checkout');
+});
+
+test('administrators start on the Dashboard; a BOA starts on Attendance', () => {
+  assert.equal(pathForTab(TABS.DASHBOARD), '/dashboard');
+  assert.equal(homeTabForRole(true), TABS.DASHBOARD);
+  assert.equal(homeTabForRole(false), TABS.OVERVIEW);
+  // The role-free resolver is unchanged: "/" is resolved to a home screen by
+  // the shell once the role is known, not by the path alone.
+  assert.equal(tabForPath('/'), TABS.OVERVIEW);
 });

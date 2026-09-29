@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ChartColumnBig,
+  LayoutDashboard,
   LayoutGrid,
   History,
   UserCog,
@@ -31,12 +33,14 @@ interface NavItem {
  * "More" sheet so the bar never scrolls or crowds on small screens.
  */
 const PRIMARY_ITEMS: NavItem[] = [
+  { tab: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, adminOnly: true },
   { tab: 'overview', label: 'Attendance', icon: LayoutGrid },
   { tab: 'daily-records', label: 'Records', icon: History },
   { tab: 'instructor-management', label: 'Instructors', icon: UserCog, adminOnly: true },
 ];
 
 const OVERFLOW_ITEMS: NavItem[] = [
+  { tab: 'institute-analytics', label: 'Institute Analytics', icon: ChartColumnBig, adminOnly: true },
   // Gated on the identify permission rather than on role, so a BOA who has been
   // granted it still reaches the queue.
   { tab: 'unidentified', label: 'Unidentified', icon: UserRoundSearch, identifyOnly: true },
@@ -79,7 +83,9 @@ export default function BottomNav({
   const visible = (items: NavItem[]) =>
     items.filter((item) => {
       if (item.adminOnly && !isElevatedRole(role)) return false;
-      if (item.identifyOnly && !canIdentify) return false;
+      // Administrators reach the queue from Settings; a BOA with the
+      // permission cannot open Settings, so it stays in their menu.
+      if (item.identifyOnly && (!canIdentify || isElevatedRole(role))) return false;
       return true;
     });
 

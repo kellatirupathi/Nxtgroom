@@ -22,6 +22,7 @@ import {
 import { adminRouter } from "./src/routes/adminRoutes.js";
 import { attendanceRouter } from "./src/routes/attendanceRoutes.js";
 import { authRouter } from "./src/routes/authRoutes.js";
+import { dashboardRouter } from "./src/routes/dashboardRoutes.js";
 import { instructorRouter } from "./src/routes/instructorRoutes.js";
 import { reportRouter } from "./src/routes/reportRoutes.js";
 import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
@@ -202,6 +203,7 @@ app.use("/api/v2/auth", requireDatabase, authRouter);
 // called by cron-jobs.org, which cannot hold a session. Each authenticates
 // itself — a report token in the path, or a shared secret header.
 app.use("/api/v2/reports", requireDatabase, reportRouter);
+app.use("/api/v2/dashboard", requireDatabase, getCurrentUser, dashboardRouter);
 app.use("/api/v2", requireDatabase, getCurrentUser, adminRouter);
 app.use("/api/v2/instructors", requireDatabase, getCurrentUser, instructorRouter);
 app.use("/api/v2/attendance", requireDatabase, getCurrentUser, attendanceRouter);

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ChartColumnBig,
+  LayoutDashboard,
   LayoutGrid,
   Users,
   History,
@@ -99,6 +101,23 @@ export default function Sidebar({
       </div>
 
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto" aria-label="Main navigation">
+        {isElevatedRole(role) && (
+          <>
+            <button type="button" onClick={() => navigate('dashboard')} className={navClass(activeTab === 'dashboard')}>
+              <LayoutDashboard size={20} aria-hidden="true" />
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('institute-analytics')}
+              className={navClass(activeTab === 'institute-analytics')}
+            >
+              <ChartColumnBig size={20} aria-hidden="true" />
+              Institute Analytics
+            </button>
+          </>
+        )}
+
         <button type="button" onClick={() => navigate('overview')} className={navClass(activeTab === 'overview')}>
           <LayoutGrid size={20} aria-hidden="true" />
           Attendance
@@ -109,7 +128,9 @@ export default function Sidebar({
           Daily Records
         </button>
 
-        {canIdentify && (
+        {/* Administrators reach the queue from Settings. A BOA with the
+            permission cannot open Settings, so it stays in their menu. */}
+        {canIdentify && !isElevatedRole(role) && (
           <button
             type="button"
             onClick={() => navigate('unidentified')}
