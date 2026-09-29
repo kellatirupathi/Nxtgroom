@@ -881,13 +881,13 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <Escalations data={data} />
         <FailedCheckpoints data={data} />
       </div>
 
       <InstitutesTable data={data} />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <Escalations data={data} />
         <AttireCard data={data} />
       </div>
     </section>
