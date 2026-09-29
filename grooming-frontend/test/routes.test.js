@@ -121,6 +121,7 @@ test('every route resolves to the screen that owns it', () => {
   const expected = [
     ['/', TABS.OVERVIEW],
     ['/dashboard', TABS.DASHBOARD],
+    ['/institute-analytics', TABS.INSTITUTE_ANALYTICS],
     ['/attendance', TABS.OVERVIEW],
     ['/daily-records', TABS.DAILY_RECORDS],
     ['/daily-records/record/abc-123', TABS.INSTRUCTOR_DETAIL],
