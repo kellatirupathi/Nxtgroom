@@ -669,6 +669,53 @@ function Escalations({ data }: { data: DashboardData }) {
   );
 }
 
+function AttireCard({ data }: { data: DashboardData }) {
+  const { attire, summary } = data;
+  const rows = [
+    { label: 'Saree', style: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200', count: attire.saree },
+    { label: 'Kurti + Dupatta', style: 'bg-violet-50 text-violet-700 border-violet-200', count: attire.kurti },
+    { label: 'Formal', style: 'bg-sky-50 text-sky-700 border-sky-200', count: attire.formal },
+  ];
+  const share = (count: number) => (attire.analysed ? (count / attire.analysed) * 100 : 0);
+  const ofCheckIns = (count: number) => (summary.check_ins ? ` (${formatPercent((count / summary.check_ins) * 100)})` : '');
+  return (
+    <section className={`${CARD} p-4 md:p-5`} aria-labelledby="dashboard-attire-title">
+      <h3 id="dashboard-attire-title" className="text-base font-bold text-slate-800">Women&apos;s attire this week</h3>
+      <p className="text-xs text-slate-500 tabular-nums">
+        From {formatCount(attire.analysed)} analysed check-in{attire.analysed === 1 ? '' : 's'}. The guideline is 3 saree and 3 kurti days a week.
+      </p>
+      {attire.analysed === 0 ? (
+        <p className="mt-6 text-sm text-slate-400">No women&apos;s check-ins have been analysed this week yet.</p>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {rows.map((row) => (
+            <li key={row.label} className="grid grid-cols-[8.5rem_1fr_5.5rem] items-center gap-3 text-sm">
+              <span><span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold ${row.style}`}>{row.label}</span></span>
+              <span className="h-2.5 rounded-full bg-slate-100" aria-hidden="true">
+                <span className="block h-2.5 rounded-full bg-slate-500" style={{ width: `${share(row.count)}%` }} />
+              </span>
+              <span className="text-right tabular-nums">
+                <b className="text-slate-800">{Math.round(share(row.count))}%</b> <span className="text-slate-400">{formatCount(row.count)}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-5 rounded-md border border-slate-100 bg-slate-50 p-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Image quality today</p>
+        <div className="mt-2 flex items-baseline justify-between gap-3 text-sm tabular-nums">
+          <span className="text-slate-600">Retake recommended</span>
+          <span className="font-bold text-slate-800">{formatCount(summary.retake_recommended)}<span className="font-medium text-slate-400">{ofCheckIns(summary.retake_recommended)}</span></span>
+        </div>
+        <div className="mt-1 flex items-baseline justify-between gap-3 text-sm tabular-nums">
+          <span className="text-slate-600">Not assessed (body not visible)</span>
+          <span className="font-bold text-slate-800">{formatCount(summary.unassessed)}<span className="font-medium text-slate-400">{ofCheckIns(summary.unassessed)}</span></span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function ComplianceDelta({ data }: { data: DashboardData }) {
   const change = complianceChange(data.summary.compliance_percent, data.summary.compliance_same_day_last_week);
   const weekday = weekdayLabel(data.same_day_last_week);
@@ -870,6 +917,7 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <Escalations data={data} />
+        <AttireCard data={data} />
       </div>
     </section>
   );
