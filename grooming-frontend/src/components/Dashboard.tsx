@@ -22,11 +22,13 @@ import {
   formatPercent,
   formatWait,
   shortDayLabel,
+  tooltipDayLabel,
   updatedAtLabel,
   weekdayLabel,
 } from '../dashboardFormat';
 import type {
   DashboardData,
+  DashboardTrendDay,
 } from '../types';
 
 interface DashboardProps {
@@ -34,6 +36,56 @@ interface DashboardProps {
   onNavigate: (tab: string) => void;
   /** Whether this account may open the Unidentified queue. */
   canIdentify?: boolean;
+}
+
+// Chart colours. Checked for colour-blind separation between neighbours; every
+// mark is also labelled, so colour never carries meaning on its own.
+const COLOR_ATTENDANCE = '#4f46e5';
+const COLOR_COMPLIANCE = '#0891b2';
+const TEXT_MUTED = '#94a3b8';
+const TEXT_STRONG = '#1e293b';
+const GRID = '#eef2f7';
+const AXIS = '#cbd5e1';
+
+const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
+const TREND_RANGES = [7, 14, 30] as const;
+/** Tracks an element's rendered width so a chart can draw at its real size. */
+function useElementWidth<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return undefined;
+    const update = () => setWidth(node.clientWidth);
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
+
+function ChartTooltip({ x, y, width, children }: { x: number; y: number; width: number; children: ReactNode }) {
+  // Kept inside the chart: centred on the point, clamped to the chart's edges.
+  const half = 90;
+  const left = Math.max(half, Math.min(width - half, x));
+  return (
+    <div
+      role="status"
+      className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-slate-900 px-2.5 py-2 text-xs leading-relaxed text-slate-50 shadow-lg"
+      style={{ left, top: y - 10 }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function Swatch({ color }: { color: string }) {
+  return <span aria-hidden="true" className="mr-1.5 inline-block h-2 w-2 rounded-sm align-middle" style={{ background: color }} />;
 }
 
 function KpiTile({
@@ -71,6 +123,180 @@ function TileLink({ onClick, children, tone = 'indigo' }: { onClick: () => void;
       {children}
       <ArrowRight size={12} aria-hidden="true" />
     </button>
+  );
+}
+
+function TrendChart({ trend }: { trend: DashboardTrendDay[] }) {
+  const [days, setDays] = useState<(typeof TREND_RANGES)[number]>(14);
+  const [hover, setHover] = useState<number | null>(null);
+  const [ref, width] = useElementWidth<HTMLDivElement>();
+  const data = trend.slice(-days);
+  const height = 256;
+  const margin = { top: 12, right: 52, bottom: 26, left: 40 };
+  const innerWidth = Math.max(0, width - margin.left - margin.right);
+  const innerHeight = height - margin.top - margin.bottom;
+
+  const values = data.flatMap((row) => [row.present_percent, row.compliance_percent])
+    .filter((value): value is number => typeof value === 'number');
+  const lowest = values.length ? Math.min(...values) : 60;
+  const yMin = Math.max(0, Math.min(60, Math.floor((lowest - 5) / 10) * 10));
+  const yStep = 100 - yMin > 50 ? 20 : 10;
+  const ticks: number[] = [];
+  for (let value = yMin; value <= 100; value += yStep) ticks.push(value);
+
+  const x = (index: number) => margin.left + (data.length <= 1 ? innerWidth / 2 : (index / (data.length - 1)) * innerWidth);
+  const y = (value: number) => margin.top + (1 - (value - yMin) / (100 - yMin)) * innerHeight;
+
+  const series = [
+    { key: 'present_percent' as const, label: 'Present', color: COLOR_ATTENDANCE },
+    { key: 'compliance_percent' as const, label: 'Compliant', color: COLOR_COMPLIANCE },
+  ];
+
+  /** A line broken wherever a day has no value, rather than drawn through it. */
+  const linePath = (key: 'present_percent' | 'compliance_percent') => {
+    let path = '';
+    let drawing = false;
+    data.forEach((row, index) => {
+      const value = row[key];
+      if (typeof value !== 'number') {
+        drawing = false;
+        return;
+      }
+      path += `${drawing ? 'L' : 'M'}${x(index)},${y(value)}`;
+      drawing = true;
+    });
+    return path;
+  };
+
+  const lastIndex = data.length - 1;
+  const labelEvery = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor(innerWidth / 72))));
+  const hovered = hover !== null ? data[hover] : null;
+
+  const pointAt = (clientX: number, target: SVGRectElement) => {
+    const box = target.getBoundingClientRect();
+    const ratio = box.width ? (clientX - box.left) / box.width : 0;
+    setHover(Math.max(0, Math.min(lastIndex, Math.round(ratio * lastIndex))));
+  };
+
+  return (
+    <section className={`${CARD} p-4 md:p-5 xl:col-span-2`} aria-labelledby="dashboard-trend-title">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 id="dashboard-trend-title" className="text-base font-bold text-slate-800">Attendance and compliance</h3>
+          <p className="text-xs text-slate-500">Share of instructors present, and share of analysed check-ins that passed, per working day (Mon–Sat)</p>
+        </div>
+        <div className="inline-flex rounded-md bg-slate-100 p-0.5" role="group" aria-label="Date range">
+          {TREND_RANGES.map((range) => (
+            <button
+              key={range}
+              type="button"
+              aria-pressed={days === range}
+              onClick={() => { setDays(range); setHover(null); }}
+              className={`rounded px-3 py-1 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                days === range ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+              }`}
+            >
+              {range} days
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-4 text-xs font-medium text-slate-600">
+        {series.map((item) => (
+          <span key={item.key} className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="h-0.5 w-4 rounded" style={{ background: item.color }} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+      <div ref={ref} className="relative mt-2 w-full" style={{ height }}>
+        {width > 0 && (
+          <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-label={`Present and compliant percentage over the last ${days} working days`}
+          >
+            {ticks.map((tick) => (
+              <g key={tick}>
+                <line x1={margin.left} x2={width - margin.right} y1={y(tick)} y2={y(tick)} stroke={tick === yMin ? AXIS : GRID} />
+                <text x={margin.left - 8} y={y(tick) + 4} textAnchor="end" fontSize={11} fill={TEXT_MUTED}>{tick}%</text>
+              </g>
+            ))}
+            {data.map((row, index) => {
+              const show = index === lastIndex || (index % labelEvery === 0 && lastIndex - index >= labelEvery * 0.6);
+              if (!show) return null;
+              return (
+                <text key={row.day} x={x(index)} y={height - 6} textAnchor="middle" fontSize={11} fill={TEXT_MUTED}>
+                  {index === lastIndex ? 'Today' : shortDayLabel(row.day)}
+                </text>
+              );
+            })}
+            {series.map((item) => (
+              <path
+                key={item.key}
+                d={linePath(item.key)}
+                fill="none"
+                stroke={item.color}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              />
+            ))}
+            {series.map((item) => {
+              const value = data[lastIndex]?.[item.key];
+              if (typeof value !== 'number') return null;
+              return (
+                <g key={item.key}>
+                  <circle cx={x(lastIndex)} cy={y(value)} r={4} fill={item.color} stroke="#fff" strokeWidth={2} />
+                  <text x={x(lastIndex) + 8} y={y(value) + 4} fontSize={11} fontWeight={700} fill={TEXT_STRONG}>
+                    {value.toFixed(1)}%
+                  </text>
+                </g>
+              );
+            })}
+            {hovered && hover !== null && (
+              <g>
+                <line x1={x(hover)} x2={x(hover)} y1={margin.top} y2={margin.top + innerHeight} stroke={AXIS} />
+                {series.map((item) => {
+                  const value = hovered[item.key];
+                  return typeof value === 'number'
+                    ? <circle key={item.key} cx={x(hover)} cy={y(value)} r={4} fill={item.color} stroke="#fff" strokeWidth={2} />
+                    : null;
+                })}
+              </g>
+            )}
+            <rect
+              x={margin.left}
+              y={margin.top}
+              width={innerWidth}
+              height={innerHeight}
+              fill="transparent"
+              onPointerMove={(event) => pointAt(event.clientX, event.currentTarget)}
+              onPointerDown={(event) => pointAt(event.clientX, event.currentTarget)}
+              onPointerLeave={() => setHover(null)}
+            />
+          </svg>
+        )}
+        {hovered && hover !== null && (
+          <ChartTooltip
+            x={x(hover)}
+            y={Math.min(
+              ...series.map((item) => {
+                const value = hovered[item.key];
+                return typeof value === 'number' ? y(value) : margin.top + innerHeight;
+              }),
+            )}
+            width={width}
+          >
+            <div className="font-bold">{tooltipDayLabel(hovered.day)}</div>
+            <div><Swatch color={COLOR_ATTENDANCE} />Present <b>{formatPercent(hovered.present_percent)}</b> ({formatCount(hovered.present)})</div>
+            <div><Swatch color={COLOR_COMPLIANCE} />Compliant <b>{formatPercent(hovered.compliance_percent)}</b> ({formatCount(hovered.compliant)} of {formatCount(hovered.compliant + hovered.non_compliant)})</div>
+          </ChartTooltip>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -259,6 +485,10 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
             <TileLink tone="rose" onClick={() => onNavigate('unidentified')}>Open queue</TileLink>
           )}
         </KpiTile>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+        <TrendChart trend={data.trend} />
       </div>
     </section>
   );
