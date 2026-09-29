@@ -5,6 +5,7 @@ import { evaluateImage } from "./visionEngine.js";
 import { CHECKPOINT_VERSION, improvementTips } from "../checkpoints.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { createIdleBackoff, createSweepSchedule } from "./workerPacing.js";
 import { incrementMetric } from "./telemetry.js";
 import { downloadPhoto } from "./photoStorage.js";
 import { enqueueMailJob } from "./mailWorker.js";
@@ -1285,6 +1286,9 @@ export function startEvaluationWorker(db) {
   let inFlight = Promise.resolve();
   const config = runtimeConfig();
   const interval = config.evaluationPollMs;
+  const backoff = createIdleBackoff({ minMs: interval, maxMs: config.workerIdleMaxPollMs });
+  const sweeps = createSweepSchedule(config.workerSweepIntervalMs);
+  let sweepBacklog = false;
   const monitor = createWorkerMonitor("evaluation", {
     busyStaleAfterMs: config.evaluationLeaseMs + 60000,
   });
@@ -1292,6 +1296,7 @@ export function startEvaluationWorker(db) {
   // Set while the loop is sleeping on an empty queue, so a wake-up knows
   // there is an idle timer worth cancelling and nothing is in flight.
   let idle = false;
+  let wokenMidCycle = false;
 
   const schedule = (delay = interval) => {
     if (stopped) return;
@@ -1302,12 +1307,19 @@ export function startEvaluationWorker(db) {
     }, delay);
   };
 
-  // Only an idle worker is worth waking. One that is mid-cycle will drain the
-  // new job on its next pass without any help, and re-entering tick() here
-  // would run two cycles concurrently.
+  // Only an idle worker's timer is worth cancelling. Re-entering tick()
+  // mid-cycle would run two cycles concurrently, so a mid-cycle wake-up just
+  // makes the next cycle start without backing off.
   const wake = () => {
-    if (stopped || !idle) return;
+    if (stopped) return;
+    if (!idle) {
+      // Mid-cycle: this cycle may already have looked for jobs. Remember the
+      // wake-up so it runs again at once instead of backing off.
+      wokenMidCycle = true;
+      return;
+    }
     idle = false;
+    backoff.reset();
     if (timer) clearTimeout(timer);
     timer = setTimeout(tick, 0);
   };
@@ -1351,18 +1363,25 @@ export function startEvaluationWorker(db) {
   };
   const tick = () => {
     monitor.cycleStarted();
+    wokenMidCycle = false;
     let loopErrorCode = null;
     let processedCount = 0;
     inFlight = (async () => {
       try {
-        await reconcileEvaluationOutbox(db);
-        monitor.progress("evaluation_outbox_reconciled");
-        await reconcileOverdueEvaluationJobs(db);
-        monitor.progress("overdue_jobs_reconciled");
-        await reconcileExpiredEvaluationJobs(db);
-        monitor.progress("expired_leases_reconciled");
-        await reconcileFailedEvaluationOutcomes(db);
-        monitor.progress("failed_outcomes_reconciled");
+        // Each sweep repairs one record per call, so a sweep that found
+        // something runs again on the next cycle until the backlog is gone.
+        if (sweepBacklog || sweeps.due()) {
+          sweepBacklog = false;
+          let repaired = await reconcileEvaluationOutbox(db);
+          monitor.progress("evaluation_outbox_reconciled");
+          repaired = await reconcileOverdueEvaluationJobs(db) || repaired;
+          monitor.progress("overdue_jobs_reconciled");
+          repaired = await reconcileExpiredEvaluationJobs(db) || repaired;
+          monitor.progress("expired_leases_reconciled");
+          repaired = await reconcileFailedEvaluationOutcomes(db) || repaired;
+          monitor.progress("failed_outcomes_reconciled");
+          sweepBacklog = repaired;
+        }
         const jobs = (await Promise.all(
           Array.from({ length: config.evaluationConcurrency }, () => claimEvaluation(db))
         )).filter(Boolean);
@@ -1374,9 +1393,9 @@ export function startEvaluationWorker(db) {
         console.error(`Evaluation worker error (${loopErrorCode})`);
       } finally {
         monitor.cycleCompleted(loopErrorCode);
-        // Drain immediately while work exists; use the configured delay only
-        // when idle so consecutive jobs never wait for an arbitrary poll gap.
-        schedule(processedCount ? 0 : interval);
+        // Drain immediately while work exists; back off only when idle so
+        // consecutive jobs never wait for an arbitrary poll gap.
+        schedule(backoff.afterCycle(processedCount > 0 || sweepBacklog || wokenMidCycle));
       }
     })();
   };

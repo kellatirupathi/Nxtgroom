@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { deletePhoto, listPhotoObjects } from "./photoStorage.js";
+import { runtimeConfig } from "../config/env.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { createIdleBackoff } from "./workerPacing.js";
 
 const WORKER_ID = randomUUID();
 const LEASE_MS = 60_000;
@@ -107,13 +109,18 @@ export function startStorageCleanupWorker(db) {
   let timer = null;
   let inFlight = Promise.resolve();
   const monitor = createWorkerMonitor("storage_cleanup", { busyStaleAfterMs: LEASE_MS + 60_000 });
+  // Photo deletion is never urgent, so an idle worker needs no wake-up; it
+  // backs off like the others and drains without pause once it finds work.
+  const backoff = createIdleBackoff({ minMs: 2_000, maxMs: runtimeConfig().workerIdleMaxPollMs });
   const tick = () => {
     monitor.cycleStarted();
     let loopError = null;
+    let job = null;
+    let orphansQueued = 0;
     inFlight = (async () => {
       try {
-        await reconcileOrphanPhotos(db);
-        const job = await claimCleanup(db);
+        orphansQueued = await reconcileOrphanPhotos(db);
+        job = await claimCleanup(db);
         monitor.progress(job ? "job_claimed" : "queue_idle");
         if (job) await processCleanup(db, job);
       } catch (error) {
@@ -121,7 +128,8 @@ export function startStorageCleanupWorker(db) {
         console.error(`Storage cleanup worker error (${loopError})`);
       } finally {
         monitor.cycleCompleted(loopError);
-        if (!stopped) timer = setTimeout(tick, loopError ? 10_000 : 2_000);
+        const delay = backoff.afterCycle(Boolean(job) || orphansQueued > 0);
+        if (!stopped) timer = setTimeout(tick, loopError ? Math.max(10_000, delay) : delay);
       }
     })();
   };

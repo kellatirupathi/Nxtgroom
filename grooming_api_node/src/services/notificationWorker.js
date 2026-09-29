@@ -5,6 +5,7 @@ import { sendCheckoutEmail, sendEvaluationEmail } from "./emailService.js";
 import { ensureReportToken, localDateKey } from "./instructorReports.js";
 import { getNotificationSettings, shouldSendNotification } from "./notificationSettings.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { createIdleBackoff, createSweepSchedule, createWakeSignal } from "./workerPacing.js";
 
 const WORKER_ID = randomUUID();
 const NOTIFICATION_OUTBOX_FIELDS = {
@@ -14,6 +15,9 @@ const NOTIFICATION_OUTBOX_FIELDS = {
 const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const NOTIFICATION_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const TERMINAL_STATUSES = new Set(["sent", "failed", "delivery_unknown"]);
+// Lets a report email go out as soon as it is queued rather than on the next
+// idle poll. See workerPacing.js.
+const notificationQueued = createWakeSignal();
 
 function updated(result) {
   return Boolean(result && (result.matchedCount > 0 || result.modifiedCount > 0));
@@ -136,6 +140,7 @@ export async function enqueueNotification(db, {
   const job = await db.collection("notification_jobs").findOne({ _id: jobId });
   if (!job) throw new Error("Notification job could not be persisted");
   await syncNotificationStatus(db, job);
+  if (job.status === "queued") notificationQueued.notify();
   return true;
 }
 
@@ -650,13 +655,39 @@ export function startNotificationWorker(db) {
   let inFlight = Promise.resolve();
   const config = runtimeConfig();
   const interval = Math.max(1000, config.evaluationPollMs);
+  const backoff = createIdleBackoff({ minMs: interval, maxMs: config.workerIdleMaxPollMs });
+  const sweeps = createSweepSchedule(config.workerSweepIntervalMs);
+  let sweepBacklog = false;
   const monitor = createWorkerMonitor("notification", {
     busyStaleAfterMs: config.notificationLeaseMs + 60000,
   });
 
+  // Set while sleeping on an empty queue: only then is there a timer worth
+  // cancelling, and re-entering tick() mid-cycle would run two at once.
+  let idle = false;
+  let wokenMidCycle = false;
   const schedule = (delay = interval) => {
-    if (!stopped) timer = setTimeout(tick, delay);
+    if (stopped) return;
+    idle = delay > 0;
+    timer = setTimeout(() => {
+      idle = false;
+      tick();
+    }, delay);
   };
+  const wake = () => {
+    if (stopped) return;
+    if (!idle) {
+      // Mid-cycle: this cycle may already have looked for jobs. Remember the
+      // wake-up so it runs again at once instead of backing off.
+      wokenMidCycle = true;
+      return;
+    }
+    idle = false;
+    backoff.reset();
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(tick, 0);
+  };
+  const stopListening = notificationQueued.listen(wake);
   const processJob = async (job) => {
     try {
       monitor.progress("ses_delivery_started");
@@ -670,20 +701,27 @@ export function startNotificationWorker(db) {
   };
   const tick = () => {
     monitor.cycleStarted();
+    wokenMidCycle = false;
     let loopErrorCode = null;
     let processedCount = 0;
     inFlight = (async () => {
       try {
-        await reconcileCheckinOutbox(db);
-        monitor.progress("checkin_outbox_reconciled");
-        await reconcileCheckoutOutbox(db);
-        monitor.progress("checkout_outbox_reconciled");
-        await reconcileOverdueNotificationJobs(db);
-        monitor.progress("overdue_jobs_reconciled");
-        await reconcileExpiredNotificationJobs(db);
-        monitor.progress("expired_leases_reconciled");
-        await reconcileNotificationOutcome(db);
-        monitor.progress("terminal_outcomes_reconciled");
+        // Each sweep repairs one record per call, so a sweep that found
+        // something runs again on the next cycle until the backlog is gone.
+        if (sweepBacklog || sweeps.due()) {
+          sweepBacklog = false;
+          let repaired = await reconcileCheckinOutbox(db);
+          monitor.progress("checkin_outbox_reconciled");
+          repaired = await reconcileCheckoutOutbox(db) || repaired;
+          monitor.progress("checkout_outbox_reconciled");
+          repaired = await reconcileOverdueNotificationJobs(db) || repaired;
+          monitor.progress("overdue_jobs_reconciled");
+          repaired = await reconcileExpiredNotificationJobs(db) || repaired;
+          monitor.progress("expired_leases_reconciled");
+          repaired = await reconcileNotificationOutcome(db) || repaired;
+          monitor.progress("terminal_outcomes_reconciled");
+          sweepBacklog = repaired;
+        }
         const jobs = (await Promise.all(
           Array.from({ length: config.notificationConcurrency }, () => claimNotification(db))
         )).filter(Boolean);
@@ -695,7 +733,7 @@ export function startNotificationWorker(db) {
         console.error(`Notification worker error (${loopErrorCode})`);
       } finally {
         monitor.cycleCompleted(loopErrorCode);
-        schedule(processedCount ? 0 : interval);
+        schedule(backoff.afterCycle(processedCount > 0 || sweepBacklog || wokenMidCycle));
       }
     })();
   };
@@ -703,6 +741,7 @@ export function startNotificationWorker(db) {
   return {
     async stop() {
       stopped = true;
+      stopListening();
       if (timer) clearTimeout(timer);
       await inFlight;
       monitor.stop();
