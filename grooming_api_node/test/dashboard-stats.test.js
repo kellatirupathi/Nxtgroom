@@ -52,18 +52,17 @@ const record = (id, instructor, day, time, extra = {}) => ({
 const weekRecords = [
   // Today.
   record("t1", "i1", TODAY, "08:50", { status: "non_compliant", check_out_time: at(TODAY, "17:05") }),
-  record("t2", "i2", TODAY, "08:52", { status: "compliant", attire_type: "SAREE", image_quality: "RETAKE_RECOMMENDED" }),
+  record("t2", "i2", TODAY, "08:52", { status: "compliant" }),
   record("t3", "i3", TODAY, "09:10", { status: "pending" }),
   record("t4", null, TODAY, "09:11", { college_id: "c2", status: "unidentified" }),
-  // Monday: i1 fails twice (check-in and check-out), i4 is on a kurti.
+  // Monday: i1 fails twice (check-in and check-out).
   record("m1", "i1", MONDAY, "08:40", {
     status: "non_compliant",
     check_out_time: at(MONDAY, "17:00"),
     checkout_compliance_status: "NON_COMPLIANT",
   }),
-  record("m2", "i4", MONDAY, "08:45", { attire_type: "KURTI_WITH_DUPATTA" }),
-  // Men's evaluations are recorded as FORMAL and must not count as women's attire.
-  record("m3", "i3", MONDAY, "08:47", { attire_type: "FORMAL", check_out_time: at(MONDAY, "17:10") }),
+  record("m2", "i4", MONDAY, "08:45"),
+  record("m3", "i3", MONDAY, "08:47", { check_out_time: at(MONDAY, "17:10") }),
   // Last Saturday: the previous working day for a Monday, but not for today.
   record("s1", "i2", "2026-09-26", "08:30"),
 ];
@@ -147,7 +146,6 @@ test("today's summary counts identified check-ins against the roster", () => {
   assert.equal(summary.oldest_pending_seconds, 8 * 3600 + 10 * 60, "pending since 9:10 AM, now 5:20 PM");
   assert.equal(summary.checked_out, 1);
   assert.equal(summary.on_duty, 2);
-  assert.equal(summary.retake_recommended, 1);
   assert.equal(summary.missed_checkout_previous_day, 1, "i4 never checked out on Monday");
   assert.equal(summary.unidentified_waiting, 3, "the whole queue, including records with no institute");
   assert.equal(summary.unidentified_today, 1);
@@ -203,10 +201,6 @@ test("escalation uses the same count as the URGENT email", () => {
   assert.equal(row.college_name, "Hyderabad Campus");
   assert.equal(row.count, 3);
   assert.equal(row.top_checkpoint, "ID Card Present");
-});
-
-test("women's attire counts only women, so men's FORMAL is left out", () => {
-  assert.deepEqual(build().attire, { analysed: 2, saree: 1, kurti: 1, formal: 0 });
 });
 
 test("each institute reports its own day, mode and enrolment", () => {

@@ -36,7 +36,6 @@ export const FAILED_CHECKPOINT_LIMIT = 8;
 
 const COMPLIANT_STATUSES = new Set(["compliant", "done", "needs_review", "review_required"]);
 const NON_COMPLIANT_STATUSES = new Set(["non_compliant", "fail"]);
-const WOMENS_ATTIRE = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL"];
 
 /**
  * One check-in's result, read exactly as the Daily Records badge reads it
@@ -250,7 +249,6 @@ export function buildDashboard({
   );
   const byStatus = { compliant: 0, unassessed: 0, non_compliant: 0, pending: 0, error: 0 };
   let oldestPending = null;
-  let retakeRecommended = 0;
   let checkedOut = 0;
   for (const record of todayIdentified) {
     const status = dashboardStatus(record.status);
@@ -258,9 +256,6 @@ export function buildDashboard({
     if (status === "pending" && record.check_in_time) {
       const at = new Date(record.check_in_time).getTime();
       if (oldestPending === null || at < oldestPending) oldestPending = at;
-    }
-    if (record.image_quality === "RETAKE_RECOMMENDED" && (status === "compliant" || status === "non_compliant" || status === "unassessed")) {
-      retakeRecommended += 1;
     }
     if (record.check_out_time) checkedOut += 1;
   }
@@ -345,19 +340,6 @@ export function buildDashboard({
   }
   escalations.sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
 
-  // ---- Women's attire, this week ----------------------------------------------
-  // Men's evaluations are always recorded as FORMAL, so only women count here.
-  const attire = { analysed: 0, saree: 0, kurti: 0, formal: 0 };
-  for (const record of weekRecordsById.values()) {
-    if (!identified(record)) continue;
-    const gender = String(rosterById.get(String(record.instructor_id))?.gender || "").toUpperCase();
-    if (gender !== "FEMALE" || !WOMENS_ATTIRE.includes(record.attire_type)) continue;
-    attire.analysed += 1;
-    if (record.attire_type === "SAREE") attire.saree += 1;
-    else if (record.attire_type === "KURTI_WITH_DUPATTA") attire.kurti += 1;
-    else attire.formal += 1;
-  }
-
   // ---- Institutes, today -----------------------------------------------------
   // The whole unidentified queue, whatever day each arrival was on, is the
   // figure on the Unidentified tile. The table counts only the day it shows.
@@ -396,7 +378,6 @@ export function buildDashboard({
         ? null
         : Math.max(0, Math.round((now.getTime() - oldestPending) / 1000)),
       errors: byStatus.error,
-      retake_recommended: retakeRecommended,
       checked_out: checkedOut,
       on_duty: Math.max(0, todayIdentified.length - checkedOut),
       missed_checkout_previous_day: missedCheckout,
@@ -413,7 +394,6 @@ export function buildDashboard({
     trend,
     failed_checkpoints: failedCheckpoints,
     escalations,
-    attire,
     institutes,
   };
 }
@@ -469,7 +449,7 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
 
   const [roster, enrolment, identificationSettings, weekRecords, trendRows, unidentifiedByCollege] = await Promise.all([
     db.collection("instructors")
-      .find({ $and: [ACTIVE, collegeScope] }, { projection: { name: 1, college_id: 1, gender: 1 } })
+      .find({ $and: [ACTIVE, collegeScope] }, { projection: { name: 1, college_id: 1 } })
       .toArray(),
     loadCollegeEnrolment(db),
     getIdentificationSettings(db),
@@ -492,8 +472,6 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
             status: 1,
             checkout_compliance_status: 1,
             checkout_deleting_at: 1,
-            attire_type: 1,
-            image_quality: 1,
           },
         }
       )
