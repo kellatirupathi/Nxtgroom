@@ -24,12 +24,14 @@ import {
   formatCount,
   formatPercent,
   formatWait,
+  niceAxis,
   shortDayLabel,
   tooltipDayLabel,
   updatedAtLabel,
   weekdayLabel,
 } from '../dashboardFormat';
 import type {
+  DashboardArrivalSlot,
   DashboardData,
   DashboardStatusKey,
   DashboardTrendDay,
@@ -365,6 +367,97 @@ function StatusCard({ data }: { data: DashboardData }) {
   );
 }
 
+function ArrivalsChart({ slots }: { slots: DashboardArrivalSlot[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const [ref, width] = useElementWidth<HTMLDivElement>();
+  const height = 208;
+  const margin = { top: 20, right: 8, bottom: 26, left: 36 };
+  const innerWidth = Math.max(0, width - margin.left - margin.right);
+  const innerHeight = height - margin.top - margin.bottom;
+  const peakCount = slots.reduce((max, slot) => Math.max(max, slot.count), 0);
+  const axis = niceAxis(peakCount);
+  const y = (value: number) => margin.top + (1 - value / axis.max) * innerHeight;
+  const band = slots.length ? innerWidth / slots.length : 0;
+  const peak = slots.findIndex((slot) => slot.count === peakCount);
+  const labelEvery = Math.max(1, Math.ceil((slots.length * 64) / Math.max(1, innerWidth)));
+  const ticks: number[] = [];
+  for (let value = 0; value <= axis.max; value += axis.step) ticks.push(value);
+  const hovered = hover !== null ? slots[hover] : null;
+
+  return (
+    <section className={`${CARD} p-4 md:p-5`} aria-labelledby="dashboard-arrivals-title">
+      <h3 id="dashboard-arrivals-title" className="text-base font-bold text-slate-800">Check-ins by time today</h3>
+      <p className="text-xs text-slate-500">Check-ins per 15 minutes, including unidentified arrivals</p>
+      <div ref={ref} className="relative mt-3 w-full" style={{ height }}>
+        {slots.length === 0 && (
+          <p className="flex h-full items-center justify-center text-sm text-slate-400">No check-ins yet today.</p>
+        )}
+        {slots.length > 0 && width > 0 && (
+          <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Check-ins per 15 minutes today">
+            {ticks.map((tick) => (
+              <g key={tick}>
+                <line x1={margin.left} x2={width - margin.right} y1={y(tick)} y2={y(tick)} stroke={tick === 0 ? AXIS : GRID} />
+                <text x={margin.left - 6} y={y(tick) + 4} textAnchor="end" fontSize={11} fill={TEXT_MUTED}>{tick}</text>
+              </g>
+            ))}
+            {slots.map((slot, index) => {
+              const barX = margin.left + index * band + 1;
+              const barWidth = Math.max(2, band - 2);
+              const top = y(slot.count);
+              const bottom = y(0);
+              const radius = Math.min(4, barWidth / 2, bottom - top);
+              return (
+                <g key={slot.start_minutes}>
+                  {slot.count > 0 && (
+                    <path
+                      d={`M${barX},${bottom}V${top + radius}Q${barX},${top} ${barX + radius},${top}H${barX + barWidth - radius}Q${barX + barWidth},${top} ${barX + barWidth},${top + radius}V${bottom}Z`}
+                      fill={COLOR_ATTENDANCE}
+                      fillOpacity={index === peak || index === hover ? 1 : 0.72}
+                    />
+                  )}
+                  {index % labelEvery === 0 && (
+                    <text x={barX + barWidth / 2} y={height - 8} textAnchor="middle" fontSize={11} fill={TEXT_MUTED}>
+                      {slot.label.replace(/ (AM|PM)$/, '')}
+                    </text>
+                  )}
+                  <rect
+                    x={margin.left + index * band}
+                    y={margin.top}
+                    width={band}
+                    height={innerHeight}
+                    fill="transparent"
+                    onPointerEnter={() => setHover(index)}
+                    onPointerDown={() => setHover(index)}
+                    onPointerLeave={() => setHover(null)}
+                  />
+                </g>
+              );
+            })}
+            {peak >= 0 && peakCount > 0 && (
+              <text
+                x={margin.left + peak * band + band / 2}
+                y={y(peakCount) - 6}
+                textAnchor="middle"
+                fontSize={11}
+                fontWeight={700}
+                fill={TEXT_STRONG}
+              >
+                Peak {peakCount}
+              </text>
+            )}
+          </svg>
+        )}
+        {hovered && hover !== null && (
+          <ChartTooltip x={margin.left + hover * band + band / 2} y={y(hovered.count)} width={width}>
+            <div className="font-bold">{hovered.label} – {hovered.end_label}</div>
+            <div>{formatCount(hovered.count)} check-in{hovered.count === 1 ? '' : 's'}</div>
+          </ChartTooltip>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function ComplianceDelta({ data }: { data: DashboardData }) {
   const change = complianceChange(data.summary.compliance_percent, data.summary.compliance_same_day_last_week);
   const weekday = weekdayLabel(data.same_day_last_week);
@@ -555,6 +648,10 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <TrendChart trend={data.trend} />
         <StatusCard data={data} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <ArrivalsChart slots={data.arrivals} />
       </div>
     </section>
   );
