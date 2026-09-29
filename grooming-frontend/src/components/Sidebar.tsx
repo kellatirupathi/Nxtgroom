@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ChartColumnBig,
   LayoutDashboard,
   LayoutGrid,
   Users,
@@ -101,10 +102,20 @@ export default function Sidebar({
 
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto" aria-label="Main navigation">
         {isElevatedRole(role) && (
-          <button type="button" onClick={() => navigate('dashboard')} className={navClass(activeTab === 'dashboard')}>
-            <LayoutDashboard size={20} aria-hidden="true" />
-            Dashboard
-          </button>
+          <>
+            <button type="button" onClick={() => navigate('dashboard')} className={navClass(activeTab === 'dashboard')}>
+              <LayoutDashboard size={20} aria-hidden="true" />
+              Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('institute-analytics')}
+              className={navClass(activeTab === 'institute-analytics')}
+            >
+              <ChartColumnBig size={20} aria-hidden="true" />
+              Institute Analytics
+            </button>
+          </>
         )}
 
         <button type="button" onClick={() => navigate('overview')} className={navClass(activeTab === 'overview')}>
