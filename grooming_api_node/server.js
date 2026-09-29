@@ -61,6 +61,9 @@ if (isProduction()) app.set("trust proxy", config.trustProxyHops);
 
 app.use((req, res, next) => {
   const startedAt = Date.now();
+  // Captured on arrival: by "finish" a mounted router has cut its prefix off
+  // req.path, and the prefix is what loggedPath matches to hide the token.
+  const path = loggedPath(req.path);
   req.requestId = randomUUID();
   res.set("X-Request-ID", req.requestId);
   if (req.path.startsWith("/api/")) res.set("Cache-Control", "no-store");
@@ -69,7 +72,7 @@ app.use((req, res, next) => {
       event: "http_request",
       request_id: req.requestId,
       method: req.method,
-      path: loggedPath(req.path),
+      path,
       status: res.statusCode,
       duration_ms: Date.now() - startedAt,
     }));
