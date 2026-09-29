@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import express from "express";
 import {
   arrivalSlots,
   buildDashboard,
   buildInstituteRows,
   checkpointAudience,
+  clearDashboardCache,
   countWorkingDays,
   instituteGroupsFromRecords,
   dashboardStatus,
@@ -12,6 +14,7 @@ import {
   TREND_WORKING_DAYS,
   workingDayKeys,
 } from "../src/services/dashboardStats.js";
+import { dashboardRouter } from "../src/routes/dashboardRoutes.js";
 
 const ZONE = "Asia/Kolkata";
 // Tuesday 29 September 2026, 5:20 PM in Kolkata.
@@ -264,4 +267,54 @@ test("over several days, present counts instructor-days against roster times wor
   assert.deepEqual([hyderabad.compliant, hyderabad.non_compliant], [1, 2]);
   // Warangal: i3 today and Monday, i4 Monday, plus one unnamed arrival.
   assert.deepEqual([warangal.present, warangal.expected, warangal.unidentified], [3, 4, 1]);
+});
+
+// ---- The route ---------------------------------------------------------------
+
+function emptyDb() {
+  const cursor = (rows) => ({ sort: () => cursor(rows), toArray: async () => rows });
+  return {
+    collection(name) {
+      return {
+        find: () => cursor(name === "colleges" ? colleges : []),
+        aggregate: () => ({ toArray: async () => [] }),
+        findOne: async () => null,
+      };
+    },
+  };
+}
+
+async function request(role, query = "") {
+  clearDashboardCache();
+  const app = express();
+  app.locals.db = emptyDb();
+  app.use((req, _res, next) => {
+    req.currentUser = { email: "someone@example.com", role, collegeId: role === "BOA" ? "c1" : null };
+    next();
+  });
+  app.use("/api/v2/dashboard", dashboardRouter);
+  const server = await new Promise((resolve) => {
+    const listener = app.listen(0, "127.0.0.1", () => resolve(listener));
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/v2/dashboard${query}`);
+    return { status: response.status, body: await response.json() };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test("only administrators can open the dashboard", async () => {
+  assert.equal((await request("BOA")).status, 403);
+  assert.equal((await request("ADMIN")).status, 200);
+  const { status, body } = await request("SUPER_ADMIN");
+  assert.equal(status, 200);
+  assert.equal(body.summary.total_instructors, 0);
+  assert.equal(body.institutes.length, 2);
+  assert.equal(body.trend.length, TREND_WORKING_DAYS);
+});
+
+test("the institute filter is validated", async () => {
+  assert.equal((await request("ADMIN", "?college_id=all")).status, 200);
+  assert.equal((await request("ADMIN", "?college_id=a&college_id=b")).status, 422);
 });
