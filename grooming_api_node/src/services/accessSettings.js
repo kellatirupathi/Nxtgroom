@@ -1,4 +1,5 @@
 import { isElevated } from "../middleware/auth.js";
+import { getSetting, saveSetting } from "../stores/settingsStore.js";
 
 /**
  * Who may delete an attendance record.
@@ -68,7 +69,7 @@ export function clearAccessSettingsCache() {
 
 export async function getAccessSettings(db, { now = Date.now() } = {}) {
   if (cache && now - cache.at < CACHE_TTL_MS) return cache.settings;
-  const stored = await db.collection("app_settings").findOne({ _id: SETTINGS_ID });
+  const stored = await getSetting(db, SETTINGS_ID);
   const settings = normalizeAccessSettings(stored || {});
   cache = { settings, at: now };
   return settings;
@@ -76,11 +77,7 @@ export async function getAccessSettings(db, { now = Date.now() } = {}) {
 
 export async function saveAccessSettings(db, body) {
   const settings = normalizeAccessSettings({ ...(await getAccessSettings(db)), ...body });
-  await db.collection("app_settings").updateOne(
-    { _id: SETTINGS_ID },
-    { $set: { ...settings, updated_at: new Date() } },
-    { upsert: true }
-  );
+  await saveSetting(db, SETTINGS_ID, { set: { ...settings, updated_at: new Date() } });
   // Cleared rather than replaced so the next read comes from the database and
   // reflects anything else that wrote concurrently.
   clearAccessSettingsCache();

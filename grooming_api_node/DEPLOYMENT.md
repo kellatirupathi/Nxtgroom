@@ -140,6 +140,67 @@ index verification, then fails closed with an actionable preflight error if
 data blockers, missing indexes, or conflicting indexes remain. Development
 startup may create missing indexes automatically after the same audit passes.
 
+### Amazon DynamoDB (migration in progress)
+
+Data is moving from MongoDB to DynamoDB one collection at a time; see
+`docs/DYNAMODB_MIGRATION_PLAN.md`. Only `app_settings` has a DynamoDB
+implementation so far. With the switches unset, everything stays on MongoDB
+and none of this is needed.
+
+1. In IAM, create a user `facultytrack-dynamodb` with an access key and only
+   this policy (replace the account id). Lightsail cannot use IAM roles, and
+   the SES key must not be reused.
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": [
+           "dynamodb:DescribeTable", "dynamodb:CreateTable", "dynamodb:TagResource",
+           "dynamodb:UpdateContinuousBackups", "dynamodb:GetItem", "dynamodb:PutItem",
+           "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query",
+           "dynamodb:Scan", "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem",
+           "dynamodb:ConditionCheckItem"
+         ],
+         "Resource": [
+           "arn:aws:dynamodb:ap-south-1:ACCOUNT_ID:table/facultytrack-*",
+           "arn:aws:dynamodb:ap-south-1:ACCOUNT_ID:table/facultytrack-*/index/*"
+         ]
+       }
+     ]
+   }
+   ```
+
+2. Add `DYNAMODB_REGION`, `DYNAMODB_ACCESS_KEY_ID` and
+   `DYNAMODB_SECRET_ACCESS_KEY` to `.env`, then create the tables
+   (on-demand billing, deletion protection and point-in-time recovery on):
+
+   ```bash
+   docker compose run --rm api npm run dynamo:tables          # report only
+   docker compose run --rm api npm run dynamo:tables:apply    # create missing tables
+   ```
+
+3. Copy the existing data. MongoDB is only read.
+
+   ```bash
+   docker compose run --rm api npm run dynamo:copy -- --apply
+   ```
+
+4. Turn on dual writes: set `DB_WRITE_TO=both` (reads stay on MongoDB) and
+   redeploy. A failed DynamoDB write is logged as `shadow_write_failed` and
+   never fails a request.
+
+5. Check daily that the databases agree; it exits 1 on any difference:
+
+   ```bash
+   docker compose run --rm api npm run dynamo:compare
+   ```
+
+6. After a clean week, move reads: `DB_READ_FROM=dynamo`. To undo either
+   step, set the value back to `mongo` and redeploy.
+
 ### Amazon SES
 
 1. Verify `SES_FROM_EMAIL` or its domain in the same AWS region configured in
@@ -324,6 +385,12 @@ with an insecure fallback.
 | `MONGODB_URI` | Required, secret | Rotated Atlas connection URI |
 | `DB_NAME` | Optional | Defaults to `grooming_standards` |
 | `DATABASE_PREFLIGHT_APPLY` | One-off only | Leave unset on the API service. Set to `CREATE_INDEXES` only for the confirmed migration job, then remove it. |
+| `DB_WRITE_TO` | Optional | `mongo` (default), `both` or `dynamo`: where migrated stores write. Per-store override, e.g. `DB_WRITE_TO_APP_SETTINGS` |
+| `DB_READ_FROM` | Optional | `mongo` (default) or `dynamo`: where migrated stores read. Must be a database that is written |
+| `DYNAMODB_REGION` | Required once a store uses DynamoDB | `ap-south-1` |
+| `DYNAMODB_ACCESS_KEY_ID` / `DYNAMODB_SECRET_ACCESS_KEY` | Required once a store uses DynamoDB, secret | Keys of the `facultytrack-dynamodb` IAM user; never the SES key |
+| `DYNAMODB_TABLE_PREFIX` | Optional | Defaults to `facultytrack-` |
+| `DYNAMODB_ENDPOINT` | Development only | DynamoDB Local, e.g. `http://localhost:8001`; unset on a server |
 | `SECRET_KEY` | Required, secret | Unique random value, at least 32 characters |
 | `JWT_EXPIRE_MINUTES` | Optional | Defaults to `525600` (one year); permitted range is 5–525600. Leave unset for one-year sign-ins; a password change or reset still signs every device out |
 | `JWT_ISSUER` | Optional | Defaults to `facultytrack-api` |

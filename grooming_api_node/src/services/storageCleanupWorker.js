@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { deletePhoto, listPhotoObjects } from "./photoStorage.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import { getSetting, saveSetting } from "../stores/settingsStore.js";
 
 const WORKER_ID = randomUUID();
 const LEASE_MS = 60_000;
@@ -59,7 +60,7 @@ async function processCleanup(db, job) {
 
 export async function reconcileOrphanPhotos(db, now = new Date()) {
   const stateId = "storage_orphan_scan";
-  const state = await db.collection("app_settings").findOne({ _id: stateId });
+  const state = await getSetting(db, stateId);
   if (state?.next_scan_at && new Date(state.next_scan_at) > now) return 0;
 
   const page = await listPhotoObjects({ continuationToken: state?.continuation_token || null });
@@ -90,15 +91,11 @@ export async function reconcileOrphanPhotos(db, now = new Date()) {
     queued += 1;
   }
 
-  await db.collection("app_settings").updateOne(
-    { _id: stateId },
-    {
-      $set: page.nextToken
-        ? { continuation_token: page.nextToken, next_scan_at: now, updated_at: now }
-        : { continuation_token: null, next_scan_at: new Date(now.getTime() + SCAN_INTERVAL_MS), updated_at: now },
-    },
-    { upsert: true }
-  );
+  await saveSetting(db, stateId, {
+    set: page.nextToken
+      ? { continuation_token: page.nextToken, next_scan_at: now, updated_at: now }
+      : { continuation_token: null, next_scan_at: new Date(now.getTime() + SCAN_INTERVAL_MS), updated_at: now },
+  });
   return queued;
 }
 

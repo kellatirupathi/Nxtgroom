@@ -1,3 +1,10 @@
+import {
+  addSettingListValue,
+  getSetting,
+  removeSettingListValue,
+  saveSetting,
+} from "../stores/settingsStore.js";
+
 const SETTINGS_ID = "rp_recipients";
 const MAX_RECIPIENTS = 50;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -18,7 +25,7 @@ export function isValidRecipient(value) {
 }
 
 export async function getReportRecipients(db) {
-  const document = await db.collection("app_settings").findOne({ _id: SETTINGS_ID });
+  const document = await getSetting(db, SETTINGS_ID);
   const emails = Array.isArray(document?.emails) ? document.emails : [];
   return emails.filter(isValidRecipient);
 }
@@ -36,7 +43,7 @@ export const DEFAULT_RECIPIENT_EVENTS = Object.freeze({
 });
 
 export async function getRecipientEvents(db) {
-  const document = await db.collection("app_settings").findOne({ _id: SETTINGS_ID });
+  const document = await getSetting(db, SETTINGS_ID);
   return {
     checkin_enabled: typeof document?.checkin_enabled === "boolean"
       ? document.checkin_enabled
@@ -54,11 +61,10 @@ export async function saveRecipientEvents(db, body, updatedBy) {
     checkout_enabled: typeof body?.checkout_enabled === "boolean" ? body.checkout_enabled : current.checkout_enabled,
   };
   const now = new Date();
-  await db.collection("app_settings").updateOne(
-    { _id: SETTINGS_ID },
-    { $set: { ...next, updated_at: now, updated_by: updatedBy || null }, $setOnInsert: { _id: SETTINGS_ID, created_at: now } },
-    { upsert: true }
-  );
+  await saveSetting(db, SETTINGS_ID, {
+    set: { ...next, updated_at: now, updated_by: updatedBy || null },
+    setOnInsert: { _id: SETTINGS_ID, created_at: now },
+  });
   return next;
 }
 
@@ -84,26 +90,20 @@ export async function addReportRecipient(db, value, addedBy) {
   if (current.length >= MAX_RECIPIENTS) return { ok: false, reason: "limit" };
 
   const now = new Date();
-  await db.collection("app_settings").updateOne(
-    { _id: SETTINGS_ID },
-    {
-      // addToSet rather than push: two administrators adding the same address
-      // at once would otherwise store it twice.
-      $addToSet: { emails: email },
-      $set: { updated_at: now, updated_by: addedBy || null },
-      $setOnInsert: { _id: SETTINGS_ID, created_at: now },
-    },
-    { upsert: true }
-  );
+  // Added as a set rather than pushed: two administrators adding the same
+  // address at once would otherwise store it twice.
+  await addSettingListValue(db, SETTINGS_ID, "emails", email, {
+    set: { updated_at: now, updated_by: addedBy || null },
+    setOnInsert: { _id: SETTINGS_ID, created_at: now },
+  });
   return { ok: true, emails: await getReportRecipients(db) };
 }
 
 export async function removeReportRecipient(db, value, removedBy) {
   const email = normaliseEmail(value);
   if (!email) return { ok: false, reason: "invalid" };
-  await db.collection("app_settings").updateOne(
-    { _id: SETTINGS_ID },
-    { $pull: { emails: email }, $set: { updated_at: new Date(), updated_by: removedBy || null } }
-  );
+  await removeSettingListValue(db, SETTINGS_ID, "emails", email, {
+    set: { updated_at: new Date(), updated_by: removedBy || null },
+  });
   return { ok: true, emails: await getReportRecipients(db) };
 }
