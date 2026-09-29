@@ -1,5 +1,8 @@
 import {
   addDaysToKey,
+  ESCALATION_THRESHOLD,
+  nonCompliantOccurrences,
+  weekStartKey,
 } from "./evaluationWorker.js";
 import {
   describeCollegeIdentification,
@@ -248,4 +251,215 @@ export function buildInstituteRows({
       low_enrolment: Boolean(described?.low_enrolment),
     };
   });
+}
+
+/**
+ * Turns the loaded rows into the Dashboard response.
+ *
+ * `weekRecords` covers this Monday-to-today plus the previous working day, so
+ * today's figures, the week's escalations and yesterday's missed check-outs
+ * all come from one read. `trendRows` are per-day totals already grouped by the
+ * database. `failedRows` are the FAIL checkpoint rows of this week's
+ * evaluations, one per failed checkpoint.
+ */
+export function buildDashboard({
+  now,
+  timeZone,
+  college = null,
+  colleges = [],
+  roster = [],
+  identificationSettings = {},
+  enrolment = new Map(),
+  weekRecords = [],
+  trendRows = [],
+  unidentifiedByCollege = [],
+  failedRows = [],
+}) {
+  const todayKey = localDateKey(now, timeZone);
+  const weekStart = weekStartKey(todayKey);
+  const previousDay = previousWorkingDayKey(todayKey);
+  const sameDayLastWeek = addDaysToKey(todayKey, -7);
+
+  const rosterById = new Map(roster.map((instructor) => [String(instructor._id), instructor]));
+  const collegeNames = new Map(colleges.map((row) => [String(row._id), row.name || "Unnamed institute"]));
+
+  const records = weekRecords.map((record) => ({ ...record, _day: dayKeyOf(record, timeZone) }));
+  const today = records.filter((record) => record._day === todayKey);
+  const todayIdentified = today.filter(identified);
+
+  // ---- Today ---------------------------------------------------------------
+  const presentIds = new Set(
+    todayIdentified
+      .map((record) => String(record.instructor_id))
+      .filter((id) => rosterById.has(id))
+  );
+  const byStatus = { compliant: 0, unassessed: 0, non_compliant: 0, pending: 0, error: 0 };
+  let oldestPending = null;
+  let retakeRecommended = 0;
+  let checkedOut = 0;
+  for (const record of todayIdentified) {
+    const status = dashboardStatus(record.status);
+    if (status in byStatus) byStatus[status] += 1;
+    if (status === "pending" && record.check_in_time) {
+      const at = new Date(record.check_in_time).getTime();
+      if (oldestPending === null || at < oldestPending) oldestPending = at;
+    }
+    if (record.image_quality === "RETAKE_RECOMMENDED" && (status === "compliant" || status === "non_compliant" || status === "unassessed")) {
+      retakeRecommended += 1;
+    }
+    if (record.check_out_time) checkedOut += 1;
+  }
+  const analysed = byStatus.compliant + byStatus.non_compliant;
+  const missedCheckout = records.filter(
+    (record) => record._day === previousDay && identified(record) && !record.check_out_time
+  ).length;
+
+  // ---- Trend ---------------------------------------------------------------
+  const trendByDay = new Map(trendRows.map((row) => [String(row._id), row]));
+  const totalInstructors = roster.length;
+  const trend = workingDayKeys(todayKey, TREND_WORKING_DAYS).map((day) => {
+    const row = trendByDay.get(day) || {};
+    const present = Number(row.present) || 0;
+    const compliant = Number(row.compliant) || 0;
+    const nonCompliant = Number(row.non_compliant) || 0;
+    return {
+      day,
+      present,
+      present_percent: percent(present, totalInstructors),
+      compliant,
+      non_compliant: nonCompliant,
+      compliance_percent: percent(compliant, compliant + nonCompliant),
+    };
+  });
+  const lastWeekRow = trendByDay.get(sameDayLastWeek);
+  const lastWeekCompliance = lastWeekRow
+    ? percent(Number(lastWeekRow.compliant) || 0, (Number(lastWeekRow.compliant) || 0) + (Number(lastWeekRow.non_compliant) || 0))
+    : null;
+
+  // ---- Failed checkpoints, this week ----------------------------------------
+  const weekRecordsById = new Map(
+    records.filter((record) => record._day >= weekStart).map((record) => [String(record._id), record])
+  );
+  const countedFailures = failedRows.filter((row) => {
+    const record = weekRecordsById.get(String(row.attendance_id));
+    if (!record) return false;
+    // A check-out result counts only while the check-out it describes exists.
+    if (row.kind === "checkout") return Boolean(record.check_out_time) && !record.checkout_deleting_at;
+    return true;
+  });
+  const failureCounts = new Map();
+  for (const row of countedFailures) {
+    const current = failureCounts.get(row.code) || { code: row.code, name: row.name || row.code, count: 0 };
+    current.count += 1;
+    failureCounts.set(row.code, current);
+  }
+  const failedCheckpoints = [...failureCounts.values()]
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+    .slice(0, FAILED_CHECKPOINT_LIMIT)
+    .map((row) => ({ ...row, audience: checkpointAudience(row.code) }));
+
+  // ---- Escalations, this week ------------------------------------------------
+  const weekByInstructor = new Map();
+  for (const record of weekRecordsById.values()) {
+    if (!identified(record)) continue;
+    const id = String(record.instructor_id);
+    if (!weekByInstructor.has(id)) weekByInstructor.set(id, []);
+    weekByInstructor.get(id).push(record);
+  }
+  const failuresByAttendance = new Map();
+  for (const row of countedFailures) {
+    const key = String(row.attendance_id);
+    if (!failuresByAttendance.has(key)) failuresByAttendance.set(key, []);
+    failuresByAttendance.get(key).push(row.name || row.code);
+  }
+  const escalations = [];
+  for (const [instructorId, group] of weekByInstructor) {
+    const count = nonCompliantOccurrences(group).length;
+    if (count < ESCALATION_THRESHOLD) continue;
+    const latest = group.reduce((a, b) => (new Date(a.check_in_time || 0) > new Date(b.check_in_time || 0) ? a : b));
+    const instructor = rosterById.get(instructorId);
+    const collegeId = latest.college_id || instructor?.college_id || null;
+    escalations.push({
+      instructor_id: instructorId,
+      name: instructor?.name || latest.instructor_name || "Unknown instructor",
+      college_name: collegeId ? (collegeNames.get(String(collegeId)) || "Unknown institute") : "No institute",
+      count,
+      top_checkpoint: mostFrequent(group.flatMap((record) => failuresByAttendance.get(String(record._id)) || [])),
+      attendance_id: String(latest._id),
+    });
+  }
+  escalations.sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
+
+  // ---- Women's attire, this week ----------------------------------------------
+  // Men's evaluations are always recorded as FORMAL, so only women count here.
+  const attire = { analysed: 0, saree: 0, kurti: 0, formal: 0 };
+  for (const record of weekRecordsById.values()) {
+    if (!identified(record)) continue;
+    const gender = String(rosterById.get(String(record.instructor_id))?.gender || "").toUpperCase();
+    if (gender !== "FEMALE" || !WOMENS_ATTIRE.includes(record.attire_type)) continue;
+    attire.analysed += 1;
+    if (record.attire_type === "SAREE") attire.saree += 1;
+    else if (record.attire_type === "KURTI_WITH_DUPATTA") attire.kurti += 1;
+    else attire.formal += 1;
+  }
+
+  // ---- Institutes, today -----------------------------------------------------
+  // The whole unidentified queue, whatever day each arrival was on, is the
+  // figure on the Unidentified tile. The table counts only the day it shows.
+  const unidentifiedTotal = unidentifiedByCollege.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
+  const institutes = buildInstituteRows({
+    colleges,
+    roster,
+    identificationSettings,
+    enrolment,
+    groups: instituteGroupsFromRecords(today),
+    workingDays: 1,
+  });
+
+  return {
+    generated_at: now.toISOString(),
+    time_zone: timeZone,
+    today: todayKey,
+    week_start: weekStart,
+    previous_working_day: previousDay,
+    same_day_last_week: sameDayLastWeek,
+    college: college ? { college_id: String(college._id), name: college.name || "Unnamed institute" } : null,
+    summary: {
+      total_instructors: totalInstructors,
+      present: presentIds.size,
+      present_percent: percent(presentIds.size, totalInstructors),
+      not_checked_in: Math.max(0, totalInstructors - presentIds.size),
+      check_ins: todayIdentified.length,
+      analysed,
+      compliant: byStatus.compliant,
+      non_compliant: byStatus.non_compliant,
+      compliance_percent: percent(byStatus.compliant, analysed),
+      compliance_same_day_last_week: lastWeekCompliance,
+      unassessed: byStatus.unassessed,
+      pending: byStatus.pending,
+      oldest_pending_seconds: oldestPending === null
+        ? null
+        : Math.max(0, Math.round((now.getTime() - oldestPending) / 1000)),
+      errors: byStatus.error,
+      retake_recommended: retakeRecommended,
+      checked_out: checkedOut,
+      on_duty: Math.max(0, todayIdentified.length - checkedOut),
+      missed_checkout_previous_day: missedCheckout,
+      unidentified_waiting: unidentifiedTotal,
+      unidentified_today: today.filter((record) => !identified(record) && dashboardStatus(record.status) === "unidentified").length,
+    },
+    status_breakdown: [
+      { key: "compliant", count: byStatus.compliant },
+      { key: "unassessed", count: byStatus.unassessed },
+      { key: "non_compliant", count: byStatus.non_compliant },
+      { key: "pending", count: byStatus.pending },
+      { key: "error", count: byStatus.error },
+    ],
+    trend,
+    arrivals: arrivalSlots(today, timeZone),
+    failed_checkpoints: failedCheckpoints,
+    escalations,
+    attire,
+    institutes,
+  };
 }
