@@ -113,7 +113,7 @@ export default function Sidebar({
               className={navClass(activeTab === 'analytics')}
             >
               <ChartColumnBig size={20} aria-hidden="true" />
-              Analytics
+              Institutes
             </button>
           </>
         )}
