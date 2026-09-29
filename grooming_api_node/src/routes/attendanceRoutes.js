@@ -6,7 +6,12 @@ import { runtimeConfig } from "../config/env.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeGroupImage, normalizeInstructorImage } from "../imageProcessor.js";
-import { enqueueEvaluation, evaluateCheckoutNow, evaluationFilter } from "../services/evaluationWorker.js";
+import { enqueueEvaluation, evaluateCheckoutNow } from "../services/evaluationWorker.js";
+import {
+  deleteEvaluation,
+  deleteEvaluationsForAttendance,
+  getEvaluation,
+} from "../stores/evaluationStore.js";
 import { escalationFor, weeklyEscalations } from "../services/escalations.js";
 import { getNotificationSettings } from "../services/notificationSettings.js";
 import {
@@ -286,7 +291,7 @@ async function purgeAttendance(db, attendance) {
       throw error;
     }
   }
-  await db.collection("evaluations").deleteMany({ attendance_id: String(attendance._id) });
+  await deleteEvaluationsForAttendance(db, attendance._id);
   await db.collection("attendance").deleteOne({ _id: attendance._id, deleting_at: { $exists: true } });
 }
 
@@ -2737,9 +2742,7 @@ attendanceRouter.get(
     // ?kind=checkout selects the check-out assessment. The default stays the
     // check-in one, so every existing caller keeps the report it asked for.
     const kind = req.query.kind === "checkout" ? "checkout" : "checkin";
-    const evaluation = await db.collection("evaluations").findOne(
-      evaluationFilter(String(attendance._id), kind)
-    );
+    const evaluation = await getEvaluation(db, String(attendance._id), kind);
     if (!evaluation) {
       // 204, not 404. A half with no evaluation is an ordinary state — no
       // photo was taken, or the analysis has not finished — and returning an
@@ -2866,9 +2869,7 @@ attendanceRouter.post(
     // Scoped to the half being re-run. An unscoped delete threw away the other
     // half's report as well, so re-analysing a check-in silently destroyed the
     // check-out one.
-    await db.collection("evaluations").deleteMany(
-      evaluationFilter(String(attendance._id), kind)
-    );
+    await deleteEvaluation(db, String(attendance._id), kind);
     await db.collection("attendance").updateOne(
       { _id: attendance._id },
       {
@@ -3137,9 +3138,7 @@ attendanceRouter.delete(
     await db.collection("evaluation_jobs").deleteOne({
       _id: `${attendance._id}:evaluation:checkout`,
     });
-    await db.collection("evaluations").deleteMany(
-      evaluationFilter(String(attendance._id), "checkout")
-    );
+    await deleteEvaluation(db, String(attendance._id), "checkout");
     await db.collection("attendance").updateOne(
       { _id: attendance._id },
       {

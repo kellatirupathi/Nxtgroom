@@ -13,6 +13,7 @@ import {
   loadCollegeEnrolment,
 } from "./identificationSettings.js";
 import { localDateKey } from "./instructorReports.js";
+import { failedCheckpointRows } from "../stores/evaluationStore.js";
 
 /**
  * The administrators' Dashboard: today's attendance and grooming results, the
@@ -358,20 +359,6 @@ export function buildDashboard({
 
 const ACTIVE = { $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] };
 
-function idVariants(ids) {
-  const seen = new Set();
-  const variants = [];
-  for (const id of ids) {
-    for (const variant of idMatch(String(id)).$in) {
-      const key = `${variant?._bsontype || typeof variant}:${String(variant)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      variants.push(variant);
-    }
-  }
-  return variants;
-}
-
 export class DashboardCollegeNotFound extends Error {}
 
 /**
@@ -496,37 +483,7 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
   const weekIds = weekRecords
     .filter((record) => (record.attendance_day || localDateKey(new Date(record.check_in_time || record.date), timeZone)) >= weekStart)
     .map((record) => record._id);
-  const failedRows = weekIds.length
-    ? await db.collection("evaluations").aggregate([
-        { $match: { attendance_id: { $in: idVariants(weekIds) } } },
-        {
-          $project: {
-            attendance_id: 1,
-            kind: 1,
-            rows: {
-              $concatArrays: [
-                { $ifNull: ["$general_idcard_check", []] },
-                { $ifNull: ["$grooming_check", []] },
-                { $ifNull: ["$attire_check", []] },
-                { $ifNull: ["$accessories_check", []] },
-                { $ifNull: ["$footwear_check", []] },
-              ],
-            },
-          },
-        },
-        { $unwind: "$rows" },
-        { $match: { "rows.status": "FAIL" } },
-        {
-          $project: {
-            _id: 0,
-            attendance_id: 1,
-            kind: 1,
-            code: "$rows.code",
-            name: "$rows.checkpoint_name",
-          },
-        },
-      ]).toArray()
-    : [];
+  const failedRows = await failedCheckpointRows(db, weekIds);
 
   return buildDashboard({
     now,

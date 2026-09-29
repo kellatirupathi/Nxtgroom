@@ -1,5 +1,5 @@
 import { BatchWriteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
-import { toItem } from "./dynamoItems.js";
+import { dynamoTableDefinition } from "./dynamoTables.js";
 
 /**
  * One-off copy of a MongoDB collection into its DynamoDB table, and the
@@ -24,12 +24,13 @@ async function writeBatch(client, tableName, items) {
 }
 
 export async function copyCollectionToDynamo(db, client, { store, tableName, apply = false }) {
+  const { itemFromDocument } = dynamoTableDefinition(store);
   let copied = 0;
   let batch = [];
   for await (const document of db.collection(store).find({})) {
     copied += 1;
     if (!apply) continue;
-    batch.push(toItem(document));
+    batch.push(itemFromDocument(document));
     if (batch.length === BATCH_SIZE) {
       await writeBatch(client, tableName, batch);
       batch = [];
@@ -60,13 +61,14 @@ function canonical(value) {
 }
 
 export async function compareCollectionWithDynamo(db, client, { store, tableName }) {
+  const { itemFromDocument, keyOf } = dynamoTableDefinition(store);
   const mongo = new Map();
   for await (const document of db.collection(store).find({})) {
-    const item = toItem(document);
-    mongo.set(String(item._id), canonical(item));
+    const item = itemFromDocument(document);
+    mongo.set(keyOf(item), canonical(item));
   }
   const dynamo = new Map();
-  for (const item of await scanAll(client, tableName)) dynamo.set(String(item._id), canonical(item));
+  for (const item of await scanAll(client, tableName)) dynamo.set(keyOf(item), canonical(item));
 
   const onlyInMongo = [...mongo.keys()].filter((id) => !dynamo.has(id));
   const onlyInDynamo = [...dynamo.keys()].filter((id) => !mongo.has(id));

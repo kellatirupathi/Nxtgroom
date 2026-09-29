@@ -117,7 +117,7 @@ before(async () => {
   client = DynamoDBDocumentClient.from(rawClient, { marshallOptions: { removeUndefinedValues: true } });
   setDynamoDocumentClient(client);
   const report = await ensureDynamoTables(rawClient, { prefix: PREFIX, apply: true, protect: false });
-  assert.deepEqual(report.created, [TABLE]);
+  assert.ok(report.created.includes(TABLE));
 });
 
 beforeEach(async () => {
@@ -335,7 +335,9 @@ test("copy fills DynamoDB from MongoDB and compare finds any difference", async 
 
 test("the table check reports existing tables and changes nothing without --apply", async () => {
   const report = await ensureDynamoTables(rawClient, { prefix: PREFIX, apply: false, protect: false });
-  assert.deepEqual(report, { existing: [TABLE], created: [], missing: [], conflicts: [] });
+  assert.ok(report.existing.includes(TABLE));
+  assert.deepEqual([report.created, report.missing, report.conflicts], [[], [], []]);
   const other = await ensureDynamoTables(rawClient, { prefix: "absent-", apply: false, protect: false });
-  assert.deepEqual(other.missing, ["absent-app_settings"]);
+  assert.ok(other.missing.includes("absent-app_settings"));
+  assert.deepEqual(other.existing, []);
 });

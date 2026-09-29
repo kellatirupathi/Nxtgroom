@@ -10,6 +10,7 @@ import {
 import { createWorkerMonitor } from "./workerHealth.js";
 import { createIdleBackoff, createWakeSignal } from "./workerPacing.js";
 import { openSecret } from "./secretBox.js";
+import { completeDeliveryRunIfDone, recordDeliveryOutcome } from "../stores/deliveryRunStore.js";
 
 const WORKER_ID = randomUUID();
 // Lets a queued email go out at once rather than on the next idle poll. See
@@ -136,21 +137,10 @@ async function deliver(job) {
   return sendAttendanceReminderEmail(job.to_email, job.payload);
 }
 
-async function recordRunTerminal(db, runId, outcome, now) {
-  const result = await db.collection("report_delivery_runs").findOneAndUpdate(
-    { _id: runId },
-    {
-      $inc: { [outcome]: 1, terminal: 1 },
-      $set: { updated_at: now },
-    },
-    { returnDocument: "after" }
-  );
-  const run = result?.value || result;
+export async function recordRunTerminal(db, runId, outcome, now) {
+  const run = await recordDeliveryOutcome(db, runId, outcome, now);
   if (run && run.terminal >= run.queued) {
-    await db.collection("report_delivery_runs").updateOne(
-      { _id: runId, terminal: { $gte: run.queued } },
-      { $set: { status: "completed", finished_at: now, updated_at: now } }
-    );
+    await completeDeliveryRunIfDone(db, runId, { status: "completed", finished_at: now, updated_at: now });
   }
 }
 

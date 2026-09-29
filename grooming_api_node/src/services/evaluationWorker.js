@@ -5,6 +5,12 @@ import { evaluateImage } from "./visionEngine.js";
 import { CHECKPOINT_VERSION, improvementTips } from "../checkpoints.js";
 import { enqueueNotification } from "./notificationWorker.js";
 import { createWorkerMonitor } from "./workerHealth.js";
+import {
+  deleteEvaluation,
+  evaluationFilter,
+  getEvaluation,
+  saveEvaluation,
+} from "../stores/evaluationStore.js";
 import { createIdleBackoff, createSweepSchedule } from "./workerPacing.js";
 import { incrementMetric } from "./telemetry.js";
 import { downloadPhoto } from "./photoStorage.js";
@@ -792,18 +798,8 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   return true;
 }
 
-/**
- * Matches one half's evaluation.
- *
- * A check-in is matched on the absence of a kind as well as on "checkin",
- * because every evaluation stored before check-out analysis existed has no
- * kind field and all of them are check-ins.
- */
-export function evaluationFilter(attendanceId, kind = "checkin") {
-  return kind === "checkout"
-    ? { attendance_id: attendanceId, kind: "checkout" }
-    : { attendance_id: attendanceId, kind: { $ne: "checkout" } };
-}
+// Moved to the evaluation store; re-exported for existing callers.
+export { evaluationFilter };
 
 async function completeEvaluation(db, job, report) {
   if (!(await renewEvaluationLease(db, job))) return false;
@@ -820,19 +816,10 @@ async function completeEvaluation(db, job, report) {
   // Tagged before it is written or synced, so the half it belongs to travels
   // with it rather than being inferred at each use.
   const evaluation = { ...publicEvaluation(report, job, now), kind: jobKind(job) };
-  await db.collection("evaluations").updateOne(
-    evaluationFilter(job.attendance_id, jobKind(job)),
-    {
-      $set: evaluation,
-      $setOnInsert: { _id: randomUUID(), created_at: now },
-    },
-    { upsert: true }
-  );
+  await saveEvaluation(db, job.attendance_id, jobKind(job), evaluation, now);
   const synced = await syncStoredEvaluation(db, job, evaluation, "processing");
   if (!synced) {
-    await db.collection("evaluations").deleteOne(
-      evaluationFilter(job.attendance_id, jobKind(job))
-    );
+    await deleteEvaluation(db, job.attendance_id, jobKind(job));
     return false;
   }
   return true;
@@ -895,17 +882,10 @@ export async function evaluateCheckoutNow(db, {
     throw error;
   }
   const evaluation = { ...publicEvaluation(report, job, now), kind: "checkout" };
-  await db.collection("evaluations").updateOne(
-    evaluationFilter(attendanceId, "checkout"),
-    {
-      $set: evaluation,
-      $setOnInsert: { _id: randomUUID(), created_at: now },
-    },
-    { upsert: true }
-  );
+  await saveEvaluation(db, attendanceId, "checkout", evaluation, now);
   const synced = await syncStoredEvaluation(db, job, evaluation, null);
   if (!synced || !(await evaluationTargetExists(db, { ...job, photo_key: photoKey }))) {
-    await db.collection("evaluations").deleteOne(evaluationFilter(attendanceId, "checkout"));
+    await deleteEvaluation(db, attendanceId, "checkout");
     const error = new Error("Checkout was removed before the report was committed");
     error.code = "ATTENDANCE_NOT_FOUND";
     throw error;
@@ -914,9 +894,7 @@ export async function evaluateCheckoutNow(db, {
 }
 
 export async function recoverClaimedEvaluation(db, job) {
-  const storedEvaluation = await db.collection("evaluations").findOne(
-    evaluationFilter(job.attendance_id, jobKind(job))
-  );
+  const storedEvaluation = await getEvaluation(db, job.attendance_id, jobKind(job));
   if (!storedEvaluation) return null;
   if (!(await renewEvaluationLease(db, job))) return false;
   await syncStoredEvaluation(db, job, storedEvaluation, "processing");
@@ -1108,13 +1086,11 @@ export async function reconcileFailedEvaluationOutcomes(db) {
  * of policy.
  */
 export async function retryEvaluation(db, job, error) {
-  const storedEvaluation = await db.collection("evaluations").findOne(
-    // Scoped to this half. Matching on attendance_id alone found the check-in
-    // report and reused it for the check-out job, so the check-out was never
-    // analysed at all — it inherited the morning's verdict, remarks and
-    // timestamp, and the two reports were identical by construction.
-    evaluationFilter(job.attendance_id, jobKind(job))
-  );
+  // Scoped to this half. Matching on attendance_id alone found the check-in
+  // report and reused it for the check-out job, so the check-out was never
+  // analysed at all — it inherited the morning's verdict, remarks and
+  // timestamp, and the two reports were identical by construction.
+  const storedEvaluation = await getEvaluation(db, job.attendance_id, jobKind(job));
   if (storedEvaluation) {
     if (await renewEvaluationLease(db, job)) {
       await syncStoredEvaluation(db, job, storedEvaluation, "processing");
@@ -1191,9 +1167,7 @@ export async function reconcileExpiredEvaluationJobs(db, now = new Date()) {
   if (!job) return false;
 
   try {
-    const storedEvaluation = await db.collection("evaluations").findOne(
-      evaluationFilter(job.attendance_id, jobKind(job))
-    );
+    const storedEvaluation = await getEvaluation(db, job.attendance_id, jobKind(job));
     if (storedEvaluation) {
       await syncStoredEvaluation(db, job, storedEvaluation, "recovering");
     } else {
@@ -1253,9 +1227,7 @@ export async function reconcileOverdueEvaluationJobs(db, now = new Date()) {
   if (!job) return false;
 
   try {
-    const storedEvaluation = await db.collection("evaluations").findOne(
-      evaluationFilter(job.attendance_id, jobKind(job))
-    );
+    const storedEvaluation = await getEvaluation(db, job.attendance_id, jobKind(job));
     if (storedEvaluation) {
       await syncStoredEvaluation(db, job, storedEvaluation, "recovering");
     } else {

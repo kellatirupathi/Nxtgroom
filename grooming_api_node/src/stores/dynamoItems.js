@@ -77,3 +77,19 @@ export function upsertExpression({ set = {}, setOnInsert = {} } = {}, { keyNames
 export function isConditionFailure(error) {
   return error?.name === "ConditionalCheckFailedException";
 }
+
+/**
+ * UpdateCommand input for MongoDB updateOne(key, { $set, $setOnInsert },
+ * { upsert: true }), or null when there is nothing to write.
+ */
+export function upsertCommandInput(tableName, key, { set = {}, setOnInsert } = {}) {
+  const expression = upsertExpression({ set, setOnInsert }, { keyNames: Object.keys(key) });
+  if (!expression.clauses.length) return null;
+  return {
+    TableName: tableName,
+    Key: key,
+    UpdateExpression: `SET ${expression.clauses.join(", ")}`,
+    ExpressionAttributeNames: expression.names,
+    ExpressionAttributeValues: expression.values,
+  };
+}

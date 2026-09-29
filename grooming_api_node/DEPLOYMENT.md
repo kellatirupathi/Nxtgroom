@@ -143,9 +143,11 @@ startup may create missing indexes automatically after the same audit passes.
 ### Amazon DynamoDB (migration in progress)
 
 Data is moving from MongoDB to DynamoDB one collection at a time; see
-`docs/DYNAMODB_MIGRATION_PLAN.md`. Only `app_settings` has a DynamoDB
-implementation so far. With the switches unset, everything stays on MongoDB
-and none of this is needed.
+`docs/DYNAMODB_MIGRATION_PLAN.md`. Migrated so far: `app_settings`,
+`report_delivery_runs` and `evaluations`, none of which takes part in a
+MongoDB transaction. The collections that share transactions (colleges,
+BOAs, users, instructors, attendance) move together, last. With the
+switches unset, everything stays on MongoDB and none of this is needed.
 
 1. In IAM, create a user `facultytrack-dynamodb` with an access key and only
    this policy (replace the account id). Lightsail cannot use IAM roles, and

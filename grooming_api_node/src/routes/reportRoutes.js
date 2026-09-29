@@ -36,7 +36,11 @@ const PHOTO_PURGE_BATCH = 200;
 const PHOTO_PURGE_DEADLINE_MS = 20_000;
 /** Bounds how many undeletable records one run will carry as exclusions. */
 const PHOTO_PURGE_MAX_STUCK = 500;
-import { evaluationFilter } from "../services/evaluationWorker.js";
+import { getEvaluation } from "../stores/evaluationStore.js";
+import {
+  completeDeliveryRunIfDone,
+  saveDeliveryRun,
+} from "../stores/deliveryRunStore.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
 import { enqueueMailJob } from "../services/mailWorker.js";
 import {
@@ -225,9 +229,7 @@ reportRouter.get(
     ));
     if (!record) return res.status(404).json({ detail: "No check-in was recorded that day" });
 
-    const evaluation = await db.collection("evaluations").findOne(
-      evaluationFilter(String(record._id), half)
-    );
+    const evaluation = await getEvaluation(db, String(record._id), half);
     // The saree/kurti rotation is a claim about the week, not about this
     // photograph, so it is counted from the week the day falls in. Null for
     // men, who have no rotation to satisfy.
@@ -348,7 +350,21 @@ reportRouter.get(
  * A timed-out call would be recorded as a failure even though the send was
  * proceeding normally.
  */
-async function deliverWeeklyReports(db, startKey) {
+/**
+ * The run record is created before any email is queued. The mail worker
+ * counts each delivery into it as it happens, and it now starts sending the
+ * moment a job is queued: a record created only after production finished
+ * lost every count that landed before it existed, and the run then never
+ * reached "completed".
+ */
+async function startDeliveryRun(db, runId, fields) {
+  await saveDeliveryRun(db, runId, {
+    set: { ...fields, status: "producing", updated_at: new Date() },
+    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  });
+}
+
+export async function deliverWeeklyReports(db, startKey) {
   const notificationSettings = await getNotificationSettings(db);
   if (!shouldSendWeeklyReport(notificationSettings)) {
     console.log(`Weekly reports for ${startKey}: disabled by notification settings`);
@@ -366,6 +382,7 @@ async function deliverWeeklyReports(db, startKey) {
   });
 
   const runId = `weekly:${startKey}`;
+  await startDeliveryRun(db, runId, { type: "weekly_report", week_start: startKey });
   let queued = 0;
   let skipped = 0;
   const failures = [];
@@ -400,28 +417,25 @@ async function deliverWeeklyReports(db, startKey) {
     }
   }
 
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId },
-    {
-      $set: {
-        type: "weekly_report",
-        week_start: startKey,
-        production_finished_at: new Date(),
-        considered: instructorIds.length,
-        queued,
-        skipped,
-        producer_failures: failures.slice(0, 20),
-        status: queued ? "queued" : "completed",
-        updated_at: new Date(),
-      },
-      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  await saveDeliveryRun(db, runId, {
+    set: {
+      type: "weekly_report",
+      week_start: startKey,
+      production_finished_at: new Date(),
+      considered: instructorIds.length,
+      queued,
+      skipped,
+      producer_failures: failures.slice(0, 20),
+      status: queued ? "queued" : "completed",
+      updated_at: new Date(),
     },
-    { upsert: true }
-  );
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId, $expr: { $gte: ["$terminal", "$queued"] } },
-    { $set: { status: "completed", finished_at: new Date(), updated_at: new Date() } }
-  );
+    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  });
+  await completeDeliveryRunIfDone(db, runId, {
+    status: "completed",
+    finished_at: new Date(),
+    updated_at: new Date(),
+  });
   console.log(`Weekly reports for ${startKey}: ${queued} queued, ${skipped} skipped, ${failures.length} producer failures`);
   return { queued, skipped, failures };
 }
@@ -469,7 +483,7 @@ reportRouter.post(
  * Sends the missed-check-out nudges. Detached for the same reason as the
  * weekly run: one email per open check-in outlives a scheduler timeout.
  */
-async function deliverAttendanceReminders(db) {
+export async function deliverAttendanceReminders(db) {
   const timeZone = runtimeConfig().appTimeZone;
   const today = localDateKey(new Date(), timeZone);
   const from = new Date(`${today}T00:00:00.000Z`);
@@ -485,6 +499,7 @@ async function deliverAttendanceReminders(db) {
   ));
 
   const runId = `attendance-reminders:${today}`;
+  await startDeliveryRun(db, runId, { type: "attendance_reminder", date: today });
   let queued = 0;
   const failures = [];
   for (const record of todays) {
@@ -513,25 +528,26 @@ async function deliverAttendanceReminders(db) {
     }
   }
 
-  await db.collection("report_delivery_runs").updateOne(
-    { _id: runId },
-    {
-      $set: { type: "attendance_reminder", date: today, production_finished_at: new Date(), checked: todays.length, queued, producer_failures: failures.slice(0, 20), updated_at: new Date() },
-      $setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  await saveDeliveryRun(db, runId, {
+    set: {
+      type: "attendance_reminder",
+      date: today,
+      production_finished_at: new Date(),
+      checked: todays.length,
+      queued,
+      producer_failures: failures.slice(0, 20),
+      status: "queued",
+      updated_at: new Date(),
     },
-    { upsert: true }
-  );
-  if (!queued) {
-    await db.collection("report_delivery_runs").updateOne(
-      { _id: runId },
-      { $set: { status: "completed", finished_at: new Date() } }
-    );
-  } else {
-    await db.collection("report_delivery_runs").updateOne(
-      { _id: runId },
-      { $set: { status: "queued" } }
-    );
-  }
+    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
+  });
+  // Every reminder may already have been delivered while production was
+  // still running, in which case no later delivery will close the run.
+  await completeDeliveryRunIfDone(db, runId, {
+    status: "completed",
+    finished_at: new Date(),
+    updated_at: new Date(),
+  });
   console.log(`Attendance reminders for ${today}: ${queued} queued of ${todays.length} open check-ins`);
   return { queued, failures };
 }

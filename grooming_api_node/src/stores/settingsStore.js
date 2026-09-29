@@ -1,6 +1,6 @@
 import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamoTableName, getDynamoDocumentClient } from "../config/dynamo.js";
-import { fromItem, isConditionFailure, toItem, upsertExpression } from "./dynamoItems.js";
+import { fromItem, isConditionFailure, toItem, upsertCommandInput, upsertExpression } from "./dynamoItems.js";
 import { routedRead, routedWrite } from "./routing.js";
 
 /**
@@ -35,15 +35,8 @@ export async function getSetting(db, id) {
 }
 
 async function dynamoUpsert(id, { set, setOnInsert }) {
-  const expression = upsertExpression({ set, setOnInsert });
-  if (!expression.clauses.length) return;
-  await getDynamoDocumentClient().send(new UpdateCommand({
-    TableName: table(),
-    Key: { _id: id },
-    UpdateExpression: `SET ${expression.clauses.join(", ")}`,
-    ExpressionAttributeNames: expression.names,
-    ExpressionAttributeValues: expression.values,
-  }));
+  const input = upsertCommandInput(table(), { _id: id }, { set, setOnInsert });
+  if (input) await getDynamoDocumentClient().send(new UpdateCommand(input));
 }
 
 /** MongoDB updateOne({ _id }, { $set, $setOnInsert }, { upsert: true }). */
