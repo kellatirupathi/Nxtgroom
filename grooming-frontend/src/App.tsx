@@ -31,6 +31,7 @@ import {
 import { isElevatedRole, type AttendanceRecord, type CurrentUser, type Instructor, type Role } from './types';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
+const InstituteAnalytics = lazy(() => import('./components/InstituteAnalytics'));
 const EvaluateCard = lazy(() => import('./components/EvaluateCard'));
 const InstructorDetail = lazy(() => import('./components/InstructorDetail'));
 const PublicReportPage = lazy(() => import('./components/PublicReportPage'));
@@ -59,7 +60,7 @@ interface SessionState {
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
-const ADMIN_TABS = new Set(['dashboard', 'boa-management', 'settings', 'instructor-management']);
+const ADMIN_TABS = new Set(['dashboard', 'institute-analytics', 'boa-management', 'settings', 'instructor-management']);
 /**
  * Gated on a capability rather than a role, so a URL typed by hand is refused
  * the same way the navigation hides it.
@@ -374,6 +375,10 @@ export default function App() {
             <div className="w-full h-full">
               <Dashboard onNavigate={navigate} canIdentify={Boolean(session.canIdentify)} />
             </div>
+          )}
+
+          {activeTab === 'institute-analytics' && isElevatedRole(session.role) && (
+            <div className="w-full h-full"><InstituteAnalytics /></div>
           )}
 
           {activeTab === 'overview' && session.faceIdentification && (
