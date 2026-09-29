@@ -14,6 +14,7 @@ import {
   LogOut,
   Minus,
   ScanFace,
+  ShieldAlert,
   Shirt,
   TrendingDown,
   TrendingUp,
@@ -632,6 +633,42 @@ function InstitutesTable({ data }: { data: DashboardData }) {
   );
 }
 
+function Escalations({ data }: { data: DashboardData }) {
+  const rows = data.escalations;
+  return (
+    <section className={`${CARD} p-4 md:p-5`} aria-labelledby="dashboard-escalations-title">
+      <h3 id="dashboard-escalations-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
+        <ShieldAlert size={18} className="text-rose-600" aria-hidden="true" />
+        Escalated this week
+        {rows.length > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{rows.length}</span>}
+      </h3>
+      <p className="text-xs text-slate-500">3 or more non-compliant results since {weekdayLabel(data.week_start)}. Reporting partners are emailed each time.</p>
+      {rows.length === 0 ? (
+        <p className="mt-6 text-sm text-slate-400">Nobody is escalated this week.</p>
+      ) : (
+        <ul className="mt-3 max-h-[312px] divide-y divide-slate-100 overflow-y-auto overscroll-contain pr-1">
+          {rows.map((row) => (
+            <li key={row.instructor_id} className="flex items-center gap-3 py-2.5">
+              <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100 text-sm font-bold text-slate-600">
+                {(row.name[0] || '?').toUpperCase()}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-slate-800">{row.name}</span>
+                <span className="block truncate text-xs text-slate-500">
+                  {row.college_name}{row.top_checkpoint ? ` · most often: ${row.top_checkpoint}` : ''}
+                </span>
+              </span>
+              <span className="inline-flex shrink-0 items-center rounded-full border border-rose-600 bg-rose-600 px-2.5 py-1 text-xs font-bold text-white tabular-nums">
+                {row.count} this week
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function ComplianceDelta({ data }: { data: DashboardData }) {
   const change = complianceChange(data.summary.compliance_percent, data.summary.compliance_same_day_last_week);
   const weekday = weekdayLabel(data.same_day_last_week);
@@ -830,6 +867,10 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
       </div>
 
       <InstitutesTable data={data} />
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Escalations data={data} />
+      </div>
     </section>
   );
 }
