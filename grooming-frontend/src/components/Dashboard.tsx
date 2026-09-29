@@ -458,6 +458,34 @@ function ArrivalsChart({ slots }: { slots: DashboardArrivalSlot[] }) {
   );
 }
 
+function FailedCheckpoints({ data }: { data: DashboardData }) {
+  const rows = data.failed_checkpoints;
+  const max = rows[0]?.count || 1;
+  return (
+    <section className={`${CARD} p-4 md:p-5`} aria-labelledby="dashboard-fails-title">
+      <h3 id="dashboard-fails-title" className="text-base font-bold text-slate-800">Most failed checkpoints</h3>
+      <p className="text-xs text-slate-500">Failed checks this week (from {shortDayLabel(data.week_start)}), check-in and check-out</p>
+      {rows.length === 0 ? (
+        <p className="mt-6 text-sm text-slate-400">No failed checkpoints this week.</p>
+      ) : (
+        <ul className="mt-4 space-y-2.5">
+          {rows.map((row) => (
+            <li key={row.code} className="grid grid-cols-[minmax(0,11rem)_1fr_2.75rem] items-center gap-3 text-sm sm:grid-cols-[minmax(0,15rem)_1fr_2.75rem]">
+              <span className="min-w-0 truncate text-slate-700" title={`${row.name} · ${row.audience}`}>
+                {row.name} <span className="text-xs text-slate-400">· {row.audience}</span>
+              </span>
+              <span className="h-2.5 rounded-full bg-slate-100" aria-hidden="true">
+                <span className="block h-2.5 rounded-full bg-rose-500" style={{ width: `${(row.count / max) * 100}%` }} />
+              </span>
+              <b className="text-right tabular-nums text-slate-800">{formatCount(row.count)}</b>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function ComplianceDelta({ data }: { data: DashboardData }) {
   const change = complianceChange(data.summary.compliance_percent, data.summary.compliance_same_day_last_week);
   const weekday = weekdayLabel(data.same_day_last_week);
@@ -652,6 +680,7 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <ArrivalsChart slots={data.arrivals} />
+        <FailedCheckpoints data={data} />
       </div>
     </section>
   );
