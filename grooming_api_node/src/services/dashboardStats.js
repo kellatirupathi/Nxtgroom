@@ -1,3 +1,6 @@
+import { idMatch } from "../middleware/auth.js";
+import { runtimeConfig } from "../config/env.js";
+import { dateRangeBoundsInTimeZone } from "../utils.js";
 import {
   addDaysToKey,
   ESCALATION_THRESHOLD,
@@ -6,6 +9,8 @@ import {
 } from "./evaluationWorker.js";
 import {
   describeCollegeIdentification,
+  getIdentificationSettings,
+  loadCollegeEnrolment,
 } from "./identificationSettings.js";
 import { localDateKey } from "./instructorReports.js";
 
@@ -462,4 +467,221 @@ export function buildDashboard({
     attire,
     institutes,
   };
+}
+
+const ACTIVE = { $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] };
+
+function idVariants(ids) {
+  const seen = new Set();
+  const variants = [];
+  for (const id of ids) {
+    for (const variant of idMatch(String(id)).$in) {
+      const key = `${variant?._bsontype || typeof variant}:${String(variant)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      variants.push(variant);
+    }
+  }
+  return variants;
+}
+
+export class DashboardCollegeNotFound extends Error {}
+
+/**
+ * Runs the Dashboard's queries and builds the response.
+ *
+ * Every attendance read filters on `date`, which is indexed on its own and
+ * behind college_id, rather than on attendance_day, which is indexed only
+ * behind instructor_id. Tombstoned records (deleting_at) are excluded
+ * everywhere, since they are already on their way out of Daily Records.
+ */
+export async function loadDashboard(db, { collegeId = null, now = new Date() } = {}) {
+  const timeZone = runtimeConfig().appTimeZone;
+  const todayKey = localDateKey(now, timeZone);
+  const collegeScope = collegeId ? { college_id: idMatch(String(collegeId)) } : {};
+
+  const colleges = await db.collection("colleges")
+    .find(collegeId ? { $and: [{ _id: idMatch(String(collegeId)) }, ACTIVE] } : ACTIVE, { projection: { name: 1 } })
+    .sort({ name: 1 })
+    .toArray();
+  const college = collegeId ? colleges[0] || null : null;
+  if (collegeId && !college) throw new DashboardCollegeNotFound("Institute not found");
+
+  const weekStart = weekStartKey(todayKey);
+  const previousDay = previousWorkingDayKey(todayKey);
+  const recordsFrom = previousDay < weekStart ? previousDay : weekStart;
+  const recordBounds = dateRangeBoundsInTimeZone(recordsFrom, todayKey, timeZone);
+  const trendDays = workingDayKeys(todayKey, TREND_WORKING_DAYS);
+  // The oldest trend day, or a week before today when the comparison day is
+  // further back than that (it never is with 30 working days, but the bound
+  // should not depend on it).
+  const trendFrom = [trendDays[0], addDaysToKey(todayKey, -7)].sort()[0];
+  const trendBounds = dateRangeBoundsInTimeZone(trendFrom, todayKey, timeZone);
+
+  const [roster, enrolment, identificationSettings, weekRecords, trendRows, unidentifiedByCollege] = await Promise.all([
+    db.collection("instructors")
+      .find({ $and: [ACTIVE, collegeScope] }, { projection: { name: 1, college_id: 1, gender: 1 } })
+      .toArray(),
+    loadCollegeEnrolment(db),
+    getIdentificationSettings(db),
+    db.collection("attendance")
+      .find(
+        {
+          date: { $gte: recordBounds.start, $lt: recordBounds.end },
+          deleting_at: { $exists: false },
+          ...collegeScope,
+        },
+        {
+          projection: {
+            instructor_id: 1,
+            instructor_name: 1,
+            college_id: 1,
+            attendance_day: 1,
+            date: 1,
+            check_in_time: 1,
+            check_out_time: 1,
+            status: 1,
+            checkout_compliance_status: 1,
+            checkout_deleting_at: 1,
+            attire_type: 1,
+            image_quality: 1,
+          },
+        }
+      )
+      .toArray(),
+    db.collection("attendance").aggregate([
+      {
+        $match: {
+          date: { $gte: trendBounds.start, $lt: trendBounds.end },
+          deleting_at: { $exists: false },
+          ...collegeScope,
+        },
+      },
+      {
+        $project: {
+          day: {
+            $ifNull: [
+              "$attendance_day",
+              {
+                $dateToString: {
+                  date: { $ifNull: ["$check_in_time", "$date"] },
+                  format: "%Y-%m-%d",
+                  timezone: timeZone,
+                },
+              },
+            ],
+          },
+          instructor: {
+            $cond: [
+              { $eq: [{ $ifNull: ["$instructor_id", null] }, null] },
+              null,
+              { $toString: "$instructor_id" },
+            ],
+          },
+          status: { $toLower: { $ifNull: ["$status", ""] } },
+        },
+      },
+      {
+        $group: {
+          _id: "$day",
+          instructors: { $addToSet: "$instructor" },
+          compliant: { $sum: { $cond: [{ $in: ["$status", [...COMPLIANT_STATUSES]] }, 1, 0] } },
+          non_compliant: { $sum: { $cond: [{ $in: ["$status", [...NON_COMPLIANT_STATUSES]] }, 1, 0] } },
+        },
+      },
+      {
+        $project: {
+          present: { $size: { $setDifference: ["$instructors", [null]] } },
+          compliant: 1,
+          non_compliant: 1,
+        },
+      },
+    ]).toArray(),
+    db.collection("attendance").aggregate([
+      {
+        $match: {
+          status: "unidentified",
+          instructor_id: null,
+          deleting_at: { $exists: false },
+          ...collegeScope,
+        },
+      },
+      { $group: { _id: "$college_id", count: { $sum: 1 } } },
+    ]).toArray(),
+  ]);
+
+  const weekIds = weekRecords
+    .filter((record) => (record.attendance_day || localDateKey(new Date(record.check_in_time || record.date), timeZone)) >= weekStart)
+    .map((record) => record._id);
+  const failedRows = weekIds.length
+    ? await db.collection("evaluations").aggregate([
+        { $match: { attendance_id: { $in: idVariants(weekIds) } } },
+        {
+          $project: {
+            attendance_id: 1,
+            kind: 1,
+            rows: {
+              $concatArrays: [
+                { $ifNull: ["$general_idcard_check", []] },
+                { $ifNull: ["$grooming_check", []] },
+                { $ifNull: ["$attire_check", []] },
+                { $ifNull: ["$accessories_check", []] },
+                { $ifNull: ["$footwear_check", []] },
+              ],
+            },
+          },
+        },
+        { $unwind: "$rows" },
+        { $match: { "rows.status": "FAIL" } },
+        {
+          $project: {
+            _id: 0,
+            attendance_id: 1,
+            kind: 1,
+            code: "$rows.code",
+            name: "$rows.checkpoint_name",
+          },
+        },
+      ]).toArray()
+    : [];
+
+  return buildDashboard({
+    now,
+    timeZone,
+    college,
+    colleges,
+    roster,
+    identificationSettings,
+    enrolment,
+    weekRecords,
+    trendRows,
+    unidentifiedByCollege,
+    failedRows,
+  });
+}
+
+/**
+ * The page refreshes itself every 30 seconds for every administrator who has
+ * it open, so a response is shared for a few seconds rather than recomputed
+ * per request. Short enough that a new check-in still shows within one
+ * refresh.
+ */
+const CACHE_MS = 10_000;
+const cache = new Map();
+
+export function clearDashboardCache() {
+  cache.clear();
+}
+
+export async function cachedDashboard(db, { collegeId = null, now = new Date() } = {}) {
+  const key = collegeId ? String(collegeId) : "*";
+  const hit = cache.get(key);
+  if (hit && now.getTime() - hit.at < CACHE_MS) return hit.promise;
+  const promise = loadDashboard(db, { collegeId, now });
+  cache.set(key, { at: now.getTime(), promise });
+  // A failed load is not kept, so the next refresh tries again.
+  promise.catch(() => {
+    if (cache.get(key)?.promise === promise) cache.delete(key);
+  });
+  return promise;
 }
