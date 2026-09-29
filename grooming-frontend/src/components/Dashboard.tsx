@@ -24,7 +24,6 @@ import {
   DASHBOARD_REFRESH_MS,
   formatCount,
   formatPercent,
-  formatWait,
   shortDayLabel,
   tooltipDayLabel,
   updatedAtLabel,
@@ -557,7 +556,7 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <KpiTile label="Present today" icon={UserCheck} iconClass="text-indigo-500">
           <div className="mt-2 flex items-baseline gap-1 tabular-nums">
             <span className="text-2xl font-extrabold text-slate-800">{formatCount(summary.present)}</span>
@@ -591,14 +590,6 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
           <p className="mt-1 text-xs text-slate-500 tabular-nums">
             {formatCount(summary.missed_checkout_previous_day)} missed check-out on {shortDayLabel(data.previous_working_day)}
           </p>
-        </KpiTile>
-
-        <KpiTile label="Pending AI" icon={Clock} iconClass="text-amber-500">
-          <div className="mt-2 text-2xl font-extrabold text-slate-800 tabular-nums">{formatCount(summary.pending)}</div>
-          <p className="mt-2 text-xs text-slate-500 tabular-nums">
-            {summary.pending ? `Oldest waiting ${formatWait(summary.oldest_pending_seconds)}` : 'Nothing waiting'}
-          </p>
-          <p className="mt-1 text-xs text-slate-500 tabular-nums">{formatCount(summary.errors)} analysis error{summary.errors === 1 ? '' : 's'} today</p>
         </KpiTile>
 
         <KpiTile
