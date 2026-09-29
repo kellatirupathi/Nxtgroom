@@ -1,19 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  ArrowDown,
   ArrowRight,
-  ArrowUp,
-  ArrowUpDown,
-  Building2,
   CircleAlert,
   CircleCheck,
   CircleX,
   Clock,
   LayoutDashboard,
-  List,
   LogOut,
   Minus,
-  ScanFace,
   ShieldAlert,
   Shirt,
   TrendingDown,
@@ -25,26 +19,19 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { apiFetch } from '../api';
 import BrandedLoader from './BrandedLoader';
-import DateRangeFilter from './DateRangeFilter';
-import { isCompleteRange, rangeForPreset, type DatePreset, type DateRange } from '../attendanceFilters';
 import {
   complianceChange,
   DASHBOARD_REFRESH_MS,
   formatCount,
   formatPercent,
   formatWait,
-  INSTITUTE_VISIBLE_ROWS,
   shortDayLabel,
-  sortInstitutes,
   tooltipDayLabel,
   updatedAtLabel,
   weekdayLabel,
-  type InstituteSort,
-  type InstituteSortKey,
 } from '../dashboardFormat';
 import type {
   DashboardData,
-  DashboardInstitutesRange,
   DashboardStatusKey,
   DashboardTrendDay,
 } from '../types';
@@ -75,8 +62,6 @@ const STATUS_META: Record<DashboardStatusKey, { label: string; color: string; ba
 
 const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
 const TREND_RANGES = [7, 14, 30] as const;
-const INSTITUTE_HEADER_HEIGHT = 40;
-const INSTITUTE_ROW_HEIGHT = 52;
 
 /** Tracks an element's rendered width so a chart can draw at its real size. */
 function useElementWidth<T extends HTMLElement>() {
@@ -410,201 +395,6 @@ function FailedCheckpoints({ data }: { data: DashboardData }) {
   );
 }
 
-const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boolean }[] = [
-  { key: 'name', label: 'Institute' },
-  { key: 'mode', label: 'Mode' },
-  { key: 'present_percent', label: 'Present', numeric: true },
-  { key: 'compliance_percent', label: 'Compliance', numeric: true },
-  { key: 'non_compliant', label: 'Non-compliant', numeric: true },
-  { key: 'unidentified', label: 'Unidentified', numeric: true },
-  { key: 'enrolled_percent', label: 'Faces enrolled', numeric: true },
-];
-
-function InstitutesTable({ data }: { data: DashboardData }) {
-  const [sort, setSort] = useState<InstituteSort>({ key: 'present_percent', direction: 1 });
-  const [preset, setPreset] = useState<DatePreset>('today');
-  const [range, setRange] = useState<DateRange>(() => rangeForPreset('today', data.today));
-  const [ranged, setRanged] = useState<DashboardInstitutesRange | null>(null);
-  const [rangeLoading, setRangeLoading] = useState(false);
-  const [rangeError, setRangeError] = useState('');
-
-  // Today's table arrives with the Dashboard and refreshes with it. Any other
-  // range is fetched on its own; one that reaches today is fetched again each
-  // time the page refreshes, so it stays as current as the rest of the page.
-  const showingToday = preset === 'today';
-  const reachesToday = !range.to || range.to >= data.today;
-  const refreshKey = !showingToday && reachesToday ? data.generated_at : '';
-  useEffect(() => {
-    if (showingToday || !isCompleteRange(range, preset)) return undefined;
-    const controller = new AbortController();
-    const params = new URLSearchParams({ from: range.from, to: range.to });
-    setRangeLoading(true);
-    apiFetch<DashboardInstitutesRange>(`/api/v2/dashboard/institutes?${params.toString()}`, { signal: controller.signal })
-      .then((result) => {
-        if (controller.signal.aborted) return;
-        setRanged(result);
-        setRangeError('');
-      })
-      .catch((requestError) => {
-        if (controller.signal.aborted || (requestError as { status?: number })?.status === 401) return;
-        setRangeError(requestError instanceof Error ? requestError.message : String(requestError));
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setRangeLoading(false);
-      });
-    return () => controller.abort();
-  }, [showingToday, preset, range, refreshKey]);
-
-  const changeRange = (nextPreset: DatePreset, nextRange: DateRange) => {
-    setPreset(nextPreset);
-    setRange(nextRange);
-    // Rows for the previous range must not stand in for the new one.
-    setRanged(null);
-    setRangeError('');
-  };
-
-  const workingDays = showingToday ? 1 : ranged?.working_days ?? 0;
-  const waiting = !showingToday && !ranged && (rangeLoading || !rangeError);
-  const rows = useMemo(
-    () => sortInstitutes(showingToday ? data.institutes : ranged?.institutes ?? [], sort),
-    [showingToday, data.institutes, ranged, sort],
-  );
-  const toggle = (key: InstituteSortKey) => {
-    setSort((current) => (
-      current.key === key
-        ? { key, direction: current.direction === 1 ? -1 : 1 }
-        : { key, direction: key === 'name' || key === 'mode' || key === 'present_percent' || key === 'compliance_percent' || key === 'enrolled_percent' ? 1 : -1 }
-    ));
-  };
-  const scrolls = rows.length > INSTITUTE_VISIBLE_ROWS;
-
-  return (
-    <section className={CARD} aria-labelledby="dashboard-institutes-title">
-      {/* No wrapping: the filter holds the top-right corner whatever range is
-          chosen, and the longer description a range brings wraps under the
-          title instead of pushing the filter onto a line of its own. */}
-      <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4 md:px-5">
-        <div className="min-w-0 flex-1">
-          <h3 id="dashboard-institutes-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
-            <Building2 size={18} className="text-indigo-600" aria-hidden="true" />
-            Institutes
-          </h3>
-          <p className="text-xs text-slate-500">
-            {workingDays > 1
-              ? `Present counts each instructor once per day they checked in, out of ${formatCount(workingDays)} working days. `
-              : ''}
-            Select a column heading to sort. Face enrolment under 80% is flagged for face-only institutes.
-          </p>
-        </div>
-        <div className="shrink-0">
-          <DateRangeFilter preset={preset} range={range} today={data.today} onChange={changeRange} />
-        </div>
-      </div>
-      {rangeError && (
-        <p role="alert" className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm text-rose-700 md:px-5">
-          {rangeError}
-        </p>
-      )}
-      {waiting ? (
-        <p className="p-6 text-sm text-slate-400" aria-live="polite">Loading institutes for this range…</p>
-      ) : rows.length === 0 ? (
-        <p className="p-6 text-sm text-slate-400">{rangeError ? 'No figures to show.' : 'No institutes have been added yet.'}</p>
-      ) : (
-        // Ten rows tall, then the rest scroll inside the card with the header
-        // pinned, so the page below keeps its place however many institutes
-        // there are.
-        <div
-          className={`overflow-auto overscroll-contain transition-opacity ${rangeLoading ? 'opacity-60' : ''}`}
-          style={{ maxHeight: INSTITUTE_HEADER_HEIGHT + INSTITUTE_ROW_HEIGHT * INSTITUTE_VISIBLE_ROWS }}
-          tabIndex={scrolls ? 0 : undefined}
-          aria-label={scrolls ? 'Institutes, scrollable' : undefined}
-        >
-          <table className="w-full min-w-[860px] text-left text-sm">
-            <thead>
-              <tr style={{ height: INSTITUTE_HEADER_HEIGHT }}>
-                {INSTITUTE_COLUMNS.map((column) => {
-                  const active = sort.key === column.key;
-                  const SortIcon = active ? (sort.direction === 1 ? ArrowUp : ArrowDown) : ArrowUpDown;
-                  return (
-                    <th
-                      key={column.key}
-                      scope="col"
-                      aria-sort={active ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}
-                      className={`sticky top-0 z-10 bg-slate-50 px-3 text-xs first:pl-4 last:pr-4 font-bold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226_232_240)] ${column.numeric ? 'text-right' : ''}`}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggle(column.key)}
-                        className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wider rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${active ? 'text-indigo-700' : 'hover:text-slate-700'}`}
-                      >
-                        {column.label}
-                        <SortIcon size={12} aria-hidden="true" />
-                      </button>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const cell = `px-3 first:pl-4 last:pr-4 whitespace-nowrap ${index === 0 ? '' : 'shadow-[inset_0_1px_0_0_rgb(241_245_249)]'}`;
-                return (
-                  <tr key={row.college_id} style={{ height: INSTITUTE_ROW_HEIGHT }} className="hover:bg-slate-50">
-                    <td className={`${cell} max-w-[240px] truncate font-semibold text-slate-800`} title={row.name}>{row.name}</td>
-                    <td className={cell}>
-                      {row.mode === 'FACE_ONLY' ? (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
-                          <ScanFace size={12} aria-hidden="true" />Face
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
-                          <List size={12} aria-hidden="true" />Selector
-                        </span>
-                      )}
-                    </td>
-                    <td className={`${cell} text-right tabular-nums`}>
-                      <span className="inline-flex items-center gap-2">
-                        <span aria-hidden="true" className="hidden h-1.5 w-12 rounded-full bg-slate-100 md:block">
-                          <span className="block h-1.5 rounded-full bg-indigo-600" style={{ width: `${Math.min(100, row.present_percent ?? 0)}%` }} />
-                        </span>
-                        <span className="font-semibold text-slate-800">{formatCount(row.present)}</span>
-                        <span className="text-slate-400">/ {formatCount(row.expected)}</span>
-                      </span>
-                    </td>
-                    <td className={`${cell} text-right font-semibold tabular-nums ${typeof row.compliance_percent === 'number' && row.compliance_percent < 80 ? 'text-rose-600' : 'text-slate-800'}`}>
-                      {formatPercent(row.compliance_percent)}
-                    </td>
-                    <td className={`${cell} text-right tabular-nums text-slate-700`}>{formatCount(row.non_compliant)}</td>
-                    <td className={`${cell} text-right tabular-nums`}>
-                      {row.unidentified > 0
-                        ? <span className="inline-flex rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white">{formatCount(row.unidentified)}</span>
-                        : <span className="text-slate-400">0</span>}
-                    </td>
-                    <td className={`${cell} text-right tabular-nums`}>
-                      {row.low_enrolment ? (
-                        <span
-                          className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-700"
-                          title={`${formatCount(row.enrolled)} of ${formatCount(row.instructors)} instructors enrolled`}
-                        >
-                          <TriangleAlert size={12} aria-hidden="true" />{row.enrolled_percent}% · Low
-                        </span>
-                      ) : (
-                        <span className="font-semibold text-slate-700" title={`${formatCount(row.enrolled)} of ${formatCount(row.instructors)} instructors enrolled`}>
-                          {row.enrolled_percent}%
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function Escalations({ data }: { data: DashboardData }) {
   const rows = data.escalations;
   return (
@@ -837,8 +627,6 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
         <Escalations data={data} />
         <FailedCheckpoints data={data} />
       </div>
-
-      <InstitutesTable data={data} />
     </section>
   );
 }
