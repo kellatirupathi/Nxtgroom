@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ChartColumnBig,
   LayoutDashboard,
   LayoutGrid,
   History,
@@ -39,6 +40,7 @@ const PRIMARY_ITEMS: NavItem[] = [
 ];
 
 const OVERFLOW_ITEMS: NavItem[] = [
+  { tab: 'institute-analytics', label: 'Institute Analytics', icon: ChartColumnBig, adminOnly: true },
   // Gated on the identify permission rather than on role, so a BOA who has been
   // granted it still reaches the queue.
   { tab: 'unidentified', label: 'Unidentified', icon: UserRoundSearch, identifyOnly: true },
