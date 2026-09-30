@@ -17,6 +17,7 @@ import { parseCsv } from '../csvParse';
 import {
   blankRequiredFields,
   COMMIT_BATCH,
+  hasIdentifier,
   fieldsInError,
   flagRow,
   guessCollegeId,
@@ -61,6 +62,8 @@ interface PreviewResult {
   /** Whether the row adds a new instructor or updates an existing one. */
   action?: 'create' | 'update';
   existing?: { id: string; name: string } | null;
+  /** Fields the sheet left blank, kept from the instructor's record. */
+  filled?: string[];
   /** enrol: the sheet's photo is used; keep: they already have one. */
   photo?: 'enrol' | 'keep';
 }
@@ -77,21 +80,31 @@ interface CommitResult {
 
 interface ReadyRow {
   row: number;
+  /**
+   * The row as it was sent to be checked, so the import sends the same
+   * thing: blank cells stay blank and are filled from the roster again, and
+   * the server's merged values are never mistaken for the sheet's.
+   */
+  source: ImportRow;
   value: PreviewValue;
   thumbnail: string | null;
   action: 'create' | 'update';
   /** The name on record of the instructor an update applies to. */
   existingName: string;
+  /** Labels of the fields kept from the roster because the sheet left them blank. */
+  kept: string[];
   photo: 'enrol' | 'keep';
 }
 
-function toReadyRow(row: number, result: PreviewResult): ReadyRow {
+function toReadyRow(source: ImportRow, result: PreviewResult): ReadyRow {
   return {
-    row,
+    row: result.row ?? source.row,
+    source,
     value: result.value as PreviewValue,
     thumbnail: result.thumbnail ?? null,
     action: result.action === 'update' ? 'update' : 'create',
     existingName: result.existing?.name ?? '',
+    kept: (result.filled ?? []).map((field) => IMPORT_COLUMNS.find((column) => column.field === field)?.label ?? field),
     photo: result.photo === 'keep' ? 'keep' : 'enrol',
   };
 }
@@ -162,6 +175,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [sourceName, setSourceName] = useState('');
   const [ignoredColumns, setIgnoredColumns] = useState<string[]>([]);
+  const [missingColumns, setMissingColumns] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [ready, setReady] = useState<ReadyRow[]>([]);
@@ -224,9 +238,11 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   /** Reads the sheet's rows and has the server check them, batch by batch. */
   const checkRows = async (csvText: string, name: string) => {
     const table = readImportTable(parseCsv(csvText));
-    if (table.missingColumns.length) {
-      const plural = table.missingColumns.length > 1 ? 's' : '';
-      setSourceError(`The sheet is missing the required column${plural} ${table.missingColumns.join(', ')}. Download the template to see the headings the import expects.`);
+    // Only a way to find each instructor is essential. Any other missing
+    // column is filled from the roster for people already in it, and flags
+    // only the new ones, so it is noted in the preview rather than refused.
+    if (!table.hasIdentifier) {
+      setSourceError('The sheet needs an Email or Employee ID column to tell who each row is. Download the template to see the headings the import expects.');
       return;
     }
     if (!table.rows.length) {
@@ -244,6 +260,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     const byRow = new Map<number, ImportRow>(unique.map((row) => [row.row, row]));
     setSourceName(name);
     setIgnoredColumns(table.ignoredColumns);
+    setMissingColumns(table.missingColumns);
     setSourceError('');
     setStage('checking');
     setProgress({ done: 0, total: unique.length });
@@ -257,7 +274,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
           const sent = batch[index];
           const rowNumber = result.row ?? sent.row;
           if (result.ok && result.value) {
-            passed.push(toReadyRow(rowNumber, result));
+            passed.push(toReadyRow(byRow.get(rowNumber) ?? sent, result));
           } else {
             refused.push(flagRow(byRow.get(rowNumber) ?? sent, result.errors?.length ? result.errors : ['This row could not be checked']));
           }
@@ -379,9 +396,11 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     const toSend: ImportRow[] = [];
     const taken = ready.map((item) => ({ row: item.row, email: item.value.email, employee_id: item.value.employee_id }));
     for (const candidate of candidates) {
-      const blanks = blankRequiredFields(candidate);
-      if (blanks.length) {
-        localErrors.set(candidate.row, [`Fill in ${blanks.join(', ')}`]);
+      // Blank fields are the server's to judge: for someone already in the
+      // roster they are filled from the record. Only a way to find them is
+      // needed here.
+      if (!hasIdentifier(candidate)) {
+        localErrors.set(candidate.row, ['Fill in an Email or Employee ID']);
         continue;
       }
       const repeats = repeatsOf(candidate, taken);
@@ -399,7 +418,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
         const { results } = await request<{ results: PreviewResult[] }>('/api/v2/instructors/import/preview', { rows: batch });
         results.forEach((result, index) => {
           const rowNumber = result.row ?? batch[index].row;
-          if (result.ok && result.value) moved.push(toReadyRow(rowNumber, result));
+          if (result.ok && result.value) moved.push(toReadyRow(batch[index], result));
           else serverErrors.set(rowNumber, result.errors?.length ? result.errors : ['This row could not be checked']);
         });
       }
@@ -444,18 +463,12 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
       }
       try {
         const { results } = await request<{ results: CommitResult[] }>('/api/v2/instructors/import', {
-          // The institute goes by id, so a second institute with the same
-          // name added since the preview cannot change where anyone lands.
-          rows: batch.map(({ row, value }) => ({
-            row,
-            name: value.name,
-            email: value.email,
-            gender: value.gender,
-            role: value.role,
-            institute: value.college_id,
-            employee_id: value.employee_id,
-            phone_no: value.phone_no,
-            photo_url: value.photo_url,
+          // The row as the sheet gave it, but with a named institute pinned
+          // to the id it matched, so a second institute with the same name
+          // added since the preview cannot change where anyone lands.
+          rows: batch.map(({ source, value }) => ({
+            ...source,
+            institute: (source.institute ?? '').trim() ? value.college_id : '',
           })),
         });
         for (const outcome of results) {
@@ -502,6 +515,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     setSummary(null);
     setSourceError('');
     setIgnoredColumns([]);
+    setMissingColumns([]);
     setDrafts({});
     setEditing(new Set());
     setFlaggedNotice('');
@@ -606,13 +620,19 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-600">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1.5">
-                  <p><span className="font-bold text-slate-800">Required columns:</span> {REQUIRED_LABELS.join(', ')}</p>
+                  <p><span className="font-bold text-slate-800">Required for a new instructor:</span> {REQUIRED_LABELS.join(', ')}</p>
                   <p><span className="font-bold text-slate-800">Optional:</span> {OPTIONAL_LABELS.join(', ')}</p>
+                  <p>
+                    <span className="font-bold text-slate-800">Already in the roster?</span> Rows are matched by Email or
+                    Employee ID. Filled cells update their record; blank cells, or columns the sheet does not have, keep
+                    what is on record.
+                  </p>
                   <p className="text-xs text-slate-500">
                     Gender is Male or Female. Role is {ROLE_CHOICES}. Institute is the institute’s name as it appears
                     here, or its ID. Photo Link is a public link to a clear, front-facing photo (a Google Drive link
-                    shared with anyone works). Headings and values are not case-sensitive, and where a cell has two
-                    values the first is used. Rows with a problem are listed under Flagged and not added.
+                    shared with anyone works). Columns can be in any order, headings and values are not case-sensitive,
+                    and extra columns are ignored. Where a cell has two values the first is used. Rows with a problem
+                    are listed under Flagged, where they can be corrected.
                   </p>
                 </div>
                 <button
@@ -677,6 +697,12 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto" role="tabpanel">
+              {missingColumns.length > 0 && (
+                <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800 sm:px-6">
+                  The sheet has no {missingColumns.join(', ')} column{missingColumns.length > 1 ? 's' : ''}. Instructors
+                  already in the roster keep what is on record; a new instructor is flagged until it is filled in.
+                </p>
+              )}
               {ignoredColumns.length > 0 && tab === 'ready' && (
                 <p className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs text-slate-500 sm:px-6">
                   Not imported, as they match no instructor field: {ignoredColumns.join(', ')}.
@@ -690,11 +716,12 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
                   {/* A card per row on a phone, where the table's columns do
                       not fit; the table from tablet width up. */}
                   <ul className="divide-y divide-slate-100 sm:hidden">
-                    {ready.map(({ row, value, thumbnail, action, existingName, photo }) => (
+                    {ready.map(({ row, value, thumbnail, action, existingName, kept, photo }) => (
                       <li key={row} className="flex items-start gap-3 px-4 py-3">
                         <Thumbnail src={thumbnail} name={value.name} kept={photo === 'keep'} />
                         <div className="min-w-0 flex-1 text-sm">
                           <ActionBadge action={action} existingName={existingName} />
+                          <KeptNote kept={kept} />
                           <p className="mt-1 font-bold text-slate-800">{value.name}</p>
                           <p className="truncate text-xs text-slate-500">{value.email}</p>
                           <p className="mt-1 text-xs text-slate-600">
@@ -723,10 +750,13 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {ready.map(({ row, value, thumbnail, action, existingName, photo }) => (
+                      {ready.map(({ row, value, thumbnail, action, existingName, kept, photo }) => (
                         <tr key={row}>
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-400">{row}</td>
-                          <td className="px-4 py-2.5"><ActionBadge action={action} existingName={existingName} /></td>
+                          <td className="px-4 py-2.5">
+                            <ActionBadge action={action} existingName={existingName} />
+                            <KeptNote kept={kept} />
+                          </td>
                           <td className="px-2 py-2.5"><Thumbnail src={thumbnail} name={value.name} kept={photo === 'keep'} /></td>
                           <td className="px-4 py-2.5">
                             <span className="block font-bold text-slate-800">{value.name}</span>
@@ -905,6 +935,12 @@ function ActionBadge({ action, existingName }: { action: 'create' | 'update'; ex
   );
 }
 
+/** Which fields an update keeps from the roster because the sheet left them blank. */
+function KeptNote({ kept }: { kept: string[] }) {
+  if (!kept.length) return null;
+  return <p className="mt-1 max-w-[14rem] text-xs text-slate-500">Kept from roster: {kept.join(', ')}</p>;
+}
+
 function Thumbnail({ src, name, kept = false }: { src: string | null; name: string; kept?: boolean }) {
   if (src) {
     return <img src={src} alt={`Photo of ${name}`} className="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />;
@@ -946,6 +982,7 @@ interface FlaggedEditorProps {
 function FlaggedEditor({ item, draft, colleges, open, checking, busy, onToggle, onChange, onCheck }: FlaggedEditorProps) {
   const marked = fieldsInError(item.errors);
   const blanks = blankRequiredFields(draft);
+  const canCheck = hasIdentifier(draft);
   const id = (field: string) => `flagged-${item.row}-${field}`;
   const sheetHad = (field: 'gender' | 'role' | 'institute') => {
     const original = (item.raw[field] ?? '').trim();
@@ -977,7 +1014,9 @@ function FlaggedEditor({ item, draft, colleges, open, checking, busy, onToggle, 
         <div className="min-w-0 flex-1">
           <p className="text-sm">
             <span className="font-mono text-xs text-slate-400">Row {item.row}</span>{' '}
-            <span className="font-bold text-slate-800">{item.name || 'No name'}</span>
+            <span className="font-bold text-slate-800">
+              {item.name || (item.raw.employee_id ? `Employee ID ${item.raw.employee_id}` : 'No name')}
+            </span>
             {item.email && <span className="text-slate-500"> · {item.email}</span>}
           </p>
           <div className="mt-1.5 text-sm"><Reasons errors={item.errors} /></div>
@@ -1032,14 +1071,16 @@ function FlaggedEditor({ item, draft, colleges, open, checking, busy, onToggle, 
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-slate-500">
-              {blanks.length
-                ? `Fill in ${blanks.join(', ')} to check this row.`
-                : 'Photo Link is needed unless they are already in the roster with a photo.'}
+              {!canCheck
+                ? 'Fill in an Email or Employee ID to check this row.'
+                : blanks.length
+                  ? `Blank: ${blanks.join(', ')}. Kept from the roster if they are already in it; needed for a new instructor.`
+                  : 'Photo Link is needed unless they are already in the roster with a photo.'}
             </p>
             <button
               type="button"
               onClick={onCheck}
-              disabled={busy || blanks.length > 0}
+              disabled={busy || !canCheck}
               className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
             >
               {checking && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
