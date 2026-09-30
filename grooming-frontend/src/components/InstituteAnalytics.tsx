@@ -4,10 +4,12 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChartColumnBig,
+  Plus,
   TriangleAlert,
 } from 'lucide-react';
 import { apiFetch } from '../api';
 import DateRangeFilter from './DateRangeFilter';
+import InstituteFormDialog from './InstituteFormDialog';
 import {
   isCompleteRange,
   localDateValue,
@@ -53,6 +55,10 @@ export default function InstituteAnalytics() {
   const [result, setResult] = useState<DashboardInstitutesRange | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+  // Bumped after an institute is added, so the table fetches again and shows
+  // it; the rows on screen stay put while it does.
+  const [reloadKey, setReloadKey] = useState(0);
   const hasResult = useRef(false);
 
   useEffect(() => {
@@ -114,7 +120,7 @@ export default function InstituteAnalytics() {
       active?.abort();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [preset, range]);
+  }, [preset, range, reloadKey]);
 
   const changeRange = (nextPreset: DatePreset, nextRange: DateRange) => {
     // Rows for the previous range must not stand in for the new one.
@@ -154,10 +160,32 @@ export default function InstituteAnalytics() {
             </p>
           )}
         </div>
-        <div className="shrink-0">
+        {/* Add sits before the date filter, which stays at the far right.
+            On a phone the button keeps only its icon so the row never wraps. */}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            aria-label="Add institute"
+            title="Add institute"
+            className="flex h-9 items-center gap-1.5 rounded-md bg-indigo-600 px-2.5 text-sm font-bold text-white shadow-sm transition-colors hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 sm:px-3"
+          >
+            <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
+            <span className="hidden sm:inline">Add Institute</span>
+          </button>
           <DateRangeFilter preset={preset} range={range} today={localDateValue()} onChange={changeRange} />
         </div>
       </div>
+
+      <InstituteFormDialog
+        open={adding}
+        college={null}
+        onClose={() => setAdding(false)}
+        onSaved={() => {
+          setAdding(false);
+          setReloadKey((key) => key + 1);
+        }}
+      />
 
       <section className={`${CARD} flex min-h-0 flex-1 flex-col overflow-hidden`} aria-label="Institutes">
         {error && (

@@ -43,6 +43,7 @@ import {
   sendAccountInviteEmail,
 } from "../services/emailService.js";
 import { INVITE_TTL_MS, issueResetToken } from "../services/passwordResetService.js";
+import { clearDashboardCache } from "../services/dashboardStats.js";
 import {
   addReportRecipient,
   getRecipientEvents,
@@ -539,6 +540,9 @@ adminRouter.post(
       if (duplicateErrorResponse(error, res, "A college with this name and location already exists")) return;
       throw error;
     }
+    // The Institutes page caches its figures for a few seconds; without this
+    // an institute added from that page would not appear on it straight away.
+    clearDashboardCache();
     return res.status(201).json({ message: "College created successfully", id: college._id });
   })
 );
@@ -579,6 +583,7 @@ adminRouter.put(
     if (result.outcome === "duplicate") {
       return res.status(409).json({ detail: "A college with this name and location already exists" });
     }
+    clearDashboardCache();
     return res.json({ message: "College updated successfully" });
   })
 );
@@ -595,6 +600,7 @@ adminRouter.delete(
     if (result.outcome === "assigned_instructor") {
       return res.status(409).json({ detail: "Reassign or delete active instructors before deleting this college" });
     }
+    clearDashboardCache();
     return res.json({ message: "College deleted successfully" });
   })
 );

@@ -1,8 +1,9 @@
 import { useCallback, useState, useEffect, useMemo, type FormEvent } from 'react';
-import { Plus, UserCog, Search, Mail, CircleAlert, X } from 'lucide-react';
+import { Plus, UserCog, Search, Mail, CircleAlert, Upload, X } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
+import InstructorImportDialog from './InstructorImportDialog';
 import ReferencePhotoField from './ReferencePhotoField';
 import RowActionsMenu from './RowActionsMenu';
 import { instructorRoleOptions } from '../instructorRoles';
@@ -46,6 +47,7 @@ export default function InstructorManagement() {
    * because a face can only be enrolled against a record that has an id.
    */
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
+  const [showImport, setShowImport] = useState(false);
   const toast = useToast();
 
   const [formData, setFormData] = useState<InstructorForm>({
@@ -283,7 +285,9 @@ export default function InstructorManagement() {
           </h2>
         </div>
         <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
-          <div className="relative flex-1 min-w-[10rem] sm:flex-none">
+          {/* On a phone the search has the first row to itself and the two
+              buttons share the second, rather than Import wrapping alone. */}
+          <div className="relative basis-full sm:basis-auto sm:flex-none">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
               type="text" 
@@ -296,10 +300,18 @@ export default function InstructorManagement() {
         <button
             type="button"
             onClick={openAddModal}
-            className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 shrink-0"
+            className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex flex-1 items-center justify-center gap-2 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 shrink-0 sm:flex-none"
           >
             <Plus size={18} />
             Add Instructor
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowImport(true)}
+            className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 shrink-0 sm:flex-none"
+          >
+            <Upload size={18} aria-hidden="true" />
+            Import
           </button>
         </div>
       </div>
@@ -557,6 +569,20 @@ export default function InstructorManagement() {
             </form>
           </div>
         </div>
+      )}
+
+      {showImport && (
+        <InstructorImportDialog
+          colleges={colleges}
+          onClose={() => setShowImport(false)}
+          onImported={(added) => {
+            // The roster changed on the server; fetch it again rather than
+            // guess the new rows, which carry ids and photo counts from there.
+            invalidateCache(INSTRUCTORS_PATH);
+            void fetchData();
+            toast.success(added === 1 ? 'Imported 1 instructor' : `Imported ${added} instructors`);
+          }}
+        />
       )}
 
       <ConfirmDialog

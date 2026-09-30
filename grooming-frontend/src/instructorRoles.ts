@@ -2,11 +2,11 @@
  * The roles an administrator can give an instructor in the Instructors form.
  *
  * INSTRUCTOR and CENTRAL_INSTRUCTOR are the values the BigQuery roster uses;
- * MENTOR and OTHER cover people the roster has no role for. Stored exactly as
- * written here, in the same upper-case form as the synced values, so filters
- * and exports group them together.
+ * CENTRAL_TEAM, MENTOR and OTHER cover people the roster has no role for.
+ * Stored exactly as written here, in the same upper-case form as the synced
+ * values, so filters and exports group them together.
  */
-export const INSTRUCTOR_ROLES = ['INSTRUCTOR', 'CENTRAL_INSTRUCTOR', 'MENTOR', 'OTHER'] as const;
+export const INSTRUCTOR_ROLES = ['INSTRUCTOR', 'CENTRAL_INSTRUCTOR', 'CENTRAL_TEAM', 'MENTOR', 'OTHER'] as const;
 
 /**
  * The Role dropdown's options: the standard roles first, in a fixed order,
