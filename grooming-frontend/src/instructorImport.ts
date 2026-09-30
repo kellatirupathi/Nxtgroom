@@ -71,12 +71,18 @@ export const PREVIEW_BATCH = 25;
 export const COMMIT_BATCH = 5;
 
 /**
- * A heading reduced to lower-case letters and digits, so case, spacing and
- * punctuation never matter: "Photo Link", "photo_link" and "PHOTO LINK *"
- * are the same heading.
+ * A heading reduced to lower-case letters and digits, so case, spacing,
+ * punctuation and a leading question number never matter: "Photo Link",
+ * "photo_link", "PHOTO LINK *" and "6. Photo Link" are the same heading.
  */
 function headingKey(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return value
+    .toLowerCase()
+    // A question number from a form, as in "2. Employee ID" or "Q3) Email":
+    // left in, it made "2employeeid", which matched no column, and every row
+    // was flagged as having no Employee ID.
+    .replace(/^\s*(q(uestion)?\s*)?\d+\s*[.):\-]?\s*/, '')
+    .replace(/[^a-z0-9]/g, '');
 }
 
 const FIELD_BY_HEADING = new Map<string, ImportField>(

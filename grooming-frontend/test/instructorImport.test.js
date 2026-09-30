@@ -215,3 +215,23 @@ test('a corrected row repeating one already in Ready is caught before sending', 
   assert.deepEqual(repeatsOf({ row: 9, email: 'new@x.com', employee_id: 'E9' }, ready), []);
   assert.deepEqual(repeatsOf({ row: 2, email: 'asha@x.com', employee_id: 'E1' }, ready), [], 'a row never repeats itself');
 });
+
+test('headings numbered like form questions are read, as in the Google Form responses sheet', () => {
+  const table = readImportTable(parseCsv(
+    'Timestamp,1. Full Name,2. Employee ID ,3. Official Email ID  ,4. Gender,5. Role,'
+    + '6. Current Passport-Size Photo( Accepted file formats: JPG / PNG),Consent for Biometric Data Collection,Validation Status\n'
+    + '9/10/2026 15:23:05,Samrat Singh,NW0004809,samrat.singh@nxtwave.co.in,Male,Instructor,https://drive.google.com/open?id=abc,I consent,Valid\n',
+  ));
+  assert.deepEqual(table.rows[0], {
+    row: 2,
+    name: 'Samrat Singh',
+    employee_id: 'NW0004809',
+    email: 'samrat.singh@nxtwave.co.in',
+    gender: 'Male',
+    role: 'Instructor',
+    photo_url: 'https://drive.google.com/open?id=abc',
+  });
+  assert.deepEqual(table.ignoredColumns, ['Timestamp', 'Consent for Biometric Data Collection', 'Validation Status']);
+  assert.equal(headingField('Q3) Email'), 'email');
+  assert.equal(headingField('2) Employee ID'), 'employee_id');
+});
