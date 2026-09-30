@@ -152,7 +152,10 @@ export async function createInstructorGuarded(
       { session }
     );
     if (!college) return { outcome: "college_not_found" };
-    if (await db.collection("instructors").findOne(
+    // Only an id that was given can collide. Querying with a missing one sent
+    // { employee_id: null }, which matched every synced instructor without an
+    // id and refused the new one as a duplicate.
+    if (input.employee_id && await db.collection("instructors").findOne(
       { employee_id: input.employee_id },
       { session }
     )) {
@@ -213,7 +216,7 @@ export async function updateInstructorGuarded(
     );
     if (!college) return { outcome: "college_not_found" };
 
-    const duplicate = await db.collection("instructors").findOne(
+    const duplicate = input.employee_id && await db.collection("instructors").findOne(
       {
         employee_id: input.employee_id,
         _id: { $ne: existing._id },

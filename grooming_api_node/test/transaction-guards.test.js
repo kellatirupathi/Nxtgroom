@@ -206,6 +206,49 @@ test("instructor creation guards its active college assignment transaction", asy
   assert.equal(inserted.deleted_at, null);
 });
 
+test("guarded instructor creation without an employee id does not collide with others lacking one", async () => {
+  // Synced instructors have no employee id. Looking one up by a missing id
+  // sends { employee_id: null }, which matches them all, so the check must be
+  // skipped rather than run with nothing to compare.
+  const session = { id: "create-no-id-session" };
+  let employeeLookups = 0;
+  let inserted = null;
+  const db = {
+    collection(name) {
+      if (name === "colleges") return {
+        findOne: async () => ({ _id: "college-a", deleted_at: null }),
+        updateOne: async () => ({ matchedCount: 1, modifiedCount: 1 }),
+      };
+      if (name === "instructors") return {
+        findOne: async () => {
+          employeeLookups += 1;
+          return { _id: "synced-without-id", employee_id: null };
+        },
+        insertOne: async (document) => {
+          inserted = document;
+          return { insertedId: document._id };
+        },
+      };
+      throw new Error(`Unexpected collection ${name}`);
+    },
+  };
+
+  const result = await createInstructorGuarded(
+    db,
+    {
+      name: "No Id Instructor",
+      role: "INSTRUCTOR",
+      gender: "FEMALE",
+      college_id: "college-a",
+      email: "noid@example.com",
+    },
+    transactionRunner(session)
+  );
+  assert.equal(result.outcome, "created");
+  assert.equal(employeeLookups, 0);
+  assert.equal(inserted.name, "No Id Instructor");
+});
+
 test("guarded instructor deletion refuses an open attendance before mutating profile", async () => {
   const session = { id: "delete-session" };
   let updates = 0;
