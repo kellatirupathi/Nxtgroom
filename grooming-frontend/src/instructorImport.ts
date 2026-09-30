@@ -81,7 +81,7 @@ function headingKey(value: string): string {
     // A question number from a form, as in "2. Employee ID" or "Q3) Email":
     // left in, it made "2employeeid", which matched no column, and every row
     // was flagged as having no Employee ID.
-    .replace(/^\s*(q(uestion)?\s*)?\d+\s*[.):\-]?\s*/, '')
+    .replace(/^\s*(q(uestion)?\s*)?\d+\s*[.):-]?\s*/, '')
     .replace(/[^a-z0-9]/g, '');
 }
 
