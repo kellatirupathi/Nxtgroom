@@ -4,8 +4,6 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChartColumnBig,
-  List,
-  ScanFace,
   TriangleAlert,
 } from 'lucide-react';
 import { apiFetch } from '../api';
@@ -33,7 +31,6 @@ const INSTITUTE_ROW_HEIGHT = 52;
 
 const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boolean }[] = [
   { key: 'name', label: 'Institute' },
-  { key: 'mode', label: 'Mode' },
   { key: 'present_percent', label: 'Present', numeric: true },
   { key: 'compliance_percent', label: 'Compliance', numeric: true },
   { key: 'non_compliant', label: 'Non-compliant', numeric: true },
@@ -134,7 +131,7 @@ export default function InstituteAnalytics() {
     setSort((current) => (
       current.key === key
         ? { key, direction: current.direction === 1 ? -1 : 1 }
-        : { key, direction: key === 'name' || key === 'mode' || key === 'present_percent' || key === 'compliance_percent' || key === 'enrolled_percent' ? 1 : -1 }
+        : { key, direction: key === 'name' || key === 'present_percent' || key === 'compliance_percent' || key === 'enrolled_percent' ? 1 : -1 }
     ));
   };
 
@@ -183,7 +180,7 @@ export default function InstituteAnalytics() {
             tabIndex={0}
             aria-label="Institutes, scrollable"
           >
-            <table className="w-full min-w-[860px] text-left text-sm">
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
                 <tr style={{ height: INSTITUTE_HEADER_HEIGHT }}>
                   {INSTITUTE_COLUMNS.map((column) => {
@@ -215,17 +212,6 @@ export default function InstituteAnalytics() {
                   return (
                     <tr key={row.college_id} style={{ height: INSTITUTE_ROW_HEIGHT }} className="hover:bg-slate-50">
                       <td className={`${cell} max-w-[240px] truncate font-semibold text-slate-800`} title={row.name}>{row.name}</td>
-                      <td className={cell}>
-                        {row.mode === 'FACE_ONLY' ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
-                            <ScanFace size={12} aria-hidden="true" />Face
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
-                            <List size={12} aria-hidden="true" />Selector
-                          </span>
-                        )}
-                      </td>
                       <td className={`${cell} text-right tabular-nums`}>
                         <span className="inline-flex items-center gap-2">
                           <span aria-hidden="true" className="hidden h-1.5 w-12 rounded-full bg-slate-100 md:block">
