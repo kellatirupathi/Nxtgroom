@@ -143,25 +143,26 @@ export default function InstituteAnalytics() {
     // not scroll, the table does, so every institute is reachable without the
     // heading or the date filter leaving the screen.
     <section className="mx-auto flex h-full min-h-0 w-full max-w-[1400px] flex-col gap-5" aria-labelledby="institutes-title">
-      <h2 id="institutes-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
-        <ChartColumnBig size={22} className="text-indigo-600" aria-hidden="true" />
-        Institutes
-      </h2>
-
-      <section className={`${CARD} flex min-h-0 flex-1 flex-col`} aria-label="Institutes">
-        {/* No wrapping: the filter holds the top-right corner whatever range is
-            chosen, and the longer description a range brings wraps beside it
-            instead of pushing the filter onto a line of its own. */}
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4 md:px-5">
-          <p className="min-w-0 flex-1 text-xs text-slate-500">
-            {workingDays > 1
-              ? `Present counts each instructor once per day they checked in, out of ${formatCount(workingDays)} working days.`
-              : ''}
-          </p>
-          <div className="shrink-0">
-            <DateRangeFilter preset={preset} range={range} today={localDateValue()} onChange={changeRange} />
-          </div>
+      {/* The date filter sits at the right end of the heading row and never
+          wraps below it; the note a longer range brings goes under the title. */}
+      <div className="flex shrink-0 items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 id="institutes-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
+            <ChartColumnBig size={22} className="text-indigo-600" aria-hidden="true" />
+            Institutes
+          </h2>
+          {workingDays > 1 && (
+            <p className="mt-1 text-xs text-slate-500">
+              Present counts each instructor once per day they checked in, out of {formatCount(workingDays)} working days.
+            </p>
+          )}
         </div>
+        <div className="shrink-0">
+          <DateRangeFilter preset={preset} range={range} today={localDateValue()} onChange={changeRange} />
+        </div>
+      </div>
+
+      <section className={`${CARD} flex min-h-0 flex-1 flex-col overflow-hidden`} aria-label="Institutes">
         {error && (
           <p role="alert" className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm text-rose-700 md:px-5">
             {result ? `Showing the last figures. The latest refresh failed: ${error}` : error}
