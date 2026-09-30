@@ -29,6 +29,7 @@ import {
   type FlaggedRow,
   type ImportRow,
 } from '../instructorImport';
+import { INSTRUCTOR_ROLES } from '../instructorRoles';
 import type { College } from '../types';
 
 /** A row as the server returns it once it has passed every check. */
@@ -81,6 +82,8 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 const REQUIRED_LABELS = IMPORT_COLUMNS.filter((column) => column.required).map((column) => column.label);
 const OPTIONAL_LABELS = IMPORT_COLUMNS.filter((column) => !column.required).map((column) => column.label);
+const ROLE_LABELS = INSTRUCTOR_ROLES.map(roleLabel);
+const ROLE_CHOICES = `${ROLE_LABELS.slice(0, -1).join(', ')} or ${ROLE_LABELS[ROLE_LABELS.length - 1]}`;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -445,10 +448,10 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
                   <p><span className="font-bold text-slate-800">Required columns:</span> {REQUIRED_LABELS.join(', ')}</p>
                   <p><span className="font-bold text-slate-800">Optional:</span> {OPTIONAL_LABELS.join(', ')}</p>
                   <p className="text-xs text-slate-500">
-                    Gender is Male or Female. Role is Instructor, Central Instructor, Mentor or Other. Institute is the
-                    institute’s name as it appears here, or its ID. Photo Link is a public link to a clear, front-facing
-                    photo (a Google Drive link shared with anyone works). Rows with a problem are listed under Flagged
-                    and not added.
+                    Gender is Male or Female. Role is {ROLE_CHOICES}. Institute is the institute’s name as it appears
+                    here, or its ID. Photo Link is a public link to a clear, front-facing photo (a Google Drive link
+                    shared with anyone works). Headings and values are not case-sensitive, and where a cell has two
+                    values the first is used. Rows with a problem are listed under Flagged and not added.
                   </p>
                 </div>
                 <button
