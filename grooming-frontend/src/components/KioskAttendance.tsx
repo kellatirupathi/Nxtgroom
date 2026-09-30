@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch } from 'lucide-react';
 import { apiFetch, ApiError } from '../api';
 import CameraCapture from './CameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
+import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 
 /**
  * How long a result stays on screen.
@@ -59,6 +60,8 @@ interface KioskAttendanceProps {
  * hold the camera either.
  */
 export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
+  // Full screen is black around the camera, so the lines above it turn light.
+  const fullScreen = useContext(AttendanceFullScreenContext);
   const [result, setResult] = useState<KioskResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -164,8 +167,8 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
           when the camera has not fired. Repeating them above the frame only
           pushed the frame down. */}
       <div className="mb-2 shrink-0 flex items-center justify-between gap-4">
-        <h2 className="text-lg font-extrabold text-slate-800">Attendance</h2>
-        <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 shrink-0">
+        <h2 className={`text-lg font-extrabold ${fullScreen ? 'text-white' : 'text-slate-800'}`}>Attendance</h2>
+        <p className={`text-xs font-medium ${fullScreen ? 'text-slate-300' : 'text-slate-500'} flex items-center gap-1.5 shrink-0`}>
           <MapPin size={14} className={fix ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
           {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
         </p>
@@ -177,7 +180,7 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
         </div>
       )}
 
-      <div className="relative flex-1 min-h-0 rounded-md overflow-hidden border border-slate-200 bg-black">
+      <div className={`relative flex-1 min-h-0 rounded-md overflow-hidden border ${fullScreen ? 'border-slate-800' : 'border-slate-200'} bg-black`}>
         {/* Mounted for the life of this screen: it captures, resets and is ready
             for the next person without anybody reopening it. */}
         {/* Inline, so the sidebar stays visible and usable: this screen is a

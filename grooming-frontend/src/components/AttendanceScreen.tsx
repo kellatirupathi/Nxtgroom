@@ -1,7 +1,10 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
-import { RefreshCw, User, Users } from 'lucide-react';
+import { Maximize, RefreshCw, User, Users, X } from 'lucide-react';
 import BrandedLoader from './BrandedLoader';
+import ConfirmDialog from './ConfirmDialog';
 import KioskAttendance from './KioskAttendance';
+import { useAttendanceFullScreen } from './useAttendanceFullScreen';
+import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { isChunkLoadError, memoizedImport, reloadForNewDeployment } from '../lib/chunkRecovery';
 import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
 
@@ -155,43 +158,174 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
     setGroupAttempt((attempt) => attempt + 1);
   };
 
+  const fullScreen = useAttendanceFullScreen();
+  const [confirmingExit, setConfirmingExit] = useState(false);
+
+  // Cleared on the way in: a question left open when Esc ended full screen
+  // must not greet the next one.
+  const startFullScreen = () => {
+    setConfirmingExit(false);
+    fullScreen.enter();
+  };
+
+  if (fullScreen.offered) {
+    return (
+      <FullScreenPrompt
+        supported={fullScreen.supported}
+        onStart={startFullScreen}
+        onDecline={fullScreen.decline}
+      />
+    );
+  }
+
   const tab = (value: CaptureMode, label: string, Icon: typeof User) => (
     <button
       key={value}
       type="button"
       onClick={() => setMode(value)}
       aria-pressed={mode === value}
-      className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+      className={`flex items-center gap-1.5 rounded-md font-bold transition-colors ${
+        fullScreen.active ? 'px-4 py-2.5 text-sm' : 'px-3 py-1.5 text-xs'
+      } ${
         mode === value
           ? 'bg-indigo-600 text-white'
-          : 'bg-white text-slate-600 hover:bg-slate-100'
+          : fullScreen.active
+            ? 'text-slate-200 hover:bg-slate-800'
+            : 'bg-white text-slate-600 hover:bg-slate-100'
       }`}
     >
-      <Icon size={14} aria-hidden="true" />
+      <Icon size={fullScreen.active ? 16 : 14} aria-hidden="true" />
       {label}
     </button>
   );
 
   return (
-    <div className="w-full h-full flex flex-col">
-      {/* One row, above the screen rather than inside it, so neither camera has
-          to know the other exists. */}
-      <div className="mb-2 shrink-0 flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 p-1 w-fit">
-        {tab('single', 'One person', User)}
-        {tab('group', 'Group', Users)}
+    // The same element in and out of full screen, only restyled, so the camera
+    // underneath keeps running rather than starting again. Fixed over the
+    // window is what hides the menus; the browser's own full screen, where it
+    // has one, hides its address bar as well.
+    <div
+      className={fullScreen.active
+        ? 'fixed inset-0 z-[55] flex flex-col bg-slate-950 px-3 sm:px-4 pt-[max(0.75rem,var(--inset-top))] pb-[max(0.75rem,var(--inset-bottom))]'
+        : 'w-full h-full flex flex-col'}
+    >
+      <div className="mb-2 shrink-0 flex items-center justify-between gap-2">
+        {/* One row, above the screen rather than inside it, so neither camera
+            has to know the other exists. */}
+        <div
+          className={`flex items-center gap-1.5 rounded-md border p-1 w-fit ${
+            fullScreen.active ? 'border-slate-700 bg-slate-900/80' : 'border-slate-200 bg-slate-50'
+          }`}
+        >
+          {tab('single', 'One person', User)}
+          {tab('group', 'Group', Users)}
+        </div>
+
+        {fullScreen.active ? (
+          <div className="flex items-center gap-3 shrink-0">
+            {/* Only where there is a keyboard to press it on. */}
+            {fullScreen.browser && (
+              <span className="hidden text-sm text-slate-400 [@media(pointer:fine)]:inline">Esc also exits</span>
+            )}
+            <button
+              type="button"
+              onClick={() => setConfirmingExit(true)}
+              aria-label="Exit full screen"
+              title="Exit full screen"
+              className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white/50 bg-slate-800/90 text-white hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            >
+              <X size={24} strokeWidth={2.4} aria-hidden="true" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={startFullScreen}
+            className="flex items-center gap-1.5 shrink-0 rounded-md border border-indigo-600 bg-indigo-600 px-3 py-2.5 text-xs font-bold text-white transition-colors hover:bg-indigo-700"
+          >
+            <Maximize size={14} aria-hidden="true" />
+            Full screen
+          </button>
+        )}
       </div>
 
       <div className="flex-1 min-h-0">
-        {mode === 'single' ? (
-          <KioskAttendance onExit={onExit} />
-        ) : (
-          <GroupScreenBoundary key={groupAttempt} onRetry={retryGroup}>
-            <Suspense fallback={<BrandedLoader label="Loading group attendance" />}>
-              <GroupScreen />
-            </Suspense>
-          </GroupScreenBoundary>
-        )}
+        <AttendanceFullScreenContext.Provider value={fullScreen.active}>
+          {mode === 'single' ? (
+            <KioskAttendance onExit={onExit} />
+          ) : (
+            <GroupScreenBoundary key={groupAttempt} onRetry={retryGroup}>
+              <Suspense fallback={<BrandedLoader label="Loading group attendance" />}>
+                <GroupScreen />
+              </Suspense>
+            </GroupScreenBoundary>
+          )}
+        </AttendanceFullScreenContext.Provider>
       </div>
+
+      {/* Asked first: an instructor leaning on the corner of the tablet should
+          not be able to bring the browser back by accident. */}
+      <ConfirmDialog
+        open={confirmingExit && fullScreen.active}
+        title="Exit full screen?"
+        message={`${fullScreen.browser ? 'The browser bar and menus come back.' : 'The menus come back.'} Attendance keeps working, and you can go full screen again with one tap.`}
+        confirmLabel="Exit"
+        cancelLabel="Stay in full screen"
+        onConfirm={() => {
+          setConfirmingExit(false);
+          fullScreen.exit();
+        }}
+        onCancel={() => setConfirmingExit(false)}
+      />
+    </div>
+  );
+}
+
+interface FullScreenPromptProps {
+  supported: boolean;
+  onStart: () => void;
+  onDecline: () => void;
+}
+
+/**
+ * What Attendance opens on in a browser. Full screen needs a tap, so the tap
+ * that starts attendance is the one that asks for it. The camera starts once
+ * either button is pressed, so nobody is photographed behind the card.
+ */
+function FullScreenPrompt({ supported, onStart, onDecline }: FullScreenPromptProps) {
+  return (
+    <div className="w-full h-full min-h-[24rem] flex items-center justify-center rounded-md bg-slate-800 p-4 sm:p-8">
+      <section
+        aria-labelledby="attendance-fullscreen-title"
+        className="w-full max-w-md flex flex-col items-center gap-3.5 rounded-xl bg-white px-6 py-8 text-center shadow-xl sm:px-8 sm:py-9"
+      >
+        <span className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl bg-indigo-100 text-indigo-700">
+          <Maximize size={34} aria-hidden="true" />
+        </span>
+        <h2 id="attendance-fullscreen-title" className="text-2xl font-extrabold text-slate-900">
+          Start attendance
+        </h2>
+        <p className="text-base leading-relaxed text-slate-600">
+          {supported
+            ? 'The camera fills the whole screen. The browser bar and menus are hidden until you close it.'
+            : 'The camera fills the screen and the menus are hidden until you close it.'}
+        </p>
+        <button
+          type="button"
+          onClick={onStart}
+          className="mt-2 flex h-14 w-full items-center justify-center gap-2.5 rounded-lg bg-indigo-600 text-lg font-bold text-white transition-colors hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+        >
+          <Maximize size={20} aria-hidden="true" />
+          Start full screen
+        </button>
+        <button
+          type="button"
+          onClick={onDecline}
+          className="h-11 px-4 text-[15px] font-semibold text-slate-600 transition-colors hover:text-slate-800"
+        >
+          Not now
+        </button>
+      </section>
     </div>
   );
 }

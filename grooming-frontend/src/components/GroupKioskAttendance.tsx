@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch, Users } from 'lucide-react';
 import { apiFetch, ApiError } from '../api';
 import GroupCameraCapture from './GroupCameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { formatAttendanceTime } from '../attendanceFilters';
+import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 
 /**
  * How long a group's results stay on screen.
@@ -61,6 +62,8 @@ interface GroupResult extends GroupResponse {
  * the single-person screen applies to one.
  */
 export default function GroupKioskAttendance() {
+  // Full screen is black around the camera, so the lines above it turn light.
+  const fullScreen = useContext(AttendanceFullScreenContext);
   const [result, setResult] = useState<GroupResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -140,11 +143,11 @@ export default function GroupKioskAttendance() {
   return (
     <div className="w-full h-full flex flex-col">
       <div className="mb-2 shrink-0 flex items-center justify-between gap-4">
-        <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-          <Users size={18} className="text-indigo-600" aria-hidden="true" />
+        <h2 className={`text-lg font-extrabold ${fullScreen ? 'text-white' : 'text-slate-800'} flex items-center gap-2`}>
+          <Users size={18} className={fullScreen ? 'text-indigo-300' : 'text-indigo-600'} aria-hidden="true" />
           Group attendance
         </h2>
-        <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 shrink-0">
+        <p className={`text-xs font-medium ${fullScreen ? 'text-slate-300' : 'text-slate-500'} flex items-center gap-1.5 shrink-0`}>
           <MapPin size={14} className={fix ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
           {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
         </p>
@@ -156,7 +159,7 @@ export default function GroupKioskAttendance() {
         </div>
       )}
 
-      <div className="relative flex-1 min-h-0 rounded-md overflow-hidden border border-slate-200 bg-black">
+      <div className={`relative flex-1 min-h-0 rounded-md overflow-hidden border ${fullScreen ? 'border-slate-800' : 'border-slate-200'} bg-black`}>
         <GroupCameraCapture
           facing={facing}
           onFlip={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
