@@ -96,7 +96,7 @@ test('columns are read in whatever order the sheet has them', () => {
 
 test('a sheet without a required column says which ones', () => {
   const table = readImportTable(parseCsv('Name,Email,Phone\nAsha,a@x.com,1\n'));
-  assert.deepEqual(table.missingColumns, ['Gender', 'Role', 'Employee ID', 'Photo Link']);
+  assert.deepEqual(table.missingColumns, ['Gender', 'Role', 'Institute', 'Employee ID', 'Photo Link']);
   // Still importable: the email finds anyone already in the roster.
   assert.equal(table.hasIdentifier, true);
 });
@@ -125,7 +125,7 @@ test('a row can be looked up by its email or its employee ID', () => {
 });
 
 test('an empty sheet is missing every required column', () => {
-  assert.deepEqual(readImportTable([]).missingColumns, ['Name', 'Email', 'Gender', 'Role', 'Employee ID', 'Photo Link']);
+  assert.deepEqual(readImportTable([]).missingColumns, ['Name', 'Email', 'Gender', 'Role', 'Institute', 'Employee ID', 'Photo Link']);
 });
 
 test('the first row for an email or employee ID is kept and later ones flagged', () => {
@@ -187,7 +187,7 @@ test('a flagged reason marks the fields it is about', () => {
 });
 
 test('a corrected row lists the required fields still blank, photo aside', () => {
-  assert.deepEqual(blankRequiredFields({ row: 2, name: 'Asha', email: ' ', gender: 'FEMALE' }), ['Email', 'Role', 'Employee ID']);
+  assert.deepEqual(blankRequiredFields({ row: 2, name: 'Asha', email: ' ', gender: 'FEMALE' }), ['Email', 'Role', 'Institute', 'Employee ID']);
   assert.deepEqual(blankRequiredFields({
     row: 2, name: 'Asha', email: 'a@x.com', gender: 'F', role: 'MENTOR', institute: 'c1', employee_id: 'E1',
   }), []);

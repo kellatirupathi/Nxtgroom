@@ -38,9 +38,7 @@ export const IMPORT_COLUMNS: readonly ImportColumn[] = [
   {
     field: 'institute',
     label: 'Institute',
-    // Optional for now: the source data often lacks it. A blank one leaves
-    // the instructor without an institute until an admin assigns it.
-    required: false,
+    required: true,
     aliases: ['institute name', 'institute id', 'college', 'college name', 'college id', 'campus'],
   },
   {
