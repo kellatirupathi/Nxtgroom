@@ -132,13 +132,30 @@ export function matchCollege(value, colleges) {
   return { error: `Institute "${wanted}" was not found` };
 }
 
+/** Why a photo link cannot be used, or null when it can. */
+export function photoLinkError(photoUrl) {
+  if (!photoUrl) return "Photo link is missing";
+  try {
+    parsePublicUrl(photoUrl);
+    return null;
+  } catch (error) {
+    return `Photo link: ${error.message}`;
+  }
+}
+
 /**
  * Checks one row's fields and returns them in stored form.
  *
  * Errors are sentences an admin can act on, naming the value that was wrong,
  * and every problem in the row is reported at once rather than one per try.
+ *
+ * `requirePhoto: false` leaves the photo link out of the errors and returns
+ * its problem as `photoError` instead, for the import, which only needs a
+ * photo when the instructor it creates or updates has none. `keys` carries
+ * the email and Employee ID even for a row that failed, so an existing
+ * instructor can still be matched.
  */
-export function validateImportFields(raw, colleges) {
+export function validateImportFields(raw, colleges, { requirePhoto = true } = {}) {
   const errors = [];
   const cell = (field) => firstValue(field, raw?.[field]);
   const name = cell("name").replace(/\s+/g, " ");
@@ -179,19 +196,15 @@ export function validateImportFields(raw, colleges) {
   }
 
   const photoUrl = cell("photo_url");
-  if (!photoUrl) {
-    errors.push("Photo link is missing");
-  } else {
-    try {
-      parsePublicUrl(photoUrl);
-    } catch (error) {
-      errors.push(`Photo link: ${error.message}`);
-    }
-  }
+  const photoError = photoLinkError(photoUrl);
+  if (requirePhoto && photoError) errors.push(photoError);
 
-  if (errors.length) return { errors };
+  const keys = { email, employee_id: employeeId };
+  if (errors.length) return { errors, keys, photoError };
   return {
     errors,
+    keys,
+    photoError,
     value: {
       name,
       email,
@@ -209,38 +222,68 @@ export function validateImportFields(raw, colleges) {
 }
 
 /**
- * The emails and employee ids among `values` that the roster already holds.
- *
- * An employee id is taken even by a removed instructor, matching the create
- * guard and the unique index; an email only by someone still active, since a
- * person who left and returns keeps their address.
+ * The instructors already holding any of the emails or Employee IDs given,
+ * grouped by each. Removed instructors are included: their Employee ID is
+ * still reserved by the unique index, so a row using it must be told.
  */
-export async function findExistingInstructors(db, values) {
-  const emails = [...new Set(values.map((value) => value.email).filter(Boolean))];
-  const employeeIds = [...new Set(values.map((value) => value.employee_id).filter(Boolean))];
+export async function findMatchingInstructors(db, keys) {
+  const emails = [...new Set(keys.map((key) => key.email).filter(Boolean))];
+  const employeeIds = [...new Set(keys.map((key) => key.employee_id).filter(Boolean))];
+  const found = { byEmail: new Map(), byEmployeeId: new Map() };
   const clauses = [];
   if (emails.length) clauses.push({ email: { $in: emails } });
   if (employeeIds.length) clauses.push({ employee_id: { $in: employeeIds } });
-  if (!clauses.length) return { emails: new Set(), employeeIds: new Set() };
+  if (!clauses.length) return found;
 
   const rows = await db.collection("instructors")
-    .find({ $or: clauses }, { projection: { email: 1, employee_id: 1, deleted_at: 1 } })
+    .find({ $or: clauses }, {
+      projection: { name: 1, email: 1, employee_id: 1, deleted_at: 1, face_ids: 1 },
+    })
     .toArray();
-  return {
-    emails: new Set(rows.filter((row) => !row.deleted_at && row.email).map((row) => String(row.email).toLowerCase())),
-    employeeIds: new Set(rows.filter((row) => row.employee_id).map((row) => String(row.employee_id))),
-  };
+  const add = (map, key, row) => map.set(key, [...(map.get(key) || []), row]);
+  for (const row of rows) {
+    if (row.email) add(found.byEmail, String(row.email).toLowerCase(), row);
+    if (row.employee_id) add(found.byEmployeeId, String(row.employee_id), row);
+  }
+  return found;
 }
 
-function duplicateErrors(value, existing) {
-  const errors = [];
-  if (existing.emails.has(value.email)) {
-    errors.push(`An instructor with email ${value.email} already exists`);
+/**
+ * The existing instructor a row updates, if any, or why it cannot.
+ *
+ * A row matching someone by email or by Employee ID updates that person
+ * rather than being refused. What cannot be settled automatically is
+ * flagged: the email and the Employee ID belonging to two different people,
+ * an email shared by several instructors, and an Employee ID still reserved
+ * by someone who was removed.
+ */
+export function matchExisting(keys, found) {
+  const isActive = (row) => !row.deleted_at;
+  const byEmail = (found.byEmail.get(keys.email) || []).filter(isActive);
+  const byId = found.byEmployeeId.get(keys.employee_id) || [];
+  if (byEmail.length > 1) {
+    return { error: `Email ${keys.email} is used by ${byEmail.length} instructors; use an email only one of them has` };
   }
-  if (value.employee_id && existing.employeeIds.has(value.employee_id)) {
-    errors.push(`Employee ID ${value.employee_id} already exists`);
+  const idOwner = byId.find(isActive) || byId[0];
+  if (idOwner?.deleted_at) {
+    return { error: `Employee ID ${keys.employee_id} belonged to ${idOwner.name || "an instructor"} who was removed; use a different Employee ID` };
   }
-  return errors;
+  const emailOwner = byEmail[0];
+  if (emailOwner && idOwner && String(emailOwner._id) !== String(idOwner._id)) {
+    return {
+      error: `Email ${keys.email} belongs to ${emailOwner.name || "one instructor"} but Employee ID ${keys.employee_id} belongs to ${idOwner.name || "another"}; change one of them`,
+    };
+  }
+  const target = emailOwner || idOwner;
+  if (!target) return { existing: null };
+  return {
+    existing: {
+      _id: target._id,
+      id: String(target._id),
+      name: target.name || "",
+      hasFace: Array.isArray(target.face_ids) && target.face_ids.some(Boolean),
+    },
+  };
 }
 
 /**
@@ -318,6 +361,7 @@ function resolveDeps(deps = {}) {
     // Passed in by the route, which owns the guarded create; importing it
     // from there would make the two modules import each other.
     createInstructor: deps.createInstructor,
+    updateInstructor: deps.updateInstructor,
     enrollPhoto: deps.enrollPhoto || enrollReferencePhoto,
   };
 }
@@ -329,39 +373,49 @@ async function loadColleges(db) {
 }
 
 /**
- * Field checks, then duplicates against the roster and within this batch,
- * then the photograph for whatever is still valid. Returns one result per row
- * in the order given; `row` is the sheet row number the browser sent.
+ * Field checks, then the match against the roster and repeats within this
+ * batch, then the photograph for whatever is still valid and needs one.
+ * Returns one result per row in the order given; `row` is the sheet row
+ * number the browser sent.
+ *
+ * A photograph is needed for a new instructor, and for an existing one who
+ * has none enrolled yet. Someone who already has a reference photo keeps it:
+ * adding the same sheet's photo again on every re-import would only fill the
+ * face collection with copies.
  */
 async function checkRows(db, rows, deps) {
   const colleges = await loadColleges(db);
-  const results = rows.map((raw) => {
-    const checked = validateImportFields(raw, colleges);
-    return { row: raw?.row ?? null, errors: checked.errors, value: checked.value, collegeName: checked.collegeName };
-  });
-
-  const valid = results.filter((result) => result.value);
-  const existing = await findExistingInstructors(db, valid.map((result) => result.value));
+  const checked = rows.map((raw) => ({ row: raw?.row ?? null, ...validateImportFields(raw, colleges, { requirePhoto: false }) }));
+  const found = await findMatchingInstructors(db, checked.map((item) => item.keys));
   const seenEmails = new Set();
   const seenIds = new Set();
-  for (const result of valid) {
-    const errors = duplicateErrors(result.value, existing);
-    // The browser already removes repeats across the whole file; this only
-    // guards a batch sent without that.
-    if (seenEmails.has(result.value.email)) errors.push(`Email ${result.value.email} appears more than once`);
-    if (result.value.employee_id && seenIds.has(result.value.employee_id)) {
-      errors.push(`Employee ID ${result.value.employee_id} appears more than once`);
+
+  const results = checked.map((item) => {
+    const errors = [...item.errors];
+    const match = matchExisting(item.keys, found);
+    if (match.error) errors.push(match.error);
+    if (item.value) {
+      // The browser already removes repeats across the whole file; this only
+      // guards a batch sent without that.
+      if (seenEmails.has(item.value.email)) errors.push(`Email ${item.value.email} appears more than once`);
+      if (seenIds.has(item.value.employee_id)) errors.push(`Employee ID ${item.value.employee_id} appears more than once`);
+      seenEmails.add(item.value.email);
+      seenIds.add(item.value.employee_id);
     }
-    seenEmails.add(result.value.email);
-    if (result.value.employee_id) seenIds.add(result.value.employee_id);
-    if (errors.length) {
-      result.errors = errors;
-      result.value = undefined;
-    }
-  }
+    const needsPhoto = !match.existing?.hasFace;
+    if (needsPhoto && item.photoError) errors.push(item.photoError);
+    return {
+      row: item.row,
+      errors,
+      value: errors.length ? undefined : item.value,
+      collegeName: item.collegeName,
+      existing: match.existing ?? null,
+      needsPhoto,
+    };
+  });
 
   await mapWithConcurrency(results, PHOTO_CONCURRENCY, async (result) => {
-    if (!result.value) return;
+    if (!result.value || !result.needsPhoto) return;
     const photo = await checkPhoto(result.value.photo_url, deps);
     if (photo.error) {
       result.errors = [photo.error];
@@ -375,7 +429,9 @@ async function checkRows(db, rows, deps) {
 
 /**
  * Checks a batch without writing anything. A passing row comes back in stored
- * form with a thumbnail of its photograph; a failing one with its reasons.
+ * form, saying whether it creates an instructor or updates an existing one
+ * and whether its photo will be enrolled, with a thumbnail when it will. A
+ * failing row comes back with its reasons.
  */
 export async function previewImportRows(db, rows, deps = {}) {
   const resolved = resolveDeps(deps);
@@ -385,21 +441,35 @@ export async function previewImportRows(db, rows, deps = {}) {
     return {
       row: result.row,
       ok: true,
+      action: result.existing ? "update" : "create",
+      existing: result.existing ? { id: result.existing.id, name: result.existing.name } : null,
+      photo: result.needsPhoto ? "enrol" : "keep",
       value: { ...result.value, institute: result.collegeName },
-      thumbnail: await photoThumbnail(result.photo.normalized.buffer).catch(() => null),
+      thumbnail: result.photo
+        ? await photoThumbnail(result.photo.normalized.buffer).catch(() => null)
+        : null,
     };
   }));
 }
 
+const UPDATE_REFUSALS = {
+  not_found: "The instructor was removed while importing",
+  active_attendance: "They are checked in today; check them out before moving them to another institute",
+  college_not_found: "The institute was removed while importing",
+};
+
 /**
- * Checks a batch again and adds every row that still passes, one at a time.
+ * Checks a batch again and applies every row that still passes, one at a
+ * time: a new instructor is created, an existing one updated with the
+ * sheet's values. A blank optional cell such as Phone leaves the value on
+ * record as it is.
  *
- * The photograph is fetched and checked before the instructor is created, so
- * a bad photo adds nobody. Storing and indexing it happen after, since a face
- * is indexed against the new id; if that step fails the instructor is kept and
- * the row says so, the same as the add form, and the photo can be added from
- * Edit. Rows are created in turn rather than together because each creation
- * takes a transaction on its institute's record.
+ * A photograph that is needed is fetched and checked before anything is
+ * written, so a bad photo changes nobody. Storing and indexing it happen
+ * after, since a face is indexed against the instructor's id; if that step
+ * fails the instructor is kept and the row says so, the same as the add form,
+ * and the photo can be added from Edit. Rows are written in turn rather than
+ * together because each takes a transaction on its institute's record.
  */
 export async function commitImportRows(db, rows, deps = {}) {
   const resolved = resolveDeps(deps);
@@ -411,35 +481,61 @@ export async function commitImportRows(db, rows, deps = {}) {
       continue;
     }
     const { photo_url: _photoUrl, ...fields } = result.value;
-    let created;
+    const refuse = (message) => outcomes.push({ row: result.row, ok: false, errors: [message] });
+
+    let instructor;
     try {
-      created = await resolved.createInstructor(db, fields);
+      if (result.existing) {
+        const updated = await resolved.updateInstructor(db, result.existing.id, fields);
+        if (updated.outcome === "duplicate_employee_id") {
+          refuse(`Employee ID ${fields.employee_id} belongs to another instructor`);
+          continue;
+        }
+        if (updated.outcome !== "updated") {
+          refuse(UPDATE_REFUSALS[updated.outcome] || "The instructor could not be updated");
+          continue;
+        }
+        instructor = { _id: result.existing._id, face_ids: [] };
+      } else {
+        const created = await resolved.createInstructor(db, fields);
+        if (created.outcome === "college_not_found") {
+          refuse(UPDATE_REFUSALS.college_not_found);
+          continue;
+        }
+        if (created.outcome === "duplicate_employee_id") {
+          refuse(`Employee ID ${fields.employee_id} already exists`);
+          continue;
+        }
+        instructor = created.instructor;
+      }
     } catch (error) {
       if (error?.code === 11000) {
-        outcomes.push({ row: result.row, ok: false, errors: ["Employee ID already exists"] });
+        refuse("Employee ID already exists");
         continue;
       }
       throw error;
     }
-    if (created.outcome === "college_not_found") {
-      outcomes.push({ row: result.row, ok: false, errors: ["The institute was removed while importing"] });
-      continue;
-    }
-    if (created.outcome === "duplicate_employee_id") {
-      outcomes.push({ row: result.row, ok: false, errors: [`Employee ID ${fields.employee_id} already exists`] });
-      continue;
-    }
 
-    const outcome = { row: result.row, ok: true, id: created.instructor._id, name: fields.name, photo_enrolled: false };
-    if (resolved.faceConfigured) {
-      const enrolled = await resolved.enrollPhoto(db, created.instructor, result.photo.normalized, {
+    const verb = result.existing ? "Updated" : "Added";
+    const outcome = {
+      row: result.row,
+      ok: true,
+      id: String(instructor._id),
+      name: fields.name,
+      updated: Boolean(result.existing),
+      photo_enrolled: false,
+    };
+    if (!result.needsPhoto) {
+      outcome.photo_kept = true;
+    } else if (resolved.faceConfigured) {
+      const enrolled = await resolved.enrollPhoto(db, instructor, result.photo.normalized, {
         mode: "add",
         checkedQuality: result.photo.quality,
       });
       if (enrolled.ok) outcome.photo_enrolled = true;
-      else outcome.warning = `Added, but the photo was not enrolled: ${enrolled.detail}`;
+      else outcome.warning = `${verb}, but the photo was not enrolled: ${enrolled.detail}`;
     } else {
-      outcome.warning = "Added, but the photo was not enrolled: face recognition is not configured";
+      outcome.warning = `${verb}, but the photo was not enrolled: face recognition is not configured`;
     }
     outcomes.push(outcome);
   }

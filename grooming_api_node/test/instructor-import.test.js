@@ -223,23 +223,79 @@ test("preview passes a good row with a thumbnail and writes nothing", async () =
   assert.match(result.thumbnail, /^data:image\/jpeg;base64,/);
 });
 
-test("preview flags an email or employee ID the roster already has", async () => {
+test("a row whose email or employee ID exists updates that instructor", async () => {
   const db = fakeDb({
     instructors: [
-      { email: "asha.rao@example.com", employee_id: "OTHER-ID", deleted_at: null },
-      { email: "gone@example.com", employee_id: "EMP-9", deleted_at: new Date() },
+      { _id: "i-asha", name: "Asha R", email: "asha.rao@example.com", employee_id: "OLD-ID", deleted_at: null, face_ids: [] },
+      { _id: "i-ravi", name: "Ravi K", email: "ravi@example.com", employee_id: "EMP-5", deleted_at: null, face_ids: ["f1"] },
     ],
   });
   const results = await previewImportRows(db, [
     goodRow(),
-    goodRow({ row: 3, email: "new@example.com", employee_id: "EMP-9" }),
-    goodRow({ row: 4, email: "gone@example.com", employee_id: "EMP-10" }),
+    goodRow({ row: 3, name: "Ravi Kumar", email: "ravi.new@example.com", employee_id: "EMP-5", photo_url: "" }),
+    goodRow({ row: 4, email: "new@example.com", employee_id: "EMP-7" }),
   ], await deps());
-  assert.deepEqual(results[0].errors, ["An instructor with email asha.rao@example.com already exists"]);
-  // A removed instructor still owns their employee ID, as the unique index does.
-  assert.deepEqual(results[1].errors, ["Employee ID EMP-9 already exists"]);
-  // Their email, though, can be used again.
-  assert.equal(results[2].ok, true);
+
+  // Matched by email; no photo on file yet, so the sheet's is enrolled.
+  assert.equal(results[0].ok, true);
+  assert.equal(results[0].action, "update");
+  assert.deepEqual(results[0].existing, { id: "i-asha", name: "Asha R" });
+  assert.equal(results[0].photo, "enrol");
+  assert.match(results[0].thumbnail, /^data:image/);
+
+  // Matched by employee ID; they already have a photo, which is kept, so no
+  // photo link is needed and none is fetched.
+  assert.equal(results[1].ok, true);
+  assert.equal(results[1].action, "update");
+  assert.deepEqual(results[1].existing, { id: "i-ravi", name: "Ravi K" });
+  assert.equal(results[1].photo, "keep");
+  assert.equal(results[1].thumbnail, null);
+
+  assert.equal(results[2].action, "create");
+  assert.equal(results[2].existing, null);
+});
+
+test("an existing instructor with no photo still needs a photo link", async () => {
+  const db = fakeDb({ instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", employee_id: "EMP-1", face_ids: [] }] });
+  const [result] = await previewImportRows(db, [goodRow({ photo_url: "" })], await deps());
+  assert.deepEqual(result.errors, ["Photo link is missing"]);
+});
+
+test("an email and employee ID belonging to two different people is flagged", async () => {
+  const db = fakeDb({
+    instructors: [
+      { _id: "i-1", name: "Asha", email: "asha.rao@example.com", employee_id: "EMP-X" },
+      { _id: "i-2", name: "Ravi", email: "ravi@example.com", employee_id: "EMP-1" },
+    ],
+  });
+  const [result] = await previewImportRows(db, [goodRow()], await deps());
+  assert.deepEqual(result.errors, [
+    "Email asha.rao@example.com belongs to Asha but Employee ID EMP-1 belongs to Ravi; change one of them",
+  ]);
+});
+
+test("an employee ID reserved by a removed instructor is flagged, but their email is free", async () => {
+  const db = fakeDb({
+    instructors: [{ _id: "i-9", name: "Gone", email: "gone@example.com", employee_id: "EMP-9", deleted_at: new Date() }],
+  });
+  const results = await previewImportRows(db, [
+    goodRow({ employee_id: "EMP-9" }),
+    goodRow({ row: 3, email: "gone@example.com", employee_id: "EMP-10" }),
+  ], await deps());
+  assert.deepEqual(results[0].errors, ["Employee ID EMP-9 belonged to Gone who was removed; use a different Employee ID"]);
+  assert.equal(results[1].ok, true);
+  assert.equal(results[1].action, "create");
+});
+
+test("an email shared by several instructors is flagged rather than guessed", async () => {
+  const db = fakeDb({
+    instructors: [
+      { _id: "a", name: "A", email: "asha.rao@example.com" },
+      { _id: "b", name: "B", email: "asha.rao@example.com" },
+    ],
+  });
+  const [result] = await previewImportRows(db, [goodRow()], await deps());
+  assert.match(result.errors[0], /used by 2 instructors/);
 });
 
 test("preview flags a repeat within the same batch", async () => {
@@ -301,7 +357,7 @@ test("commit creates the instructor and enrols the checked photograph", async ()
       return { ok: true };
     },
   }));
-  assert.deepEqual(outcomes, [{ row: 2, ok: true, id: "new-1", name: "Asha Rao", photo_enrolled: true }]);
+  assert.deepEqual(outcomes, [{ row: 2, ok: true, id: "new-1", name: "Asha Rao", updated: false, photo_enrolled: true }]);
   assert.equal(created.length, 1);
   assert.equal("photo_url" in created[0], false);
   assert.equal(created[0].instructor_role, "INSTRUCTOR");
@@ -336,6 +392,51 @@ test("commit reports a race the create guard caught", async () => {
     createInstructor: async () => ({ outcome: "duplicate_employee_id" }),
   }));
   assert.deepEqual(outcomes, [{ row: 2, ok: false, errors: ["Employee ID EMP-1 already exists"] }]);
+});
+
+test("commit updates a matched instructor with the sheet's values", async () => {
+  const db = fakeDb({ instructors: [{ _id: "i-asha", name: "Asha R", email: "asha.rao@example.com", employee_id: "OLD", face_ids: [] }] });
+  const updates = [];
+  const enrolled = [];
+  let creates = 0;
+  const outcomes = await commitImportRows(db, [goodRow()], await deps({
+    createInstructor: async () => { creates += 1; },
+    updateInstructor: async (_db, id, fields) => { updates.push({ id, fields }); return { outcome: "updated" }; },
+    enrollPhoto: async (_db, instructor) => { enrolled.push(instructor._id); return { ok: true }; },
+  }));
+  assert.equal(creates, 0);
+  assert.equal(updates[0].id, "i-asha");
+  assert.equal(updates[0].fields.employee_id, "EMP-1");
+  assert.equal(updates[0].fields.name, "Asha Rao");
+  assert.equal("photo_url" in updates[0].fields, false);
+  assert.deepEqual(enrolled, ["i-asha"]);
+  assert.deepEqual(outcomes, [{ row: 2, ok: true, id: "i-asha", name: "Asha Rao", updated: true, photo_enrolled: true }]);
+});
+
+test("commit leaves the photo of an instructor who already has one", async () => {
+  const db = fakeDb({ instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", face_ids: ["f1"] }] });
+  let fetched = 0;
+  const outcomes = await commitImportRows(db, [goodRow({ phone_no: "" })], await deps({
+    fetcher: async () => { fetched += 1; throw new Error("should not fetch"); },
+    updateInstructor: async (_db, _id, fields) => {
+      // A blank optional cell is not sent, so the phone on record stays.
+      assert.equal("phone_no" in fields, false);
+      return { outcome: "updated" };
+    },
+    enrollPhoto: async () => assert.fail("no enrolment expected"),
+  }));
+  assert.equal(fetched, 0);
+  assert.equal(outcomes[0].ok, true);
+  assert.equal(outcomes[0].photo_kept, true);
+});
+
+test("commit reports why an update was refused", async () => {
+  const db = fakeDb({ instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", face_ids: ["f1"] }] });
+  const outcomes = await commitImportRows(db, [goodRow()], await deps({
+    updateInstructor: async () => ({ outcome: "active_attendance" }),
+  }));
+  assert.equal(outcomes[0].ok, false);
+  assert.match(outcomes[0].errors[0], /checked in today/);
 });
 
 test("a sheet link that is not Google Sheets is refused before any request", async () => {
