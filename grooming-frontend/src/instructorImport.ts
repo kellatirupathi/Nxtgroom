@@ -66,9 +66,46 @@ export const IMPORT_COLUMNS: readonly ImportColumn[] = [
 /** Most rows one import takes; a larger roster is split across files. */
 export const MAX_IMPORT_ROWS = 1000;
 /** Rows per check request, matching the server's limit. */
-export const PREVIEW_BATCH = 25;
+export const PREVIEW_BATCH = 50;
 /** Rows per add request, matching the server's limit. */
-export const COMMIT_BATCH = 5;
+export const COMMIT_BATCH = 25;
+/**
+ * Requests in flight at once. The server bounds downloads and face checks
+ * across all of them, so more would only queue there.
+ */
+export const PARALLEL_BATCHES = 3;
+
+/**
+ * Runs `work` on each batch, at most `parallel` at once. No new batch starts
+ * once `shouldStop()` is true or one has failed; the batches already running
+ * finish, and the first failure is then thrown.
+ */
+export async function runBatches<T>(
+  batches: readonly T[][],
+  parallel: number,
+  work: (batch: T[]) => Promise<void>,
+  shouldStop: () => boolean = () => false,
+): Promise<void> {
+  let next = 0;
+  let failed = false;
+  let failure: unknown = null;
+  const worker = async () => {
+    while (!failed && next < batches.length && !shouldStop()) {
+      const batch = batches[next];
+      next += 1;
+      try {
+        await work(batch);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(parallel, batches.length) }, worker));
+  if (failed) throw failure;
+}
 
 /**
  * A heading reduced to lower-case letters and digits, so case, spacing,

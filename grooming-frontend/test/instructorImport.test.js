@@ -16,6 +16,7 @@ import {
   readImportTable,
   repeatsOf,
   roleLabel,
+  runBatches,
   splitRepeats,
 } from '../src/instructorImport.ts';
 
@@ -234,4 +235,36 @@ test('headings numbered like form questions are read, as in the Google Form resp
   assert.deepEqual(table.ignoredColumns, ['Timestamp', 'Consent for Biometric Data Collection', 'Validation Status']);
   assert.equal(headingField('Q3) Email'), 'email');
   assert.equal(headingField('2) Employee ID'), 'employee_id');
+});
+
+test('batches run several at a time and all of them run', async () => {
+  let active = 0;
+  let peak = 0;
+  const done = [];
+  await runBatches([[1], [2], [3], [4], [5], [6], [7]], 3, async ([value]) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    done.push(value);
+    active -= 1;
+  });
+  assert.equal(peak, 3);
+  assert.deepEqual(done.sort(), [1, 2, 3, 4, 5, 6, 7]);
+});
+
+test('no batch starts after a stop or a failure, and the failure is reported', async () => {
+  const started = [];
+  let stop = false;
+  await runBatches([[1], [2], [3], [4]], 1, async ([value]) => {
+    started.push(value);
+    if (value === 2) stop = true;
+  }, () => stop);
+  assert.deepEqual(started, [1, 2]);
+
+  const attempted = [];
+  await assert.rejects(runBatches([[1], [2], [3]], 1, async ([value]) => {
+    attempted.push(value);
+    if (value === 1) throw new Error('network down');
+  }), /network down/);
+  assert.deepEqual(attempted, [1]);
 });

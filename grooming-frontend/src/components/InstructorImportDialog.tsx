@@ -28,10 +28,12 @@ import {
   inBatches,
   isGoogleSheetLink,
   MAX_IMPORT_ROWS,
+  PARALLEL_BATCHES,
   PREVIEW_BATCH,
   readImportTable,
   repeatsOf,
   roleLabel,
+  runBatches,
   splitRepeats,
   type FlaggedRow,
   type ImportField,
@@ -193,7 +195,8 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   const colleges = givenColleges.length ? givenColleges : loadedColleges;
   const fileInput = useRef<HTMLInputElement | null>(null);
   const stopRequested = useRef(false);
-  const activeRequest = useRef<AbortController | null>(null);
+  /** Every request in flight, so leaving or cancelling stops them all. */
+  const activeRequests = useRef(new Set<AbortController>());
 
   useEffect(() => {
     if (givenColleges.length) return undefined;
@@ -209,7 +212,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   // Leaving the dialog abandons whatever is in flight.
   useEffect(() => () => {
     stopRequested.current = true;
-    activeRequest.current?.abort();
+    for (const controller of activeRequests.current) controller.abort();
   }, []);
 
   const busy = stage === 'checking' || stage === 'importing' || loadingSheet;
@@ -227,11 +230,11 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
 
   const request = async <T,>(path: string, body: unknown): Promise<T> => {
     const controller = new AbortController();
-    activeRequest.current = controller;
+    activeRequests.current.add(controller);
     try {
       return await apiJson<T>(path, { method: 'POST', body, signal: controller.signal, timeoutMs: 180_000 });
     } finally {
-      if (activeRequest.current === controller) activeRequest.current = null;
+      activeRequests.current.delete(controller);
     }
   };
 
@@ -267,8 +270,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     stopRequested.current = false;
 
     try {
-      for (const batch of inBatches(unique, PREVIEW_BATCH)) {
-        if (stopRequested.current) return;
+      await runBatches(inBatches(unique, PREVIEW_BATCH), PARALLEL_BATCHES, async (batch) => {
         const { results } = await request<{ results: PreviewResult[] }>('/api/v2/instructors/import/preview', { rows: batch });
         results.forEach((result, index) => {
           const sent = batch[index];
@@ -280,7 +282,8 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
           }
         });
         setProgress((current) => ({ ...current, done: current.done + batch.length }));
-      }
+      }, () => stopRequested.current);
+      if (stopRequested.current) return;
     } catch (error) {
       if (stopRequested.current) return;
       setStage('source');
@@ -448,7 +451,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     }
   };
 
-  /** Imports the Ready rows, a few at a time, and gathers what happened to each. */
+  /** Imports the Ready rows, several batches at once, and gathers what happened to each. */
   const importRows = async () => {
     const result: ImportSummary = { added: 0, updated: 0, warnings: [], failed: [], stoppedBecause: '' };
     stopRequested.current = false;
@@ -456,12 +459,8 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     setProgress({ done: 0, total: ready.length });
     const byRow = new Map(ready.map((row) => [row.row, row]));
 
-    for (const batch of inBatches(ready, COMMIT_BATCH)) {
-      if (stopRequested.current) {
-        result.stoppedBecause = 'You stopped the import. Rows after this point were not imported.';
-        break;
-      }
-      try {
+    try {
+      await runBatches(inBatches(ready, COMMIT_BATCH), PARALLEL_BATCHES, async (batch) => {
         const { results } = await request<{ results: CommitResult[] }>('/api/v2/instructors/import', {
           // The row as the sheet gave it, but with a named institute pinned
           // to the id it matched, so a second institute with the same name
@@ -488,11 +487,13 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
             });
           }
         }
-      } catch (error) {
-        result.stoppedBecause = `The import stopped: ${messageOf(error)}. The rows being imported at that moment may or may not have been saved; importing the same sheet again updates any that were.`;
-        break;
+        setProgress((current) => ({ ...current, done: current.done + batch.length }));
+      }, () => stopRequested.current);
+      if (stopRequested.current) {
+        result.stoppedBecause = 'You stopped the import. Rows not yet sent were not imported.';
       }
-      setProgress((current) => ({ ...current, done: current.done + batch.length }));
+    } catch (error) {
+      result.stoppedBecause = `The import stopped: ${messageOf(error)}. The rows being imported at that moment may or may not have been saved; importing the same sheet again updates any that were.`;
     }
 
     setSummary(result);
@@ -503,7 +504,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   const stop = () => {
     stopRequested.current = true;
     if (stage === 'checking') {
-      activeRequest.current?.abort();
+      for (const controller of activeRequests.current) controller.abort();
       setStage('source');
     }
   };
@@ -667,7 +668,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
               <div className="h-full rounded-full bg-indigo-600 transition-all" style={{ width: `${percent}%` }} />
             </div>
             <button type="button" onClick={stop} className="rounded-md bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600 transition-colors hover:bg-slate-200">
-              {stage === 'checking' ? 'Cancel' : 'Stop after this batch'}
+              {stage === 'checking' ? 'Cancel' : 'Stop after the current batches'}
             </button>
           </div>
         )}
