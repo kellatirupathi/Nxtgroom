@@ -149,13 +149,16 @@ export function photoLinkError(photoUrl) {
  * Errors are sentences an admin can act on, naming the value that was wrong,
  * and every problem in the row is reported at once rather than one per try.
  *
+ * `keptRole` is a role filled in from the instructor's record, accepted as
+ * it is.
+ *
  * `requirePhoto: false` leaves the photo link out of the errors and returns
  * its problem as `photoError` instead, for the import, which only needs a
  * photo when the instructor it creates or updates has none. `keys` carries
  * the email and Employee ID even for a row that failed, so an existing
  * instructor can still be matched.
  */
-export function validateImportFields(raw, colleges, { requirePhoto = true } = {}) {
+export function validateImportFields(raw, colleges, { requirePhoto = true, keptRole = "" } = {}) {
   const errors = [];
   const cell = (field) => firstValue(field, raw?.[field]);
   const name = cell("name").replace(/\s+/g, " ");
@@ -174,7 +177,9 @@ export function validateImportFields(raw, colleges, { requirePhoto = true } = {}
   else if (!gender) errors.push(`Gender "${genderText}" must be Male or Female`);
 
   const roleText = cell("role");
-  const role = normalizeImportRole(roleText);
+  // A role kept from the roster is taken as it is, even one the import would
+  // not accept from a sheet, such as a synced "Trainee".
+  const role = normalizeImportRole(roleText) ?? (keptRole && roleText === keptRole ? keptRole : null);
   if (!roleText) errors.push("Role is missing");
   else if (!role) errors.push(`Role "${roleText}" must be ${ROLE_CHOICES}`);
 
@@ -237,7 +242,10 @@ export async function findMatchingInstructors(db, keys) {
 
   const rows = await db.collection("instructors")
     .find({ $or: clauses }, {
-      projection: { name: 1, email: 1, employee_id: 1, deleted_at: 1, face_ids: 1 },
+      projection: {
+        name: 1, email: 1, employee_id: 1, deleted_at: 1, face_ids: 1,
+        gender: 1, role: 1, instructor_role: 1, college_id: 1, phone_no: 1,
+      },
     })
     .toArray();
   const add = (map, key, row) => map.set(key, [...(map.get(key) || []), row]);
@@ -282,6 +290,7 @@ export function matchExisting(keys, found) {
       id: String(target._id),
       name: target.name || "",
       hasFace: Array.isArray(target.face_ids) && target.face_ids.some(Boolean),
+      record: target,
     },
   };
 }
@@ -372,6 +381,44 @@ async function loadColleges(db) {
     .toArray();
 }
 
+/** The email and Employee ID a sheet row gives, used to find who it is. */
+export function importKeys(raw) {
+  return {
+    email: firstValue("email", raw?.email).toLowerCase(),
+    employee_id: firstValue("employee_id", raw?.employee_id),
+  };
+}
+
+/** Where each import field lives on an instructor's record. */
+const RECORD_VALUES = {
+  name: (record) => record.name,
+  email: (record) => record.email,
+  gender: (record) => record.gender,
+  role: (record) => record.instructor_role || record.role,
+  institute: (record) => record.college_id,
+  employee_id: (record) => record.employee_id,
+  phone_no: (record) => record.phone_no,
+};
+
+/**
+ * A row for an instructor already in the roster, with every blank cell
+ * filled from their record. The sheet adds what the record lacks and
+ * replaces what it changes; what it leaves blank, or has no column for,
+ * stays as it is. `filled` names the fields taken from the record.
+ */
+export function fillFromRecord(raw, record) {
+  const merged = { ...raw };
+  const filled = [];
+  for (const [field, read] of Object.entries(RECORD_VALUES)) {
+    const current = read(record);
+    if (!firstValue(field, raw?.[field]) && current != null && text(current)) {
+      merged[field] = String(current);
+      filled.push(field);
+    }
+  }
+  return { merged, filled };
+}
+
 /**
  * Field checks, then the match against the roster and repeats within this
  * batch, then the photograph for whatever is still valid and needs one.
@@ -385,14 +432,29 @@ async function loadColleges(db) {
  */
 async function checkRows(db, rows, deps) {
   const colleges = await loadColleges(db);
-  const checked = rows.map((raw) => ({ row: raw?.row ?? null, ...validateImportFields(raw, colleges, { requirePhoto: false }) }));
-  const found = await findMatchingInstructors(db, checked.map((item) => item.keys));
+  // Who each row is comes first, from its email or Employee ID, so that an
+  // instructor already in the roster can have blank cells filled from their
+  // record before the row is judged.
+  const found = await findMatchingInstructors(db, rows.map(importKeys));
+  const checked = rows.map((raw) => {
+    const match = matchExisting(importKeys(raw), found);
+    const { merged, filled } = match.existing
+      ? fillFromRecord(raw, match.existing.record)
+      : { merged: raw, filled: [] };
+    const keptRole = filled.includes("role") ? merged.role : "";
+    return {
+      row: raw?.row ?? null,
+      match,
+      filled,
+      ...validateImportFields(merged, colleges, { requirePhoto: false, keptRole }),
+    };
+  });
   const seenEmails = new Set();
   const seenIds = new Set();
 
   const results = checked.map((item) => {
     const errors = [...item.errors];
-    const match = matchExisting(item.keys, found);
+    const { match } = item;
     if (match.error) errors.push(match.error);
     if (item.value) {
       // The browser already removes repeats across the whole file; this only
@@ -410,6 +472,7 @@ async function checkRows(db, rows, deps) {
       value: errors.length ? undefined : item.value,
       collegeName: item.collegeName,
       existing: match.existing ?? null,
+      filled: item.filled,
       needsPhoto,
     };
   });
@@ -443,6 +506,8 @@ export async function previewImportRows(db, rows, deps = {}) {
       ok: true,
       action: result.existing ? "update" : "create",
       existing: result.existing ? { id: result.existing.id, name: result.existing.name } : null,
+      // Fields left blank in the sheet and kept from the instructor's record.
+      filled: result.filled,
       photo: result.needsPhoto ? "enrol" : "keep",
       value: { ...result.value, institute: result.collegeName },
       thumbnail: result.photo

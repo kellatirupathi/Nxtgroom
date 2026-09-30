@@ -255,6 +255,63 @@ test("a row whose email or employee ID exists updates that instructor", async ()
   assert.equal(results[2].existing, null);
 });
 
+test("blank cells for an existing instructor are filled from their record", async () => {
+  const db = fakeDb({
+    instructors: [{
+      _id: "i-asha", name: "Asha Rao", email: "asha.rao@example.com", employee_id: "EMP-1",
+      gender: "FEMALE", instructor_role: "Trainee", role: "Trainee", college_id: "c-blr-2",
+      phone_no: "9000000000", face_ids: ["f1"],
+    }],
+  });
+  // Only the Employee ID and a new phone number: everything else is on record,
+  // including a synced role the import would not accept from a sheet.
+  const [result] = await previewImportRows(db, [{
+    row: 2, employee_id: "EMP-1", phone_no: "9876543210",
+  }], await deps());
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.action, "update");
+  assert.deepEqual(result.value, {
+    name: "Asha Rao",
+    email: "asha.rao@example.com",
+    employee_id: "EMP-1",
+    role: "Trainee",
+    instructor_role: "Trainee",
+    gender: "FEMALE",
+    college_id: "c-blr-2",
+    phone_no: "9876543210",
+    photo_url: "",
+    institute: "City College",
+  });
+  assert.deepEqual(result.filled, ["name", "email", "gender", "role", "institute"]);
+});
+
+test("the sheet's values win over the record where it gives them", async () => {
+  const db = fakeDb({
+    instructors: [{ _id: "i-1", name: "Old Name", email: "asha.rao@example.com", gender: "MALE", role: "INSTRUCTOR", college_id: "c-blr-1", face_ids: ["f"] }],
+  });
+  const [result] = await previewImportRows(db, [goodRow({ photo_url: "" })], await deps());
+  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  assert.equal(result.value.name, "Asha Rao");
+  assert.equal(result.value.gender, "FEMALE");
+  assert.equal(result.value.college_id, "c-hyd");
+  assert.deepEqual(result.filled, []);
+});
+
+test("a field missing from both the sheet and the record is still flagged", async () => {
+  const db = fakeDb({
+    instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", employee_id: "EMP-1", face_ids: ["f"] }],
+  });
+  const [result] = await previewImportRows(db, [{ row: 2, email: "asha.rao@example.com" }], await deps());
+  assert.deepEqual(result.errors, ["Gender is missing", "Role is missing", "Institute is missing"]);
+});
+
+test("a new instructor still needs every required field", async () => {
+  const [result] = await previewImportRows(fakeDb(), [{ row: 2, email: "new@example.com", employee_id: "EMP-50" }], await deps());
+  assert.deepEqual(result.errors, [
+    "Name is missing", "Gender is missing", "Role is missing", "Institute is missing", "Photo link is missing",
+  ]);
+});
+
 test("an existing instructor with no photo still needs a photo link", async () => {
   const db = fakeDb({ instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", employee_id: "EMP-1", face_ids: [] }] });
   const [result] = await previewImportRows(db, [goodRow({ photo_url: "" })], await deps());
