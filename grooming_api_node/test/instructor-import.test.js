@@ -87,22 +87,31 @@ test("roles are read however a sheet spells them", () => {
 });
 
 test("Central Team is a role, however it is spelled", () => {
-  for (const spelling of ["Central Team", "central team", "CENTRAL_TEAM", "Central-Team"]) {
+  for (const spelling of ["Central Team", "central team", "CENTRAL_TEAM", "Central-Team", "central team."]) {
     assert.equal(normalizeImportRole(spelling), "CENTRAL_TEAM", spelling);
   }
 });
 
-test("gender accepts M, F, Male and Female in any case and nothing else", () => {
+test("gender accepts M, F, Male, Female, Man and Woman in any case and nothing else", () => {
   assert.equal(normalizeImportGender("m"), "MALE");
   assert.equal(normalizeImportGender("Female"), "FEMALE");
   assert.equal(normalizeImportGender("FEMALE"), "FEMALE");
-  assert.equal(normalizeImportGender("woman"), null);
+  assert.equal(normalizeImportGender("fEmAlE."), "FEMALE");
+  assert.equal(normalizeImportGender("Woman"), "FEMALE");
+  assert.equal(normalizeImportGender("MAN"), "MALE");
+  assert.equal(normalizeImportGender("X"), null);
   assert.equal(normalizeImportGender(""), null);
 });
 
 test("an institute is found by id, or by a name that is unique", () => {
   assert.equal(matchCollege("c-blr-2", COLLEGES).college._id, "c-blr-2");
   assert.equal(matchCollege("AURORA INSTITUTE", COLLEGES).college._id, "c-hyd");
+  // Case, spacing and punctuation never decide a match.
+  assert.equal(matchCollege("aurora-institute.", COLLEGES).college._id, "c-hyd");
+  assert.equal(
+    matchCollege("hyderabad - kondapur campus", [{ _id: "k", name: "Hyderabad – Kondapur Campus" }]).college._id,
+    "k",
+  );
   assert.match(matchCollege("City College", COLLEGES).error, /matches 2 institutes; use its institute ID/);
   assert.match(matchCollege("Nowhere", COLLEGES).error, /"Nowhere" was not found/);
   assert.equal(matchCollege("", COLLEGES).error, "Institute is missing");
@@ -132,6 +141,37 @@ test("phone is optional and left out when blank", () => {
 
 test("employee ID is required", () => {
   assert.deepEqual(validateImportFields(goodRow({ employee_id: " " }), COLLEGES).errors, ["Employee ID is missing"]);
+});
+
+test("a cell holding two values uses the first", () => {
+  const { errors, value } = validateImportFields(goodRow({
+    name: "Asha Rao\nA. Rao",
+    email: "asha@example.com, asha.personal@example.com",
+    gender: "F / Female",
+    role: "Mentor, Instructor",
+    institute: "Aurora Institute | City College",
+    employee_id: "EMP-1 EMP-2",
+    phone_no: "+91 98765 43210 / 9123456789",
+    photo_url: "https://cdn.example.com/a.jpg https://cdn.example.com/b.jpg",
+  }), COLLEGES);
+  assert.deepEqual(errors, []);
+  assert.equal(value.name, "Asha Rao");
+  assert.equal(value.email, "asha@example.com");
+  assert.equal(value.gender, "FEMALE");
+  assert.equal(value.role, "MENTOR");
+  assert.equal(value.college_id, "c-hyd");
+  assert.equal(value.employee_id, "EMP-1");
+  assert.equal(value.phone_no, "+91 98765 43210");
+  assert.equal(value.photo_url, "https://cdn.example.com/a.jpg");
+});
+
+test("a comma in a name or a slash in a link is not read as two values", () => {
+  const { value } = validateImportFields(goodRow({
+    name: "Nair, Anjali",
+    photo_url: "https://drive.google.com/file/d/ABC/view",
+  }), COLLEGES);
+  assert.equal(value.name, "Nair, Anjali");
+  assert.equal(value.photo_url, "https://drive.google.com/file/d/ABC/view");
 });
 
 test("every problem in a row is reported at once, naming the bad value", () => {

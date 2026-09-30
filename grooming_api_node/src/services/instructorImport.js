@@ -33,6 +33,33 @@ function roleWords(role) {
 
 const ROLE_CHOICES = `${IMPORT_ROLES.slice(0, -1).map(roleWords).join(", ")} or ${roleWords(IMPORT_ROLES.at(-1))}`;
 
+/**
+ * What separates two values typed into one cell, per field.
+ *
+ * A cell sometimes holds two emails or two phone numbers; the first is the
+ * one used. The separators differ by field because a comma is part of a name
+ * ("Nair, Anjali") or an institute, and a slash is part of every link, so
+ * those are only split where they cannot belong to a single value.
+ */
+const MULTI_VALUE_SEPARATORS = {
+  name: /[\n;|]/,
+  email: /[\s,;/|]+/,
+  gender: /[\s,;/|]+/,
+  role: /[\n,;/|]/,
+  institute: /[\n;|]/,
+  employee_id: /[\s,;/|]+/,
+  phone_no: /[\n,;/|]/,
+  photo_url: /[\s,;|]+/,
+};
+
+/** The first of several values in one cell, or the whole cell when there is one. */
+export function firstValue(field, value) {
+  const whole = text(value);
+  const separator = MULTI_VALUE_SEPARATORS[field];
+  if (!whole || !separator) return whole;
+  return whole.split(separator).map((part) => part.trim()).find(Boolean) ?? "";
+}
+
 /** Rows per preview request: each may download and check a photograph. */
 export const MAX_PREVIEW_ROWS = 25;
 /** Rows per commit request: each also stores and indexes a photograph. */
@@ -56,25 +83,33 @@ function text(value) {
   return value == null ? "" : String(value).trim();
 }
 
+/**
+ * A value reduced to lower-case letters and digits, so case, spacing and
+ * punctuation never decide a match: "Hyderabad – Kondapur Campus" and
+ * "hyderabad-kondapur campus" are the same institute.
+ */
 function comparable(value) {
-  return text(value).replace(/\s+/g, " ").toLowerCase();
+  return text(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 /**
  * One of IMPORT_ROLES from however a sheet spells it: "Central Instructor",
- * "central-instructor" and "CENTRAL_INSTRUCTOR" are the same role. Anything
- * else is null.
+ * "central-instructor", "CENTRAL_INSTRUCTOR" and "Central Team." all match.
+ * Anything else is null.
  */
 export function normalizeImportRole(value) {
-  const key = text(value).toUpperCase().replace(/[\s-]+/g, "_");
-  return IMPORT_ROLES.includes(key) ? key : null;
+  const key = comparable(value);
+  return IMPORT_ROLES.find((role) => comparable(role) === key) ?? null;
 }
 
-/** MALE or FEMALE from M, Male, F, Female in any case; anything else is null. */
+/**
+ * MALE or FEMALE from M, Male, Man, F, Female or Woman in any case;
+ * anything else is null.
+ */
 export function normalizeImportGender(value) {
-  const key = text(value).toUpperCase();
-  if (key === "M" || key === "MALE") return "MALE";
-  if (key === "F" || key === "FEMALE") return "FEMALE";
+  const key = comparable(value);
+  if (["m", "male", "man"].includes(key)) return "MALE";
+  if (["f", "female", "woman"].includes(key)) return "FEMALE";
   return null;
 }
 
@@ -105,35 +140,37 @@ export function matchCollege(value, colleges) {
  */
 export function validateImportFields(raw, colleges) {
   const errors = [];
-  const name = text(raw?.name).replace(/\s+/g, " ");
+  const cell = (field) => firstValue(field, raw?.[field]);
+  const name = cell("name").replace(/\s+/g, " ");
   if (!name) errors.push("Name is missing");
   else if (name.length < 2) errors.push("Name must be at least 2 characters");
   else if (name.length > 120) errors.push("Name is longer than 120 characters");
 
-  const email = text(raw?.email).toLowerCase();
+  const emailText = cell("email");
+  const email = emailText.toLowerCase();
   if (!email) errors.push("Email is missing");
-  else if (!emailSchema.safeParse(email).success) errors.push(`Email "${text(raw.email)}" is not a valid address`);
+  else if (!emailSchema.safeParse(email).success) errors.push(`Email "${emailText}" is not a valid address`);
 
-  const genderText = text(raw?.gender);
+  const genderText = cell("gender");
   const gender = normalizeImportGender(genderText);
   if (!genderText) errors.push("Gender is missing");
   else if (!gender) errors.push(`Gender "${genderText}" must be Male or Female`);
 
-  const roleText = text(raw?.role);
+  const roleText = cell("role");
   const role = normalizeImportRole(roleText);
   if (!roleText) errors.push("Role is missing");
   else if (!role) errors.push(`Role "${roleText}" must be ${ROLE_CHOICES}`);
 
-  const institute = matchCollege(raw?.institute, colleges);
+  const institute = matchCollege(cell("institute"), colleges);
   if (institute.error) errors.push(institute.error);
 
   // Required here although optional on a synced record: an imported
   // instructor is added by hand, as through the add form, which requires it.
-  const employeeId = text(raw?.employee_id);
+  const employeeId = cell("employee_id");
   if (!employeeId) errors.push("Employee ID is missing");
   else if (employeeId.length > 50) errors.push("Employee ID is longer than 50 characters");
 
-  const phone = text(raw?.phone_no);
+  const phone = cell("phone_no");
   if (phone) {
     const digits = phone.replace(/\D/g, "").length;
     if (!/^[+()\-\s\d]*$/.test(phone) || phone.length > 30 || digits < 7 || digits > 15) {
@@ -141,7 +178,7 @@ export function validateImportFields(raw, colleges) {
     }
   }
 
-  const photoUrl = text(raw?.photo_url);
+  const photoUrl = cell("photo_url");
   if (!photoUrl) {
     errors.push("Photo link is missing");
   } else {
