@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useMemo, type FormEvent } from 'react';
-import { Plus, UserCog, Search, Mail, CircleAlert } from 'lucide-react';
+import { Plus, UserCog, Search, Mail, CircleAlert, X } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
@@ -468,8 +468,14 @@ export default function InstructorManagement() {
                 <UserCog size={20} className="text-indigo-600" />
                 {isEditMode ? 'Edit Instructor' : 'Add New Instructor'}
               </h2>
-              <button type="button" aria-label="Close instructor dialog" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-white p-1 rounded-full border border-slate-200 shadow-sm">
-                ✕
+              <button
+                type="button"
+                aria-label="Close instructor dialog"
+                title="Close"
+                onClick={closeModal}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-600 shadow-sm transition-colors hover:border-rose-600 hover:bg-rose-600 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                <X size={18} strokeWidth={2.5} aria-hidden="true" />
               </button>
             </div>
             
