@@ -155,9 +155,8 @@ export default function InstituteAnalytics() {
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4 md:px-5">
           <p className="min-w-0 flex-1 text-xs text-slate-500">
             {workingDays > 1
-              ? `Present counts each instructor once per day they checked in, out of ${formatCount(workingDays)} working days. `
+              ? `Present counts each instructor once per day they checked in, out of ${formatCount(workingDays)} working days.`
               : ''}
-            Select a column heading to sort. Face enrolment under 80% is flagged for face-only institutes.
           </p>
           <div className="shrink-0">
             <DateRangeFilter preset={preset} range={range} today={localDateValue()} onChange={changeRange} />
