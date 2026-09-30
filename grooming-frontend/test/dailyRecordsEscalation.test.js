@@ -97,13 +97,14 @@ test('the export says escalated with the dates, not "this week"', () => {
 
 test('the table shows the column after Status, and the panel filters on it', () => {
   const table = read('src/components/DailyAttendanceTable.tsx');
-  const headers = [...table.matchAll(/<th className="p-4 w-\[\d+px\]">([^<]+)<\/th>/g)].map((match) => match[1]);
+  const columns = table.slice(table.indexOf('const RECORD_COLUMNS = ['), table.indexOf('] as const;'));
+  const headers = [...columns.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
+  assert.equal(headers.length, 13);
   assert.equal(headers[headers.indexOf('Status') + 1], 'Escalation');
-  // The checkbox column is the one header without a label.
-  for (const match of table.matchAll(/colSpan=\{canBulkDelete \? (\d+) : (\d+)\}/g)) {
-    assert.equal(Number(match[2]), headers.length, 'the empty-table rows must span every column');
-    assert.equal(Number(match[1]), headers.length + 1);
-  }
+  // Every header comes from that list, and the empty-table row spans all of
+  // them plus the checkbox column when there is one.
+  assert.match(table, /\{RECORD_COLUMNS\.map\(\(column, index\) => \(/);
+  assert.match(table, /colSpan=\{RECORD_COLUMNS\.length \+ \(canBulkDelete \? 1 : 0\)\}/);
   assert.match(table, /<EscalationTag escalation=\{record\.escalation\} today=\{today\} \/>/);
   assert.match(table, /escalation: escalationFilter,/);
   assert.match(table, /currentRows = spreadEscalation\(currentRows\);/);

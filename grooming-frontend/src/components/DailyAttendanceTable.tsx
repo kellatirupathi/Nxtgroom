@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, UserRoundSearch, SlidersHorizontal, Download, ChevronRight } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import AttendanceFilterDrawer from './AttendanceFilterDrawer';
@@ -44,11 +44,6 @@ function StatusBadge({ status }: { status?: string }) {
       return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-rose-50 text-rose-600 border border-rose-200"><XCircle size={12} aria-hidden="true" /> Non-compliant</span>;
     case 'unassessed':
       return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-amber-50 text-amber-700 border border-amber-200" title="The photograph did not show enough to judge"><CircleAlert size={12} aria-hidden="true" /> Not assessed</span>;
-    case 'unidentified':
-      // Not "pending": nothing is running and nothing will, until somebody
-      // attaches an instructor. Saying pending would promise a result that
-      // never arrives.
-      return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-orange-50 text-orange-700 border border-orange-200" title="Face recognition could not identify this person. An administrator needs to attach the right instructor."><UserRoundSearch size={12} aria-hidden="true" /> Unidentified</span>;
     case 'error':
       return <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap bg-slate-100 text-slate-600 border border-slate-200"><TriangleAlert size={12} aria-hidden="true" /> Analysis error</span>;
     default:
@@ -95,128 +90,56 @@ function EscalationTag({ escalation, today }: { escalation?: AttendanceEscalatio
   );
 }
 
-interface RecordCardProps {
-  record: AttendanceRecord;
-  today: string;
-  canOpen: boolean;
-  selectable: boolean;
-  selected: boolean;
-  onToggle: () => void;
-  onOpen: () => void;
-  onPhoto: (kind: 'checkin' | 'checkout') => void;
-}
+/**
+ * Every column of the table, which is the same on every screen.
+ *
+ * Each width is written twice: below lg for phones and tablets, where the
+ * cells are tighter, and from lg the desktop's own. The table's total width
+ * (RECORD_TABLE_WIDTH) is the sum of these, which table-fixed needs.
+ */
+const RECORD_COLUMNS = [
+  { label: 'Instructor Name', width: 'w-[160px] lg:w-[200px]' },
+  { label: 'Role', width: 'w-[130px] lg:w-[150px]' },
+  { label: 'Institute', width: 'w-[140px] lg:w-[160px]' },
+  { label: 'Date', width: 'w-[122px] lg:w-[130px]' },
+  { label: 'Check-In', width: 'w-[96px] lg:w-[110px]' },
+  { label: 'Check-Out', width: 'w-[104px] lg:w-[110px]' },
+  { label: 'Coordinates', width: 'w-[176px] lg:w-[190px]' },
+  { label: 'Status', width: 'w-[136px] lg:w-[150px]' },
+  { label: 'Escalation', width: 'w-[210px] lg:w-[230px]' },
+  { label: 'Attire', width: 'w-[150px] lg:w-[170px]' },
+  { label: 'Photo', width: 'w-[84px] lg:w-[90px]' },
+  { label: 'Report', width: 'w-[92px] lg:w-[100px]' },
+  { label: 'Remark', width: 'w-[260px] lg:w-[320px]' },
+] as const;
+
+/** The checkbox column, when this account may delete records. */
+const SELECT_COLUMN_WIDTH = 'w-10 lg:w-12';
 
 /**
- * One record on a phone.
- *
- * The table's columns do not fit a phone: it showed a name and a role, and
- * everything else sat off-screen to the right. A card carries the same record -
- * status, escalation, times, attire, remark, photos and reports - in the width
- * there is, and opens the evaluation on a tap, as a row does.
+ * The sums of the widths above, with and without the checkbox column. The
+ * desktop's used to say 2010px, short of its own columns since Escalation was
+ * added; a fixed table is never narrower than its columns, so it has always
+ * drawn at these widths.
  */
-function RecordCard({ record, today, canOpen, selectable, selected, onToggle, onOpen, onPhoto }: RecordCardProps) {
-  const name = record.instructor_name || 'Unknown person';
-  const place = [record.instructor_role, record.college_name].filter(Boolean).join(' · ');
-  const reportDay = localDateValue(new Date(record.date || record.check_in_time || Date.now()));
-  const hasAttire = ['FORMAL', 'SAREE', 'KURTI_WITH_DUPATTA'].includes(String(record.attire_type));
-  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
-  const actionClass = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border focus:outline-none focus:ring-2';
+const RECORD_TABLE_WIDTH = {
+  withSelect: 'w-[1900px] lg:w-[2158px]',
+  withoutSelect: 'w-[1860px] lg:w-[2110px]',
+} as const;
 
-  return (
-    <article
-      onClick={canOpen ? onOpen : undefined}
-      onKeyDown={(event) => {
-        if (canOpen && (event.key === 'Enter' || event.key === ' ')) {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-      tabIndex={canOpen ? 0 : undefined}
-      aria-label={canOpen ? `Open evaluation for ${name}` : undefined}
-      className={`rounded-xl border bg-white p-4 shadow-sm transition-colors ${
-        selected ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-slate-200'
-      } ${canOpen ? 'cursor-pointer active:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500' : ''}`}
-    >
-      <div className="flex items-start gap-3">
-        {selectable && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onClick={stop}
-            onChange={onToggle}
-            aria-label={`Select attendance record for ${name}`}
-            className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className={`min-w-0 truncate text-[15px] font-bold ${record.instructor_name ? 'text-slate-800' : 'italic text-slate-500'}`}>{name}</h3>
-            <span className="shrink-0"><StatusBadge status={record.status} /></span>
-          </div>
-          {place && <p className="mt-0.5 truncate text-xs font-medium text-slate-500" title={place}>{place}</p>}
-        </div>
-      </div>
+/** Tighter on phones and tablets; the desktop's p-4 from lg. */
+const HEAD_CELL = 'px-3 py-3 lg:p-4';
+const CELL = 'px-3 py-2.5 lg:p-4';
+/** Small print on a phone, the desktop's size from sm. */
+const CELL_TEXT = 'text-xs sm:text-sm';
 
-      {record.escalation && (
-        <div className="mt-2.5"><EscalationTag escalation={record.escalation} today={today} /></div>
-      )}
-
-      <dl className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 px-3 py-2.5">
-        <div className="min-w-0">
-          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Date</dt>
-          <dd className="mt-0.5 text-xs font-semibold text-slate-700">{attendanceSessionDateLabel(record.check_in_time, record.check_out_time, record.date)}</dd>
-        </div>
-        <div className="min-w-0">
-          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-in</dt>
-          <dd className="mt-0.5 text-xs font-bold text-slate-800">{formatAttendanceTime(record.check_in_time)}</dd>
-        </div>
-        <div className="min-w-0">
-          <dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-out</dt>
-          <dd className="mt-0.5 text-xs font-bold text-slate-800">{checkoutDateTimeLabel(record.check_in_time, record.check_out_time, record.checkout_status)}</dd>
-        </div>
-      </dl>
-
-      {record.remarks && (
-        <p className="mt-3 line-clamp-2 text-sm leading-snug text-slate-600" title={record.remarks}>{record.remarks}</p>
-      )}
-
-      {record.location_coordinates && (
-        <p className="mt-2 flex min-w-0 items-center gap-1 text-xs font-medium text-indigo-600" title={formatCoordinates(record.location_coordinates)}>
-          <MapPin size={13} className="shrink-0" aria-hidden="true" />
-          <span className="truncate">{record.location_address || formatCoordinates(record.location_coordinates)}</span>
-        </p>
-      )}
-
-      <div className="mt-3 flex items-center gap-2">
-        {hasAttire && <AttireTag attire={record.attire_type} />}
-        {/* Kept off the card's own tap, as the table keeps them off the row. */}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5" onClick={stop}>
-          {record.check_in_photo_key && (
-            <button type="button" title="View check-in photo" aria-label={`View check-in photo for ${name}`} onClick={() => onPhoto('checkin')} className={`${actionClass} border-indigo-100 bg-indigo-50 text-indigo-700 focus:ring-indigo-500`}>
-              <ImageIcon size={17} aria-hidden="true" />
-            </button>
-          )}
-          {record.check_out_photo_key && (
-            <button type="button" title="View check-out photo" aria-label={`View check-out photo for ${name}`} onClick={() => onPhoto('checkout')} className={`${actionClass} border-rose-100 bg-rose-50 text-rose-700 focus:ring-rose-500`}>
-              <LogOut size={17} aria-hidden="true" />
-            </button>
-          )}
-          {record.report_token && (
-            <a href={publicDayReportPath(record.report_token, reportDay, 'checkin')} target="_blank" rel="noopener noreferrer" title="Open the check-in report" aria-label={`Open the check-in report for ${name}`} className={`${actionClass} border-indigo-100 bg-indigo-50 text-indigo-700 focus:ring-indigo-500`}>
-              <FileText size={17} aria-hidden="true" />
-            </a>
-          )}
-          {record.report_token && record.check_out_time && (
-            <a href={publicDayReportPath(record.report_token, reportDay, 'checkout')} target="_blank" rel="noopener noreferrer" title="Open the check-out report" aria-label={`Open the check-out report for ${name}`} className={`${actionClass} border-rose-100 bg-rose-50 text-rose-700 focus:ring-rose-500`}>
-              <FileText size={17} aria-hidden="true" />
-            </a>
-          )}
-        </div>
-        {canOpen && <ChevronRight size={18} className="shrink-0 text-slate-300" aria-hidden="true" />}
-      </div>
-    </article>
-  );
-}
+/**
+ * The name stays in view while the other columns are swiped past on a phone or
+ * tablet. Opaque, so the cells sliding underneath do not show through, and
+ * with a rule on its right edge. From lg the table is as it always was.
+ */
+const PINNED_HEAD = 'max-lg:sticky max-lg:left-0 max-lg:z-20 bg-slate-50 max-lg:shadow-[inset_-1px_0_0_rgb(226_232_240)]';
+const PINNED_CELL = 'max-lg:sticky max-lg:left-0 max-lg:z-[1] max-lg:shadow-[inset_-1px_0_0_rgb(226_232_240)]';
 
 export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false }: DailyAttendanceTableProps) {
   const today = useMemo(() => localDateValue(), []);
@@ -367,6 +290,17 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   const openRecord = (record: AttendanceRecord) => {
     if (canOpenRecord(record.status)) onRowClick(record);
   };
+
+  // One cell across the table. Below lg the table is far wider than the
+  // screen, so the message is held to the visible width at the left rather
+  // than centred somewhere off to the right.
+  const emptyRow = (message: string) => (
+    <tr>
+      <td colSpan={RECORD_COLUMNS.length + (canBulkDelete ? 1 : 0)} className="py-8 lg:p-8 text-slate-400">
+        <div className="text-center max-lg:sticky max-lg:left-0 max-lg:w-[calc(100vw-2.25rem)]">{message}</div>
+      </td>
+    </tr>
+  );
 
   const handleRangeChange = (nextPreset: DatePreset, nextRange: DateRange) => {
     setSelectedIds(new Set());
@@ -551,60 +485,15 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      {/* Phones and tablets: a card per record, two across on a tablet. The
-          table needs a desktop's width - on a tablet it still scrolled
-          sideways - so it starts at lg, where the sidebar does. */}
-      <div className="lg:hidden">
-        {loading && records.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Loading attendance records…</p>
-        ) : records.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">No attendance records found for the selected dates.</p>
-        ) : filteredRecords.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">No records match the selected filters.</p>
-        ) : (
-          <>
-            <div className="mb-2 flex min-h-8 items-center justify-between px-1 text-xs font-semibold text-slate-500">
-              <span>{filteredRecords.length} {filteredRecords.length === 1 ? 'record' : 'records'}</span>
-              {canBulkDelete && (
-                <label className="flex items-center gap-2 py-1">
-                  <input
-                    type="checkbox"
-                    ref={(input) => {
-                      if (input) input.indeterminate = selectedVisibleCount > 0 && !allVisibleSelected;
-                    }}
-                    checked={allVisibleSelected}
-                    onChange={toggleAllVisible}
-                    className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  Select all
-                </label>
-              )}
-            </div>
-            <ul className="grid gap-3 pb-2 md:grid-cols-2">
-              {filteredRecords.map((record) => {
-                const attendanceId = String(record._id);
-                return (
-                  <li key={record._id}>
-                    <RecordCard
-                      record={record}
-                      today={today}
-                      canOpen={canOpenRecord(record.status)}
-                      selectable={canBulkDelete}
-                      selected={selectedIds.has(attendanceId)}
-                      onToggle={() => toggleRecord(attendanceId)}
-                      onOpen={() => openRecord(record)}
-                      onPhoto={(kind) => setPhotoTarget({ record, kind })}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          </>
-        )}
-      </div>
-
-      <div className="hidden lg:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">
-        <div className="overflow-x-auto flex-1">
+      {/* One table on every screen. It fills the height left under the
+          header, so its own header row stays in view while the rows scroll,
+          and on a phone or tablet the columns are swiped sideways past the
+          pinned name. The minimum height keeps it usable on a phone held
+          sideways; the page scrolls then instead. */}
+      <div className="flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col max-lg:min-h-[20rem]">
+        {/* Contained, so a sideways swipe that reaches the end does not turn
+            into the browser's back gesture. */}
+        <div className="overflow-x-auto flex-1 max-lg:overscroll-x-contain">
           {/*
             table-fixed with explicit widths, because auto layout was sizing
             columns from their content and wrapping "Vikram Balai" and
@@ -615,14 +504,14 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
           {/*
             An explicit total width, not w-max. w-max sizes the table to its
             content, which let the Remark column grow to fit a paragraph and
-            scroll the row far off screen instead of truncating at 320px.
-            1610px is the sum of the column widths below.
+            scroll the row far off screen instead of truncating. The total is
+            the sum of RECORD_COLUMNS' widths, for each screen size.
           */}
-          <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? 'w-[2058px]' : 'w-[2010px]'}`}>
+          <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? RECORD_TABLE_WIDTH.withSelect : RECORD_TABLE_WIDTH.withoutSelect}`}>
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                 {canBulkDelete && (
-                  <th className="w-12 p-4">
+                  <th className={`${SELECT_COLUMN_WIDTH} ${HEAD_CELL}`}>
                     <input
                       ref={selectAllRef}
                       type="checkbox"
@@ -630,32 +519,24 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                       disabled={!visibleIds.length}
                       onChange={toggleAllVisible}
                       aria-label="Select all visible attendance records"
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      className="h-4 w-4 max-lg:h-5 max-lg:w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                     />
                   </th>
                 )}
-                <th className="p-4 w-[200px]">Instructor Name</th>
-                <th className="p-4 w-[150px]">Role</th>
-                <th className="p-4 w-[160px]">Institute</th>
-                <th className="p-4 w-[130px]">Date</th>
-                <th className="p-4 w-[110px]">Check-In</th>
-                <th className="p-4 w-[110px]">Check-Out</th>
-                <th className="p-4 w-[190px]">Coordinates</th>
-                <th className="p-4 w-[150px]">Status</th>
-                <th className="p-4 w-[230px]">Escalation</th>
-                <th className="p-4 w-[170px]">Attire</th>
-                <th className="p-4 w-[90px]">Photo</th>
-                <th className="p-4 w-[100px]">Report</th>
-                <th className="p-4 w-[320px]">Remark</th>
+                {RECORD_COLUMNS.map((column, index) => (
+                  <th key={column.label} className={`${HEAD_CELL} ${column.width} ${index === 0 ? PINNED_HEAD : ''}`}>
+                    {column.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading && records.length === 0 ? (
-                <tr><td colSpan={canBulkDelete ? 14 : 13} className="p-8 text-center text-slate-400">Loading attendance records…</td></tr>
+                emptyRow('Loading attendance records…')
               ) : records.length === 0 ? (
-                <tr><td colSpan={canBulkDelete ? 14 : 13} className="p-8 text-center text-slate-400">No attendance records found for the selected dates.</td></tr>
+                emptyRow('No attendance records found for the selected dates.')
               ) : filteredRecords.length === 0 ? (
-                <tr><td colSpan={canBulkDelete ? 14 : 13} className="p-8 text-center text-slate-400">No records match the selected filters.</td></tr>
+                emptyRow('No records match the selected filters.')
               ) : filteredRecords.map((record) => {
                 const canOpen = canOpenRecord(record.status);
                 const attendanceId = String(record._id);
@@ -672,42 +553,42 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                     }}
                     tabIndex={canOpen ? 0 : undefined}
                     aria-label={canOpen ? `Open evaluation for ${record.instructor_name}` : undefined}
-                    className={`transition-colors ${selected ? 'bg-indigo-50/70' : ''} ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
+                    className={`group transition-colors ${selected ? 'bg-indigo-50/70 max-lg:bg-indigo-50' : ''} ${canOpen ? 'hover:bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500' : 'opacity-80'}`}
                   >
                     {canBulkDelete && (
-                      <td className="w-12 p-4" onClick={(event) => event.stopPropagation()}>
+                      <td className={`${SELECT_COLUMN_WIDTH} ${CELL}`} onClick={(event) => event.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={selected}
                           onChange={() => toggleRecord(attendanceId)}
                           aria-label={`Select attendance record for ${record.instructor_name || 'instructor'}`}
-                          className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                          className="h-4 w-4 max-lg:h-5 max-lg:w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                         />
                       </td>
                     )}
                     {/* truncate on every text cell: one line, an ellipsis when
                         it overflows, and the full value in the tooltip. */}
-                    <td className="p-4 font-bold text-slate-800 truncate" title={record.instructor_name || ''}>{record.instructor_name}</td>
-                    <td className="p-4 text-sm font-medium text-slate-500 truncate" title={record.instructor_role || ''}>{record.instructor_role || '--'}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600 truncate" title={record.college_name || ''}>{record.college_name || 'Unknown'}</td>
-                    <td className="p-4 text-sm font-medium text-slate-600 whitespace-nowrap">
+                    <td className={`${CELL} ${PINNED_CELL} ${selected ? 'max-lg:bg-indigo-50' : 'max-lg:bg-white'} ${canOpen && !selected ? 'max-lg:group-hover:bg-slate-50' : ''} font-bold text-slate-800 truncate max-lg:text-sm`} title={record.instructor_name || ''}>{record.instructor_name}</td>
+                    <td className={`${CELL} ${CELL_TEXT} font-medium text-slate-500 truncate`} title={record.instructor_role || ''}>{record.instructor_role || '--'}</td>
+                    <td className={`${CELL} ${CELL_TEXT} font-medium text-slate-600 truncate`} title={record.college_name || ''}>{record.college_name || 'Unknown'}</td>
+                    <td className={`${CELL} ${CELL_TEXT} font-medium text-slate-600 whitespace-nowrap`}>
                       {attendanceSessionDateLabel(record.check_in_time, record.check_out_time, record.date)}
                     </td>
-                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">{formatAttendanceTime(record.check_in_time)}</td>
-                    <td className="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">
+                    <td className={`${CELL} ${CELL_TEXT} font-bold text-slate-700 whitespace-nowrap`}>{formatAttendanceTime(record.check_in_time)}</td>
+                    <td className={`${CELL} ${CELL_TEXT} font-bold text-slate-700 whitespace-nowrap`}>
                       {checkoutDateTimeLabel(record.check_in_time, record.check_out_time, record.checkout_status)}
                     </td>
-                    <td className="p-4 text-sm text-slate-500 truncate">
+                    <td className={`${CELL} ${CELL_TEXT} text-slate-500 truncate`}>
                       {record.location_coordinates ? (
                         <span className="flex items-center gap-1.5 text-indigo-600 font-medium whitespace-nowrap" title="Latitude, longitude">
                           <MapPin size={14} className="shrink-0" aria-hidden="true" /> {formatCoordinates(record.location_coordinates)}
                         </span>
                       ) : '--'}
                     </td>
-                    <td className="p-4 whitespace-nowrap"><StatusBadge status={record.status} /></td>
-                    <td className="p-4 whitespace-nowrap"><EscalationTag escalation={record.escalation} today={today} /></td>
-                    <td className="p-4 whitespace-nowrap"><AttireTag attire={record.attire_type} /></td>
-                    <td className="p-4">
+                    <td className={`${CELL} whitespace-nowrap`}><StatusBadge status={record.status} /></td>
+                    <td className={`${CELL} whitespace-nowrap`}><EscalationTag escalation={record.escalation} today={today} /></td>
+                    <td className={`${CELL} whitespace-nowrap`}><AttireTag attire={record.attire_type} /></td>
+                    <td className={CELL}>
                       {/* stopPropagation: the row itself opens the evaluation
                           detail, and viewing a photo should not also do that. */}
                       <div className="flex items-center gap-1.5 whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
@@ -717,7 +598,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                             title="View check-in photo"
                             aria-label={`View check-in photo for ${record.instructor_name}`}
                             onClick={() => setPhotoTarget({ record, kind: 'checkin' })}
-                            className="rounded-md border border-indigo-100 bg-indigo-50 p-1.5 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            className="rounded-md border border-indigo-100 bg-indigo-50 p-1.5 max-lg:p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                           >
                             <ImageIcon size={15} aria-hidden="true" />
                           </button>
@@ -730,14 +611,14 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                             title="View check-out photo"
                             aria-label={`View check-out photo for ${record.instructor_name}`}
                             onClick={() => setPhotoTarget({ record, kind: 'checkout' })}
-                            className="rounded-md border border-rose-100 bg-rose-50 p-1.5 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                            className="rounded-md border border-rose-100 bg-rose-50 p-1.5 max-lg:p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
                           >
                             <LogOut size={15} aria-hidden="true" />
                           </button>
                         )}
                       </div>
                     </td>
-                    <td className="p-4">
+                    <td className={CELL}>
                       {/* The public report an instructor is emailed, one link
                           per half. New tab, and the click is kept off the row
                           so it does not also open the internal detail view. */}
@@ -750,7 +631,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                               rel="noopener noreferrer"
                               title="Open the check-in report"
                               aria-label={`Open the check-in report for ${record.instructor_name}`}
-                              className="inline-flex rounded-md border border-indigo-100 bg-indigo-50 p-1.5 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              className="inline-flex rounded-md border border-indigo-100 bg-indigo-50 p-1.5 max-lg:p-2 text-indigo-700 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                             >
                               <FileText size={15} aria-hidden="true" />
                             </a>
@@ -761,7 +642,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                                 rel="noopener noreferrer"
                                 title="Open the check-out report"
                                 aria-label={`Open the check-out report for ${record.instructor_name}`}
-                                className="inline-flex rounded-md border border-rose-100 bg-rose-50 p-1.5 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                                className="inline-flex rounded-md border border-rose-100 bg-rose-50 p-1.5 max-lg:p-2 text-rose-700 hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
                               >
                                 <FileText size={15} aria-hidden="true" />
                               </a>
@@ -772,7 +653,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                         )}
                       </div>
                     </td>
-                    <td className="p-4 text-sm text-slate-500 truncate" title={record.remarks || ''}>{record.remarks || '--'}</td>
+                    <td className={`${CELL} ${CELL_TEXT} text-slate-500 truncate`} title={record.remarks || ''}>{record.remarks || '--'}</td>
                   </tr>
                 );
               })}

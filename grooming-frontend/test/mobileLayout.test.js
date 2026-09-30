@@ -6,24 +6,51 @@ import { readFileSync } from 'node:fs';
  * Phone layouts.
  *
  * On a phone the desktop tables showed two columns and scrolled everything
- * else off to the right. Each list now has a card layout below its breakpoint
- * and keeps the table above it. These read the source, so they cannot judge
- * the pixels; they keep both layouts present, keep them from showing at the
- * same time, and keep the cards carrying what the rows carry.
+ * else off to the right. Instructors and Users have a card layout below their
+ * breakpoint and keep the table above it. Daily Records is the exception, by
+ * request: the same table on every screen, fitted to it. These read the
+ * source, so they cannot judge the pixels.
  */
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('Daily Records: cards below lg, the table from lg, never both', () => {
+test('Daily Records: one table on every screen, and no cards', () => {
   const table = read('src/components/DailyAttendanceTable.tsx');
-  assert.match(table, /<div className="lg:hidden">/);
-  assert.match(table, /<div className="hidden lg:flex bg-white/);
-  assert.match(table, /<ul className="grid gap-3 pb-2 md:grid-cols-2">/, 'two cards across on a tablet');
+  assert.match(table, /<div className="flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col max-lg:min-h-\[20rem\]">/);
+  assert.ok(!table.includes('function RecordCard'), 'the card layout is gone');
+  assert.ok(!table.includes('<div className="lg:hidden">'));
+  assert.ok(!table.includes('hidden lg:flex'), 'the table is not hidden below lg');
+  // A sideways swipe at the end must not become the browser's back gesture.
+  assert.match(table, /overflow-x-auto flex-1 max-lg:overscroll-x-contain/);
 });
 
-test('a record card carries what a row does', () => {
+test('Daily Records: every column width adds up to the table width, on phones and on desktops', () => {
   const table = read('src/components/DailyAttendanceTable.tsx');
-  const card = table.slice(table.indexOf('function RecordCard'), table.indexOf('export default function DailyAttendanceTable'));
+  const columns = table.slice(table.indexOf('const RECORD_COLUMNS = ['), table.indexOf('] as const;'));
+  const widths = [...columns.matchAll(/width: 'w-\[(\d+)px\] lg:w-\[(\d+)px\]'/g)].map((match) => [Number(match[1]), Number(match[2])]);
+  assert.equal(widths.length, 13);
+  const compact = widths.reduce((sum, [small]) => sum + small, 0);
+  const wide = widths.reduce((sum, [, large]) => sum + large, 0);
+  // The desktop's columns, unchanged. Its stated total used to be 2010px, but a
+  // fixed table is never narrower than its columns, so it always drew at 2110.
+  assert.equal(wide, 2110);
+  assert.match(table, /const SELECT_COLUMN_WIDTH = 'w-10 lg:w-12';/);
+  assert.match(table, new RegExp(`withSelect: 'w-\\[${compact + 40}px\\] lg:w-\\[${wide + 48}px\\]'`));
+  assert.match(table, new RegExp(`withoutSelect: 'w-\\[${compact}px\\] lg:w-\\[${wide}px\\]'`));
+});
+
+test('Daily Records: the name stays pinned on phones and tablets, and every cell keeps its content', () => {
+  const table = read('src/components/DailyAttendanceTable.tsx');
+  // Pinned only below lg; the desktop's header and cells are unchanged there.
+  assert.match(table, /const PINNED_HEAD = 'max-lg:sticky max-lg:left-0 max-lg:z-20 bg-slate-50/);
+  assert.match(table, /const PINNED_CELL = 'max-lg:sticky max-lg:left-0 max-lg:z-\[1\]/);
+  assert.match(table, /\$\{index === 0 \? PINNED_HEAD : ''\}/);
+  // Opaque behind the pinned name, matching a selected row.
+  assert.match(table, /\$\{selected \? 'max-lg:bg-indigo-50' : 'max-lg:bg-white'\}/);
+  assert.match(table, /\$\{selected \? 'bg-indigo-50\/70 max-lg:bg-indigo-50' : ''\}/);
+  // Tighter below lg, the desktop's p-4 from lg.
+  assert.match(table, /const CELL = 'px-3 py-2\.5 lg:p-4';/);
+  assert.match(table, /const HEAD_CELL = 'px-3 py-3 lg:p-4';/);
   for (const piece of [
     '<StatusBadge status={record.status} />',
     '<EscalationTag escalation={record.escalation} today={today} />',
@@ -31,21 +58,18 @@ test('a record card carries what a row does', () => {
     'checkoutDateTimeLabel(record.check_in_time, record.check_out_time, record.checkout_status)',
     'attendanceSessionDateLabel(record.check_in_time, record.check_out_time, record.date)',
     '<AttireTag attire={record.attire_type} />',
-    'record.remarks',
-    "onPhoto('checkin')",
-    "onPhoto('checkout')",
-    "publicDayReportPath(record.report_token, reportDay, 'checkin')",
-    "publicDayReportPath(record.report_token, reportDay, 'checkout')",
+    'formatCoordinates(record.location_coordinates)',
+    "{record.remarks || '--'}",
+    "setPhotoTarget({ record, kind: 'checkin' })",
+    "setPhotoTarget({ record, kind: 'checkout' })",
+    "'checkin')}",
+    "'checkout')}",
   ]) {
-    assert.ok(card.includes(piece), `the card is missing ${piece}`);
+    assert.ok(table.includes(piece), `the table is missing ${piece}`);
   }
-  // Opening, selecting and the photo viewer go through the table's own handlers.
-  assert.match(table, /onOpen=\{\(\) => openRecord\(record\)\}/);
-  assert.match(table, /onToggle=\{\(\) => toggleRecord\(attendanceId\)\}/);
-  assert.match(table, /onPhoto=\{\(kind\) => setPhotoTarget\(\{ record, kind \}\)\}/);
-  assert.match(table, /selectable=\{canBulkDelete\}/);
-  // Buttons inside the card must not also open the record.
-  assert.match(card, /onClick=\{stop\}/);
+  // The empty-table message stays on screen on a phone instead of being
+  // centred across the table's full width.
+  assert.match(table, /max-lg:sticky max-lg:left-0 max-lg:w-\[calc\(100vw-2\.25rem\)\]">\{message\}/);
 });
 
 test('the phone header keeps search, Filters and Export in that order, as full touch targets', () => {
