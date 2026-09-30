@@ -66,7 +66,11 @@ export const PREVIEW_BATCH = 25;
 /** Rows per add request, matching the server's limit. */
 export const COMMIT_BATCH = 5;
 
-/** A heading reduced to letters and digits, so "Photo Link" = "photo_link". */
+/**
+ * A heading reduced to lower-case letters and digits, so case, spacing and
+ * punctuation never matter: "Photo Link", "photo_link" and "PHOTO LINK *"
+ * are the same heading.
+ */
 function headingKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -76,8 +80,51 @@ const FIELD_BY_HEADING = new Map<string, ImportField>(
     .map((heading) => [headingKey(heading), column.field] as [string, ImportField])),
 );
 
+/**
+ * Words that identify a column when its heading is not one of the known
+ * names, such as "Official Email" or "Employee Code (required)". Tried in
+ * this order, so "Employee Name" is a name rather than an employee ID and
+ * "Institute Email" is an email rather than an institute.
+ */
+const HEADING_KEYWORDS: ReadonlyArray<[ImportField, RegExp]> = [
+  ['photo_url', /photo|image|picture|pic|selfie/],
+  ['email', /mail/],
+  ['phone_no', /phone|mobile|contact|whatsapp/],
+  ['gender', /gender|sex/],
+  ['employee_id', /^(emp|employee|staff)\w*?(id|code|no|number)/],
+  ['role', /role|designation|position/],
+  ['institute', /institute|college|campus|centre|center|branch/],
+  ['name', /name/],
+];
+
 export function headingField(heading: string): ImportField | null {
-  return FIELD_BY_HEADING.get(headingKey(heading)) ?? null;
+  const key = headingKey(heading);
+  if (!key) return null;
+  const known = FIELD_BY_HEADING.get(key);
+  if (known) return known;
+  return HEADING_KEYWORDS.find(([, pattern]) => pattern.test(key))?.[0] ?? null;
+}
+
+/**
+ * What separates two values typed into one cell, per field; the server
+ * applies the same split. A comma is part of a name ("Nair, Anjali") and a
+ * slash part of every link, so those split only where they cannot belong to
+ * a single value.
+ */
+const MULTI_VALUE_SEPARATORS: Record<ImportField, RegExp> = {
+  name: /[\n;|]/,
+  email: /[\s,;/|]+/,
+  gender: /[\s,;/|]+/,
+  role: /[\n,;/|]/,
+  institute: /[\n;|]/,
+  employee_id: /[\s,;/|]+/,
+  phone_no: /[\n,;/|]/,
+  photo_url: /[\s,;|]+/,
+};
+
+/** The first of several values in one cell, or the whole cell when there is one. */
+export function firstValue(field: ImportField, value: string): string {
+  return value.split(MULTI_VALUE_SEPARATORS[field]).map((part) => part.trim()).find(Boolean) ?? '';
 }
 
 export type ImportRow = { row: number } & Partial<Record<ImportField, string>>;
@@ -94,6 +141,10 @@ export interface ImportTable {
  * Finds the columns by their headings - in any order, any case, and under
  * the usual alternative names - and reads each row into them. The first row
  * of the sheet is the heading row.
+ *
+ * Where there are two of something, the first is used: of two columns for
+ * the same field, the first that has a value in that row, and of two values
+ * in one cell, the first value.
  */
 export function readImportTable(csvRows: CsvRow[]): ImportTable {
   const [header, ...body] = csvRows;
@@ -113,8 +164,7 @@ export function readImportTable(csvRows: CsvRow[]): ImportTable {
     const row: ImportRow = { row: csvRow.row };
     csvRow.cells.forEach((value, index) => {
       const field = fieldAt[index];
-      // The first column of a heading wins if a sheet repeats one.
-      if (field && row[field] === undefined) row[field] = value.trim();
+      if (field && !row[field]) row[field] = firstValue(field, value);
     });
     return row;
   });

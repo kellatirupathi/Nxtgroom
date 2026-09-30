@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCsv } from '../src/csvParse.ts';
 import {
+  firstValue,
   headingField,
   importTemplateCsv,
   inBatches,
@@ -20,6 +21,50 @@ test('headings are matched in any case and under their usual other names', () =>
   assert.equal(headingField('Emp ID'), 'employee_id');
   assert.equal(headingField('Mobile Number'), 'phone_no');
   assert.equal(headingField('Favourite colour'), null);
+});
+
+test('headings ignore case, spacing and punctuation', () => {
+  assert.equal(headingField('  NAME * '), 'name');
+  assert.equal(headingField('e-mail'), 'email');
+  assert.equal(headingField('Employee_ID'), 'employee_id');
+  assert.equal(headingField('PHOTO-LINK'), 'photo_url');
+});
+
+test('an unfamiliar heading is recognised by the words in it', () => {
+  assert.equal(headingField('Official Email Address'), 'email');
+  assert.equal(headingField('Employee Code (required)'), 'employee_id');
+  assert.equal(headingField('Staff ID'), 'employee_id');
+  assert.equal(headingField('Employee Name'), 'name');
+  assert.equal(headingField('Institute Email'), 'email');
+  assert.equal(headingField('Designation'), 'role');
+  assert.equal(headingField('Training Centre'), 'institute');
+  assert.equal(headingField('WhatsApp Number'), 'phone_no');
+  assert.equal(headingField('Profile Picture URL'), 'photo_url');
+  assert.equal(headingField('Remarks'), null);
+});
+
+test('a cell with two values keeps the first, per field', () => {
+  assert.equal(firstValue('email', 'a@x.com, b@x.com'), 'a@x.com');
+  assert.equal(firstValue('phone_no', '+91 98765 43210 / 9123456789'), '+91 98765 43210');
+  assert.equal(firstValue('gender', 'F / Female'), 'F');
+  assert.equal(firstValue('role', 'Central Team, Mentor'), 'Central Team');
+  assert.equal(firstValue('employee_id', 'E1 E2'), 'E1');
+  // A comma belongs to a name, and a slash to a link.
+  assert.equal(firstValue('name', 'Nair, Anjali'), 'Nair, Anjali');
+  assert.equal(firstValue('photo_url', 'https://x.com/a/b.jpg'), 'https://x.com/a/b.jpg');
+  assert.equal(firstValue('photo_url', 'https://x.com/a.jpg https://x.com/b.jpg'), 'https://x.com/a.jpg');
+  assert.equal(firstValue('email', '  '), '');
+});
+
+test('of two columns for one field, the first with a value in that row is used', () => {
+  const table = readImportTable(parseCsv(
+    'Name,Email,Personal Email,Gender,Role,Institute,Employee ID,Photo\n'
+    + 'Asha,asha@work.com,asha@home.com,F,Mentor,Aurora,E1,https://x/a.jpg\n'
+    + 'Ravi,,ravi@home.com,M,Mentor,Aurora,E2,https://x/r.jpg\n'
+    + 'Meera,"meera@work.com; meera@home.com",,F,Mentor,Aurora,E3,https://x/m.jpg\n',
+  ));
+  assert.deepEqual(table.ignoredColumns, []);
+  assert.deepEqual(table.rows.map((row) => row.email), ['asha@work.com', 'ravi@home.com', 'meera@work.com']);
 });
 
 test('columns are read in whatever order the sheet has them', () => {
