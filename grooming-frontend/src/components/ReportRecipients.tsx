@@ -57,8 +57,8 @@ function EventToggles() {
   };
 
   const rows: { key: keyof RecipientEvents; label: string; hint: string }[] = [
-    { key: 'checkin_enabled', label: 'Copy partners on check-in reports', hint: 'Sent when a check-in photo does not meet the standards.' },
-    { key: 'checkout_enabled', label: 'Copy partners on check-out reports', hint: 'Sent when a check-out photo does not meet the standards.' },
+    { key: 'checkin_enabled', label: 'Copy partners on check-in reports', hint: 'Sent for every check-in report, compliant or not.' },
+    { key: 'checkout_enabled', label: 'Copy partners on check-out reports', hint: 'Sent for every check-out report, compliant or not.' },
   ];
 
   return (
@@ -168,7 +168,8 @@ export default function ReportRecipients() {
           Reporting Partners
         </h3>
         <p className="mt-1 text-sm text-slate-500">
-          These addresses are copied when an instructor's appearance report is non-compliant.
+          These addresses are copied on every instructor's appearance report, compliant or not,
+          and on the urgent email when an instructor fails three or more times in a week.
           The instructor is always emailed their own report; these settings control who else is.
         </p>
         {/* Stated plainly: it is the only way anyone but the instructor is told. */}
@@ -255,7 +256,7 @@ export default function ReportRecipients() {
         busy={Boolean(removing)}
         title="Remove reporting partner"
         message={`Stop sending appearance alerts to ${confirmTarget ?? 'this address'}?`}
-        detail="They will no longer be copied on non-compliant or review-required results."
+        detail="They will no longer be copied on instructors' appearance reports."
         confirmLabel="Remove"
         onCancel={() => setConfirmTarget(null)}
         onConfirm={() => confirmTarget && handleRemove(confirmTarget)}

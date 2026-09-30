@@ -1,19 +1,35 @@
-import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamoTableName, getDynamoDocumentClient } from "../config/dynamo.js";
 import { fromItem, isConditionFailure, upsertCommandInput } from "./dynamoItems.js";
-import { routedWrite } from "./routing.js";
+import { routedRead, routedWrite } from "./routing.js";
 
 /**
- * report_delivery_runs: one document per weekly-report or reminder run,
- * counting its emails as they are delivered (weekly:<date>,
- * attendance-reminders:<date>). Written by the cron routes and the mail
- * worker; nothing reads it back except those two, through the return value
- * of recordDeliveryOutcome.
+ * report_delivery_runs: one document per weekly-report, reminder or daily
+ * report run, counting its emails as they are delivered (weekly:<date>,
+ * attendance-reminders:<date>, daily-report:<date>:<HH:MM>). Written by the
+ * cron routes, the daily report scheduler and the mail worker. A daily report
+ * run is also read back by id: it holds the period the report covers and the
+ * secret that opens its public page.
  */
 const STORE = "report_delivery_runs";
 
 function table() {
   return dynamoTableName(STORE);
+}
+
+/** One run by id, or null. */
+export async function getDeliveryRun(db, runId) {
+  return routedRead(STORE, {
+    mongo: () => db.collection(STORE).findOne({ _id: runId }),
+    dynamo: async () => {
+      const { Item } = await getDynamoDocumentClient().send(new GetCommand({
+        TableName: table(),
+        Key: { _id: runId },
+        ConsistentRead: true,
+      }));
+      return Item ? fromItem(Item) : null;
+    },
+  });
 }
 
 /** MongoDB updateOne({ _id }, { $set, $setOnInsert }, { upsert: true }). */

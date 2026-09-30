@@ -7,11 +7,13 @@ import BrandedLoader from './components/BrandedLoader';
 import {
   currentTabFromLocation,
   homeTabForRole,
+  dailyReportFromLocation,
   publicReportFromLocation,
   pushTabPath,
   recordIdFromLocation,
   replaceTabPath,
   RESET_PASSWORD_PATH,
+  type DailyReportRoute,
   type PublicReportRoute,
 } from './routes';
 import { ChangePasswordModal, ProfileModal } from './components/AccountModals';
@@ -36,6 +38,7 @@ const InstituteAnalytics = lazy(() => import('./components/InstituteAnalytics'))
 const EvaluateCard = lazy(() => import('./components/EvaluateCard'));
 const InstructorDetail = lazy(() => import('./components/InstructorDetail'));
 const PublicReportPage = lazy(() => import('./components/PublicReportPage'));
+const DailyReportPage = lazy(() => import('./components/DailyReportPage'));
 const DailyAttendanceTable = lazy(() => import('./components/DailyAttendanceTable'));
 const UserManagement = lazy(() => import('./components/UserManagement'));
 const SettingsPage = lazy(() => import('./components/SettingsPage'));
@@ -107,6 +110,7 @@ export default function App() {
   // Resolved once: the report route is decided by the URL alone and never
   // changes without a full navigation.
   const [publicReport] = useState<PublicReportRoute | null>(publicReportFromLocation);
+  const [dailyReport] = useState<DailyReportRoute | null>(dailyReportFromLocation);
   const [session, setSession] = useState(initialSession);
   const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
   // Seed from the URL so a refresh or a shared link opens the right screen.
@@ -229,7 +233,7 @@ export default function App() {
    * only the id, and the page previously rendered its empty state.
    */
   useEffect(() => {
-    if (publicReport || resetToken) return undefined;
+    if (publicReport || dailyReport || resetToken) return undefined;
     if (!session.token || !session.validated) return undefined;
     const recordId = recordIdFromLocation();
     if (!recordId || selectedAttendanceRecord) return undefined;
@@ -249,11 +253,11 @@ export default function App() {
         replaceTabPath('daily-records');
       });
     return () => controller.abort();
-  }, [session.token, session.validated, selectedAttendanceRecord, publicReport, resetToken]);
+  }, [session.token, session.validated, selectedAttendanceRecord, publicReport, dailyReport, resetToken]);
 
   // Keep the rendered tab in step with Back and Forward.
   useEffect(() => {
-    if (publicReport || resetToken) return undefined;
+    if (publicReport || dailyReport || resetToken) return undefined;
     const onPopState = () => {
       const tab = currentTabFromLocation();
       if (opensInSettings(tab, session.role)) {
@@ -271,7 +275,7 @@ export default function App() {
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
-  }, [session.role, session.canIdentify, publicReport, resetToken]);
+  }, [session.role, session.canIdentify, publicReport, dailyReport, resetToken]);
 
   // Normalise the entry URL once the session is known: "/" becomes the role's
   // home screen, and a deep link the role cannot open is rewritten rather
@@ -280,7 +284,7 @@ export default function App() {
     // A report or password link is not a tab. Without this guard the effect
     // resolved those paths to Attendance and rewrote the address bar, so the
     // report rendered under the wrong URL and a refresh lost it entirely.
-    if (publicReport || resetToken) return;
+    if (publicReport || dailyReport || resetToken) return;
     if (!session.validated || !session.token) return;
     // The bare root opens the role's home screen: the Dashboard for an
     // administrator, Attendance for a BOA. Any other path keeps its own screen.
@@ -296,7 +300,7 @@ export default function App() {
     // Carry the record id through, or normalising the entry URL would strip
     // it and the detail page would lose the record it was asked for.
     replaceTabPath(allowed, recordIdFromLocation() || undefined);
-  }, [session.validated, session.token, session.role, session.canIdentify, publicReport, resetToken]);
+  }, [session.validated, session.token, session.role, session.canIdentify, publicReport, dailyReport, resetToken]);
 
   // Checked before everything else, including the session validation gate: the
   // recipient has no account, and an administrator opening the link from their
@@ -313,6 +317,15 @@ export default function App() {
           // check-out URL. The half is parsed from the path; pass it on.
           half={publicReport.half}
         />
+      </Suspense>
+    );
+  }
+
+  // The daily report's "See all reports" page: public for the same reason.
+  if (dailyReport) {
+    return (
+      <Suspense fallback={<BrandedLoader label="Loading report" />}>
+        <DailyReportPage date={dailyReport.date} token={dailyReport.token} />
       </Suspense>
     );
   }

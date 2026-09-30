@@ -52,12 +52,22 @@ import {
   saveRecipientEvents,
 } from "../services/reportRecipients.js";
 import {
+  addDailyReportRecipient,
+  dailyReportDays,
+  dailyReportSettingsView,
+  getDailyReportSettings,
+  MONTH_PATTERN,
+  removeDailyReportRecipient,
+  saveDailyReportSchedule,
+} from "../services/dailyReport.js";
+import {
   isSyncConfigured,
   readSyncState,
   runInstructorSync,
   runInstituteSync,
 } from "../services/instructorSync.js";
 import { appUrl } from "../config/env.js";
+import { localDateKey } from "../services/instructorReports.js";
 import { rateLimit } from "express-rate-limit";
 
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
@@ -1089,6 +1099,80 @@ adminRouter.put(
  * Separate from the address list because they answer a different question:
  * who receives reports, and which reports they receive.
  */
+/**
+ * The daily report: its switch, its send times and its own recipients, who
+ * are not the reporting partners. Times travel as 24-hour "HH:MM"; the
+ * screen shows them in 12-hour form.
+ */
+adminRouter.get(
+  "/settings/daily-report",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(dailyReportSettingsView(await getDailyReportSettings(req.app.locals.db)));
+  })
+);
+
+adminRouter.put(
+  "/settings/daily-report",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await saveDailyReportSchedule(req.app.locals.db, req.body || {}, req.currentUser.email);
+    if (!result.ok) return res.status(422).json({ detail: result.detail });
+    return res.json(result.settings);
+  })
+);
+
+/**
+ * The Reports tab: one row per day of a month up to today, with the day's
+ * check-ins, check-outs, those not yet checked out, and the link to its full
+ * report - the same link that day's emails carry.
+ */
+adminRouter.get(
+  "/settings/daily-report/days",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const month = typeof req.query.month === "string" && req.query.month
+      ? req.query.month
+      : localDateKey(new Date()).slice(0, 7);
+    if (!MONTH_PATTERN.test(month)) return res.status(422).json({ detail: "Choose a valid month." });
+    if (month > localDateKey(new Date()).slice(0, 7)) {
+      return res.status(422).json({ detail: "Choose this month or an earlier one." });
+    }
+    return res.json({ month, days: await dailyReportDays(req.app.locals.db, month) });
+  })
+);
+
+adminRouter.post(
+  "/settings/daily-report/recipients",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await addDailyReportRecipient(req.app.locals.db, req.body?.email, req.currentUser.email);
+    if (!result.ok) {
+      const detail = result.reason === "duplicate"
+        ? "That address is already on the list."
+        : result.reason === "limit"
+          ? "The recipient list is full."
+          : "Enter a valid email address.";
+      return res.status(422).json({ detail });
+    }
+    return res.status(201).json({ emails: result.emails });
+  })
+);
+
+adminRouter.delete(
+  "/settings/daily-report/recipients/:email",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await removeDailyReportRecipient(
+      req.app.locals.db,
+      decodeURIComponent(req.params.email),
+      req.currentUser.email
+    );
+    if (!result.ok) return res.status(422).json({ detail: "Enter a valid email address." });
+    return res.json({ emails: result.emails });
+  })
+);
+
 adminRouter.get(
   "/settings/rp-recipients/events",
   requireSuperAdmin,

@@ -87,6 +87,26 @@ export function publicReportFromLocation(): PublicReportRoute | null {
   };
 }
 
+export interface DailyReportRoute {
+  /** DD-MM-YYYY, as in the link. */
+  date: string;
+  token: string;
+}
+
+/**
+ * Matches /daily-report/<DD-MM-YYYY>/<secret>, one day's full report - the
+ * "See all reports" link in a daily report email. Opened by people without
+ * an account, so it is recognised before the auth gate, like a report link.
+ */
+export function dailyReportFromLocation(): DailyReportRoute | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(
+    /^\/daily-report\/(\d{2}-\d{2}-\d{4})\/([A-Za-z0-9_-]{16,128})\/?$/,
+  );
+  if (!match) return null;
+  return { date: match[1], token: match[2] };
+}
+
 export function pathForTab(tab: string, recordId?: string): string {
   const base = TAB_TO_PATH[tab as Tab] ?? TAB_TO_PATH[TABS.OVERVIEW];
   // The detail view addresses one record, so its id belongs in the URL:

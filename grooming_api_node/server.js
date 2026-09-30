@@ -29,6 +29,7 @@ import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
 import { startMailWorker } from "./src/services/mailWorker.js";
+import { startDailyReportScheduler } from "./src/services/dailyReportScheduler.js";
 import { checkPhotoStorageConnection } from "./src/services/photoStorage.js";
 import { getWorkerReadiness } from "./src/services/workerHealth.js";
 import { createDocument } from "./src/utils.js";
@@ -367,6 +368,7 @@ export async function startServer() {
     startNotificationWorker(db),
     startStorageCleanupWorker(db),
     startMailWorker(db),
+    startDailyReportScheduler(db),
   ];
   // Shared with the environment check that keeps interactive Gemini work
   // inside this window, so the two cannot drift apart.

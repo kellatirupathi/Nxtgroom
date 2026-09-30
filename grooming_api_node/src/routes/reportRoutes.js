@@ -13,6 +13,11 @@ import {
   ensureReportToken,
 } from "../services/instructorReports.js";
 import { getReportRecipients } from "../services/reportRecipients.js";
+import {
+  buildFullDayReport,
+  dailyReportPhotoKey,
+  findDailyReportDay,
+} from "../services/dailyReport.js";
 import { deletePhoto } from "../services/photoStorage.js";
 import {
   closeOpenCheckIns,
@@ -92,6 +97,66 @@ const publicReportLimiter = rateLimit({
   legacyHeaders: false,
   message: { detail: "Too many requests. Please try again later." },
 });
+
+/**
+ * One day's full report page - "See all reports" in the daily report email:
+ * every session of that date, 12:00 AM to midnight, as it stands now. The
+ * link's secret is the credential - its readers have no account - and it
+ * stops working DAILY_REPORT_LINK_DAYS after the day.
+ */
+reportRouter.get(
+  "/daily/:date/:token",
+  publicReportLimiter,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const day = await findDailyReportDay(db, req.params.date, req.params.token);
+    if (!day) {
+      return res.status(404).json({ detail: "This report link is invalid or has expired." });
+    }
+    const report = await buildFullDayReport(db, day.date, { ensureTokens: true });
+    return res.json({
+      title: report.subject,
+      date_label: report.dateLabel,
+      window_label: report.windowLabel,
+      expires_at: day.expires_at,
+      rows: report.rows.map((row) => ({
+        attendance_id: row.attendanceId,
+        date: row.date,
+        name: row.name,
+        institute: row.institute,
+        status: row.status,
+        check_in: row.checkIn,
+        check_out: row.checkOut,
+        feedback: row.feedback,
+        has_checkin_photo: row.hasCheckinPhoto,
+        has_checkout_photo: row.hasCheckoutPhoto,
+        checkin_report_url: row.checkinReportUrl,
+        checkout_report_url: row.checkoutReportUrl,
+      })),
+    });
+  })
+);
+
+/** One photograph from that day's page, as a short-lived link. */
+reportRouter.get(
+  "/daily/:date/:token/photo/:attendanceId/:kind",
+  publicReportLimiter,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const day = await findDailyReportDay(db, req.params.date, req.params.token);
+    if (!day) {
+      return res.status(404).json({ detail: "This report link is invalid or has expired." });
+    }
+    if (!["checkin", "checkout"].includes(req.params.kind)) {
+      return res.status(400).json({ detail: "Invalid photo" });
+    }
+    const key = await dailyReportPhotoKey(db, day.date, req.params.attendanceId, req.params.kind);
+    if (!key) return res.status(404).json({ detail: "No photo was stored for this record." });
+    const url = await getPhotoUrl(key, { expiresIn: 900 });
+    if (!url) return res.status(503).json({ detail: "Photo storage is unavailable right now" });
+    return res.json({ url, expires_in: 900 });
+  })
+);
 
 /** Month bounds for the monthly totals shown beneath the weekly table. */
 function monthKeyOf(dateKey) {

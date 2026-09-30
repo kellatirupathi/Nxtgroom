@@ -131,6 +131,20 @@ async function dynamoEvaluationsFor(attendanceIds) {
 }
 
 /**
+ * Both halves' reports for many sessions, in one read. A check-in stored
+ * before check-out analysis existed has no kind, and comes back without one.
+ */
+export async function evaluationsForSessions(db, attendanceIds) {
+  if (!attendanceIds.length) return [];
+  return routedRead(STORE, {
+    mongo: () => db.collection(STORE)
+      .find({ attendance_id: { $in: idVariants(attendanceIds) } })
+      .toArray(),
+    dynamo: () => dynamoEvaluationsFor(attendanceIds),
+  });
+}
+
+/**
  * Every failed checkpoint in the given sessions' reports, one row per
  * failure: { attendance_id, kind, code, name }. Feeds the dashboard's
  * "most failed checkpoints".

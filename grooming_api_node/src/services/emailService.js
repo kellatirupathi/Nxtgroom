@@ -660,6 +660,59 @@ export function buildAttendanceReminderEmail({ name, kind, dateLabel }) {
   };
 }
 
+/**
+ * The daily report: a short line with the link to the full page, then one
+ * table row per instructor.
+ *
+ * Kept compact on purpose. Gmail hides everything past about 100 KB of HTML
+ * behind "View entire message", so the cell styling lives once in the head
+ * rather than on every cell, and failures are sorted to the top by the report
+ * itself so they are what a clipped email still shows. The link at the top
+ * always opens the whole table.
+ */
+export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = [], pageUrl }) {
+  const count = rows.length;
+  const countLabel = `${count} ${count === 1 ? "instructor" : "instructors"}`;
+  const intro = `Attendance & grooming check, ${dateLabel}, ${windowLabel}: ${countLabel}.`;
+  const body = count
+    ? rows.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td class="t">${escapeHtml(row.checkIn)}</td><td class="t">${escapeHtml(row.checkOut)}</td><td>${row.points.map(escapeHtml).join("<br>")}</td><td>${row.reportUrl ? `<a href="${escapeHtml(row.reportUrl)}" style="color:#2563eb">Report</a>` : "-"}</td></tr>`).join("\n")
+    : `<tr><td colspan="5">No check-ins or check-outs between ${escapeHtml(windowLabel)}.</td></tr>`;
+
+  return {
+    subject,
+    text: [
+      intro,
+      `See all reports: ${pageUrl}`,
+      "",
+      ...(count
+        ? rows.map((row) => [
+          `${row.name} | Check-in ${row.checkIn} | Check-out ${row.checkOut}`,
+          `  ${row.points.join(" / ")}`,
+          row.reportUrl ? `  Report: ${row.reportUrl}` : null,
+        ].filter(Boolean).join("\n"))
+        : [`No check-ins or check-outs between ${windowLabel}.`]),
+    ].join("\n"),
+    html: `<!doctype html><html><head><meta charset="utf-8"><style>
+body{font-family:Arial,Helvetica,sans-serif;color:#0f172a}
+table{border-collapse:collapse}
+th,td{border:1px solid #e2e8f0;padding:6px 8px;text-align:left;vertical-align:top;font-size:13px}
+th{background:#f1f5f9;white-space:nowrap}
+.t{white-space:nowrap}
+a{color:#2563eb;font-weight:600;text-decoration:none}
+</style></head><body>
+<p style="margin:0 0 12px;font-size:12px;color:#475569">${escapeHtml(intro)} <a href="${escapeHtml(pageUrl)}" style="color:#2563eb">See all reports</a></p>
+<table cellpadding="6" cellspacing="0">
+<tr><th>Instructor Name</th><th>Check-in Time</th><th>Check-out Time</th><th>Improvement Points</th><th>Report</th></tr>
+${body}
+</table>
+</body></html>`,
+  };
+}
+
+export function sendDailyReportEmail(toEmail, payload) {
+  return sendEmail(toEmail, buildDailyReportEmail(payload));
+}
+
 export function sendWeeklyReportEmail(toEmail, payload) {
   return sendEmail(toEmail, buildWeeklyReportEmail(payload));
 }

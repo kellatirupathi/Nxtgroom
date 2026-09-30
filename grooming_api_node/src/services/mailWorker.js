@@ -2,15 +2,17 @@ import { randomUUID } from "node:crypto";
 import { appUrl, runtimeConfig } from "../config/env.js";
 import {
   sendAttendanceReminderEmail,
+  sendDailyReportEmail,
   sendEscalationEmail,
   sendGroomingAlertEmail,
   sendPasswordResetEmail,
   sendWeeklyReportEmail,
 } from "./emailService.js";
+import { buildDailyReportForEmail, dailyReportDayUrl, ensureDailyReportDay } from "./dailyReport.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { createIdleBackoff, createWakeSignal } from "./workerPacing.js";
 import { openSecret } from "./secretBox.js";
-import { completeDeliveryRunIfDone, recordDeliveryOutcome } from "../stores/deliveryRunStore.js";
+import { completeDeliveryRunIfDone, getDeliveryRun, recordDeliveryOutcome } from "../stores/deliveryRunStore.js";
 
 const WORKER_ID = randomUUID();
 // Lets a queued email go out at once rather than on the next idle poll. See
@@ -22,6 +24,7 @@ const SUPPORTED_TYPES = new Set([
   "attendance_reminder",
   "grooming_alert",
   "grooming_escalation",
+  "daily_report",
 ]);
 
 /**
@@ -129,7 +132,25 @@ function passwordResetPayload(payload) {
   return { ...rest, token: openSecret(sealed) };
 }
 
-async function deliver(job) {
+/**
+ * A daily report job carries only its run. The table is built when the email
+ * goes out, so it shows the analysis as it stands then rather than when the
+ * job was queued, and no copy of a thousand-row table waits in the queue.
+ */
+async function deliverDailyReport(db, job) {
+  const runId = job.run_id || job.payload?.run_id;
+  const run = runId ? await getDeliveryRun(db, runId) : null;
+  if (!run) {
+    throw Object.assign(new Error("Daily report run not found"), { code: "DAILY_REPORT_RUN_MISSING" });
+  }
+  const report = await buildDailyReportForEmail(db, run);
+  // "See all reports" opens the whole day, not just this email's period.
+  const day = await ensureDailyReportDay(db, run.date);
+  return sendDailyReportEmail(job.to_email, { ...report, pageUrl: dailyReportDayUrl(day) });
+}
+
+async function deliver(db, job) {
+  if (job.type === "daily_report") return deliverDailyReport(db, job);
   if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, passwordResetPayload(job.payload));
   if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, deliveryPayload(job));
   if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, deliveryPayload(job));
@@ -165,7 +186,7 @@ async function processMail(db, job) {
         return;
       }
     }
-    const result = await deliver(job);
+    const result = await deliver(db, job);
     if (!result.sent) throw Object.assign(new Error(result.reason || "Email was not accepted"), { code: result.reason });
     const now = new Date();
     await db.collection("mail_jobs").updateOne(

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, Database, ScanFace, UserRoundSearch, Users } from 'lucide-react';
+import { Bell, Building2, Database, FileChartColumn, ScanFace, UserRoundSearch, Users } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import IdentificationSettingsSection from './IdentificationSettingsSection';
 import InstructorSyncPanel from './InstructorSyncPanel';
 import ReportRecipients from './ReportRecipients';
+import ReportsTab from './ReportsTab';
 import AccessSettingsSection from './AccessSettingsSection';
 import UnidentifiedQueue from './UnidentifiedQueue';
 import type { NotificationSettings } from '../types';
@@ -181,7 +182,7 @@ function NotificationSettings() {
   );
 }
 
-export type SettingsTab = 'notifications' | 'identification' | 'unidentified' | 'colleges' | 'sync' | 'rp';
+export type SettingsTab = 'notifications' | 'identification' | 'unidentified' | 'colleges' | 'sync' | 'rp' | 'reports';
 
 /**
  * `initialTab` lets another screen open Settings on a particular tab: the
@@ -204,7 +205,7 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
       <div className="mb-5 shrink-0">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, unidentified check-ins, institutes, data sync and reporting partners.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, unidentified check-ins, institutes, data sync, reporting partners and daily reports.</p>
       </div>
 
       {/* Scrolls sideways rather than compressing. Six tabs need more width
@@ -283,6 +284,16 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
             <Users size={16} aria-hidden="true" />
             RP
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'reports'}
+            onClick={() => setTab('reports')}
+            className={tabClass('reports')}
+          >
+            <FileChartColumn size={16} aria-hidden="true" />
+            Reports
+          </button>
         </div>
       </div>
 
@@ -293,6 +304,7 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
         {tab === 'colleges' && <CollegeManagement />}
         {tab === 'sync' && <InstructorSyncPanel />}
         {tab === 'rp' && <ReportRecipients />}
+        {tab === 'reports' && <ReportsTab />}
       </div>
     </section>
   );
