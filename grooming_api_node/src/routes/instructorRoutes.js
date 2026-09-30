@@ -154,11 +154,18 @@ export async function createInstructorGuarded(
   runTransaction = withMongoTransaction
 ) {
   return runTransaction(async (session) => {
-    const college = await db.collection("colleges").findOne(
-      activeFilter({ _id: idMatch(input.college_id) }),
-      { session }
-    );
-    if (!college) return { outcome: "college_not_found" };
+    // No college is allowed only for the instructor import, whose rows may
+    // come without an institute; the add form's schema still requires one.
+    // Such an instructor is stored with college_id null, as synced ones
+    // without an institute already are, until an admin assigns one.
+    let college = null;
+    if (input.college_id) {
+      college = await db.collection("colleges").findOne(
+        activeFilter({ _id: idMatch(input.college_id) }),
+        { session }
+      );
+      if (!college) return { outcome: "college_not_found" };
+    }
     // Only an id that was given can collide. Querying with a missing one sent
     // { employee_id: null }, which matched every synced instructor without an
     // id and refused the new one as a duplicate.
@@ -168,17 +175,19 @@ export async function createInstructorGuarded(
     )) {
       return { outcome: "duplicate_employee_id" };
     }
-    const collegeGuard = await db.collection("colleges").updateOne(
-      activeFilter({ _id: college._id }),
-      { $inc: { [COLLEGE_ASSIGNMENT_GUARD]: 1 } },
-      { session }
-    );
-    if (!collegeGuard.matchedCount) return { outcome: "college_not_found" };
+    if (college) {
+      const collegeGuard = await db.collection("colleges").updateOne(
+        activeFilter({ _id: college._id }),
+        { $inc: { [COLLEGE_ASSIGNMENT_GUARD]: 1 } },
+        { session }
+      );
+      if (!collegeGuard.matchedCount) return { outcome: "college_not_found" };
+    }
 
     const now = new Date();
     const instructor = createDocument({
       ...input,
-      college_id: String(college._id),
+      college_id: college ? String(college._id) : null,
       created_at: now,
       updated_at: now,
       deleted_at: null,
@@ -208,7 +217,12 @@ export async function updateInstructorGuarded(
     // refusing those too meant a forgotten check-out made the whole profile
     // uneditable. The window is today only, for the same reason: a record left
     // open yesterday is a missed check-out, not a session in progress.
-    const movingCollege = String(existing.college_id) !== String(input.college_id);
+    //
+    // An input without a college leaves the instructor's college as it is;
+    // only the import sends one, for a row whose institute is blank on both
+    // the sheet and the record.
+    const keepsCollege = !input.college_id;
+    const movingCollege = !keepsCollege && String(existing.college_id) !== String(input.college_id);
     if (movingCollege) {
       const activeAttendance = await db.collection("attendance").findOne(
         openCheckInTodayFilter(existing._id),
@@ -217,11 +231,11 @@ export async function updateInstructorGuarded(
       if (activeAttendance) return { outcome: "active_attendance" };
     }
 
-    const college = await db.collection("colleges").findOne(
+    const college = keepsCollege ? null : await db.collection("colleges").findOne(
       activeFilter({ _id: idMatch(input.college_id) }),
       { session }
     );
-    if (!college) return { outcome: "college_not_found" };
+    if (!keepsCollege && !college) return { outcome: "college_not_found" };
 
     const duplicate = input.employee_id && await db.collection("instructors").findOne(
       {
@@ -232,16 +246,25 @@ export async function updateInstructorGuarded(
     );
     if (duplicate) return { outcome: "duplicate_employee_id" };
 
-    const collegeGuard = await db.collection("colleges").updateOne(
-      activeFilter({ _id: college._id }),
-      { $inc: { [COLLEGE_ASSIGNMENT_GUARD]: 1 } },
-      { session }
-    );
-    if (!collegeGuard.matchedCount) return { outcome: "college_not_found" };
+    if (college) {
+      const collegeGuard = await db.collection("colleges").updateOne(
+        activeFilter({ _id: college._id }),
+        { $inc: { [COLLEGE_ASSIGNMENT_GUARD]: 1 } },
+        { session }
+      );
+      if (!collegeGuard.matchedCount) return { outcome: "college_not_found" };
+    }
 
+    const { college_id: _college, ...rest } = input;
     const result = await db.collection("instructors").updateOne(
       activeFilter({ _id: existing._id }),
-      { $set: { ...input, college_id: String(college._id), updated_at: new Date() } },
+      {
+        $set: {
+          ...rest,
+          ...(college ? { college_id: String(college._id) } : {}),
+          updated_at: new Date(),
+        },
+      },
       { session }
     );
     return result.matchedCount
