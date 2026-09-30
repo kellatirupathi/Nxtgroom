@@ -629,8 +629,8 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
                   </p>
                   <p className="text-xs text-slate-500">
                     Gender is Male or Female. Role is {ROLE_CHOICES}. Institute is the institute’s name as it appears
-                    here, or its ID. Photo Link is a public link to a clear, front-facing photo (a Google Drive link
-                    shared with anyone works). Columns can be in any order, headings and values are not case-sensitive,
+                    here, or its ID; left blank, the instructor is added without one, to assign later. Photo Link is a
+                    public link to a clear, front-facing photo (a Google Drive link shared with anyone works). Columns can be in any order, headings and values are not case-sensitive,
                     and extra columns are ignored. Where a cell has two values the first is used. Rows with a problem
                     are listed under Flagged, where they can be corrected.
                   </p>
@@ -725,7 +725,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
                           <p className="mt-1 font-bold text-slate-800">{value.name}</p>
                           <p className="truncate text-xs text-slate-500">{value.email}</p>
                           <p className="mt-1 text-xs text-slate-600">
-                            {[genderLabel(value.gender), roleLabel(value.role), value.institute].join(' · ')}
+                            {[genderLabel(value.gender), roleLabel(value.role), value.institute].filter(Boolean).join(' · ')}
                           </p>
                           {(value.employee_id || value.phone_no) && (
                             <p className="text-xs text-slate-500">{[value.employee_id, value.phone_no].filter(Boolean).join(' · ')}</p>
@@ -764,7 +764,7 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
                           </td>
                           <td className="px-4 py-2.5 text-slate-700">{genderLabel(value.gender)}</td>
                           <td className="px-4 py-2.5 text-slate-700">{roleLabel(value.role)}</td>
-                          <td className="px-4 py-2.5 text-slate-700">{value.institute}</td>
+                          <td className="px-4 py-2.5 text-slate-700">{value.institute || '—'}</td>
                           <td className="px-4 py-2.5 text-slate-700">{value.employee_id || '—'}</td>
                           <td className="px-4 py-2.5 text-slate-700">{value.phone_no || '—'}</td>
                         </tr>
@@ -1054,7 +1054,7 @@ function FlaggedEditor({ item, draft, colleges, open, checking, busy, onToggle, 
               {sheetHad('role') && <p className="mt-1 text-xs text-slate-500">Sheet had “{sheetHad('role')}”</p>}
             </div>
             <div>
-              {label('institute', 'Institute')}
+              {label('institute', 'Institute', false)}
               <select id={id('institute')} value={draft.institute ?? ''} onChange={(event) => onChange('institute', event.target.value)} aria-invalid={marked.has('institute') || undefined} className={fieldClass(marked.has('institute'))}>
                 <option value="">Select institute...</option>
                 {colleges.map((college) => (
