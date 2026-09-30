@@ -184,7 +184,12 @@ export function validateImportFields(raw, colleges, { requirePhoto = true, keptR
   if (!roleText) errors.push("Role is missing");
   else if (!role) errors.push(`Role "${roleText}" must be ${ROLE_CHOICES}`);
 
-  const institute = matchCollege(cell("institute"), colleges);
+  // Optional for now in the import, whose source data often lacks it: a
+  // blank institute leaves the instructor without one (or with the one on
+  // their record) until an admin assigns it. A named institute that matches
+  // none is still an error, since that is usually a typo.
+  const instituteText = cell("institute");
+  const institute = instituteText ? matchCollege(instituteText, colleges) : { college: null };
   if (institute.error) errors.push(institute.error);
 
   // Required here although optional on a synced record: an imported
@@ -219,11 +224,11 @@ export function validateImportFields(raw, colleges, { requirePhoto = true, keptR
       // What the tables display, as the add form sends it.
       instructor_role: role,
       gender,
-      college_id: String(institute.college._id),
+      ...(institute.college ? { college_id: String(institute.college._id) } : {}),
       ...(phone ? { phone_no: phone } : {}),
       photo_url: photoUrl,
     },
-    collegeName: institute.college.name || "",
+    collegeName: institute.college?.name || "",
   };
 }
 

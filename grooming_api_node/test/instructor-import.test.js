@@ -204,10 +204,27 @@ test("missing required fields are each named", () => {
     "Email is missing",
     "Gender is missing",
     "Role is missing",
-    "Institute is missing",
     "Employee ID is missing",
     "Photo link is missing",
   ]);
+});
+
+test("institute is optional in the import, but a named one must exist", () => {
+  const blank = validateImportFields(goodRow({ institute: " " }), COLLEGES);
+  assert.deepEqual(blank.errors, []);
+  assert.equal("college_id" in blank.value, false);
+  assert.equal(blank.collegeName, "");
+  assert.deepEqual(validateImportFields(goodRow({ institute: "Nowhere" }), COLLEGES).errors, ['Institute "Nowhere" was not found']);
+});
+
+test("a new instructor without an institute is created with none", async () => {
+  let created = null;
+  const outcomes = await commitImportRows(fakeDb(), [goodRow({ institute: "" })], await deps({
+    createInstructor: async (_db, fields) => { created = fields; return { outcome: "created", instructor: { _id: "n1", ...fields } }; },
+    enrollPhoto: async () => ({ ok: true }),
+  }));
+  assert.equal(outcomes[0].ok, true);
+  assert.equal("college_id" in created, false);
 });
 
 test("a photo link to a private address is refused before anything is fetched", () => {
@@ -314,13 +331,13 @@ test("a field missing from both the sheet and the record is still flagged", asyn
     instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", employee_id: "EMP-1", face_ids: ["f"] }],
   });
   const [result] = await previewImportRows(db, [{ row: 2, email: "asha.rao@example.com" }], await deps());
-  assert.deepEqual(result.errors, ["Gender is missing", "Role is missing", "Institute is missing"]);
+  assert.deepEqual(result.errors, ["Gender is missing", "Role is missing"]);
 });
 
 test("a new instructor still needs every required field", async () => {
   const [result] = await previewImportRows(fakeDb(), [{ row: 2, email: "new@example.com", employee_id: "EMP-50" }], await deps());
   assert.deepEqual(result.errors, [
-    "Name is missing", "Gender is missing", "Role is missing", "Institute is missing", "Photo link is missing",
+    "Name is missing", "Gender is missing", "Role is missing", "Photo link is missing",
   ]);
 });
 
