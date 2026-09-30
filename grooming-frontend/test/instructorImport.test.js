@@ -24,8 +24,8 @@ test('headings are matched in any case and under their usual other names', () =>
 
 test('columns are read in whatever order the sheet has them', () => {
   const table = readImportTable(parseCsv(
-    'Photo Link,Email,Name,Role,Gender,Campus,Notes\n'
-    + 'https://x/a.jpg, asha@x.com ,Asha Rao,Mentor,F,Aurora,likes tea\n',
+    'Photo Link,Email,Name,Role,Gender,Campus,Emp ID,Notes\n'
+    + 'https://x/a.jpg, asha@x.com ,Asha Rao,Mentor,F,Aurora,E-7,likes tea\n',
   ));
   assert.deepEqual(table.missingColumns, []);
   assert.deepEqual(table.ignoredColumns, ['Notes']);
@@ -37,16 +37,17 @@ test('columns are read in whatever order the sheet has them', () => {
     role: 'Mentor',
     gender: 'F',
     institute: 'Aurora',
+    employee_id: 'E-7',
   }]);
 });
 
 test('a sheet without a required column says which ones', () => {
   const table = readImportTable(parseCsv('Name,Email,Phone\nAsha,a@x.com,1\n'));
-  assert.deepEqual(table.missingColumns, ['Gender', 'Role', 'Institute', 'Photo Link']);
+  assert.deepEqual(table.missingColumns, ['Gender', 'Role', 'Institute', 'Employee ID', 'Photo Link']);
 });
 
 test('an empty sheet is missing every required column', () => {
-  assert.deepEqual(readImportTable([]).missingColumns, ['Name', 'Email', 'Gender', 'Role', 'Institute', 'Photo Link']);
+  assert.deepEqual(readImportTable([]).missingColumns, ['Name', 'Email', 'Gender', 'Role', 'Institute', 'Employee ID', 'Photo Link']);
 });
 
 test('the first row for an email or employee ID is kept and later ones flagged', () => {

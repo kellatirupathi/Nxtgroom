@@ -42,7 +42,7 @@ export const IMPORT_COLUMNS: readonly ImportColumn[] = [
   {
     field: 'employee_id',
     label: 'Employee ID',
-    required: false,
+    required: true,
     aliases: ['emp id', 'employee code', 'emp code', 'employee no', 'employee number'],
   },
   {
