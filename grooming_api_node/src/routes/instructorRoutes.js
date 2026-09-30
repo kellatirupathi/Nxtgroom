@@ -351,7 +351,7 @@ instructorRouter.post(
   })
 );
 
-/** Checks a batch again and adds every row that still passes. */
+/** Checks a batch again and applies every row that still passes: new instructors are created, existing ones updated. */
 instructorRouter.post(
   "/import",
   requireSuperAdmin,
@@ -362,6 +362,7 @@ instructorRouter.post(
     }
     const results = await commitImportRows(req.app.locals.db, req.validatedBody.rows, {
       createInstructor: createInstructorGuarded,
+      updateInstructor: updateInstructorGuarded,
     });
     return res.json({ results });
   })

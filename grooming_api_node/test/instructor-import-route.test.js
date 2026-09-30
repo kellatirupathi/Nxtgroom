@@ -66,14 +66,14 @@ test("a BOA cannot import instructors", async () => {
   }
 });
 
-test("a preview batch larger than 25 rows is refused", async () => {
-  const rows = Array.from({ length: 26 }, (_, index) => ({ ...row, row: index + 2 }));
+test("a preview batch larger than 50 rows is refused", async () => {
+  const rows = Array.from({ length: 51 }, (_, index) => ({ ...row, row: index + 2 }));
   const result = await call("/import/preview", { rows });
   assert.equal(result.status, 422);
 });
 
-test("a commit batch larger than 5 rows is refused", async () => {
-  const rows = Array.from({ length: 6 }, (_, index) => ({ ...row, row: index + 2 }));
+test("a commit batch larger than 25 rows is refused", async () => {
+  const rows = Array.from({ length: 26 }, (_, index) => ({ ...row, row: index + 2 }));
   const result = await call("/import", { rows });
   assert.equal(result.status, 422);
 });
