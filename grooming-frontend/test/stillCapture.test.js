@@ -231,7 +231,7 @@ test('without a still camera the photograph is exactly the video frame it always
   assert.equal(state.lastSource, 'video');
 });
 
-test('a still is used, at up to 2048, cropped to exactly the approved region', async () => {
+test('a still preserves native detail above 2048, cropped to exactly the approved region', async () => {
   const raw = { width: 4000, height: 3000 };
   const still = { raw, rotation: 0, truth: centred(raw) };
   const browser = fakeBrowser({ scene: makeScene(2), still });
@@ -243,7 +243,8 @@ test('a still is used, at up to 2048, cropped to exactly the approved region', a
   );
 
   assert.equal(photo.source, 'still');
-  assert.equal(Math.max(photo.width, photo.height), 2048, 'as large as the server keeps');
+  assert.equal(Math.max(photo.width, photo.height), 2550, 'retain the native crop instead of shrinking it to 2048');
+  assert.ok(Math.max(photo.width, photo.height) <= SINGLE_UPLOAD_MAX_DIMENSION);
   assert.ok(photo.width > 1224 * 1.5, `only ${photo.width}px wide`);
   assertSameRegion(await photographedRegion(browser, photo, still), SINGLE, 'upright');
   assert.deepEqual(browser.calls.takePhoto[0], { imageWidth: 4000, imageHeight: 3000 });

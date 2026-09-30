@@ -5,7 +5,10 @@ import sharp from "sharp";
 // downscaling was skipped or failed, so it must not reject an ordinary photo.
 const MAX_INPUT_PIXELS = 80_000_000;
 const MIN_DIMENSION = 320;
-const MAX_DIMENSION = 2048;
+export const PHOTO_MAX_DIMENSION = 3072;
+// Leave headroom below Rekognition's 5 MB byte limit. These are the same bytes
+// stored in R2, searched for identity and subsequently read by the evaluator.
+export const PHOTO_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
 
 export async function normalizeInstructorImage(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
@@ -25,45 +28,32 @@ export async function normalizeInstructorImage(buffer) {
     throw new Error(`The image must be at least ${MIN_DIMENSION}x${MIN_DIMENSION} pixels`);
   }
 
-  const { data, info } = await source
-    .rotate()
-    .resize({
-      width: MAX_DIMENSION,
-      height: MAX_DIMENSION,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .flatten({ background: "#ffffff" })
-    // The standard encoder, not mozjpeg. Photographs now arrive as
-    // full-resolution stills of up to 2048 pixels rather than 1-2 megapixel
-    // video frames, and mozjpeg's trellis search took ~960ms of CPU per such
-    // photograph - nearly five seconds of waiting at the tablet on a fifth of
-    // a CPU. The standard encoder with optimised Huffman tables takes ~160ms
-    // and keeps more of the picture (37.7 dB against 35.5 dB PSNR on the same
-    // frame); the price is files about twice the size, which storage barely
-    // notices and nothing downstream reads by the byte.
-    .jpeg({ quality: 86, chromaSubsampling: "4:4:4", optimiseCoding: true })
-    .toBuffer({ resolveWithObject: true });
-
-  if (!data.length || !info.width || !info.height) {
-    throw new Error("The uploaded image could not be normalized");
+  // Start at high quality and full retained resolution. Only unusually detailed
+  // images need lower quality or a smaller size to fit the recognition limit.
+  // Every attempt starts from the source, avoiding accumulated JPEG loss.
+  for (let dimension = PHOTO_MAX_DIMENSION; dimension >= MIN_DIMENSION; dimension = Math.floor(dimension * 0.85)) {
+    const pixels = source.clone()
+      .rotate()
+      .resize({ width: dimension, height: dimension, fit: "inside", withoutEnlargement: true })
+      .flatten({ background: "#ffffff" });
+    for (const quality of [95, 90, 85, 80]) {
+      const { data, info } = await pixels.clone()
+        .jpeg({ quality, chromaSubsampling: "4:4:4", optimiseCoding: true })
+        .toBuffer({ resolveWithObject: true });
+      if (data.length > 0 && data.length <= PHOTO_MAX_BYTES && info.width && info.height) {
+        return { buffer: data, mimeType: "image/jpeg", width: info.width, height: info.height };
+      }
+    }
   }
-  return {
-    buffer: data,
-    mimeType: "image/jpeg",
-    width: info.width,
-    height: info.height,
-  };
+  throw new Error("The uploaded image could not be normalized within the photo size limit");
 }
 
 /**
  * The longest side a group photograph is kept at.
  *
- * Larger than a single photograph's 2048 because a group spends its pixels on
- * several people: six people across a frame each get a sixth of its width, and
- * at 2048 the faces of the people at the back were landing below the size face
- * search can match honestly. Kept as pixels, never re-encoded whole, so the
- * extra size costs memory for the length of one request rather than CPU.
+ * A group spends pixels on several people. Keep 3072 pixels so faces at the
+ * back remain usable. Kept as pixels, never re-encoded whole, so this costs
+ * memory for the length of one request rather than repeated encoding.
  */
 export const GROUP_MAX_DIMENSION = 3072;
 

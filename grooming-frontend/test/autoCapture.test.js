@@ -6,6 +6,7 @@ import {
   AUTO_CAPTURE_FALLBACK_ATTEMPTS,
   autoCaptureFallbackDue,
   autoCaptureReady,
+  captureConfirmationCount,
   shutterEnabled,
 } from '../src/lib/fullBodyDetector.ts';
 
@@ -70,17 +71,21 @@ test('the fallback arrives in a few seconds, not after a minute of waiting', () 
   assert.ok(seconds >= 3 && seconds <= 8, `fallback after ${seconds}s should be a few seconds`);
 });
 
-test('the cooldown is a short pause after each reply, not a queue', () => {
-  // The camera already waits for each reply before it can fire again, so this
-  // is only long enough that a result panel is not replaced before it is read.
-  assert.ok(AUTO_CAPTURE_COOLDOWN_MS >= 800, 'a shorter gap replaces a result before it is read');
-  // And short enough that the next person is not made to wait. A person
-  // photographed again is answered from their day's record, so this must not
-  // grow back into a duplicate guard.
-  assert.ok(
-    AUTO_CAPTURE_COOLDOWN_MS <= 2_000,
-    'a longer cooldown makes a queue wait for a duplicate guard that is not needed',
-  );
+test('the next person is captured only after three seconds and fresh confirmations', () => {
+  assert.equal(AUTO_CAPTURE_COOLDOWN_MS, 3_000);
+  const end = 10_000 + AUTO_CAPTURE_COOLDOWN_MS;
+  let frames = 99;
+  for (const now of [10_000, 11_000, 12_999]) {
+    frames = captureConfirmationCount('FULL_BODY', frames, false, end, now);
+    assert.equal(frames, 0);
+    assert.equal(autoCaptureReady('FULL_BODY', frames), false);
+  }
+  for (let count = 1; count <= AUTO_CAPTURE_CONFIRMATIONS; count += 1) {
+    frames = captureConfirmationCount('FULL_BODY', frames, false, end, end + (count - 1) * 200);
+    assert.equal(autoCaptureReady('FULL_BODY', frames), count === AUTO_CAPTURE_CONFIRMATIONS);
+  }
+  assert.equal(captureConfirmationCount('FULL_BODY', 99, true, end, end + 1000), 0);
+  assert.equal(captureConfirmationCount('NO_PERSON', 2, false, end, end + 1000), 0);
 });
 
 test('the hold is over half a second but under two', () => {

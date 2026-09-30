@@ -174,7 +174,9 @@ test('both cameras retry a busy camera, and reopen after the screen sleeps', () 
 
 test('both cameras say "hold still" while the still is being taken', () => {
   const single = read('src/components/CameraCapture.tsx');
-  assert.match(single, /autoCapture && \(capturing \|\| \(steadyFrames > 0 && steadyFrames < AUTO_CAPTURE_CONFIRMATIONS\)\)/);
+  // Guidance continues through the one-second posture hold, even after the
+  // minimum frame confirmations have arrived.
+  assert.match(single, /autoCapture && \(capturing \|\| steadyFrames > 0\)/);
   const group = read('src/components/GroupCameraCapture.tsx');
   assert.match(group, /capturing \|\| \(steadyFrames > 0 && steadyFrames < GROUP_CAPTURE_CONFIRMATIONS\)/);
 });

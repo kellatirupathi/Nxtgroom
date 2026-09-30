@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, RefreshCw, SwitchCamera, X } from 'lucide-react';
 import {
-  AUTO_CAPTURE_CONFIRMATIONS,
   AUTO_CAPTURE_COOLDOWN_MS,
   autoCaptureFallbackDue,
   autoCaptureReady,
+  captureConfirmationCount,
   DETECTOR_STARTING_GUIDANCE,
   fullBodyDetectorSettled,
   loadFullBodyDetector,
@@ -21,6 +21,8 @@ import type { FaceBox } from '../lib/faceBoxes';
 import { bodyGuideSourceRect } from '../lib/cameraGeometry';
 import { openCameraStream } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
+import { PHOTO_JPEG_QUALITY } from '../lib/photoEncoding';
+import { postureHoldComplete, postureHoldStart } from '../lib/capturePosture';
 
 type Facing = 'user' | 'environment';
 
@@ -89,6 +91,7 @@ export default function CameraCapture({
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(true);
   const [capturing, setCapturing] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   // Start closed. UNAVAILABLE deliberately fails open, so using it while the
   // model was still loading briefly enabled capture on an empty frame.
   const [verdict, setVerdict] = useState<FrameVerdict>('NO_PERSON');
@@ -125,6 +128,7 @@ export default function CameraCapture({
   // The same reasoning as cooldownUntilRef: the tick reads these every 200ms,
   // and as state they would be captured stale by the running timer.
   const steadyRef = useRef(0);
+  const postureSinceRef = useRef<number | null>(null);
   const unusableRef = useRef(0);
   const manualOfferedRef = useRef(!autoCapture);
   /**
@@ -148,6 +152,8 @@ export default function CameraCapture({
   const [streamGeneration, setStreamGeneration] = useState(0);
 
   const stop = useCallback(() => {
+    steadyRef.current = 0;
+    postureSinceRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }, []);
@@ -249,15 +255,21 @@ export default function CameraCapture({
         stableState = stabilizeFrameReading(stableState, reading);
         const stableReading = stableState.reading;
         setVerdict(stableReading.verdict);
-        setGuidance(stableReading.guidance);
+        setGuidance(autoCapture && reading.verdict === 'FULL_BODY' && !reading.capturePosture?.ready
+          ? reading.capturePosture?.guidance ?? 'Keep both arms and hands visible'
+          : stableReading.guidance);
         verdictRef.current = stableReading.verdict;
         setFaceBoxes(reading.boxes ?? []);
 
         if (autoCapture) {
-          // Counted from the stabilised verdict rather than the raw reading, so
-          // one noisy frame neither fires the camera nor resets a good hold.
-          const fireable = stableReading.verdict === 'FULL_BODY';
-          const held = fireable ? steadyRef.current + 1 : 0;
+          // Use the current posture, never a previous stabilised pose: raised
+          // hands must stop capture immediately, even after a good hold.
+          const fireable = stableReading.verdict === 'FULL_BODY'
+            && reading.verdict === 'FULL_BODY' && reading.capturePosture?.ready === true;
+          const now = Date.now();
+          setCooldownSeconds(Math.max(0, Math.ceil((cooldownUntilRef.current - now) / 1000)));
+          const held = captureConfirmationCount(fireable ? 'FULL_BODY' : 'PARTIAL', steadyRef.current, firingRef.current, cooldownUntilRef.current, now);
+          postureSinceRef.current = postureHoldStart(held > 0, postureSinceRef.current, now);
           steadyRef.current = held;
           setSteadyFrames(held);
 
@@ -272,6 +284,7 @@ export default function CameraCapture({
 
           if (
             autoCaptureReady(stableReading.verdict, held)
+            && postureHoldComplete(postureSinceRef.current, now)
             && Date.now() >= cooldownUntilRef.current
             && !firingRef.current
           ) {
@@ -323,6 +336,7 @@ export default function CameraCapture({
     if (!video || !video.videoWidth) return;
     if (!viaAuto && !shutterEnabled(verdictRef.current, 0, false)) return;
     if (firingRef.current) return;
+    if (autoCapture && Date.now() < cooldownUntilRef.current) return;
     firingRef.current = true;
     setCapturing(true);
     try {
@@ -342,7 +356,7 @@ export default function CameraCapture({
         track: streamRef.current?.getVideoTracks()[0] ?? null,
         region: crop,
         maxDimension: SINGLE_UPLOAD_MAX_DIMENSION,
-        quality: 0.92,
+        quality: PHOTO_JPEG_QUALITY,
         state: stillStateRef.current,
       });
       // Keep the shutter locked until the owner has finished handling the
@@ -357,11 +371,13 @@ export default function CameraCapture({
       // Counted from the end of the capture, not the start: the upload and the
       // recognition call happen after this, and restarting the clock earlier
       // would let the next frame fire while the first was still in flight.
-      cooldownUntilRef.current = Date.now() + AUTO_CAPTURE_COOLDOWN_MS;
+      cooldownUntilRef.current = autoCapture ? Date.now() + AUTO_CAPTURE_COOLDOWN_MS : 0;
+      setCooldownSeconds(autoCapture ? AUTO_CAPTURE_COOLDOWN_MS / 1000 : 0);
       setSteadyFrames(0);
       steadyRef.current = 0;
+      postureSinceRef.current = null;
     }
-  }, [onCapture]);
+  }, [onCapture, autoCapture]);
 
   // Published for the inspection loop, which reaches the capture function
   // through a ref so rebuilding the callback does not restart the detector.
@@ -441,11 +457,15 @@ export default function CameraCapture({
                 about to fire by itself has to say so: being photographed with
                 no warning is worse than waiting an extra moment. */}
             <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2 px-6">
-              {guidance ? (
+              {autoCapture && cooldownSeconds > 0 ? (
+                <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
+                  Ready in {cooldownSeconds}s — next person can step into frame
+                </p>
+              ) : guidance ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
                   {guidance}
                 </p>
-              ) : autoCapture && (capturing || (steadyFrames > 0 && steadyFrames < AUTO_CAPTURE_CONFIRMATIONS)) ? (
+              ) : autoCapture && (capturing || steadyFrames > 0) ? (
                 <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
                   Hold still…
                 </p>
@@ -497,7 +517,7 @@ export default function CameraCapture({
           type="button"
           onClick={() => void shoot()}
           hidden={autoCapture && !manualOffered}
-          disabled={Boolean(error) || starting || capturing || !ready}
+          disabled={Boolean(error) || starting || capturing || !ready || cooldownSeconds > 0}
           aria-label={ready ? 'Capture photo' : 'Position one person in the camera to capture a photo'}
           className={`w-[72px] h-[72px] rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 flex items-center justify-center${inline ? ' pointer-events-auto shadow-lg' : ''}`}
         >

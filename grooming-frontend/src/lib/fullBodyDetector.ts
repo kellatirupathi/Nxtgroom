@@ -23,6 +23,8 @@ export interface FrameReading {
   guidance: string | null;
   /** Relative arm positions used by the live challenge before capture. */
   poseSignals?: PoseSignals;
+  /** Automatic capture requires relaxed, visible arms as well as body framing. */
+  capturePosture?: CapturePosture;
   /**
    * Where the face is, for drawing a box on the preview.
    *
@@ -48,6 +50,7 @@ export const KEYPOINT_CONFIDENCE = 0.35;
 import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
 import { faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
 import { assessBody, describeBodyProblem } from './bodyCompleteness.ts';
+import { assessCapturePosture, type CapturePosture } from './capturePosture.ts';
 
 /** Large enough for face recognition and grooming details without crowding the guide. */
 export const MIN_BODY_SPAN_RATIO = 0.48;
@@ -423,6 +426,7 @@ export function readKeypoints(
       verdict: 'FULL_BODY',
       guidance: null,
       poseSignals: poseSignals(keypoints, frameHeight),
+      capturePosture: assessCapturePosture(keypoints, frameHeight, frameWidth),
     };
   }
   return {
@@ -716,18 +720,16 @@ export const AUTO_CAPTURE_CONFIRMATIONS = 3;
 /**
  * How long the camera waits after firing before it will fire again.
  *
- * Only long enough that one capture cannot fire twice before its own response
- * has returned. It used to be eight seconds, which was how the same person was
- * stopped from being photographed on every frame — but a clock cannot tell a
- * person lingering from the next person in the queue, so a queue moved at one
- * person every nine seconds to solve a problem caused by one person not moving.
- *
- * The camera now waits for each reply before it can fire again, and a person
- * photographed a second time is answered from their day's record - "already
- * checked in" - which records nothing. What is left here is mechanical: a short
- * pause after each reply so the result panel is not replaced before it is read.
+ * Three seconds after the response lets the captured person move away before
+ * another photograph is taken. The request itself remains locked separately.
+ * Fresh frame confirmations begin only once this pause has finished.
  */
-export const AUTO_CAPTURE_COOLDOWN_MS = 1_000;
+export const AUTO_CAPTURE_COOLDOWN_MS = 3_000;
+
+/** Frames collected during a request or pause cannot arm the next capture. */
+export function captureConfirmationCount(verdict: FrameVerdict, frames: number, busy: boolean, cooldownUntil: number, now: number): number {
+  return !busy && now >= cooldownUntil && verdict === 'FULL_BODY' ? frames + 1 : 0;
+}
 
 /**
  * Consecutive unusable readings before the manual shutter is offered.

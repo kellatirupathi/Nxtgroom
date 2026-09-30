@@ -1,15 +1,12 @@
 /**
  * Downscales a photo in the browser before upload.
  *
- * A modern phone camera produces 3-8 MB files. On mobile data that upload is
- * the dominant cost of a check-in, and the server immediately resizes to
- * 2048px anyway, so sending the full-resolution original wastes the user's
- * time and bandwidth for pixels that are discarded.
+ * Preserve detail up to the same resolution the server stores, while keeping
+ * the upload within its byte limit.
  */
 
 /** Matches the server's MAX_DIMENSION so the backend has no further work to do. */
-const MAX_DIMENSION = 2048;
-const QUALITY = 0.85;
+import { encodeUploadJpeg, PHOTO_MAX_DIMENSION } from './photoEncoding.ts';
 
 export interface PreparedPhoto {
   file: File;
@@ -50,13 +47,11 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   };
 
   try {
-    // createImageBitmap decodes off the main thread where available, so the
-    // page keeps responding while a large photo is processed.
     const image = await loadImage(file);
     const { naturalWidth: width, naturalHeight: height } = image;
     if (!width || !height) return fallback;
 
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(width, height));
+    const scale = Math.min(1, PHOTO_MAX_DIMENSION / Math.max(width, height));
     const targetWidth = Math.round(width * scale);
     const targetHeight = Math.round(height * scale);
 
@@ -67,10 +62,7 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
     if (!context) return fallback;
     context.drawImage(image, 0, 0, targetWidth, targetHeight);
 
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, 'image/jpeg', QUALITY);
-    });
-    if (!blob) return fallback;
+    const blob = await encodeUploadJpeg(canvas);
 
     // Keep the original if the re-encode came out larger, which can happen
     // for an already small or heavily compressed source.

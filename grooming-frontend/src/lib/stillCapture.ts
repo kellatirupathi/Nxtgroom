@@ -21,6 +21,7 @@
  */
 
 import type { SourceRect } from './cameraGeometry.ts';
+import { encodeUploadJpeg, PHOTO_MAX_DIMENSION } from './photoEncoding.ts';
 import {
   candidateRotations,
   chooseMapping,
@@ -40,7 +41,7 @@ import {
 } from './stillRegistration.ts';
 
 /** The longest side the upload may have; the server keeps no more. */
-export const SINGLE_UPLOAD_MAX_DIMENSION = 2048;
+export const SINGLE_UPLOAD_MAX_DIMENSION = PHOTO_MAX_DIMENSION;
 /** Matches the server's GROUP_MAX_DIMENSION: a group spends pixels on several people. */
 export const GROUP_UPLOAD_MAX_DIMENSION = 3072;
 
@@ -228,9 +229,7 @@ function toGray(context: Context2DLike, size: Size): GrayImage {
 }
 
 function encode(canvas: CanvasLike, quality: number): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('encode failed'))), 'image/jpeg', quality);
-  });
+  return encodeUploadJpeg(canvas, quality);
 }
 
 /** Trims a region that overhangs the still by rounding, so no edge is left blank. */
