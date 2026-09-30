@@ -2,12 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCsv } from '../src/csvParse.ts';
 import {
+  blankRequiredFields,
+  fieldsInError,
   firstValue,
+  guessCollegeId,
+  guessGender,
+  guessRole,
   headingField,
   importTemplateCsv,
   inBatches,
   isGoogleSheetLink,
   readImportTable,
+  repeatsOf,
   roleLabel,
   splitRepeats,
 } from '../src/instructorImport.ts';
@@ -105,10 +111,12 @@ test('the first row for an email or employee ID is kept and later ones flagged',
     { row: 7, name: 'No email either', email: '' },
   ]);
   assert.deepEqual(unique.map((row) => row.row), [2, 5, 6, 7]);
-  assert.deepEqual(flagged, [
+  assert.deepEqual(flagged.map(({ raw: _raw, ...rest }) => rest), [
     { row: 3, name: 'Asha again', email: 'asha@X.com', errors: ['Same email as row 2'] },
     { row: 4, name: 'Ravi', email: 'ravi@x.com', errors: ['Same Employee ID as row 2'] },
   ]);
+  // The sheet's values travel with a flagged row, so it can be corrected.
+  assert.equal(flagged[0].raw.employee_id, 'E2');
 });
 
 test('rows are sent in batches of the given size', () => {
@@ -135,4 +143,49 @@ test('the template has every heading and an example row the import reads back', 
   assert.equal(table.rows.length, 1);
   assert.equal(table.rows[0].institute, 'Aurora Institute');
   assert.equal(table.rows[0].gender, 'Female');
+});
+
+test('a flagged reason marks the fields it is about', () => {
+  assert.deepEqual([...fieldsInError([
+    'Email "x" is not a valid address',
+    'Role "Teacher" must be Instructor, Central Instructor, Central Team, Mentor or Other',
+    'Photo link is missing',
+  ])].sort(), ['email', 'photo_url', 'role']);
+  assert.deepEqual(
+    [...fieldsInError(['Email a@x.com belongs to Asha but Employee ID E1 belongs to Ravi; change one of them'])].sort(),
+    ['email', 'employee_id'],
+  );
+  assert.deepEqual([...fieldsInError(['Same Employee ID as row 2'])], ['employee_id']);
+  assert.deepEqual([...fieldsInError(['They are checked in today'])], []);
+});
+
+test('a corrected row lists the required fields still blank, photo aside', () => {
+  assert.deepEqual(blankRequiredFields({ row: 2, name: 'Asha', email: ' ', gender: 'FEMALE' }), ['Email', 'Role', 'Institute', 'Employee ID']);
+  assert.deepEqual(blankRequiredFields({
+    row: 2, name: 'Asha', email: 'a@x.com', gender: 'F', role: 'MENTOR', institute: 'c1', employee_id: 'E1',
+  }), []);
+});
+
+test('the correction form is preselected from the sheet however it was written', () => {
+  assert.equal(guessGender('f / female'), 'FEMALE');
+  assert.equal(guessGender('MAN'), 'MALE');
+  assert.equal(guessGender('x'), '');
+  assert.equal(guessRole('central team.'), 'CENTRAL_TEAM');
+  assert.equal(guessRole('Teacher'), '');
+  const colleges = [
+    { _id: 'c1', name: 'Hyderabad – Kondapur Campus', location: '' },
+    { _id: 'c2', name: 'City College', location: 'A' },
+    { _id: 'c3', name: 'City College', location: 'B' },
+  ];
+  assert.equal(guessCollegeId('hyderabad - kondapur campus', colleges), 'c1');
+  assert.equal(guessCollegeId('c3', colleges), 'c3');
+  assert.equal(guessCollegeId('City College', colleges), '', 'two share the name, so none is guessed');
+  assert.equal(guessCollegeId('Nowhere', colleges), '');
+});
+
+test('a corrected row repeating one already in Ready is caught before sending', () => {
+  const ready = [{ row: 2, email: 'Asha@x.com', employee_id: 'E1' }, { row: 3, email: 'ravi@x.com', employee_id: 'E2' }];
+  assert.deepEqual(repeatsOf({ row: 9, email: 'asha@X.com', employee_id: 'E2' }, ready), ['Same email as row 2', 'Same Employee ID as row 3']);
+  assert.deepEqual(repeatsOf({ row: 9, email: 'new@x.com', employee_id: 'E9' }, ready), []);
+  assert.deepEqual(repeatsOf({ row: 2, email: 'asha@x.com', employee_id: 'E1' }, ready), [], 'a row never repeats itself');
 });

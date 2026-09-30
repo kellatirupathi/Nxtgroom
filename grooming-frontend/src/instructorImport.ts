@@ -1,5 +1,7 @@
 import { csvCell } from './attendanceExport.ts';
 import type { CsvRow } from './csvParse.ts';
+import { INSTRUCTOR_ROLES } from './instructorRoles.ts';
+import type { College } from './types.ts';
 
 /**
  * Turning a spreadsheet into instructor rows for the import.
@@ -176,10 +178,92 @@ export interface FlaggedRow {
   name: string;
   email: string;
   errors: string[];
+  /** The row's values as read from the sheet, so it can be corrected. */
+  raw: ImportRow;
 }
 
 export function flagRow(row: ImportRow, errors: string[]): FlaggedRow {
-  return { row: row.row, name: row.name ?? '', email: row.email ?? '', errors };
+  return { row: row.row, name: row.name ?? '', email: row.email ?? '', errors, raw: row };
+}
+
+/**
+ * The fields a flagged row's reasons are about, so the correction form can
+ * mark them. Read from the reason's wording, which the server keeps stable;
+ * a reason about two fields (an email and an Employee ID belonging to
+ * different people) marks both.
+ */
+const ERROR_FIELDS: ReadonlyArray<[RegExp, ImportField]> = [
+  [/^Name\b/, 'name'],
+  [/email/i, 'email'],
+  [/^Gender\b/, 'gender'],
+  [/^Role\b/, 'role'],
+  [/^Institute\b/, 'institute'],
+  [/Employee ID/, 'employee_id'],
+  [/^Phone\b/, 'phone_no'],
+  [/^Photo\b/, 'photo_url'],
+];
+
+export function fieldsInError(errors: readonly string[]): Set<ImportField> {
+  const fields = new Set<ImportField>();
+  for (const error of errors) {
+    for (const [pattern, field] of ERROR_FIELDS) if (pattern.test(error)) fields.add(field);
+  }
+  return fields;
+}
+
+/**
+ * Required fields a corrected row still leaves blank. Photo Link is not among
+ * them: only the server knows whether the instructor already has a photo, in
+ * which case none is needed.
+ */
+export function blankRequiredFields(row: ImportRow): string[] {
+  return IMPORT_COLUMNS
+    .filter((column) => column.required && column.field !== 'photo_url' && !(row[column.field] ?? '').trim())
+    .map((column) => column.label);
+}
+
+/** Lower-case letters and digits only, as the server compares values. */
+function comparable(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/** MALE, FEMALE or '' for a sheet's gender cell, to preselect the form. */
+export function guessGender(value: string | undefined): string {
+  const key = comparable(firstValue('gender', value ?? ''));
+  if (['m', 'male', 'man'].includes(key)) return 'MALE';
+  if (['f', 'female', 'woman'].includes(key)) return 'FEMALE';
+  return '';
+}
+
+/** One of INSTRUCTOR_ROLES or '' for a sheet's role cell. */
+export function guessRole(value: string | undefined): string {
+  const key = comparable(firstValue('role', value ?? ''));
+  return INSTRUCTOR_ROLES.find((role) => comparable(role) === key) ?? '';
+}
+
+/** The id of the institute a sheet's cell names, when exactly one matches. */
+export function guessCollegeId(value: string | undefined, colleges: readonly College[]): string {
+  const wanted = firstValue('institute', value ?? '');
+  if (!wanted) return '';
+  const byId = colleges.find((college) => String(college._id) === wanted);
+  if (byId) return String(byId._id);
+  const byName = colleges.filter((college) => comparable(college.name) === comparable(wanted));
+  return byName.length === 1 ? String(byName[0]._id) : '';
+}
+
+/**
+ * Reasons a corrected row would repeat one already in Ready, checked before
+ * it is sent: the server sees one batch at a time and cannot know.
+ */
+export function repeatsOf(row: ImportRow, others: ReadonlyArray<{ row: number; email: string; employee_id?: string }>): string[] {
+  const email = (row.email ?? '').trim().toLowerCase();
+  const employeeId = (row.employee_id ?? '').trim();
+  const errors: string[] = [];
+  const sameEmail = others.find((other) => other.row !== row.row && email && other.email.toLowerCase() === email);
+  const sameId = others.find((other) => other.row !== row.row && employeeId && other.employee_id === employeeId);
+  if (sameEmail) errors.push(`Same email as row ${sameEmail.row}`);
+  if (sameId) errors.push(`Same Employee ID as row ${sameId.row}`);
+  return errors;
 }
 
 /**
