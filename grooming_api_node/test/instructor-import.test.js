@@ -86,6 +86,12 @@ test("roles are read however a sheet spells them", () => {
   assert.equal(normalizeImportRole(""), null);
 });
 
+test("Central Team is a role, however it is spelled", () => {
+  for (const spelling of ["Central Team", "central team", "CENTRAL_TEAM", "Central-Team"]) {
+    assert.equal(normalizeImportRole(spelling), "CENTRAL_TEAM", spelling);
+  }
+});
+
 test("gender accepts M, F, Male and Female in any case and nothing else", () => {
   assert.equal(normalizeImportGender("m"), "MALE");
   assert.equal(normalizeImportGender("Female"), "FEMALE");
@@ -140,7 +146,7 @@ test("every problem in a row is reported at once, naming the bad value", () => {
     "Name must be at least 2 characters",
     'Email "not-an-email" is not a valid address',
     'Gender "X" must be Male or Female',
-    'Role "Teacher" must be Instructor, Central Instructor, Mentor or Other',
+    'Role "Teacher" must be Instructor, Central Instructor, Central Team, Mentor or Other',
     'Institute "Nowhere" was not found',
     'Phone "call me" is not a valid phone number',
     "Photo link: The link must start with http:// or https://",

@@ -24,7 +24,14 @@ import {
  */
 
 /** The roles the Instructors form offers, in its upper-case stored form. */
-export const IMPORT_ROLES = ["INSTRUCTOR", "CENTRAL_INSTRUCTOR", "MENTOR", "OTHER"];
+export const IMPORT_ROLES = ["INSTRUCTOR", "CENTRAL_INSTRUCTOR", "CENTRAL_TEAM", "MENTOR", "OTHER"];
+
+/** "CENTRAL_TEAM" as "Central Team", for messages. */
+function roleWords(role) {
+  return role.toLowerCase().split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
+}
+
+const ROLE_CHOICES = `${IMPORT_ROLES.slice(0, -1).map(roleWords).join(", ")} or ${roleWords(IMPORT_ROLES.at(-1))}`;
 
 /** Rows per preview request: each may download and check a photograph. */
 export const MAX_PREVIEW_ROWS = 25;
@@ -54,9 +61,9 @@ function comparable(value) {
 }
 
 /**
- * INSTRUCTOR, CENTRAL_INSTRUCTOR, MENTOR or OTHER from however a sheet spells
- * it: "Central Instructor", "central-instructor" and "CENTRAL_INSTRUCTOR" are
- * the same role. Anything else is null.
+ * One of IMPORT_ROLES from however a sheet spells it: "Central Instructor",
+ * "central-instructor" and "CENTRAL_INSTRUCTOR" are the same role. Anything
+ * else is null.
  */
 export function normalizeImportRole(value) {
   const key = text(value).toUpperCase().replace(/[\s-]+/g, "_");
@@ -115,7 +122,7 @@ export function validateImportFields(raw, colleges) {
   const roleText = text(raw?.role);
   const role = normalizeImportRole(roleText);
   if (!roleText) errors.push("Role is missing");
-  else if (!role) errors.push(`Role "${roleText}" must be Instructor, Central Instructor, Mentor or Other`);
+  else if (!role) errors.push(`Role "${roleText}" must be ${ROLE_CHOICES}`);
 
   const institute = matchCollege(raw?.institute, colleges);
   if (institute.error) errors.push(institute.error);
