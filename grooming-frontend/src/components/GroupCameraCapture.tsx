@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, RefreshCw, SwitchCamera, Users } from 'lucide-react';
+import { Camera, RefreshCw, Users } from 'lucide-react';
 import {
   GROUP_CAPTURE_CONFIRMATIONS,
   GROUP_MAX_PEOPLE,
@@ -46,7 +46,6 @@ import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION } fro
 
 interface GroupCameraCaptureProps {
   facing: 'user' | 'environment';
-  onFlip: () => void;
   onCapture: (file: File) => void | Promise<void>;
 }
 
@@ -65,7 +64,7 @@ function describeCameraError(error: unknown): string {
   return 'The camera could not be started. Check permissions and try again.';
 }
 
-export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupCameraCaptureProps) {
+export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const analysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -312,24 +311,10 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
 
   return (
     <div className="absolute inset-0 bg-black flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 text-white">
-        {/* How many people the camera can currently see. In a group this is the
-            thing somebody arranging people actually needs to know, and it is
-            the only way to notice that the person at the end is not being
-            detected before the photograph is taken rather than after. */}
-        <p className="flex items-center gap-2 text-sm font-semibold">
-          <Users size={18} aria-hidden="true" />
-          <span aria-live="polite">{countLabel || 'Nobody in frame'}</span>
-        </p>
-        <button
-          type="button"
-          onClick={onFlip}
-          aria-label={facing === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
-          className="w-11 h-11 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center"
-        >
-          <SwitchCamera size={22} aria-hidden="true" />
-        </button>
-      </div>
+      <p className="pointer-events-none absolute left-3 top-[calc(max(0.75rem,var(--inset-top))+6rem)] z-10 flex items-center gap-2 rounded-md bg-black/50 px-2 py-1 text-xs font-semibold text-white">
+        <Users size={16} aria-hidden="true" />
+        <span aria-live="polite">{countLabel || 'Nobody in frame'}</span>
+      </p>
 
       <div ref={viewportRef} className="flex-1 relative overflow-hidden">
         {error ? (

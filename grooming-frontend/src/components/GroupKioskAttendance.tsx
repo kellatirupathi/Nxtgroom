@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch, Users } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch } from 'lucide-react';
 import { apiFetch, ApiError } from '../api';
 import GroupCameraCapture from './GroupCameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
@@ -61,14 +61,13 @@ interface GroupResult extends GroupResponse {
  * comes back from the server, which applies the same rules to each person as
  * the single-person screen applies to one.
  */
-export default function GroupKioskAttendance() {
+export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'environment' }) {
   // Full screen is black around the camera, so the lines above it turn light.
   const fullScreen = useContext(AttendanceFullScreenContext);
   const [result, setResult] = useState<GroupResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fix, setFix] = useState<Fix | null>(null);
-  const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const resultTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const submitInFlight = useRef(false);
@@ -141,28 +140,24 @@ export default function GroupKioskAttendance() {
   );
 
   return (
-    <div className="w-full h-full flex flex-col">
-      <div className="mb-2 shrink-0 flex items-center justify-between gap-4">
-        <h2 className={`text-lg font-extrabold ${fullScreen ? 'text-white' : 'text-slate-800'} flex items-center gap-2`}>
-          <Users size={18} className={fullScreen ? 'text-indigo-300' : 'text-indigo-600'} aria-hidden="true" />
-          Group attendance
-        </h2>
-        <p className={`text-xs font-medium ${fullScreen ? 'text-slate-300' : 'text-slate-500'} flex items-center gap-1.5 shrink-0`}>
-          <MapPin size={14} className={fix ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
+    <div className={`relative w-full h-full overflow-hidden bg-black ${fullScreen ? '' : 'rounded-md'}`}>
+      <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+3.75rem)] z-10 flex flex-wrap items-center justify-between gap-2 text-white">
+        <h2 className="rounded-md bg-black/50 px-2 py-1 text-sm font-bold shadow-sm">Group attendance</h2>
+        <p className="flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs font-medium shadow-sm">
+          <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
           {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
         </p>
       </div>
 
       {error && (
-        <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700 shrink-0">
+        <div role="alert" className="absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+6.5rem)] z-20 rounded-md border border-rose-200 bg-rose-50/95 p-3 text-sm font-medium text-rose-700">
           {error}
         </div>
       )}
 
-      <div className={`relative flex-1 min-h-0 rounded-md overflow-hidden border ${fullScreen ? 'border-slate-800' : 'border-slate-200'} bg-black`}>
+      <div className="absolute inset-0">
         <GroupCameraCapture
           facing={facing}
-          onFlip={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
           onCapture={submit}
         />
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   browserFullscreenSupported,
+  preferAppFullscreen,
   declineFullscreen,
   FULLSCREEN_CHANGE_EVENTS,
   FULLSCREEN_DECLINED_KEY,
@@ -117,22 +118,21 @@ test('the attendance screen offers full screen, closes it behind a question, and
     'Start full screen',
     'Not now',
     'Full screen',
-    'aria-label="Exit full screen"',
+    "'Exit full screen'",
     'Exit full screen?',
     'cancelLabel="Stay in full screen"',
     'confirmLabel="Exit"',
-    'Esc also exits',
   ]) {
     assert.ok(screen.includes(text), `missing ${text}`);
   }
   // Over the whole window, above the bottom bar's sheet (z-46) and below every
   // dialog (z-60 and up), so a confirmation or a toast still shows on top.
-  assert.match(screen, /'fixed inset-0 z-\[55\] flex flex-col bg-slate-950/);
+  assert.match(screen, /'fixed inset-0 z-\[55\] overflow-hidden bg-black/);
   // Out of full screen the element keeps the classes it always had.
-  assert.match(screen, /: 'w-full h-full flex flex-col'\}/);
+  assert.match(screen, /: 'relative w-full h-full overflow-hidden rounded-md bg-black'\}/);
   // One element restyled, not two trees: the camera must not restart.
-  assert.equal(screen.match(/<KioskAttendance onExit=\{onExit\} \/>/g).length, 1);
-  assert.equal(screen.match(/<GroupScreen \/>/g).length, 1);
+  assert.equal(screen.match(/<KioskAttendance onExit=\{onExit\} facing=\{facing\} onFlip=\{flipCamera\} \/>/g).length, 1);
+  assert.equal(screen.match(/<GroupScreen facing=\{facing\} \/>/g).length, 1);
 });
 
 test('the full-screen switch lives in its own hook and leaves full screen when the screen goes', () => {
@@ -141,16 +141,16 @@ test('the full-screen switch lives in its own hook and leaves full screen when t
   assert.match(hook, /if \(!now\) setActive\(false\)/);
   assert.match(hook, /useEffect\(\(\) => \(\) => \{\s*void leaveBrowserFullscreen\(\);\s*\}, \[\]\)/);
   // The app's web view is never asked; only its menus are hidden.
-  assert.match(hook, /const supported = !native && browserFullscreenSupported\(\)/);
+  assert.match(hook, /const supported = !native && !preferAppFullscreen\(\) && browserFullscreenSupported\(\)/);
 });
 
-test('both camera screens only change colour in full screen', () => {
+test('both camera screens place status over a preview that fills their panel', () => {
   for (const file of ['components/KioskAttendance.tsx', 'components/GroupKioskAttendance.tsx']) {
     const screen = source(file);
     assert.match(screen, /const fullScreen = useContext\(AttendanceFullScreenContext\)/, file);
-    assert.match(screen, /fullScreen \? 'text-white' : 'text-slate-800'/, file);
-    assert.match(screen, /fullScreen \? 'text-slate-300' : 'text-slate-500'/, file);
-    assert.match(screen, /fullScreen \? 'border-slate-800' : 'border-slate-200'/, file);
+    assert.ok(screen.includes('relative w-full h-full overflow-hidden bg-black'), file);
+    assert.ok(screen.includes('pointer-events-none absolute inset-x-3'), file);
+    assert.ok(!screen.includes('mb-2 shrink-0'), 'the heading must not reserve a camera band');
   }
 });
 
@@ -158,4 +158,15 @@ test('the app shell is untouched: full screen is entirely inside the Attendance 
   const app = source('App.tsx');
   assert.ok(!/fullscreen/i.test(app));
   assert.match(app, /<AttendanceScreen onExit=\{\(\) => navigate\('daily-records'\)\} \/>/);
+});
+
+
+test('Apple touch devices use app fullscreen to avoid the browser left exit control', () => {
+  assert.equal(preferAppFullscreen({ userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_0)' }), true);
+  assert.equal(preferAppFullscreen({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)' }), true);
+  assert.equal(preferAppFullscreen({ platform: 'MacIntel', maxTouchPoints: 5 }), true);
+  assert.equal(preferAppFullscreen({ platform: 'MacIntel', maxTouchPoints: 0 }), false);
+  assert.equal(preferAppFullscreen({ platform: 'Win32', maxTouchPoints: 10 }), false);
+  assert.equal(preferAppFullscreen({ userAgent: 'Android', maxTouchPoints: 5 }), false);
+  assert.equal(preferAppFullscreen(null), false);
 });

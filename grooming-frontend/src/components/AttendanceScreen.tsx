@@ -1,5 +1,5 @@
 import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
-import { Maximize, RefreshCw, User, Users, X } from 'lucide-react';
+import { Maximize, RefreshCw, SwitchCamera, User, Users, X } from 'lucide-react';
 import BrandedLoader from './BrandedLoader';
 import ConfirmDialog from './ConfirmDialog';
 import KioskAttendance from './KioskAttendance';
@@ -134,6 +134,8 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
   // the flag is cleared once the screen has mounted.
   const [mode, setMode] = useState<CaptureMode>(() => (reopenGroupRequested() ? 'group' : 'single'));
   const [groupAttempt, setGroupAttempt] = useState(0);
+  const [facing, setFacing] = useState<'user' | 'environment'>('user');
+  const flipCamera = () => setFacing((current) => current === 'user' ? 'environment' : 'user');
   // A lazy component remembers a failed download for good, so a retry needs a
   // new one; the import underneath is shared and fetched once.
   const [GroupScreen, setGroupScreen] = useState(() => lazy(loadGroupScreen));
@@ -184,17 +186,11 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
       type="button"
       onClick={() => setMode(value)}
       aria-pressed={mode === value}
-      className={`flex items-center gap-1.5 rounded-md font-bold transition-colors ${
-        fullScreen.active ? 'px-4 py-2.5 text-sm' : 'px-3 py-1.5 text-xs'
-      } ${
-        mode === value
-          ? 'bg-indigo-600 text-white'
-          : fullScreen.active
-            ? 'text-slate-200 hover:bg-slate-800'
-            : 'bg-white text-slate-600 hover:bg-slate-100'
+      className={`flex min-h-11 items-center gap-1.5 rounded-md px-3 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:text-sm ${
+        mode === value ? 'bg-indigo-600 text-white' : 'text-white hover:bg-white/15'
       }`}
     >
-      <Icon size={fullScreen.active ? 16 : 14} aria-hidden="true" />
+      <Icon size={16} className="hidden sm:block" aria-hidden="true" />
       {label}
     </button>
   );
@@ -206,57 +202,56 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
     // has one, hides its address bar as well.
     <div
       className={fullScreen.active
-        ? 'fixed inset-0 z-[55] flex flex-col bg-slate-950 px-3 sm:px-4 pt-[max(0.75rem,var(--inset-top))] pb-[max(0.75rem,var(--inset-bottom))]'
-        : 'w-full h-full flex flex-col'}
+        ? 'fixed inset-0 z-[55] overflow-hidden bg-black'
+        : 'relative w-full h-full overflow-hidden rounded-md bg-black'}
     >
-      <div className="mb-2 shrink-0 flex items-center justify-between gap-2">
-        {/* One row, above the screen rather than inside it, so neither camera
-            has to know the other exists. */}
-        <div
-          className={`flex items-center gap-1.5 rounded-md border p-1 w-fit ${
-            fullScreen.active ? 'border-slate-700 bg-slate-900/80' : 'border-slate-200 bg-slate-50'
-          }`}
-        >
-          {tab('single', 'One person', User)}
+      {/* Controls float above the preview without reserving any camera height. */}
+      <div className="pointer-events-none absolute inset-x-0 top-[max(0.75rem,var(--inset-top))] z-30 flex items-start justify-between gap-2 px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-lg border border-white/25 bg-black/50 p-1 shadow-lg backdrop-blur-sm" role="group" aria-label="Attendance capture mode">
+          {tab('single', 'Single', User)}
           {tab('group', 'Group', Users)}
         </div>
-
-        {fullScreen.active ? (
-          <div className="flex items-center gap-3 shrink-0">
-            {/* Only where there is a keyboard to press it on. */}
-            {fullScreen.browser && (
-              <span className="hidden text-sm text-slate-400 [@media(pointer:fine)]:inline">Esc also exits</span>
-            )}
+        <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
+          {!fullScreen.active && (
             <button
               type="button"
-              onClick={() => setConfirmingExit(true)}
-              aria-label="Exit full screen"
-              title="Exit full screen"
-              className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-white/50 bg-slate-800/90 text-white hover:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              onClick={startFullScreen}
+              aria-label="Full screen"
+              title="Full screen"
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white shadow-lg backdrop-blur-sm hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
-              <X size={24} strokeWidth={2.4} aria-hidden="true" />
+              <Maximize size={20} aria-hidden="true" />
             </button>
-          </div>
-        ) : (
+          )}
           <button
             type="button"
-            onClick={startFullScreen}
-            className="flex items-center gap-1.5 shrink-0 rounded-md border border-indigo-600 bg-indigo-600 px-3 py-2.5 text-xs font-bold text-white transition-colors hover:bg-indigo-700"
+            onClick={flipCamera}
+            aria-label={facing === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
+            title="Flip camera"
+            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white shadow-lg backdrop-blur-sm hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
           >
-            <Maximize size={14} aria-hidden="true" />
-            Full screen
+            <SwitchCamera size={22} aria-hidden="true" />
           </button>
-        )}
+          <button
+            type="button"
+            onClick={() => fullScreen.active ? setConfirmingExit(true) : onExit()}
+            aria-label={fullScreen.active ? 'Exit full screen' : 'Close attendance camera'}
+            title={fullScreen.active ? 'Exit full screen' : 'Close attendance camera'}
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-white/50 bg-black/50 text-white shadow-lg backdrop-blur-sm hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+          >
+            <X size={24} strokeWidth={2.4} aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1 min-h-0">
+      <div className="absolute inset-0">
         <AttendanceFullScreenContext.Provider value={fullScreen.active}>
           {mode === 'single' ? (
-            <KioskAttendance onExit={onExit} />
+            <KioskAttendance onExit={onExit} facing={facing} onFlip={flipCamera} />
           ) : (
             <GroupScreenBoundary key={groupAttempt} onRetry={retryGroup}>
               <Suspense fallback={<BrandedLoader label="Loading group attendance" />}>
-                <GroupScreen />
+                <GroupScreen facing={facing} />
               </Suspense>
             </GroupScreenBoundary>
           )}

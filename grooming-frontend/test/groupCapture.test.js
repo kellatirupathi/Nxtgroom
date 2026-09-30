@@ -97,7 +97,7 @@ test('the group screen names everybody rather than counting them', () => {
 });
 
 test('the front camera is the default on the group screen too', () => {
-  const screen = read('src/components/GroupKioskAttendance.tsx');
+  const screen = read('src/components/AttendanceScreen.tsx');
   assert.match(screen, /useState<'user' \| 'environment'>\('user'\)/);
 });
 

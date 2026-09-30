@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   browserFullscreenSupported,
+  preferAppFullscreen,
   declineFullscreen,
   FULLSCREEN_CHANGE_EVENTS,
   fullscreenDeclined,
@@ -30,7 +31,7 @@ export function useAttendanceFullScreen(): AttendanceFullScreen {
   // The app is already edge to edge, and its web view is not a browser tab
   // whose full screen we can rely on, so there only the menus are hidden.
   const [native] = useState(isNativeApp);
-  const supported = !native && browserFullscreenSupported();
+  const supported = !native && !preferAppFullscreen() && browserFullscreenSupported();
   const [browser, setBrowser] = useState(inBrowserFullscreen);
   const [active, setActive] = useState(() => !native && inBrowserFullscreen());
   const [offered, setOffered] = useState(() => offerFullscreenOnOpen({

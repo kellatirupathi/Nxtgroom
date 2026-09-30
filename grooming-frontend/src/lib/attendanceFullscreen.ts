@@ -115,3 +115,14 @@ export function offerFullscreenOnOpen({ native, declined, alreadyFullscreen }: {
 }): boolean {
   return !native && !declined && !alreadyFullscreen;
 }
+
+
+/** iPad's browser fullscreen adds its own left exit button over the camera.
+ * Use the app overlay on Apple touch devices so the right exit is the only one.
+ */
+export function preferAppFullscreen(device: { userAgent?: string; platform?: string; maxTouchPoints?: number } | null = typeof navigator === 'undefined' ? null : navigator): boolean {
+  return Boolean(device && (
+    /iPad|iPhone|iPod/.test(device.userAgent || '')
+    || (device.platform === 'MacIntel' && (device.maxTouchPoints || 0) > 1)
+  ));
+}

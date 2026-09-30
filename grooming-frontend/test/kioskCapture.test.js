@@ -20,7 +20,7 @@ test('the kiosk returns its request promise to the camera', () => {
 });
 
 test('all attendance camera flows open the front camera by default', () => {
-  const kiosk = read('src/components/KioskAttendance.tsx');
+  const kiosk = read('src/components/AttendanceScreen.tsx');
   const evaluation = read('src/components/EvaluateCard.tsx');
   const frontCameraDefault = /useState<'user' \| 'environment'>\('user'\)/;
   assert.match(kiosk, frontCameraDefault);

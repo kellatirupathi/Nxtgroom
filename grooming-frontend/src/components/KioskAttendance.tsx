@@ -43,6 +43,8 @@ interface KioskAttendanceProps {
    * looks next, and it releases the stream on the way out.
    */
   onExit: () => void;
+  facing: 'user' | 'environment';
+  onFlip: () => void;
 }
 
 /**
@@ -59,14 +61,13 @@ interface KioskAttendanceProps {
  * drops the stream when the tab is hidden, so a backgrounded tablet does not
  * hold the camera either.
  */
-export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
+export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttendanceProps) {
   // Full screen is black around the camera, so the lines above it turn light.
   const fullScreen = useContext(AttendanceFullScreenContext);
   const [result, setResult] = useState<KioskResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fix, setFix] = useState<Fix | null>(null);
-  const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const resultTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const submitInFlight = useRef(false);
@@ -159,39 +160,27 @@ export default function KioskAttendance({ onExit }: KioskAttendanceProps) {
       : CircleAlert;
 
   return (
-    <div className="w-full h-full flex flex-col">
-      {/* One short line, so the picture gets the rest of the screen. The
-          instructions that used to sit here are already on the camera itself,
-          where somebody standing in front of it is actually looking: the guide
-          outline shows where to stand, and the guidance line says what to fix
-          when the camera has not fired. Repeating them above the frame only
-          pushed the frame down. */}
-      <div className="mb-2 shrink-0 flex items-center justify-between gap-4">
-        <h2 className={`text-lg font-extrabold ${fullScreen ? 'text-white' : 'text-slate-800'}`}>Attendance</h2>
-        <p className={`text-xs font-medium ${fullScreen ? 'text-slate-300' : 'text-slate-500'} flex items-center gap-1.5 shrink-0`}>
-          <MapPin size={14} className={fix ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
+    <div className={`relative w-full h-full overflow-hidden bg-black ${fullScreen ? '' : 'rounded-md'}`}>
+      <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+3.75rem)] z-10 flex flex-wrap items-center justify-between gap-2 text-white">
+        <h2 className="rounded-md bg-black/50 px-2 py-1 text-sm font-bold shadow-sm">Attendance</h2>
+        <p className="flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs font-medium shadow-sm">
+          <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
           {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
         </p>
       </div>
 
       {error && (
-        <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700 shrink-0">
+        <div role="alert" className="absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+6.5rem)] z-20 rounded-md border border-rose-200 bg-rose-50/95 p-3 text-sm font-medium text-rose-700">
           {error}
         </div>
       )}
 
-      <div className={`relative flex-1 min-h-0 rounded-md overflow-hidden border ${fullScreen ? 'border-slate-800' : 'border-slate-200'} bg-black`}>
-        {/* Mounted for the life of this screen: it captures, resets and is ready
-            for the next person without anybody reopening it. */}
-        {/* Inline, so the sidebar stays visible and usable: this screen is a
-            panel in the app rather than something covering it. Leaving is
-            navigation like any other, which is why there is no close button —
-            onExit remains for the fullscreen callers of this component. */}
+      <div className="absolute inset-0">
         <CameraCapture
           facing={facing}
           autoCapture
           inline
-          onFlip={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
+          onFlip={onFlip}
           onCapture={submit}
           onClose={onExit}
         />

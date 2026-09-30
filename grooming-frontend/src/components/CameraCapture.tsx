@@ -394,10 +394,8 @@ export default function CameraCapture({
         : 'fixed inset-0 z-[120] bg-black flex flex-col'}
       {...(inline ? {} : { role: 'dialog', 'aria-modal': true, 'aria-label': 'Take photo' })}
     >
-      {/* Inline, the safe-area inset belongs to the page rather than to this
-          panel, and the title would repeat the heading already above it. Only
-          the camera flip survives, right-aligned on its own. */}
-      <div
+      {/* Attendance owns its overlay controls; standalone photo capture keeps its toolbar. */}
+      {!inline && <div
         className="flex items-center justify-between px-4 py-3 text-white"
         style={inline ? undefined : { paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
       >
@@ -420,7 +418,7 @@ export default function CameraCapture({
         >
           <SwitchCamera size={22} aria-hidden="true" />
         </button>
-      </div>
+      </div>}
 
       <div ref={viewportRef} className="flex-1 relative overflow-hidden">
         {error ? (
