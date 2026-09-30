@@ -149,8 +149,8 @@ export function photoLinkError(photoUrl) {
  * Errors are sentences an admin can act on, naming the value that was wrong,
  * and every problem in the row is reported at once rather than one per try.
  *
- * `keptRole` is a role filled in from the instructor's record, accepted as
- * it is.
+ * `keptRole` is the role on the instructor's record, accepted as it is
+ * whether the sheet left it blank or repeated it.
  *
  * `requirePhoto: false` leaves the photo link out of the errors and returns
  * its problem as `photoError` instead, for the import, which only needs a
@@ -177,9 +177,10 @@ export function validateImportFields(raw, colleges, { requirePhoto = true, keptR
   else if (!gender) errors.push(`Gender "${genderText}" must be Male or Female`);
 
   const roleText = cell("role");
-  // A role kept from the roster is taken as it is, even one the import would
-  // not accept from a sheet, such as a synced "Trainee".
-  const role = normalizeImportRole(roleText) ?? (keptRole && roleText === keptRole ? keptRole : null);
+  // The role already on record is taken as it is, even one the import would
+  // not accept as a new role, such as a synced "Trainee".
+  const role = normalizeImportRole(roleText)
+    ?? (keptRole && comparable(roleText) === comparable(keptRole) ? keptRole : null);
   if (!roleText) errors.push("Role is missing");
   else if (!role) errors.push(`Role "${roleText}" must be ${ROLE_CHOICES}`);
 
@@ -441,7 +442,7 @@ async function checkRows(db, rows, deps) {
     const { merged, filled } = match.existing
       ? fillFromRecord(raw, match.existing.record)
       : { merged: raw, filled: [] };
-    const keptRole = filled.includes("role") ? merged.role : "";
+    const keptRole = match.existing ? text(RECORD_VALUES.role(match.existing.record)) : "";
     return {
       row: raw?.row ?? null,
       match,

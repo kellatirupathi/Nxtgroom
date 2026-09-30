@@ -285,6 +285,18 @@ test("blank cells for an existing instructor are filled from their record", asyn
   assert.deepEqual(result.filled, ["name", "email", "gender", "role", "institute"]);
 });
 
+test("a sheet repeating the role on record is accepted even if it is not a standard one", async () => {
+  const db = fakeDb({
+    instructors: [{ _id: "i-1", name: "Asha", email: "asha.rao@example.com", employee_id: "EMP-1", gender: "FEMALE", instructor_role: "Trainee", college_id: "c-hyd", face_ids: ["f"] }],
+  });
+  const [kept] = await previewImportRows(db, [goodRow({ role: "trainee", photo_url: "" })], await deps());
+  assert.equal(kept.ok, true, JSON.stringify(kept.errors));
+  assert.equal(kept.value.role, "Trainee");
+  // A different unknown role is still refused.
+  const [other] = await previewImportRows(db, [goodRow({ role: "Teacher", photo_url: "" })], await deps());
+  assert.match(other.errors[0], /Role "Teacher" must be/);
+});
+
 test("the sheet's values win over the record where it gives them", async () => {
   const db = fakeDb({
     instructors: [{ _id: "i-1", name: "Old Name", email: "asha.rao@example.com", gender: "MALE", role: "INSTRUCTOR", college_id: "c-blr-1", face_ids: ["f"] }],
