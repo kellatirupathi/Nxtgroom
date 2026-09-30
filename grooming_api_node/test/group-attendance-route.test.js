@@ -170,12 +170,12 @@ test("a passer-by in the background is not recorded as an unidentified check-in"
   assert.ok(!branch.includes("beginUpload("), "nor may their photograph be stored");
 });
 
-test("the tablet hold is taken only when a record for a stranger is at stake", async () => {
+test("the tablet hold suppresses unknown-only repeats and never blocks recognised group members", async () => {
   // A frame where everybody matched cannot create duplicates — each of them is
   // answered from their own day's record — so it must not be blocked by the
   // hold, only start it.
   const group = await routeSource("/auto/group");
-  const guard = /const willRecordStrangers = identified\.people\.some\(\(person\) => \(([\s\S]*?)\)\);/.exec(group);
+  const guard = /const hasUnrecognisedFaces = identified\.people\.some\(\(person\) => \(([\s\S]*?)\)\);/.exec(group);
   assert.ok(guard, "the hold must be decided from the outcomes");
   assert.ok(
     !guard[1].includes("TOO_SMALL"),
@@ -194,7 +194,7 @@ test("every person's line carries a time, so the tablet can show one next to the
   assert.match(group, defaults, "a line with nothing known must say so with nulls, not omit the fields");
 
   const recorded = [...group.matchAll(/recorded_at: now,/g)];
-  assert.equal(recorded.length, 3, "check-in, check-out and an unidentified arrival each record a time");
+  assert.equal(recorded.length, 2, "only recognised check-in and check-out record a time");
 
   // Somebody told they already checked in is told when.
   assert.ok(group.includes("check_in_time: today?.check_in_time || null"), "too-early and already-done must carry the day's check-in");

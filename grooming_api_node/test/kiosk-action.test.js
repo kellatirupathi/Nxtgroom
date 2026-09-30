@@ -47,23 +47,22 @@ test("a day already closed records nothing", () => {
   assert.equal(kioskActionRecorded(KIOSK_ACTIONS.ALREADY_DONE), false);
 });
 
-test("an unrecognised face still checks in", () => {
-  // The asymmetry the design rests on: a check-in creates a record somebody can
-  // name later, while a check-out must close one specific session.
+test("an unrecognised face records nothing", () => {
+  // Without an identity neither arrival nor departure may be recorded.
   assert.equal(
     decideKioskAction({ matched: false, availability: "not_checked_in_today" }),
-    KIOSK_ACTIONS.UNIDENTIFIED,
+    KIOSK_ACTIONS.NOT_RECOGNISED,
   );
-  assert.equal(kioskActionRecorded(KIOSK_ACTIONS.UNIDENTIFIED), true);
+  assert.equal(kioskActionRecorded(KIOSK_ACTIONS.NOT_RECOGNISED), false);
 });
 
-test("an unrecognised face is unidentified whatever the day looks like", () => {
+test("an unrecognised face is rejected whatever the day looks like", () => {
   // Without a match there is no instructor whose day could be consulted, so no
   // availability verdict can turn this into a check-out.
   for (const availability of ["available", "too_early", "already_checked_out_today"]) {
     assert.equal(
       decideKioskAction({ matched: false, availability }),
-      KIOSK_ACTIONS.UNIDENTIFIED,
+      KIOSK_ACTIONS.NOT_RECOGNISED,
       `${availability} must not produce a check-out for an unmatched face`,
     );
   }
@@ -126,7 +125,7 @@ test("one minute remaining is not pluralised", () => {
 test("an unrecognised face is told what happened and what to do", () => {
   // It is the one outcome where the person cannot tell from the screen whether
   // anything was saved, so the message says both.
-  const described = describeKioskAction(KIOSK_ACTIONS.UNIDENTIFIED, {});
+  const described = describeKioskAction(KIOSK_ACTIONS.NOT_RECOGNISED, {});
   assert.match(described.title, /not recognised/i);
   assert.match(described.detail, /administrator/i);
   assert.equal(described.tone, "warning");

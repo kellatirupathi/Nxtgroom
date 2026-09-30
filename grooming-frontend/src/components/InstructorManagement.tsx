@@ -419,8 +419,8 @@ export default function InstructorManagement() {
                       <span className="flex items-center gap-1.5">
                         {ins.name}
                         {/* Recognition needs an enrolled face. Without one this
-                            instructor reaches the unidentified queue on every
-                            check-in, which is worth seeing from the list. */}
+                            instructor cannot check in automatically, which
+                            is worth seeing from the list. */}
                         {!ins.face_count && (
                           <span title="No reference photo: this instructor will not be recognised automatically">
                             <CircleAlert size={14} className="text-amber-500 shrink-0" aria-label="No reference photo" />

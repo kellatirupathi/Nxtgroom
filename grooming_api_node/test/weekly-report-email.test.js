@@ -62,36 +62,6 @@ test("a populated week renders every figure it claims to", () => {
 });
 
 /**
- * The permission guard awaits, so it has to be wrapped.
- *
- * Express 4 does not catch a rejected promise returned by middleware. An
- * unwrapped guard therefore failed twice over: the caller received no reply
- * and hung until the socket was destroyed, and the rejection reached the
- * process-level unhandledRejection listener, which shuts the API down. The
- * guard reads access settings from the database on a thirty-second cache, so a
- * failover or a pool timeout was enough to turn one request for the
- * unidentified queue into an outage for everybody.
- *
- * Asserted against the source because the guard is module-private, and
- * exporting a three-line function to test it would widen the module's surface
- * for less than this costs.
- */
-test("the identify guard is wrapped so a database fault cannot escape it", async () => {
-  const source = await readFile(new URL("../src/routes/attendanceRoutes.js", import.meta.url), "utf8");
-
-  assert.match(
-    source,
-    /const requireIdentifyPermission = asyncRoute\(/,
-    "the guard must be asyncRoute-wrapped",
-  );
-  assert.doesNotMatch(
-    source,
-    /async function requireIdentifyPermission/,
-    "a bare async middleware leaves its rejection uncaught",
-  );
-});
-
-/**
  * A lost lease after SES has accepted the message must not retry.
  *
  * deliverNotification sends, then transitions the job to "sent" under its own

@@ -5,7 +5,6 @@ import {
   LayoutGrid,
   History,
   UserCog,
-  UserRoundSearch,
   Users,
   Settings,
   User,
@@ -20,12 +19,6 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   adminOnly?: boolean;
-  /**
-   * Gated on the identify permission instead of on role. A BOA granted it is
-   * usually the only person who can recognise a face from their own campus, so
-   * role alone would hide the queue from exactly the right people.
-   */
-  identifyOnly?: boolean;
 }
 
 /**
@@ -41,9 +34,6 @@ const PRIMARY_ITEMS: NavItem[] = [
 
 const OVERFLOW_ITEMS: NavItem[] = [
   { tab: 'institutes', label: 'Institutes', icon: ChartColumnBig, adminOnly: true },
-  // Gated on the identify permission rather than on role, so a BOA who has been
-  // granted it still reaches the queue.
-  { tab: 'unidentified', label: 'Unidentified', icon: UserRoundSearch, identifyOnly: true },
   { tab: 'boa-management', label: 'Users', icon: Users, adminOnly: true },
   { tab: 'settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
@@ -53,8 +43,6 @@ interface BottomNavProps {
   navigate: (tab: string) => void;
   role: Role | null;
   email: string | null;
-  /** Whether to offer the unidentified queue; see Sidebar for why it is its own flag. */
-  canIdentify?: boolean;
   onLogout: () => void;
   onOpenProfile: () => void;
   onOpenChangePassword: () => void;
@@ -72,7 +60,6 @@ export default function BottomNav({
   navigate,
   role,
   email,
-  canIdentify = false,
   onLogout,
   onOpenProfile,
   onOpenChangePassword,
@@ -83,9 +70,6 @@ export default function BottomNav({
   const visible = (items: NavItem[]) =>
     items.filter((item) => {
       if (item.adminOnly && !isElevatedRole(role)) return false;
-      // Administrators reach the queue from Settings; a BOA with the
-      // permission cannot open Settings, so it stays in their menu.
-      if (item.identifyOnly && (!canIdentify || isElevatedRole(role))) return false;
       return true;
     });
 

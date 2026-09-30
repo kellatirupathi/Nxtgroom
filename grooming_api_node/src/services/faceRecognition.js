@@ -117,9 +117,8 @@ function failure(reason) {
 /**
  * Provider faults are recorded and reported, never thrown.
  *
- * A Rekognition outage during check-in must not lose the attendance record. The
- * caller treats PROVIDER_ERROR exactly like an unrecognised face: the record is
- * saved unidentified and an admin attaches the name afterwards.
+ * The caller reports a provider outage as an unrecognised capture and saves
+ * no attendance or photograph, so the instructor can retry.
  */
 function providerFailure(operation, error) {
   incrementMetric("rekognition_request_failures_total");
@@ -433,7 +432,7 @@ export async function detectFacesForGroup(imageBuffer, { maxFaces = 0 } = {}) {
   }))
     // A low-confidence detection in a group is usually a pattern on a wall or a
     // face on a poster. Searching for it costs a call and can only produce an
-    // unidentified record nobody can resolve.
+    // capture nobody can identify.
     .filter((face) => face.confidence >= config.rekognitionMinFaceConfidence
       && face.box.width > 0
       && face.box.height > 0);

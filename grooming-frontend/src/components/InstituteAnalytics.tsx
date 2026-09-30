@@ -36,7 +36,6 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
   { key: 'present_percent', label: 'Present', numeric: true },
   { key: 'compliance_percent', label: 'Compliance', numeric: true },
   { key: 'non_compliant', label: 'Non-compliant', numeric: true },
-  { key: 'unidentified', label: 'Unidentified', numeric: true },
   { key: 'enrolled_percent', label: 'Faces enrolled', numeric: true },
 ];
 
@@ -253,11 +252,6 @@ export default function InstituteAnalytics() {
                         {formatPercent(row.compliance_percent)}
                       </td>
                       <td className={`${cell} text-right tabular-nums text-slate-700`}>{formatCount(row.non_compliant)}</td>
-                      <td className={`${cell} text-right tabular-nums`}>
-                        {row.unidentified > 0
-                          ? <span className="inline-flex rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white">{formatCount(row.unidentified)}</span>
-                          : <span className="text-slate-400">0</span>}
-                      </td>
                       <td className={`${cell} text-right tabular-nums`}>
                         {row.low_enrolment ? (
                           <span

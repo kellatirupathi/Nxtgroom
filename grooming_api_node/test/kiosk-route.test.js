@@ -163,7 +163,7 @@ test("only an unrecognised frame can be refused as a duplicate", async () => {
   assert.ok(/else if \(!claimCapture\(tabletKey/.test(route), "the claim belongs to the unrecognised branch");
   assert.ok(duplicate > claim, "the duplicate reply follows a refused claim");
   assert.equal(
-    route.includes("UNIDENTIFIED_CAPTURE_WINDOW_MS"),
+    route.includes("CAPTURE_WINDOW_MS"),
     true,
     "the hold is the short tablet window, not a long one",
   );
@@ -172,23 +172,17 @@ test("only an unrecognised frame can be refused as a duplicate", async () => {
 test("a recognised frame briefly protects the tablet from a trailing NO_FACE frame", async () => {
   const { route } = await routeSource("/auto");
   const matchedTabletGuard = route.indexOf("rememberCapture(tabletKey, tabletHold)");
-  const unidentifiedCommit = route.indexOf("commitUnidentifiedCheckIn(");
-  assert.ok(matchedTabletGuard >= 0 && matchedTabletGuard < unidentifiedCommit);
+  const unknownReply = route.indexOf("action === KIOSK_ACTIONS.NOT_RECOGNISED");
+  assert.ok(matchedTabletGuard >= 0 && matchedTabletGuard < unknownReply);
 });
 
-test("an unrecognised face is recorded as an arrival, never as a departure", async () => {
-  // A check-out closes one specific open session; there is no way to tell which
-  // one an unidentified photograph belongs to.
+test("an unrecognised face is rejected before storage or attendance writes", async () => {
   const { route } = await routeSource("/auto");
-  const unidentified = route.indexOf("action === KIOSK_ACTIONS.UNIDENTIFIED");
-  const commitUnidentified = route.indexOf("commitUnidentifiedCheckIn(");
-  assert.ok(unidentified >= 0 && commitUnidentified > unidentified);
-  // And it returns before ever reaching the check-out update.
-  const checkoutUpdate = route.indexOf("check_out_time: null");
-  assert.ok(
-    commitUnidentified < checkoutUpdate,
-    "the unidentified branch must return before the check-out path",
-  );
+  const refusal = route.indexOf("action === KIOSK_ACTIONS.NOT_RECOGNISED");
+  const upload = route.indexOf("const uploading = uploadPhoto(");
+  assert.ok(refusal >= 0 && refusal < upload);
+  assert.equal(route.includes("commitUnidentifiedCheckIn("), false);
+  assert.match(route.slice(refusal, upload), /recorded: false/);
 });
 
 test("the check-out update is guarded so one session cannot be closed twice", async () => {
@@ -257,11 +251,11 @@ test("the decision matches what the day actually looks like", () => {
   );
 });
 
-test("an unmatched face is an arrival whatever the day looks like", () => {
+test("an unmatched face is rejected whatever the day looks like", () => {
   const open = { check_in_time: new Date(Date.UTC(2026, 8, 11, 3, 30)), check_out_time: null };
   const afternoon = new Date(Date.UTC(2026, 8, 11, 12, 0));
   assert.equal(
     decideKioskAction({ matched: false, availability: checkoutAvailability(open, afternoon) }),
-    KIOSK_ACTIONS.UNIDENTIFIED,
+    KIOSK_ACTIONS.NOT_RECOGNISED,
   );
 });

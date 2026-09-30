@@ -10,7 +10,7 @@ interface InstructorSearchSelectProps {
   disabled?: boolean;
   /**
    * A shorter box for sitting in a row of small controls, such as a card in
-   * the unidentified queue. The results list keeps a readable width even when
+   * instructor selection. The results list keeps a readable width even when
    * the box itself is narrow.
    */
   compact?: boolean;

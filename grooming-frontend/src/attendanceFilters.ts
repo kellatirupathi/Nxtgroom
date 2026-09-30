@@ -295,7 +295,6 @@ export const STATUS_FILTER_OPTIONS: ReadonlyArray<{ value: AttendanceStatus; lab
   { value: 'non_compliant', label: 'Non-compliant' },
   { value: 'unassessed', label: 'Not assessed' },
   { value: 'pending', label: 'Pending AI' },
-  { value: 'unidentified', label: 'Unidentified' },
   { value: 'error', label: 'Analysis error' },
 ];
 
@@ -310,6 +309,8 @@ export function filterAttendanceRecords(
 ): AttendanceRecord[] {
   const term = search.trim().toLowerCase();
   return records.filter((record) => {
+    // Ignore historical unknown rows even if an older API response is cached.
+    if (record.status === 'unidentified') return false;
     if (role && record.instructor_role !== role) return false;
     if (college && record.college_name !== college) return false;
     if (status && normalizeAttendanceStatus(record.status) !== status) return false;

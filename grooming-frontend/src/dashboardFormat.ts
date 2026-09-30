@@ -86,7 +86,6 @@ export type InstituteSortKey =
   | 'present_percent'
   | 'compliance_percent'
   | 'non_compliant'
-  | 'unidentified'
   | 'enrolled_percent';
 
 export interface InstituteSort {

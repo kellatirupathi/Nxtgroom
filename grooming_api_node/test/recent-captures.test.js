@@ -7,7 +7,7 @@ const {
   rememberCapture,
   resetRecentCaptures,
   tabletCaptureKey,
-  UNIDENTIFIED_CAPTURE_WINDOW_MS,
+  CAPTURE_WINDOW_MS,
   wasRecentlyCaptured,
 } = recentCaptures;
 
@@ -34,7 +34,7 @@ test("a tablet is held for a few seconds, then free", () => {
   assert.equal(wasRecentlyCaptured(key, { now }), false);
   rememberCapture(key, { now });
   assert.equal(wasRecentlyCaptured(key, { now: now + 1_000 }), true);
-  assert.equal(wasRecentlyCaptured(key, { now: now + UNIDENTIFIED_CAPTURE_WINDOW_MS }), false);
+  assert.equal(wasRecentlyCaptured(key, { now: now + CAPTURE_WINDOW_MS }), false);
 });
 
 test("claiming is an atomic check-and-set for overlapping requests", () => {
@@ -43,7 +43,7 @@ test("claiming is an atomic check-and-set for overlapping requests", () => {
 
   assert.equal(claimCapture(key, { now }), true);
   assert.equal(claimCapture(key, { now }), false);
-  assert.equal(claimCapture(key, { now: now + UNIDENTIFIED_CAPTURE_WINDOW_MS }), true);
+  assert.equal(claimCapture(key, { now: now + CAPTURE_WINDOW_MS }), true);
 });
 
 test("reading does not extend the hold", () => {
@@ -51,10 +51,10 @@ test("reading does not extend the hold", () => {
   const now = 1_000_000;
 
   rememberCapture(key, { now });
-  for (let at = now; at < now + UNIDENTIFIED_CAPTURE_WINDOW_MS; at += 200) {
+  for (let at = now; at < now + CAPTURE_WINDOW_MS; at += 200) {
     wasRecentlyCaptured(key, { now: at });
   }
-  assert.equal(wasRecentlyCaptured(key, { now: now + UNIDENTIFIED_CAPTURE_WINDOW_MS }), false);
+  assert.equal(wasRecentlyCaptured(key, { now: now + CAPTURE_WINDOW_MS }), false);
 });
 
 test("two tablets do not share a hold", () => {
@@ -75,5 +75,5 @@ test("an empty key is never treated as held", () => {
 
 test("the hold is a few seconds, not a queue", () => {
   // Short enough that a failed request is retryable almost at once.
-  assert.ok(UNIDENTIFIED_CAPTURE_WINDOW_MS >= 1_000 && UNIDENTIFIED_CAPTURE_WINDOW_MS <= 5_000);
+  assert.ok(CAPTURE_WINDOW_MS >= 1_000 && CAPTURE_WINDOW_MS <= 5_000);
 });

@@ -177,7 +177,6 @@ export function buildInstituteRows({
       compliant,
       non_compliant: nonCompliant,
       compliance_percent: percent(compliant, compliant + nonCompliant),
-      unidentified: Number(group.unidentified) || 0,
       enrolled: described?.enrolled ?? 0,
       enrolled_percent: described?.enrolled_percent ?? 0,
       low_enrolment: Boolean(described?.low_enrolment),
@@ -202,7 +201,6 @@ export function buildDashboard({
   roster = [],
   weekRecords = [],
   trendRows = [],
-  unidentifiedByCollege = [],
   failedRows = [],
 }) {
   const todayKey = localDateKey(now, timeZone);
@@ -311,11 +309,6 @@ export function buildDashboard({
   }
   escalations.sort((left, right) => right.count - left.count || left.name.localeCompare(right.name));
 
-  // ---- Unidentified queue --------------------------------------------------------
-  // The whole queue, whatever day each arrival was on: this is the figure on
-  // the Unidentified tile, not a count of today.
-  const unidentifiedTotal = unidentifiedByCollege.reduce((sum, row) => sum + (Number(row.count) || 0), 0);
-
   return {
     generated_at: now.toISOString(),
     time_zone: timeZone,
@@ -341,8 +334,6 @@ export function buildDashboard({
       checked_out: checkedOut,
       on_duty: Math.max(0, todayIdentified.length - checkedOut),
       missed_checkout_previous_day: missedCheckout,
-      unidentified_waiting: unidentifiedTotal,
-      unidentified_today: today.filter((record) => !identified(record) && dashboardStatus(record.status) === "unidentified").length,
     },
     status_breakdown: [
       { key: "compliant", count: byStatus.compliant },
@@ -392,7 +383,7 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
   const trendFrom = [trendDays[0], addDaysToKey(todayKey, -7)].sort()[0];
   const trendBounds = dateRangeBoundsInTimeZone(trendFrom, todayKey, timeZone);
 
-  const [roster, weekRecords, trendRows, unidentifiedByCollege] = await Promise.all([
+  const [roster, weekRecords, trendRows] = await Promise.all([
     db.collection("instructors")
       .find({ $and: [ACTIVE, collegeScope] }, { projection: { name: 1, college_id: 1 } })
       .toArray(),
@@ -467,17 +458,6 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
         },
       },
     ]).toArray(),
-    db.collection("attendance").aggregate([
-      {
-        $match: {
-          status: "unidentified",
-          instructor_id: null,
-          deleting_at: { $exists: false },
-          ...collegeScope,
-        },
-      },
-      { $group: { _id: "$college_id", count: { $sum: 1 } } },
-    ]).toArray(),
   ]);
 
   const weekIds = weekRecords
@@ -493,7 +473,6 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
     roster,
     weekRecords,
     trendRows,
-    unidentifiedByCollege,
     failedRows,
   });
 }
@@ -533,7 +512,7 @@ export function normalizeInstituteRange({ from = "", to = "" } = {}, todayKey) {
  * Grouped in one aggregation rather than read record by record, because "All
  * time" covers every attendance record ever written. An identified record is a
  * check-in, counted as compliant or non-compliant by the same statuses
- * dashboardStatus reads; an unnamed one counts only as an unidentified arrival.
+ * dashboardStatus reads. Historical unnamed arrivals do not count as attendance.
  */
 export async function loadInstituteStats(db, { from = "", to = "", now = new Date() } = {}) {
   const timeZone = runtimeConfig().appTimeZone;
@@ -579,9 +558,6 @@ export async function loadInstituteStats(db, { from = "", to = "", now = new Dat
           },
           non_compliant: {
             $sum: { $cond: [{ $and: ["$identified", { $in: ["$status", [...NON_COMPLIANT_STATUSES]] }] }, 1, 0] },
-          },
-          unidentified: {
-            $sum: { $cond: [{ $and: [{ $not: ["$identified"] }, { $eq: ["$status", "unidentified"] }] }, 1, 0] },
           },
           first_day: { $min: "$day" },
         },

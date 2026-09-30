@@ -30,7 +30,6 @@ export type AttendanceStatus =
    * analysed and nothing is queued: it waits for an administrator to attach an
    * instructor. Distinct from pending, which means analysis is still running.
    */
-  | 'unidentified'
   | 'error'
   | 'pending';
 
@@ -80,7 +79,7 @@ export interface Instructor {
   /**
    * How many reference faces are enrolled for this instructor. Zero or absent
    * means recognition cannot identify them, so every check-in reaches the
-   * unidentified queue until a photo is added.
+   * automatic recognition cannot work until a photo is added.
    */
   face_count?: number;
   face_indexed_at?: string | null;
@@ -217,12 +216,6 @@ export interface CurrentUser {
   /** Workspace-wide: whether the Re-analyse control is shown on a report. */
   reanalyse_enabled?: boolean;
   /**
-   * Whether this account may name an unidentified check-in, and discard one.
-   * Off for a BOA until granted, since naming decides whose attendance a
-   * record becomes and enrolls that photograph as a face for them.
-   */
-  can_identify?: boolean;
-  /**
    * Whether this tablet's college identifies the instructor from the check-in
    * photograph. Resolved server-side for the signed-in account's own college,
    * so the capture screen shows a selector only where one still applies.
@@ -244,12 +237,6 @@ export interface UserPermissions {
 export interface AccessSettings {
   boa_can_delete_records: boolean;
   boa_can_delete_checkout: boolean;
-  /**
-   * Whether BOAs may name an unidentified check-in. Deliberately not implied by
-   * the delete permissions: discarding a photograph and deciding whose
-   * attendance record it becomes are different powers.
-   */
-  boa_can_identify: boolean;
 }
 
 export type IdentificationMode = 'FACE_ONLY' | 'SELECTOR';
@@ -326,8 +313,6 @@ export interface DashboardSummary {
   checked_out: number;
   on_duty: number;
   missed_checkout_previous_day: number;
-  unidentified_waiting: number;
-  unidentified_today: number;
 }
 
 export interface DashboardTrendDay {
@@ -369,7 +354,6 @@ export interface DashboardInstitute {
   non_compliant: number;
   compliance_percent: number | null;
   /** Unnamed arrivals at this institute within the range. */
-  unidentified: number;
   enrolled: number;
   enrolled_percent: number;
   low_enrolment: boolean;

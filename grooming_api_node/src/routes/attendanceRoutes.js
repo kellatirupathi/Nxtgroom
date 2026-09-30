@@ -3,7 +3,7 @@ import { rateLimit } from "express-rate-limit";
 import multer from "multer";
 import { withMongoTransaction } from "../config/db.js";
 import { runtimeConfig } from "../config/env.js";
-import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
+import { idMatch, instructorScope, isElevated, requireSuperAdmin } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeGroupImage, normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluateCheckoutNow } from "../services/evaluationWorker.js";
@@ -19,10 +19,7 @@ import {
   usesFaceIdentification,
 } from "../services/identificationSettings.js";
 import {
-  deleteFaces,
   FACE_REASONS,
-  facesToEvict,
-  indexFace,
   isFaceRecognitionConfigured,
   searchFaceByImage,
 } from "../services/faceRecognition.js";
@@ -44,16 +41,8 @@ import {
 import {
   canDeleteAttendance,
   canDeleteCheckout,
-  canIdentifyAttendance,
   getAccessSettings,
 } from "../services/accessSettings.js";
-import {
-  assessIdentification,
-  explainFailure,
-  findRetryCandidates,
-  identifiedRecordUpdate,
-  IDENTIFY_OUTCOMES,
-} from "../services/identifyQueue.js";
 import {
   CHECKOUT_TIMING,
   checkoutTiming,
@@ -64,7 +53,7 @@ import {
   groupTabletCaptureKey,
   rememberCapture,
   tabletCaptureKey,
-  UNIDENTIFIED_CAPTURE_WINDOW_MS,
+  CAPTURE_WINDOW_MS,
 } from "../services/recentCaptures.js";
 import {
   decideKioskAction,
@@ -419,84 +408,6 @@ function lookupIdVariants(ids) {
  * transaction retries with the new profile, or check-in wins and the profile
  * mutation retries and observes the open attendance.
  */
-/**
- * Records a check-in whose face was not recognised.
- *
- * There is no instructor to look up, so none of the usual guards apply: no
- * gender to choose a dress code with, no email to send a report to, and no
- * identity to test today's duplicate rule against. The record is still created,
- * because the photograph and the time and place it was taken are the evidence
- * somebody showed up, and discarding that to keep the data tidy would lose the
- * attendance itself.
- *
- * The college comes from the account the tablet is signed in as. An unidentified
- * record has no instructor to inherit one from, and without it a BOA cannot see
- * the queue containing the photograph they just took — attendanceScope filters
- * them to their own college.
- *
- * Deliberately not transactional: there is no instructor document to guard
- * against a concurrent edit, and no duplicate-day rule to enforce, so the single
- * insert is the whole operation.
- */
-export async function commitUnidentifiedCheckIn(
-  db,
-  {
-    currentUser,
-    coordinates,
-    normalizedImage,
-    photoKey = null,
-    locationAccuracyM = null,
-    capturedAt = null,
-    recognition = null,
-    now = new Date(),
-  }
-) {
-  const attendance = createDocument({
-    // Null rather than absent: the partial index that enforces one record per
-    // instructor per day requires a string instructor_id, so these records sit
-    // outside it and several can exist for one day.
-    instructor_id: null,
-    instructor_name: null,
-    instructor_role: null,
-    college_id: currentUser.collegeId ? String(currentUser.collegeId) : null,
-    boa_id: currentUser.referenceId ? String(currentUser.referenceId) : "super-admin",
-    attendance_day: localDateKey(now, runtimeConfig().appTimeZone),
-    date: now,
-    check_in_time: now,
-    check_out_time: null,
-    location_coordinates: coordinates,
-    location_accuracy_m: locationAccuracyM,
-    check_in_photo_key: photoKey,
-    check_in_photo_captured_at: capturedAt || now,
-    check_out_photo_key: null,
-    // Its own status, so it is never counted as compliant, non-compliant or
-    // merely pending analysis. Nothing was assessed and nothing is queued.
-    status: "unidentified",
-    compliance_status: null,
-    remarks: "The instructor could not be identified from this photo. An administrator needs to attach the right instructor.",
-    // No job is queued, so no queue status is claimed. Analysis runs once an
-    // administrator attaches an instructor and chooses to analyse.
-    evaluation_queue_status: null,
-    checkin_email_status: "not_requested",
-    checkout_email_status: "not_requested",
-    identification: {
-      method: "FACE",
-      outcome: recognition?.reason || "NO_MATCH",
-      // The best score seen, even when it was below the accept threshold: it is
-      // the difference between "nobody resembled this face" and "somebody nearly
-      // did", which is what an administrator resolving the queue wants to know.
-      best_similarity: recognition?.bestSimilarity ?? null,
-      candidate_instructor_id: recognition?.candidateInstructorId || null,
-      attempted_at: now,
-    },
-    mime_type: normalizedImage.mimeType,
-    created_at: now,
-    updated_at: now,
-  });
-  await db.collection("attendance").insertOne(attendance);
-  return { outcome: "created_unidentified", attendance };
-}
-
 export async function commitGuardedCheckIn(
   db,
   {
@@ -631,7 +542,7 @@ attendanceRouter.post(
     if (!isFaceRecognitionConfigured()) {
       return res.status(503).json({
         detail: "Face recognition is not available right now, so nobody can be identified.",
-        action: KIOSK_ACTIONS.UNIDENTIFIED,
+        action: KIOSK_ACTIONS.NOT_RECOGNISED,
       });
     }
 
@@ -660,25 +571,9 @@ attendanceRouter.post(
         )
       : null;
 
-    /**
-     * A recognised person is never held.
-     *
-     * Whatever they do next - stay in front of the camera, step back in a few
-     * seconds later - is answered from their day's record: "already checked in"
-     * or "already checked out", recording nothing. The daily unique index is what
-     * guarantees one check-in per day, and the tablet waits for this reply before
-     * it can fire again, so no overlapping request needs guarding. A hold by name
-     * used to sit here, and a request that failed after taking it left that
-     * person silently unable to retry until it expired.
-     *
-     * An unrecognised photograph has no record to answer with, so each one would
-     * become its own unidentified check-in. Those are held briefly per tablet.
-     * A recognised frame starts the same hold, so the next frame catching the
-     * person mid-turn - no face, or a face too blurred to match - is dropped
-     * rather than recorded as a stranger.
-     */
+    // Hold trailing unknown frames briefly; recognised attendance keeps its daily guard.
     const tabletKey = tabletCaptureKey(req.currentUser.email);
-    const tabletHold = { now: now.getTime(), windowMs: UNIDENTIFIED_CAPTURE_WINDOW_MS };
+    const tabletHold = { now: now.getTime(), windowMs: CAPTURE_WINDOW_MS };
     if (instructor) {
       rememberCapture(tabletKey, tabletHold);
     } else if (!claimCapture(tabletKey, tabletHold)) {
@@ -686,7 +581,7 @@ attendanceRouter.post(
       // answered, and nothing is stored for it.
       incrementMetric("kiosk_duplicate_capture_total");
       return res.status(200).json({
-        action: KIOSK_ACTIONS.ALREADY_DONE,
+        action: KIOSK_ACTIONS.NOT_RECOGNISED,
         recorded: false,
         duplicate: true,
         instructor_name: null,
@@ -731,6 +626,17 @@ attendanceRouter.post(
       });
     }
 
+    // Reject an unknown face before generating a storage key or writing attendance.
+    if (action === KIOSK_ACTIONS.NOT_RECOGNISED) {
+      return res.status(200).json({
+        action,
+        recorded: false,
+        instructor_name: null,
+        attendance_id: null,
+        ...describeKioskAction(action),
+      });
+    }
+
     /**
      * The upload runs alongside the rest of the request rather than in front of
      * it.
@@ -754,7 +660,7 @@ attendanceRouter.post(
      */
     const photoKind = action === KIOSK_ACTIONS.CHECK_OUT ? "checkout" : "checkin";
     const photoKey = buildPhotoKey({
-      instructorId: String(instructor?._id || "unidentified"),
+      instructorId: String(instructor._id),
       kind: photoKind,
       mimeType: normalizedImage.mimeType,
       now,
@@ -764,7 +670,7 @@ attendanceRouter.post(
       body: normalizedImage.buffer,
       mimeType: normalizedImage.mimeType,
       metadata: {
-        instructor_id: String(instructor?._id || "unidentified"),
+        instructor_id: String(instructor._id),
         kind: photoKind,
         captured_at: now.toISOString(),
         coordinates: coordinates || "",
@@ -821,38 +727,6 @@ attendanceRouter.post(
       if (await uploading) await compensateUploadedPhoto(db, photoKey, reason);
     };
     const stored = { key: photoKey };
-
-    /**
-     * Nobody matched, so this is recorded as an arrival for an administrator to
-     * name. A departure cannot be: it closes one specific open session, and
-     * there is no way to tell which.
-     */
-    if (action === KIOSK_ACTIONS.UNIDENTIFIED) {
-      const unidentified = await commitUnidentifiedCheckIn(db, {
-        currentUser: req.currentUser,
-        coordinates,
-        normalizedImage,
-        photoKey: stored.key,
-        locationAccuracyM: accuracyMetres,
-        capturedAt: now,
-        recognition: { reason: match.reason, bestSimilarity: null, candidateInstructorId: null },
-        now,
-      });
-      // Nothing is analysed for an unidentified record, so the upload only has
-      // to be accounted for, not waited on before answering.
-      // Held per tablet, not per person: nobody was identified, so there is no
-      // name to remember. Short, because it blocks a real retake.
-      void settleUpload(unidentified.attendance._id, "checkin");
-      if (coordinates) void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
-      incrementMetric("kiosk_unidentified_total");
-      return res.status(202).json({
-        action,
-        recorded: true,
-        instructor_name: null,
-        attendance_id: String(unidentified.attendance._id),
-        ...describeKioskAction(action, {}),
-      });
-    }
 
     const identification = {
       method: "FACE",
@@ -1069,24 +943,17 @@ attendanceRouter.post(
       });
     }
 
-    /**
-     * A short hold, for the same reason the single route has one.
-     *
-     * Unmatched people are the ones that need it: they have no daily record to
-     * be answered from, so a second photograph of the same group within a
-     * moment would create a second unidentified record for each of them. A
-     * frame where everybody matched cannot do that — each of them is answered
-     * "already checked in", which records nothing — so it starts the hold
-     * without being blocked by it.
-     */
-    const willRecordStrangers = identified.people.some((person) => (
+    // Suppress trailing unknown-only frames, while always processing recognised
+    // members of a mixed group. Their daily attendance guards prevent duplicates.
+    const hasUnrecognisedFaces = identified.people.some((person) => (
       person.outcome === GROUP_OUTCOMES.NO_MATCH
       || person.outcome === GROUP_OUTCOMES.AMBIGUOUS
       || person.outcome === GROUP_OUTCOMES.PROVIDER_ERROR
     ));
     const holdKey = groupTabletCaptureKey(req.currentUser.email);
-    const hold = { now: now.getTime(), windowMs: UNIDENTIFIED_CAPTURE_WINDOW_MS };
-    if (!willRecordStrangers) {
+    const hold = { now: now.getTime(), windowMs: CAPTURE_WINDOW_MS };
+    const hasRecognisedFaces = identified.people.some((person) => person.outcome === GROUP_OUTCOMES.MATCHED);
+    if (hasRecognisedFaces || !hasUnrecognisedFaces) {
       rememberCapture(holdKey, hold);
     } else if (!claimCapture(holdKey, hold)) {
       incrementMetric("group_duplicate_capture_total");
@@ -1133,7 +1000,7 @@ attendanceRouter.post(
     /** Begins one person's upload without waiting for it. */
     const beginUpload = (person, instructorId, kind) => {
       const key = buildPhotoKey({
-        instructorId: String(instructorId || "unidentified"),
+        instructorId: String(instructorId),
         kind,
         mimeType: person.image.mimeType,
         now,
@@ -1143,7 +1010,7 @@ attendanceRouter.post(
         body: person.image.buffer,
         mimeType: person.image.mimeType,
         metadata: {
-          instructor_id: String(instructorId || "unidentified"),
+          instructor_id: String(instructorId),
           kind,
           captured_at: now.toISOString(),
           coordinates: coordinates || "",
@@ -1202,7 +1069,7 @@ attendanceRouter.post(
     const processPerson = async (person) => {
       if (!person.image) {
         return answer(person, {
-          action: KIOSK_ACTIONS.UNIDENTIFIED,
+          action: KIOSK_ACTIONS.NOT_RECOGNISED,
           recorded: false,
           instructor_name: null,
           attendance_id: null,
@@ -1212,27 +1079,11 @@ attendanceRouter.post(
         });
       }
 
-      /**
-       * Somebody too far away to identify is told so, and nothing is written.
-       *
-       * This is where a group photograph differs from a single one. The
-       * single-person screen refuses to fire at all when it sees more than one
-       * person, so a colleague crossing the corridor behind the subject can
-       * never reach the server. Here the whole frame is the photograph, and a
-       * passer-by forty feet back is a detected face like any other — recording
-       * them would fill the unidentified queue with people who were not
-       * checking in and leave an administrator to work out which strangers
-       * mattered.
-       *
-       * An instructor who genuinely was standing too far back loses nothing:
-       * they are named on the screen, told to stand closer, and photographed
-       * again a second later. That is a better trade than a record nobody can
-       * resolve.
-       */
+      // Background faces too small to recognise are rejected without storage.
       if (person.outcome === GROUP_OUTCOMES.TOO_SMALL) {
         incrementMetric("group_too_small_total");
         return answer(person, {
-          action: KIOSK_ACTIONS.UNIDENTIFIED,
+          action: KIOSK_ACTIONS.NOT_RECOGNISED,
           recorded: false,
           instructor_name: null,
           attendance_id: null,
@@ -1281,34 +1132,14 @@ attendanceRouter.post(
         });
       }
 
-      if (action === KIOSK_ACTIONS.UNIDENTIFIED) {
-        const { key, uploading } = beginUpload(person, null, "checkin");
-        const unidentified = await commitUnidentifiedCheckIn(db, {
-          currentUser: req.currentUser,
-          coordinates,
-          normalizedImage: person.image,
-          photoKey: key,
-          locationAccuracyM: accuracyMetres,
-          capturedAt: now,
-          recognition: {
-            reason: person.outcome,
-            bestSimilarity: person.similarity,
-            candidateInstructorId: null,
-          },
-          now,
-        });
-        void settleUpload(uploading, unidentified.attendance._id, "checkin");
-        if (coordinates) void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
-        incrementMetric("group_unidentified_total");
+      if (action === KIOSK_ACTIONS.NOT_RECOGNISED) {
         return answer(person, {
           action,
-          recorded: true,
+          recorded: false,
           instructor_name: null,
-          attendance_id: String(unidentified.attendance._id),
-          recorded_at: now,
-          check_in_time: now,
-          title: describeGroupOutcome(person.outcome),
-          detail: "Recorded for an administrator to name.",
+          attendance_id: null,
+          title: "Not recognised — not recorded",
+          detail: "Please try again, or ask an administrator to update your reference photo.",
           tone: "warning",
         });
       }
@@ -1491,7 +1322,7 @@ attendanceRouter.post(
         incrementMetric("group_person_failed_total");
         people.push({
           position: batch[offset].box,
-          action: KIOSK_ACTIONS.UNIDENTIFIED,
+          action: KIOSK_ACTIONS.NOT_RECOGNISED,
           recorded: false,
           instructor_name: null,
           attendance_id: null,
@@ -1596,67 +1427,31 @@ attendanceRouter.post(
 
     const now = new Date();
 
-    /**
-     * A photograph nobody could be identified from is still recorded.
-     *
-     * The alternative is refusing the check-in, which loses the evidence that
-     * somebody turned up because the lighting was poor or their reference photo
-     * is weak. No analysis is queued and no email is sent: gender decides which
-     * dress code applies and there is no instructor to take one from, so a
-     * report now would be an empty one. Both happen once an administrator
-     * attaches the right instructor.
-     */
+    // Face mode rejects unknown captures; selector mode keeps its selected instructor.
     if (recognitionFailure) {
-      const unidentifiedKey = buildPhotoKey({
-        instructorId: "unidentified",
-        kind: "checkin",
-        mimeType: normalizedImage.mimeType,
-        now,
-      });
-      const unidentifiedUpload = await uploadPhoto({
-        key: unidentifiedKey,
-        body: normalizedImage.buffer,
-        mimeType: normalizedImage.mimeType,
-        metadata: {
-          kind: "checkin",
-          identification: "unidentified",
-          outcome: recognitionFailure.reason,
-          captured_at: now.toISOString(),
-          coordinates: coordinates || "",
-        },
-      });
-      if (!unidentifiedUpload.stored) {
-        return res.status(503).json({
-          detail: "Photo storage is unavailable right now. Please try again in a moment.",
-        });
-      }
-
-      const unidentified = await commitUnidentifiedCheckIn(db, {
-        currentUser: req.currentUser,
-        coordinates,
-        normalizedImage,
-        photoKey: unidentifiedKey,
-        locationAccuracyM: Number.parseInt(req.body.location_accuracy_m, 10) || null,
-        capturedAt: now,
-        recognition: recognitionFailure,
-        now,
-      });
-      if (coordinates) {
-        void attachAddressToAttendance(db, unidentified.attendance._id, coordinates);
-      }
-      incrementMetric("checkin_unidentified_total");
-      return res.status(202).json({
-        message: "Check-in recorded, but the instructor could not be identified. An administrator will attach the right instructor.",
-        attendance_id: unidentified.attendance._id,
+      return res.status(422).json({
+        action: KIOSK_ACTIONS.NOT_RECOGNISED,
+        recorded: false,
         identified: false,
         reason: recognitionFailure.reason,
+        detail: "Not recognised — nothing was recorded. Please try again, or ask an administrator to update your reference photo.",
       });
     }
 
     const instructor = await db.collection("instructors").findOne(
       activeInstructorFilter(req.currentUser, instructorId)
     );
-    if (!instructor) return res.status(404).json({ detail: "Instructor not found" });
+    if (!instructor) {
+      if (faceMode) {
+        return res.status(422).json({
+          action: KIOSK_ACTIONS.NOT_RECOGNISED,
+          recorded: false,
+          identified: false,
+          detail: "Not recognised — nothing was recorded. Please try again, or ask an administrator to update your reference photo.",
+        });
+      }
+      return res.status(404).json({ detail: "Instructor not found" });
+    }
     if (!isValidEmail(instructor.email)) {
       return res.status(422).json({
         detail: "This instructor needs a valid email address before check-in reports can be sent.",
@@ -1804,314 +1599,6 @@ async function storeAttendancePhoto({
   });
   return upload.stored ? { stored: true, key } : { stored: false, reason: upload.reason };
 }
-
-/**
- * Guard for queue work: naming a record, and discarding one.
- *
- * Wrapped like every handler, because it awaits. Express 4 does not catch a
- * rejected promise from middleware, so an unwrapped version had two failures
- * for the price of one: the request never received a reply and hung until the
- * server destroyed its socket, and the rejection reached the process-level
- * unhandledRejection listener, which shuts the API down. getAccessSettings
- * reads the database on a thirty-second cache, so any transient fault — a
- * failover, a pool timeout — turned one request for the unidentified queue
- * into an outage for everybody.
- */
-const requireIdentifyPermission = asyncRoute(async (req, res, next) => {
-  const settings = await getAccessSettings(req.app.locals.db);
-  if (!canIdentifyAttendance(req.currentUser, settings)) {
-    return res.status(403).json({ detail: "Not authorized to resolve unidentified check-ins" });
-  }
-  return next();
-});
-
-/**
- * Check-ins whose face was not recognised, oldest first.
- *
- * Scoped like every other attendance read, which is why an unidentified record
- * is stamped with the tablet's college: a BOA can only see their own, and
- * without it the queue would be empty for the person who took the photograph.
- *
- * Each row carries the likely retry suggestions for its own day. They are
- * offered, never applied — the photograph failed to match, so nothing actually
- * links it to the recognised record beyond the college, the day and a few
- * minutes, and discarding somebody's attendance on that basis would be a guess.
- */
-attendanceRouter.get(
-  "/unidentified",
-  requireIdentifyPermission,
-  asyncRoute(async (req, res) => {
-    const db = req.app.locals.db;
-    let pagination;
-    try {
-      pagination = parsePagination(req.query, { defaultLimit: 50, maxLimit: 200 });
-    } catch (error) {
-      if (error instanceof RangeError) return res.status(422).json({ detail: error.message });
-      throw error;
-    }
-
-    const filter = {
-      status: "unidentified",
-      instructor_id: null,
-      deleting_at: { $exists: false },
-      ...attendanceScope(req.currentUser),
-    };
-    const [records, total] = await Promise.all([
-      db.collection("attendance")
-        .find(filter)
-        .sort({ check_in_time: 1 })
-        .skip(pagination.offset)
-        .limit(pagination.limit)
-        .toArray(),
-      db.collection("attendance").countDocuments(filter),
-    ]);
-
-    // One query for every day present in this page, rather than one per row.
-    const days = [...new Set(records.map((row) => row.attendance_day).filter(Boolean))];
-    const sameDayRecords = days.length
-      ? await db.collection("attendance")
-          .find(
-            {
-              attendance_day: { $in: days },
-              instructor_id: { $type: "string" },
-              deleting_at: { $exists: false },
-              ...attendanceScope(req.currentUser),
-            },
-            {
-              projection: {
-                instructor_id: 1,
-                instructor_name: 1,
-                college_id: 1,
-                attendance_day: 1,
-                check_in_time: 1,
-                identification: 1,
-              },
-            }
-          )
-          .toArray()
-      : [];
-    const byDay = new Map();
-    for (const row of sameDayRecords) {
-      const key = String(row.attendance_day);
-      if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key).push(row);
-    }
-
-    return res.json({
-      total,
-      limit: pagination.limit,
-      offset: pagination.offset,
-      records: records.map((record) => ({
-        ...serializeAttendance(record),
-        failure_reason: record.identification?.outcome || null,
-        failure_explanation: explainFailure(record.identification?.outcome),
-        retry_candidates: findRetryCandidates(record, byDay.get(String(record.attendance_day)) || []),
-      })),
-    });
-  })
-);
-
-/**
- * Names an unidentified check-in.
- *
- * The arrival itself is left alone — time, photograph, coordinates and address
- * are what happened, and the only thing missing was who it happened to. The
- * photograph is then enrolled as a face for that instructor, because a
- * correction is the best possible reference: it is a real photo from the tablet
- * in use, in that room's lighting, of the person recognition just failed on.
- *
- * `force` carries an administrator past the already-checked-in warning rather
- * than the server deciding for them: that instructor having a record already is
- * usually a retry the queue has not caught up with, and occasionally is not.
- */
-attendanceRouter.post(
-  "/:attendanceId/identify",
-  requireIdentifyPermission,
-  asyncRoute(async (req, res) => {
-    const db = req.app.locals.db;
-    const instructorId = String(req.body?.instructor_id || "").trim();
-    if (!instructorId || instructorId.length > 100) {
-      return res.status(422).json({ detail: "A valid instructor_id is required" });
-    }
-    const faceMode = String(req.body?.face_mode || "add").toLowerCase();
-    if (!["add", "replace", "none"].includes(faceMode)) {
-      return res.status(422).json({ detail: "face_mode must be add, replace, or none" });
-    }
-    const analyse = req.body?.analyse === true;
-    const force = req.body?.force === true;
-
-    const record = await db.collection("attendance").findOne({
-      _id: idMatch(req.params.attendanceId),
-      deleting_at: { $exists: false },
-      ...attendanceScope(req.currentUser),
-    });
-    const instructor = await db.collection("instructors").findOne(
-      activeInstructorFilter(req.currentUser, instructorId)
-    );
-    const existingRecordToday = instructor
-      ? await db.collection("attendance").findOne(attendanceOnLocalDay(instructor._id))
-      : null;
-
-    const assessment = assessIdentification({ record, instructor, existingRecordToday });
-    if (assessment.outcome === IDENTIFY_OUTCOMES.NOT_FOUND) {
-      return res.status(404).json({ detail: "Unidentified check-in not found" });
-    }
-    if (assessment.outcome === IDENTIFY_OUTCOMES.ALREADY_IDENTIFIED) {
-      return res.status(409).json({
-        detail: assessment.instructor_name
-          ? `This check-in was already identified as ${assessment.instructor_name}.`
-          : "This check-in has already been identified.",
-        outcome: assessment.outcome,
-      });
-    }
-    if (assessment.outcome === IDENTIFY_OUTCOMES.INSTRUCTOR_NOT_FOUND) {
-      return res.status(404).json({ detail: "Instructor not found" });
-    }
-    if (assessment.outcome === IDENTIFY_OUTCOMES.INSTRUCTOR_ALREADY_CHECKED_IN && !force) {
-      // Reported rather than refused: the administrator can see both records and
-      // is better placed than the server to say whether this was a retry.
-      return res.status(409).json({
-        detail: assessment.existing_was_recognised
-          ? "This instructor was already recognised and checked in today, so this photo is probably the failed attempt just before it. Discard it instead, or confirm to record it anyway."
-          : "This instructor already has a check-in today. Confirm to record this one as well.",
-        outcome: assessment.outcome,
-        existing_attendance_id: assessment.existing_attendance_id,
-        existing_check_in_time: assessment.existing_check_in_time,
-        existing_was_recognised: assessment.existing_was_recognised,
-      });
-    }
-
-    const now = new Date();
-    const update = identifiedRecordUpdate({
-      instructor,
-      record,
-      identifiedBy: req.currentUser?.email || null,
-      now,
-    });
-    // Claimed on status so two administrators resolving the same row cannot both
-    // succeed; the second finds it already identified.
-    const claimed = await db.collection("attendance").updateOne(
-      { _id: record._id, status: "unidentified", instructor_id: null },
-      { $set: update }
-    );
-    if (!claimed.matchedCount) {
-      return res.status(409).json({ detail: "This check-in was identified by someone else." });
-    }
-
-    // Enrollment is best effort. The attendance is now correct, and failing the
-    // request over a face that could not be indexed would undo work that
-    // succeeded; the administrator can add a photo from the instructor form.
-    let enrolled = null;
-    if (faceMode !== "none" && record.check_in_photo_key) {
-      try {
-        const photo = await downloadPhoto(record.check_in_photo_key);
-        const indexed = await indexFace(photo.buffer, String(instructor._id));
-        if (indexed.ok) {
-          const existingFaceIds = Array.isArray(instructor.face_ids)
-            ? instructor.face_ids.filter(Boolean).map(String)
-            : [];
-          const retired = faceMode === "replace"
-            ? existingFaceIds
-            : facesToEvict(existingFaceIds, { adding: 1 });
-          const kept = existingFaceIds.filter((id) => !retired.includes(id));
-          await db.collection("instructors").updateOne(
-            { _id: instructor._id },
-            {
-              $set: {
-                face_ids: [...kept, indexed.faceId],
-                face_indexed_at: now,
-                updated_at: now,
-              },
-            }
-          );
-          if (retired.length) await deleteFaces(retired);
-          enrolled = { face_id: indexed.faceId, retired: retired.length };
-        } else {
-          enrolled = { error: indexed.reason };
-        }
-      } catch (error) {
-        enrolled = { error: error?.name || "ENROLL_FAILED" };
-      }
-    }
-
-    // Analysis is offered rather than assumed: it spends a vision call, and an
-    // administrator resolving a backlog may not want one per row.
-    let queued = false;
-    if (analyse) {
-      try {
-        await enqueueEvaluation(db, {
-          attendanceId: record._id,
-          instructor: {
-            id: String(instructor._id),
-            name: instructor.name,
-            email: instructor.email,
-            gender: instructor.gender,
-            collegeId: instructor.college_id ? String(instructor.college_id) : null,
-          },
-          photoKey: record.check_in_photo_key,
-          mimeType: record.mime_type || "image/jpeg",
-          checkInTime: record.check_in_time,
-        });
-        await db.collection("attendance").updateOne(
-          { _id: record._id },
-          { $set: { evaluation_queue_status: "queued", updated_at: new Date() } }
-        );
-        queued = true;
-      } catch (error) {
-        console.error(`Identify queue: analysis not queued for ${record._id} (${error?.name || "ERROR"})`);
-      }
-    }
-
-    incrementMetric("checkin_identified_by_admin_total");
-    return res.json({
-      message: `Check-in assigned to ${instructor.name}.`,
-      attendance_id: String(record._id),
-      instructor_id: String(instructor._id),
-      analysis_queued: queued,
-      face_enrolled: enrolled,
-      gender_missing: assessment.outcome === IDENTIFY_OUTCOMES.NO_GENDER,
-    });
-  })
-);
-
-/**
- * Discards an unidentified check-in.
- *
- * Its own action rather than the attendance delete permission: most of what
- * reaches this queue is a wall, a passer-by or a test shot, and clearing those
- * is queue work rather than destroying somebody's record. Only a record that
- * still names nobody can be discarded this way, so an identified check-in cannot
- * be removed through it.
- */
-attendanceRouter.delete(
-  "/:attendanceId/unidentified",
-  requireIdentifyPermission,
-  asyncRoute(async (req, res) => {
-    const db = req.app.locals.db;
-    const record = await db.collection("attendance").findOne({
-      _id: idMatch(req.params.attendanceId),
-      status: "unidentified",
-      instructor_id: null,
-      ...attendanceScope(req.currentUser),
-    });
-    if (!record) {
-      return res.status(404).json({ detail: "Unidentified check-in not found" });
-    }
-
-    // Photo first, then the record: a deleted record with a surviving object
-    // would leave a photograph of somebody with nothing explaining why it is
-    // held, which is the opposite of what discarding is for.
-    if (record.check_in_photo_key) {
-      const removed = await deletePhoto(record.check_in_photo_key);
-      if (!removed.deleted) {
-        await compensateUploadedPhoto(db, record.check_in_photo_key, "unidentified_discarded");
-      }
-    }
-    await db.collection("attendance").deleteOne({ _id: record._id, instructor_id: null });
-    incrementMetric("checkin_unidentified_discarded_total");
-    return res.json({ message: "Unidentified check-in discarded" });
-  })
-);
 
 attendanceRouter.post(
   "/check-out",
@@ -2475,6 +1962,7 @@ attendanceRouter.get(
         ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
         ...(updatedSince ? { updated_at: { $gt: updatedSince } } : {}),
         ...attendanceScope(req.currentUser),
+        status: { $ne: "unidentified" },
       })
       .project({
         _private_evaluation_outbox: 0,
@@ -2552,6 +2040,7 @@ attendanceRouter.get(
     const attendance = await db.collection("attendance").findOne({
       _id: idMatch(req.params.attendanceId),
       ...attendanceScope(req.currentUser),
+      status: { $ne: "unidentified" },
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 

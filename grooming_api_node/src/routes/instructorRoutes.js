@@ -650,7 +650,7 @@ instructorRouter.get(
  * Used when a reference turns out to be the wrong person, and when an
  * instructor leaves: the soft delete keeps their attendance history, but there
  * is no reason to keep biometric data in a collection searched on every
- * check-in. Recognition then falls back to the unidentified queue for them.
+ * check-in. Automatic attendance then refuses captures until a reference is enrolled.
  */
 instructorRouter.delete(
   "/:instructorId/face",

@@ -143,8 +143,8 @@ test("today's summary counts identified check-ins against the roster", () => {
   assert.equal(summary.checked_out, 1);
   assert.equal(summary.on_duty, 2);
   assert.equal(summary.missed_checkout_previous_day, 1, "i4 never checked out on Monday");
-  assert.equal(summary.unidentified_waiting, 3, "the whole queue, including records with no institute");
-  assert.equal(summary.unidentified_today, 1);
+  assert.equal("unidentified_waiting" in summary, false);
+  assert.equal("unidentified_today" in summary, false);
   assert.deepEqual(breakdown.map((row) => [row.key, row.count]), [
     ["compliant", 1], ["unassessed", 0], ["non_compliant", 1], ["pending", 1], ["error", 0],
   ]);
@@ -209,7 +209,7 @@ test("each institute reports its own day, mode and enrolment", () => {
     identificationSettings: { default_mode: "FACE_ONLY", college_modes: { c2: "SELECTOR" } },
     enrolment: new Map([["c1", { total: 2, enrolled: 2 }], ["c2", { total: 2, enrolled: 1 }]]),
     groups: [
-      { _id: "c1", check_ins: 2, compliant: 1, non_compliant: 1, unidentified: 0 },
+      { _id: "c1", check_ins: 2, compliant: 1, non_compliant: 1 },
       { _id: "c2", check_ins: 1, compliant: 0, non_compliant: 0, unidentified: 1 },
     ],
     workingDays: 1,
@@ -223,14 +223,13 @@ test("each institute reports its own day, mode and enrolment", () => {
       mode: hyderabad.mode,
       enrolled: hyderabad.enrolled_percent,
       low: hyderabad.low_enrolment,
-      unidentified: hyderabad.unidentified,
     },
-    { present: 2, expected: 2, instructors: 2, compliance: 50, mode: "FACE_ONLY", enrolled: 100, low: false, unidentified: 0 }
+    { present: 2, expected: 2, instructors: 2, compliance: 50, mode: "FACE_ONLY", enrolled: 100, low: false }
   );
   assert.equal(warangal.mode, "SELECTOR");
   assert.equal(warangal.present, 1);
   assert.equal(warangal.compliance_percent, null, "nothing analysed yet at Warangal today");
-  assert.equal(warangal.unidentified, 1);
+  assert.equal("unidentified" in warangal, false);
   assert.equal(warangal.enrolled_percent, 50);
   assert.equal(warangal.low_enrolment, false, "a SELECTOR college is never flagged, matching Settings");
 });
@@ -257,13 +256,13 @@ test("over several days, present counts instructor-days against roster times wor
   // Monday and today: Hyderabad has i1 and i2 today and i1 on Monday;
   // Warangal has i3 on both days, i4 on Monday and one unnamed arrival.
   const groups = [
-    { _id: "c1", check_ins: 3, compliant: 1, non_compliant: 2, unidentified: 0 },
+    { _id: "c1", check_ins: 3, compliant: 1, non_compliant: 2 },
     { _id: "c2", check_ins: 3, compliant: 2, non_compliant: 0, unidentified: 1 },
   ];
   const [hyderabad, warangal] = buildInstituteRows({ colleges, roster, groups, workingDays: 2 });
   assert.deepEqual([hyderabad.present, hyderabad.expected, hyderabad.present_percent], [3, 4, 75]);
   assert.deepEqual([hyderabad.compliant, hyderabad.non_compliant], [1, 2]);
-  assert.deepEqual([warangal.present, warangal.expected, warangal.unidentified], [3, 4, 1]);
+  assert.deepEqual([warangal.present, warangal.expected], [3, 4]);
 });
 
 // ---- The route ---------------------------------------------------------------

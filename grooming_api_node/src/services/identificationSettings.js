@@ -16,8 +16,7 @@ import { getSetting, saveSetting } from "../stores/settingsStore.js";
  * Enrolment is reported alongside the mode but never overrides it. A college set
  * to FACE_ONLY with few enrolled faces is warned about and left alone —
  * switching it back automatically would override a deliberate choice by the
- * administrator who set it, and the unidentified queue already catches what
- * recognition misses.
+ * administrator who set it. Unknown faces are refused without saving attendance.
  */
 
 const SETTINGS_ID = "identification_settings";
@@ -26,9 +25,8 @@ export const IDENTIFICATION_MODES = Object.freeze(["FACE_ONLY", "SELECTOR"]);
 
 /**
  * FACE_ONLY is the default because it is the intended operating mode, and a
- * college with no enrolled faces still records attendance: every check-in is
- * saved as unidentified for an admin to resolve rather than refused. The
- * enrolment warning exists so that state is visible rather than surprising.
+ * college needs enrolled faces before automatic attendance can be recorded.
+ * The enrolment warning makes missing reference photos visible.
  */
 export const DEFAULT_IDENTIFICATION_SETTINGS = Object.freeze({
   default_mode: "FACE_ONLY",

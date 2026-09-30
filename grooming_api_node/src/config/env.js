@@ -174,8 +174,8 @@ export function runtimeConfig() {
     rekognitionAccessKeyId: (process.env.REKOGNITION_ACCESS_KEY_ID || "").trim(),
     rekognitionSecretAccessKey: (process.env.REKOGNITION_SECRET_ACCESS_KEY || "").trim(),
     // A wrong identity files one instructor's grooming record under another
-    // name, so the floor is deliberately high: below this the record is saved
-    // unidentified for an admin to resolve, which is recoverable.
+    // name, so the floor is deliberately high: below this the capture is rejected
+    // without recording attendance; the instructor can retry.
     rekognitionMatchThreshold: parseInteger("REKOGNITION_MATCH_THRESHOLD", 95, { min: 80, max: 100 }),
     rekognitionMaxFacesPerInstructor: parseInteger(
       "REKOGNITION_MAX_FACES_PER_INSTRUCTOR",

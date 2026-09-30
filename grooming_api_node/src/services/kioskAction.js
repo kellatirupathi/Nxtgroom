@@ -19,8 +19,8 @@ export const KIOSK_ACTIONS = Object.freeze({
   ALREADY_DONE: "ALREADY_DONE",
   /** Recognised and checked in, but too soon to close the day. */
   TOO_EARLY: "TOO_EARLY",
-  /** Nobody matched. A check-in is still recorded; a departure cannot be. */
-  UNIDENTIFIED: "UNIDENTIFIED",
+  /** Nobody matched. No photo or attendance is saved. */
+  NOT_RECOGNISED: "NOT_RECOGNISED",
 });
 
 /**
@@ -30,13 +30,10 @@ export const KIOSK_ACTIONS = Object.freeze({
  * timing rules — noon for a morning arrival, ten minutes for an afternoon one —
  * are applied in exactly one place rather than restated here.
  *
- * An unrecognised face still checks in. That is the asymmetry the whole design
- * rests on: a check-in creates a record that an administrator can name later,
- * while a check-out must close one specific existing session and cannot be
- * guessed at.
+ * Unknown faces are rejected before storage or attendance writes.
  */
 export function decideKioskAction({ matched, availability }) {
-  if (!matched) return KIOSK_ACTIONS.UNIDENTIFIED;
+  if (!matched) return KIOSK_ACTIONS.NOT_RECOGNISED;
   switch (availability) {
     case "not_checked_in_today":
       return KIOSK_ACTIONS.CHECK_IN;
@@ -84,10 +81,10 @@ export function describeKioskAction(action, { instructorName, opensAtLabel, minu
         detail: "Nothing was recorded.",
         tone: "info",
       };
-    case KIOSK_ACTIONS.UNIDENTIFIED:
+    case KIOSK_ACTIONS.NOT_RECOGNISED:
       return {
         title: "Not recognised",
-        detail: "The check-in was recorded for an administrator to name. To check out, try again or ask an administrator to update your reference photo.",
+        detail: "Nothing was recorded. Please try again, or ask an administrator to update your reference photo.",
         tone: "warning",
       };
     default:
@@ -98,6 +95,5 @@ export function describeKioskAction(action, { instructorName, opensAtLabel, minu
 /** Whether this outcome wrote anything, for the counters and the screen. */
 export function kioskActionRecorded(action) {
   return action === KIOSK_ACTIONS.CHECK_IN
-    || action === KIOSK_ACTIONS.CHECK_OUT
-    || action === KIOSK_ACTIONS.UNIDENTIFIED;
+    || action === KIOSK_ACTIONS.CHECK_OUT;
 }

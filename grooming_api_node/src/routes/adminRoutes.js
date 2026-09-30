@@ -973,7 +973,7 @@ adminRouter.post(
  *
  * Returned with each college's enrolment, because the mode and the readiness to
  * use it are one decision: a college set to FACE_ONLY with few enrolled faces
- * still records attendance, but every check-in lands in the unidentified queue.
+ * cannot record automatic attendance until reference faces are enrolled.
  * The low_enrolment flag is advisory — it is reported so the choice is informed,
  * and never applied, since overriding an administrator's setting automatically
  * would be the more surprising behaviour.

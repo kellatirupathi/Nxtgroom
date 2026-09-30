@@ -80,8 +80,8 @@ test('the filter finds escalated instructors, and the rest', () => {
   const spread = spreadEscalation(rows);
   const ids = (list) => list.map((row) => row._id);
   assert.deepEqual(ids(filterAttendanceRecords(spread, { escalation: 'escalated' })), ['mon', 'fri']);
-  assert.deepEqual(ids(filterAttendanceRecords(spread, { escalation: 'not_escalated' })), ['asha', 'lastweek', 'unknown']);
-  assert.equal(filterAttendanceRecords(spread, { escalation: '' }).length, rows.length, 'empty means all');
+  assert.deepEqual(ids(filterAttendanceRecords(spread, { escalation: 'not_escalated' })), ['asha', 'lastweek']);
+  assert.equal(filterAttendanceRecords(spread, { escalation: '' }).length, rows.length - 1, 'historical unknown records stay hidden');
   assert.deepEqual(ids(filterAttendanceRecords(spread, { escalation: 'escalated', status: 'non_compliant', search: 'ravi' })), ['mon', 'fri']);
   assert.deepEqual(ESCALATION_FILTER_OPTIONS.map((option) => option.value), ['escalated', 'not_escalated']);
 });

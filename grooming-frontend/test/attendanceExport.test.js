@@ -33,9 +33,9 @@ const ids = (list) => list.map((record) => record._id);
 test('status filters on what the badge shows, legacy values included', () => {
   assert.deepEqual(ids(filterAttendanceRecords(records, { status: 'compliant' })), ['1', '4']);
   assert.deepEqual(ids(filterAttendanceRecords(records, { status: 'non_compliant' })), ['2', '3']);
-  assert.deepEqual(ids(filterAttendanceRecords(records, { status: 'unidentified' })), ['5']);
+  assert.deepEqual(ids(filterAttendanceRecords(records, { status: 'unidentified' })), []);
   assert.deepEqual(ids(filterAttendanceRecords(records, { status: 'pending' })), ['6']);
-  assert.equal(filterAttendanceRecords(records, { status: '' }).length, records.length, 'empty means all');
+  assert.equal(filterAttendanceRecords(records, { status: '' }).length, records.length - 1, 'historical unknown rows stay hidden');
 });
 
 test('status combines with institute, role and search', () => {
@@ -45,7 +45,7 @@ test('status combines with institute, role and search', () => {
 
 test('every status the table can show is a filter option', () => {
   const values = STATUS_FILTER_OPTIONS.map((option) => option.value).sort();
-  assert.deepEqual(values, ['compliant', 'error', 'non_compliant', 'pending', 'unassessed', 'unidentified']);
+  assert.deepEqual(values, ['compliant', 'error', 'non_compliant', 'pending', 'unassessed']);
   assert.equal(statusLabel('fail'), 'Non-compliant');
   assert.equal(statusLabel('done'), 'Compliant');
   assert.equal(statusLabel(undefined), 'Pending AI');

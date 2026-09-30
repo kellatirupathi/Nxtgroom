@@ -6,7 +6,6 @@ import {
   Users,
   History,
   UserCog,
-  UserRoundSearch,
   Settings,
   User,
   KeyRound,
@@ -20,12 +19,6 @@ interface SidebarProps {
   navigate: (tab: string) => void;
   role: Role | null;
   email: string | null;
-  /**
-   * Whether to offer the unidentified queue. Its own flag rather than a role
-   * test: a BOA granted the permission is usually the only person who can
-   * recognise a face from their own campus.
-   */
-  canIdentify?: boolean;
   onLogout: () => void;
   onOpenProfile: () => void;
   onOpenChangePassword: () => void;
@@ -54,7 +47,6 @@ export default function Sidebar({
   navigate,
   role,
   email,
-  canIdentify = false,
   onLogout,
   onOpenProfile,
   onOpenChangePassword,
@@ -118,18 +110,6 @@ export default function Sidebar({
           Daily Records
         </button>
 
-        {/* Administrators reach the queue from Settings. A BOA with the
-            permission cannot open Settings, so it stays in their menu. */}
-        {canIdentify && !isElevatedRole(role) && (
-          <button
-            type="button"
-            onClick={() => navigate('unidentified')}
-            className={navClass(activeTab === 'unidentified')}
-          >
-            <UserRoundSearch size={20} aria-hidden="true" />
-            Unidentified
-          </button>
-        )}
 
         {isElevatedRole(role) && (
           <>

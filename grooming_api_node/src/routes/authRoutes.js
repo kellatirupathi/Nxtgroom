@@ -13,7 +13,6 @@ import { asyncRoute } from "../utils.js";
 import {
   canDeleteAttendance,
   canDeleteCheckout,
-  canIdentifyAttendance,
   getAccessSettings,
 } from "../services/accessSettings.js";
 import {
@@ -117,10 +116,6 @@ authRouter.get("/me", getCurrentUser, asyncRoute(async (req, res) => {
     // server still checks on every delete; this only keeps the UI honest.
     can_delete_records: canDeleteAttendance(req.currentUser, settings),
     can_delete_checkout: canDeleteCheckout(req.currentUser, settings),
-    // Whether this account may name an unidentified check-in. Sent for the same
-    // reason as the delete flags: the queue is hidden rather than offered and
-    // then refused. The server still checks on every assignment.
-    can_identify: canIdentifyAttendance(req.currentUser, settings),
     // Whether this tablet's college identifies the instructor from the
     // photograph. Resolved for the caller's own college, so two tablets signed
     // in as different colleges get different answers, and sent here rather than

@@ -14,7 +14,7 @@ import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
  */
 const RESULT_VISIBLE_MS = 1_200;
 
-type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'UNIDENTIFIED';
+type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'NOT_RECOGNISED';
 
 interface KioskResponse {
   action: KioskAction;

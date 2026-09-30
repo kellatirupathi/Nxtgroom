@@ -14,7 +14,6 @@ import {
   TrendingUp,
   TriangleAlert,
   UserCheck,
-  UserRoundSearch,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiFetch } from '../api';
@@ -36,10 +35,8 @@ import type {
 } from '../types';
 
 interface DashboardProps {
-  /** Moves to another screen, e.g. Daily Records or the Unidentified queue. */
+  /** Moves to another screen, such as Daily Records. */
   onNavigate: (tab: string) => void;
-  /** Whether this account may open the Unidentified queue. */
-  canIdentify?: boolean;
 }
 
 // Chart colours. Checked for colour-blind separation between neighbours; every
@@ -447,7 +444,7 @@ function ComplianceDelta({ data }: { data: DashboardData }) {
   );
 }
 
-export default function Dashboard({ onNavigate, canIdentify = false }: DashboardProps) {
+export default function Dashboard({ onNavigate }: DashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -556,7 +553,7 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiTile label="Present today" icon={UserCheck} iconClass="text-indigo-500">
           <div className="mt-2 flex items-baseline gap-1 tabular-nums">
             <span className="text-2xl font-extrabold text-slate-800">{formatCount(summary.present)}</span>
@@ -592,21 +589,6 @@ export default function Dashboard({ onNavigate, canIdentify = false }: Dashboard
           </p>
         </KpiTile>
 
-        <KpiTile
-          label="Unidentified"
-          icon={UserRoundSearch}
-          iconClass="text-rose-600"
-          tone={summary.unidentified_waiting > 0 ? 'alert' : 'default'}
-        >
-          <div className="mt-2 text-2xl font-extrabold text-slate-800 tabular-nums">{formatCount(summary.unidentified_waiting)}</div>
-          <p className="mt-2 text-xs text-slate-600 tabular-nums">
-            {summary.unidentified_waiting ? 'Waiting to be named' : 'Nobody waiting to be named'}
-            {summary.unidentified_today ? ` · ${formatCount(summary.unidentified_today)} today` : ''}
-          </p>
-          {canIdentify && summary.unidentified_waiting > 0 && (
-            <TileLink tone="rose" onClick={() => onNavigate('unidentified')}>Open queue</TileLink>
-          )}
-        </KpiTile>
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">

@@ -31,11 +31,8 @@ interface EvaluateCardProps {
   /**
    * Whether this tablet's college identifies the instructor from the check-in
    * photograph. When it does there is no selector: the face decides who the
-   * record belongs to, and a photograph nobody is recognised from is saved for
-   * an administrator to name rather than refused.
-   *
-   * Check-out keeps its selector either way — it closes one specific open
-   * session, and the face is not what decides which.
+   * record belongs to. Unknown faces are rejected without saving attendance.
+   * Check-out also identifies the person from their photograph in this mode.
    */
   faceIdentification?: boolean;
 }
@@ -181,8 +178,7 @@ export default function EvaluateCard({
     // Face identification needs nothing but the photograph. Demanding a
     // selection would reintroduce the step this mode exists to remove, and the
     // gender check cannot run either: nobody is identified until the server has
-    // matched the face, and an unmatched photo is saved for an administrator to
-    // name rather than refused.
+    // matched the face. Unknown faces are rejected without saving attendance.
     if (photoError || (!faceIdentification && !selectedUuid)) {
       setMessage({
         type: 'error',

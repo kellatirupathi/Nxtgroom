@@ -176,9 +176,7 @@ function faceIsLargeEnough(box, imageWidth, imageHeight) {
  *
  * Returns one entry per detected face, in reading order, each carrying the
  * identity if there is one and the body crop to analyse either way. An
- * unmatched person still gets their bytes back, because an unidentified record
- * is still a record of somebody who turned up and an administrator names it
- * later — exactly as the single-person route already does.
+ * unmatched person is reported to the tablet without storing their crop.
  */
 export async function identifyPeopleInPhoto(input, _dimensions = {}) {
   if (!isFaceRecognitionConfigured()) {
@@ -259,7 +257,7 @@ export async function identifyPeopleInPhoto(input, _dimensions = {}) {
    * the scores do not say which — a look-alike above the threshold scores like
    * a genuine match. Taking the higher and recording it would file a stranger's
    * grooming under a real name half the time, so both are demoted and both
-   * become records an administrator resolves by looking at the photographs.
+   * are rejected without storing photographs or attendance.
    *
    * The daily unique index would refuse the second write anyway. This is not
    * that: the index protects the data, and this protects the person whose name

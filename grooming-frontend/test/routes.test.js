@@ -223,3 +223,9 @@ test('administrators start on the Dashboard; a BOA starts on Attendance', () => 
   // the shell once the role is known, not by the path alone.
   assert.equal(tabForPath('/'), TABS.OVERVIEW);
 });
+
+
+test('a retired Unidentified bookmark returns to Attendance', () => {
+  assert.equal(tabForPath('/unidentified'), TABS.OVERVIEW);
+  assert.equal(Object.values(TABS).includes('unidentified'), false);
+});
