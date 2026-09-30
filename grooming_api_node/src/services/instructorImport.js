@@ -127,8 +127,11 @@ export function validateImportFields(raw, colleges) {
   const institute = matchCollege(raw?.institute, colleges);
   if (institute.error) errors.push(institute.error);
 
+  // Required here although optional on a synced record: an imported
+  // instructor is added by hand, as through the add form, which requires it.
   const employeeId = text(raw?.employee_id);
-  if (employeeId.length > 50) errors.push("Employee ID is longer than 50 characters");
+  if (!employeeId) errors.push("Employee ID is missing");
+  else if (employeeId.length > 50) errors.push("Employee ID is longer than 50 characters");
 
   const phone = text(raw?.phone_no);
   if (phone) {
@@ -155,7 +158,7 @@ export function validateImportFields(raw, colleges) {
     value: {
       name,
       email,
-      ...(employeeId ? { employee_id: employeeId } : {}),
+      employee_id: employeeId,
       role,
       // What the tables display, as the add form sends it.
       instructor_role: role,

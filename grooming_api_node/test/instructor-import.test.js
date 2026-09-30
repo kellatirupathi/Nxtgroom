@@ -125,10 +125,13 @@ test("a good row comes back in stored form", () => {
   assert.equal(collegeName, "Aurora Institute");
 });
 
-test("employee ID and phone are optional and left out when blank", () => {
-  const { value } = validateImportFields(goodRow({ employee_id: " ", phone_no: "" }), COLLEGES);
-  assert.equal("employee_id" in value, false);
+test("phone is optional and left out when blank", () => {
+  const { value } = validateImportFields(goodRow({ phone_no: "" }), COLLEGES);
   assert.equal("phone_no" in value, false);
+});
+
+test("employee ID is required", () => {
+  assert.deepEqual(validateImportFields(goodRow({ employee_id: " " }), COLLEGES).errors, ["Employee ID is missing"]);
 });
 
 test("every problem in a row is reported at once, naming the bad value", () => {
@@ -148,6 +151,7 @@ test("every problem in a row is reported at once, naming the bad value", () => {
     'Gender "X" must be Male or Female',
     'Role "Teacher" must be Instructor, Central Instructor, Central Team, Mentor or Other',
     'Institute "Nowhere" was not found',
+    "Employee ID is missing",
     'Phone "call me" is not a valid phone number',
     "Photo link: The link must start with http:// or https://",
   ]);
@@ -161,6 +165,7 @@ test("missing required fields are each named", () => {
     "Gender is missing",
     "Role is missing",
     "Institute is missing",
+    "Employee ID is missing",
     "Photo link is missing",
   ]);
 });
