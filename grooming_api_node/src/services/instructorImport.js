@@ -61,11 +61,122 @@ export function firstValue(field, value) {
 }
 
 /** Rows per preview request: each may download and check a photograph. */
-export const MAX_PREVIEW_ROWS = 25;
+export const MAX_PREVIEW_ROWS = 50;
 /** Rows per commit request: each also stores and indexes a photograph. */
-export const MAX_COMMIT_ROWS = 5;
+export const MAX_COMMIT_ROWS = 25;
 /** Photographs fetched and checked at once within one request. */
-const PHOTO_CONCURRENCY = 5;
+const PHOTO_CONCURRENCY = 12;
+/** Rows written at once within one request; one institute's rows still go in turn. */
+const COMMIT_CONCURRENCY = 6;
+
+/**
+ * Runs at most `max` of the given tasks at once, across every caller.
+ *
+ * The browser sends several batches in parallel, so a per-request limit
+ * alone would multiply. These are shared by all import requests in the
+ * process: downloads bound memory and CPU for resizing, face calls keep
+ * Rekognition under its per-second quota (the SDK retries a throttled call,
+ * but only a few times).
+ */
+export function createLimiter(max) {
+  let active = 0;
+  const queue = [];
+  const next = () => {
+    if (active >= max || !queue.length) return;
+    active += 1;
+    const { task, resolve, reject } = queue.shift();
+    Promise.resolve().then(task).then(resolve, reject).finally(() => {
+      active -= 1;
+      next();
+    });
+  };
+  return (task) => new Promise((resolve, reject) => {
+    queue.push({ task, resolve, reject });
+    next();
+  });
+}
+
+const positiveInt = (value, fallback) => {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+};
+const downloadSlots = createLimiter(positiveInt(process.env.IMPORT_DOWNLOAD_CONCURRENCY, 12));
+const faceSlots = createLimiter(positiveInt(process.env.IMPORT_FACE_CONCURRENCY, 8));
+
+/**
+ * Runs tasks for the same key one after another, and tasks for different
+ * keys at once. Rows are written in parallel, but creating or moving an
+ * instructor takes a transaction on their institute's record, and two at
+ * once on the same institute would only conflict and retry.
+ */
+export function createKeyedLock() {
+  const tails = new Map();
+  return async (key, task) => {
+    if (!key) return task();
+    const previous = tails.get(key) || Promise.resolve();
+    let release;
+    const current = new Promise((resolve) => { release = resolve; });
+    const tail = previous.then(() => current);
+    tails.set(key, tail);
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+      if (tails.get(key) === tail) tails.delete(key);
+    }
+  };
+}
+
+const collegeLock = createKeyedLock();
+
+/**
+ * Photographs already downloaded and checked, by link, so the import does
+ * not fetch and face-check again what the preview just did. Only a photo
+ * that passed is kept; it is dropped once used, after half an hour, or when
+ * the memory budget (IMPORT_PHOTO_CACHE_MB, 200 MB by default, about 600
+ * resized photographs) needs the room, oldest first. A photo not found here
+ * is simply fetched again, so eviction only costs time.
+ */
+export class PhotoCache {
+  constructor({ maxBytes = positiveInt(process.env.IMPORT_PHOTO_CACHE_MB, 200) * 1024 * 1024, ttlMs = 30 * 60_000, now = Date.now } = {}) {
+    this.maxBytes = maxBytes;
+    this.ttlMs = ttlMs;
+    this.now = now;
+    this.entries = new Map();
+    this.bytes = 0;
+  }
+
+  get(link) {
+    const entry = this.entries.get(link);
+    if (!entry) return null;
+    if (this.now() - entry.at > this.ttlMs) {
+      this.delete(link);
+      return null;
+    }
+    return entry.photo;
+  }
+
+  set(link, photo) {
+    const size = photo?.normalized?.buffer?.length || 0;
+    if (!size || size > this.maxBytes) return;
+    this.delete(link);
+    while (this.bytes + size > this.maxBytes && this.entries.size) {
+      this.delete(this.entries.keys().next().value);
+    }
+    this.entries.set(link, { photo, at: this.now(), size });
+    this.bytes += size;
+  }
+
+  delete(link) {
+    const entry = this.entries.get(link);
+    if (!entry) return;
+    this.entries.delete(link);
+    this.bytes -= entry.size;
+  }
+}
+
+const sharedPhotoCache = new PhotoCache();
 const MAX_SHEET_BYTES = 2 * 1024 * 1024;
 
 const emailSchema = z.string().email().max(254);
@@ -344,12 +455,12 @@ export async function photoThumbnail(buffer) {
 async function checkPhoto(link, deps) {
   let normalized;
   try {
-    normalized = await loadImportPhoto(link, deps);
+    normalized = await downloadSlots(() => loadImportPhoto(link, deps));
   } catch (error) {
     return { error: error.message };
   }
   if (!deps.faceConfigured) return { normalized, quality: null };
-  const quality = await deps.checkQuality(normalized.buffer);
+  const quality = await faceSlots(() => deps.checkQuality(normalized.buffer));
   if (!quality.ok) return { error: `Photo: ${quality.message}` };
   return { normalized, quality: quality.quality };
 }
@@ -377,6 +488,9 @@ function resolveDeps(deps = {}) {
     // from there would make the two modules import each other.
     createInstructor: deps.createInstructor,
     updateInstructor: deps.updateInstructor,
+    // The shared cache only with the real downloader: a test that injects
+    // its own must not be answered from another test's photographs.
+    photoCache: deps.photoCache !== undefined ? deps.photoCache : (deps.fetcher ? null : sharedPhotoCache),
     enrollPhoto: deps.enrollPhoto || enrollReferencePhoto,
   };
 }
@@ -485,12 +599,15 @@ async function checkRows(db, rows, deps) {
 
   await mapWithConcurrency(results, PHOTO_CONCURRENCY, async (result) => {
     if (!result.value || !result.needsPhoto) return;
-    const photo = await checkPhoto(result.value.photo_url, deps);
+    const link = result.value.photo_url;
+    const cached = deps.photoCache?.get(link);
+    const photo = cached || await checkPhoto(link, deps);
     if (photo.error) {
       result.errors = [photo.error];
       result.value = undefined;
       return;
     }
+    if (!cached) deps.photoCache?.set(link, photo);
     result.photo = photo;
   });
   return results;
@@ -530,87 +647,78 @@ const UPDATE_REFUSALS = {
 };
 
 /**
- * Checks a batch again and applies every row that still passes, one at a
- * time: a new instructor is created, an existing one updated with the
+ * Checks a batch again and applies every row that still passes: a new instructor is created, an existing one updated with the
  * sheet's values. A blank optional cell such as Phone leaves the value on
  * record as it is.
  *
  * A photograph that is needed is fetched and checked before anything is
- * written, so a bad photo changes nobody. Storing and indexing it happen
- * after, since a face is indexed against the instructor's id; if that step
- * fails the instructor is kept and the row says so, the same as the add form,
- * and the photo can be added from Edit. Rows are written in turn rather than
- * together because each takes a transaction on its institute's record.
+ * written, so a bad photo changes nobody; one the preview already checked is
+ * taken from the photo cache instead. Storing and indexing it happen after,
+ * since a face is indexed against the instructor's id; if that step fails the
+ * instructor is kept and the row says so, the same as the add form, and the
+ * photo can be added from Edit. Rows are written several at a time, except
+ * that rows for the same institute go in turn, since each takes a
+ * transaction on the institute's record.
  */
 export async function commitImportRows(db, rows, deps = {}) {
   const resolved = resolveDeps(deps);
   const results = await checkRows(db, rows, resolved);
-  const outcomes = [];
-  for (const result of results) {
-    if (!result.value) {
-      outcomes.push({ row: result.row, ok: false, errors: result.errors });
-      continue;
-    }
-    const { photo_url: _photoUrl, ...fields } = result.value;
-    const refuse = (message) => outcomes.push({ row: result.row, ok: false, errors: [message] });
+  return mapWithConcurrency(results, COMMIT_CONCURRENCY, (result) => applyRow(db, result, resolved));
+}
 
-    let instructor;
-    try {
-      if (result.existing) {
-        const updated = await resolved.updateInstructor(db, result.existing.id, fields);
-        if (updated.outcome === "duplicate_employee_id") {
-          refuse(`Employee ID ${fields.employee_id} belongs to another instructor`);
-          continue;
-        }
-        if (updated.outcome !== "updated") {
-          refuse(UPDATE_REFUSALS[updated.outcome] || "The instructor could not be updated");
-          continue;
-        }
-        instructor = { _id: result.existing._id, face_ids: [] };
-      } else {
-        const created = await resolved.createInstructor(db, fields);
-        if (created.outcome === "college_not_found") {
-          refuse(UPDATE_REFUSALS.college_not_found);
-          continue;
-        }
-        if (created.outcome === "duplicate_employee_id") {
-          refuse(`Employee ID ${fields.employee_id} already exists`);
-          continue;
-        }
-        instructor = created.instructor;
-      }
-    } catch (error) {
-      if (error?.code === 11000) {
-        refuse("Employee ID already exists");
-        continue;
-      }
-      throw error;
-    }
+/** Writes one checked row and enrols its photograph; returns its outcome. */
+async function applyRow(db, result, resolved) {
+  if (!result.value) return { row: result.row, ok: false, errors: result.errors };
+  const { photo_url: photoUrl, ...fields } = result.value;
+  const refuse = (message) => ({ row: result.row, ok: false, errors: [message] });
 
-    const verb = result.existing ? "Updated" : "Added";
-    const outcome = {
-      row: result.row,
-      ok: true,
-      id: String(instructor._id),
-      name: fields.name,
-      updated: Boolean(result.existing),
-      photo_enrolled: false,
-    };
-    if (!result.needsPhoto) {
-      outcome.photo_kept = true;
-    } else if (resolved.faceConfigured) {
-      const enrolled = await resolved.enrollPhoto(db, instructor, result.photo.normalized, {
-        mode: "add",
-        checkedQuality: result.photo.quality,
-      });
-      if (enrolled.ok) outcome.photo_enrolled = true;
-      else outcome.warning = `${verb}, but the photo was not enrolled: ${enrolled.detail}`;
+  let instructor;
+  try {
+    const written = await collegeLock(fields.college_id || null, () => (result.existing
+      ? resolved.updateInstructor(db, result.existing.id, fields)
+      : resolved.createInstructor(db, fields)));
+    if (result.existing) {
+      if (written.outcome === "duplicate_employee_id") {
+        return refuse(`Employee ID ${fields.employee_id} belongs to another instructor`);
+      }
+      if (written.outcome !== "updated") {
+        return refuse(UPDATE_REFUSALS[written.outcome] || "The instructor could not be updated");
+      }
+      instructor = { _id: result.existing._id, face_ids: [] };
     } else {
-      outcome.warning = `${verb}, but the photo was not enrolled: face recognition is not configured`;
+      if (written.outcome === "college_not_found") return refuse(UPDATE_REFUSALS.college_not_found);
+      if (written.outcome === "duplicate_employee_id") return refuse(`Employee ID ${fields.employee_id} already exists`);
+      instructor = written.instructor;
     }
-    outcomes.push(outcome);
+  } catch (error) {
+    if (error?.code === 11000) return refuse("Employee ID already exists");
+    throw error;
   }
-  return outcomes;
+
+  const verb = result.existing ? "Updated" : "Added";
+  const outcome = {
+    row: result.row,
+    ok: true,
+    id: String(instructor._id),
+    name: fields.name,
+    updated: Boolean(result.existing),
+    photo_enrolled: false,
+  };
+  if (!result.needsPhoto) {
+    outcome.photo_kept = true;
+  } else if (resolved.faceConfigured) {
+    const enrolled = await faceSlots(() => resolved.enrollPhoto(db, instructor, result.photo.normalized, {
+      mode: "add",
+      checkedQuality: result.photo.quality,
+    }));
+    if (enrolled.ok) outcome.photo_enrolled = true;
+    else outcome.warning = `${verb}, but the photo was not enrolled: ${enrolled.detail}`;
+  } else {
+    outcome.warning = `${verb}, but the photo was not enrolled: face recognition is not configured`;
+  }
+  // Used now; keeping it would only hold memory another import could use.
+  if (photoUrl) resolved.photoCache?.delete(photoUrl);
+  return outcome;
 }
 
 /**
