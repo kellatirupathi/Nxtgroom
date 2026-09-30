@@ -11,12 +11,17 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { apiJson } from '../api';
+import { apiFetchCached, apiJson } from '../api';
 import { csvCell, saveCsvFile } from '../attendanceExport';
 import { parseCsv } from '../csvParse';
 import {
+  blankRequiredFields,
   COMMIT_BATCH,
+  fieldsInError,
   flagRow,
+  guessCollegeId,
+  guessGender,
+  guessRole,
   IMPORT_COLUMNS,
   importTemplateCsv,
   inBatches,
@@ -24,9 +29,11 @@ import {
   MAX_IMPORT_ROWS,
   PREVIEW_BATCH,
   readImportTable,
+  repeatsOf,
   roleLabel,
   splitRepeats,
   type FlaggedRow,
+  type ImportField,
   type ImportRow,
 } from '../instructorImport';
 import { INSTRUCTOR_ROLES } from '../instructorRoles';
@@ -51,12 +58,18 @@ interface PreviewResult {
   errors?: string[];
   value?: PreviewValue;
   thumbnail?: string | null;
+  /** Whether the row adds a new instructor or updates an existing one. */
+  action?: 'create' | 'update';
+  existing?: { id: string; name: string } | null;
+  /** enrol: the sheet's photo is used; keep: they already have one. */
+  photo?: 'enrol' | 'keep';
 }
 
 interface CommitResult {
   row: number | null;
   ok: boolean;
   name?: string;
+  updated?: boolean;
   photo_enrolled?: boolean;
   warning?: string;
   errors?: string[];
@@ -66,10 +79,41 @@ interface ReadyRow {
   row: number;
   value: PreviewValue;
   thumbnail: string | null;
+  action: 'create' | 'update';
+  /** The name on record of the instructor an update applies to. */
+  existingName: string;
+  photo: 'enrol' | 'keep';
+}
+
+function toReadyRow(row: number, result: PreviewResult): ReadyRow {
+  return {
+    row,
+    value: result.value as PreviewValue,
+    thumbnail: result.thumbnail ?? null,
+    action: result.action === 'update' ? 'update' : 'create',
+    existingName: result.existing?.name ?? '',
+    photo: result.photo === 'keep' ? 'keep' : 'enrol',
+  };
+}
+
+/**
+ * A flagged row's values as the correction form edits them: gender, role and
+ * institute are preselected from however the sheet wrote them, the institute
+ * as its id so the server matches it exactly.
+ */
+function initialDraft(flaggedRow: FlaggedRow, colleges: College[]): ImportRow {
+  const raw = flaggedRow.raw;
+  return {
+    ...raw,
+    gender: guessGender(raw.gender),
+    role: guessRole(raw.role),
+    institute: guessCollegeId(raw.institute, colleges),
+  };
 }
 
 interface ImportSummary {
   added: number;
+  updated: number;
   warnings: { row: number; name: string; warning: string }[];
   failed: FlaggedRow[];
   /** Why the import stopped early, when it did. */
@@ -101,14 +145,17 @@ interface InstructorImportDialogProps {
 }
 
 /**
- * Adds instructors from a CSV file or a Google Sheet.
+ * Adds and updates instructors from a CSV file or a Google Sheet.
  *
  * Nothing is written until the admin has seen the preview. The sheet is read
  * here, every row is checked by the server - photograph downloaded and its
- * face checked included - and the rows that pass are listed under Ready; the
- * rest go under Flagged with the reasons, and are never sent to be added.
+ * face checked included - and the rows that pass are listed under Ready, each
+ * marked New or as updating the instructor whose email or Employee ID it
+ * shares. The rest go under Flagged with the reasons; they are never
+ * imported as they are, but each can be corrected in place and checked again,
+ * which moves it to Ready once it passes.
  */
-export default function InstructorImportDialog({ colleges, onClose, onImported }: InstructorImportDialogProps) {
+export default function InstructorImportDialog({ colleges: givenColleges, onClose, onImported }: InstructorImportDialogProps) {
   const [stage, setStage] = useState<Stage>('source');
   const [sourceError, setSourceError] = useState('');
   const [sheetUrl, setSheetUrl] = useState('');
@@ -121,9 +168,29 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
   const [flagged, setFlagged] = useState<FlaggedRow[]>([]);
   const [tab, setTab] = useState<'ready' | 'flagged'>('ready');
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  /** Corrections typed into flagged rows, by sheet row number. */
+  const [drafts, setDrafts] = useState<Record<number, ImportRow>>({});
+  const [editing, setEditing] = useState<Set<number>>(() => new Set());
+  const [rechecking, setRechecking] = useState<Set<number>>(() => new Set());
+  const [flaggedNotice, setFlaggedNotice] = useState('');
+  const [loadedColleges, setLoadedColleges] = useState<College[]>([]);
+  // The correction form's institute list. Loaded here when the page has not
+  // got it yet, so a failed or slow page load never leaves the list empty.
+  const colleges = givenColleges.length ? givenColleges : loadedColleges;
   const fileInput = useRef<HTMLInputElement | null>(null);
   const stopRequested = useRef(false);
   const activeRequest = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (givenColleges.length) return undefined;
+    let disposed = false;
+    // No abort signal: the cached request is shared, and aborting it would
+    // fail every other caller waiting on the same list.
+    apiFetchCached<College[]>('/api/v2/colleges')
+      .then((rows) => { if (!disposed && Array.isArray(rows)) setLoadedColleges(rows); })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, [givenColleges.length]);
 
   // Leaving the dialog abandons whatever is in flight.
   useEffect(() => () => {
@@ -134,12 +201,15 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
   const busy = stage === 'checking' || stage === 'importing' || loadingSheet;
 
   useEffect(() => {
+    // Escape never throws away corrections typed into flagged rows; the close
+    // button still does, deliberately.
+    const hasCorrections = stage === 'preview' && Object.keys(drafts).length > 0;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && stage !== 'importing') onClose();
+      if (event.key === 'Escape' && stage !== 'importing' && !hasCorrections) onClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [stage, onClose]);
+  }, [stage, drafts, onClose]);
 
   const request = async <T,>(path: string, body: unknown): Promise<T> => {
     const controller = new AbortController();
@@ -187,7 +257,7 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
           const sent = batch[index];
           const rowNumber = result.row ?? sent.row;
           if (result.ok && result.value) {
-            passed.push({ row: rowNumber, value: result.value, thumbnail: result.thumbnail ?? null });
+            passed.push(toReadyRow(rowNumber, result));
           } else {
             refused.push(flagRow(byRow.get(rowNumber) ?? sent, result.errors?.length ? result.errors : ['This row could not be checked']));
           }
@@ -273,9 +343,95 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
     void saveCsvFile('instructor-import-flagged.csv', lines.map((cells) => cells.map(csvCell).join(',')).join('\r\n'));
   };
 
-  /** Adds the Ready rows, a few at a time, and gathers what happened to each. */
+  const draftFor = (flaggedRow: FlaggedRow): ImportRow => drafts[flaggedRow.row] ?? initialDraft(flaggedRow, colleges);
+
+  const updateDraft = (flaggedRow: FlaggedRow, field: ImportField, value: string) => {
+    // From the latest drafts, not this render's, so quick successive edits
+    // never overwrite one another.
+    setDrafts((current) => ({
+      ...current,
+      [flaggedRow.row]: { ...(current[flaggedRow.row] ?? initialDraft(flaggedRow, colleges)), [field]: value },
+    }));
+  };
+
+  const toggleEditing = (row: number) => {
+    setEditing((current) => {
+      const next = new Set(current);
+      if (next.has(row)) next.delete(row);
+      else next.add(row);
+      return next;
+    });
+  };
+
+  /**
+   * Checks corrected flagged rows again and moves each one that passes to
+   * Ready. Blank required fields and repeats of a Ready row are caught here
+   * first; everything else is the server's same check as the first pass, so
+   * a corrected row is held to exactly the rules the others were.
+   */
+  const recheck = async (rows: number[]) => {
+    const candidates = flagged.filter((item) => rows.includes(item.row)).map((item) => draftFor(item));
+    if (!candidates.length) return;
+    setRechecking(new Set(candidates.map((candidate) => candidate.row)));
+    setFlaggedNotice('');
+    const localErrors = new Map<number, string[]>();
+    const serverErrors = new Map<number, string[]>();
+    const toSend: ImportRow[] = [];
+    const taken = ready.map((item) => ({ row: item.row, email: item.value.email, employee_id: item.value.employee_id }));
+    for (const candidate of candidates) {
+      const blanks = blankRequiredFields(candidate);
+      if (blanks.length) {
+        localErrors.set(candidate.row, [`Fill in ${blanks.join(', ')}`]);
+        continue;
+      }
+      const repeats = repeatsOf(candidate, taken);
+      if (repeats.length) {
+        localErrors.set(candidate.row, repeats);
+        continue;
+      }
+      toSend.push(candidate);
+      taken.push({ row: candidate.row, email: candidate.email ?? '', employee_id: candidate.employee_id });
+    }
+
+    const moved: ReadyRow[] = [];
+    try {
+      for (const batch of inBatches(toSend, PREVIEW_BATCH)) {
+        const { results } = await request<{ results: PreviewResult[] }>('/api/v2/instructors/import/preview', { rows: batch });
+        results.forEach((result, index) => {
+          const rowNumber = result.row ?? batch[index].row;
+          if (result.ok && result.value) moved.push(toReadyRow(rowNumber, result));
+          else serverErrors.set(rowNumber, result.errors?.length ? result.errors : ['This row could not be checked']);
+        });
+      }
+    } catch (error) {
+      setFlaggedNotice(`Checking stopped: ${messageOf(error)}`);
+    }
+
+    const movedRows = new Set(moved.map((item) => item.row));
+    const sent = new Map(candidates.map((candidate) => [candidate.row, candidate]));
+    setFlagged((current) => current
+      .filter((item) => !movedRows.has(item.row))
+      .map((item) => {
+        const errors = localErrors.get(item.row) ?? serverErrors.get(item.row);
+        const draft = sent.get(item.row);
+        if (!errors || !draft) return item;
+        return { ...item, errors, raw: draft, name: draft.name ?? '', email: draft.email ?? '' };
+      }));
+    setReady((current) => [...current, ...moved].sort((a, b) => a.row - b.row));
+    setEditing((current) => new Set([...current].filter((row) => !movedRows.has(row))));
+    setRechecking(new Set());
+    const stillFlagged = candidates.length - moved.length;
+    if (moved.length || stillFlagged) {
+      setFlaggedNotice((current) => current || [
+        moved.length ? `${moved.length} moved to Ready.` : '',
+        stillFlagged ? `${stillFlagged} still ${stillFlagged === 1 ? 'needs' : 'need'} fixing; see the reasons below.` : '',
+      ].filter(Boolean).join(' '));
+    }
+  };
+
+  /** Imports the Ready rows, a few at a time, and gathers what happened to each. */
   const importRows = async () => {
-    const result: ImportSummary = { added: 0, warnings: [], failed: [], stoppedBecause: '' };
+    const result: ImportSummary = { added: 0, updated: 0, warnings: [], failed: [], stoppedBecause: '' };
     stopRequested.current = false;
     setStage('importing');
     setProgress({ done: 0, total: ready.length });
@@ -283,7 +439,7 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
 
     for (const batch of inBatches(ready, COMMIT_BATCH)) {
       if (stopRequested.current) {
-        result.stoppedBecause = 'You stopped the import. Rows after this point were not added.';
+        result.stoppedBecause = 'You stopped the import. Rows after this point were not imported.';
         break;
       }
       try {
@@ -306,19 +462,21 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
           const original = byRow.get(outcome.row ?? -1);
           const name = outcome.name || original?.value.name || '';
           if (outcome.ok) {
-            result.added += 1;
+            if (outcome.updated) result.updated += 1;
+            else result.added += 1;
             if (outcome.warning) result.warnings.push({ row: outcome.row ?? 0, name, warning: outcome.warning });
           } else {
             result.failed.push({
               row: outcome.row ?? 0,
               name,
               email: original?.value.email ?? '',
-              errors: outcome.errors?.length ? outcome.errors : ['This row could not be added'],
+              errors: outcome.errors?.length ? outcome.errors : ['This row could not be imported'],
+              raw: { row: outcome.row ?? 0, name, email: original?.value.email ?? '' },
             });
           }
         }
       } catch (error) {
-        result.stoppedBecause = `The import stopped: ${messageOf(error)}. The rows being added at that moment may or may not have been saved; importing the same sheet again flags any that were.`;
+        result.stoppedBecause = `The import stopped: ${messageOf(error)}. The rows being imported at that moment may or may not have been saved; importing the same sheet again updates any that were.`;
         break;
       }
       setProgress((current) => ({ ...current, done: current.done + batch.length }));
@@ -326,7 +484,7 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
 
     setSummary(result);
     setStage('done');
-    if (result.added > 0) onImported(result.added);
+    if (result.added + result.updated > 0) onImported(result.added + result.updated);
   };
 
   const stop = () => {
@@ -344,6 +502,9 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
     setSummary(null);
     setSourceError('');
     setIgnoredColumns([]);
+    setDrafts({});
+    setEditing(new Set());
+    setFlaggedNotice('');
   };
 
   const percent = progress.total ? Math.round((progress.done / progress.total) * 100) : 0;
@@ -529,11 +690,12 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
                   {/* A card per row on a phone, where the table's columns do
                       not fit; the table from tablet width up. */}
                   <ul className="divide-y divide-slate-100 sm:hidden">
-                    {ready.map(({ row, value, thumbnail }) => (
+                    {ready.map(({ row, value, thumbnail, action, existingName, photo }) => (
                       <li key={row} className="flex items-start gap-3 px-4 py-3">
-                        <Thumbnail src={thumbnail} name={value.name} />
+                        <Thumbnail src={thumbnail} name={value.name} kept={photo === 'keep'} />
                         <div className="min-w-0 flex-1 text-sm">
-                          <p className="font-bold text-slate-800">{value.name}</p>
+                          <ActionBadge action={action} existingName={existingName} />
+                          <p className="mt-1 font-bold text-slate-800">{value.name}</p>
                           <p className="truncate text-xs text-slate-500">{value.email}</p>
                           <p className="mt-1 text-xs text-slate-600">
                             {[genderLabel(value.gender), roleLabel(value.role), value.institute].join(' · ')}
@@ -546,10 +708,11 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
                       </li>
                     ))}
                   </ul>
-                  <table className="hidden w-full min-w-[720px] text-left text-sm sm:table">
+                  <table className="hidden w-full min-w-[820px] text-left text-sm sm:table">
                     <thead className="sticky top-0 z-10 bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
                       <tr>
                         <th className="px-4 py-3">Row</th>
+                        <th className="px-4 py-3">Status</th>
                         <th className="px-2 py-3">Photo</th>
                         <th className="px-4 py-3">Name</th>
                         <th className="px-4 py-3">Gender</th>
@@ -560,10 +723,11 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {ready.map(({ row, value, thumbnail }) => (
+                      {ready.map(({ row, value, thumbnail, action, existingName, photo }) => (
                         <tr key={row}>
                           <td className="px-4 py-2.5 font-mono text-xs text-slate-400">{row}</td>
-                          <td className="px-2 py-2.5"><Thumbnail src={thumbnail} name={value.name} /></td>
+                          <td className="px-4 py-2.5"><ActionBadge action={action} existingName={existingName} /></td>
+                          <td className="px-2 py-2.5"><Thumbnail src={thumbnail} name={value.name} kept={photo === 'keep'} /></td>
                           <td className="px-4 py-2.5">
                             <span className="block font-bold text-slate-800">{value.name}</span>
                             <span className="block text-xs text-slate-500">{value.email}</span>
@@ -583,18 +747,49 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
                 <p className="p-8 text-center text-sm font-medium text-slate-500">Every row passed the checks.</p>
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-100 bg-rose-50 px-4 py-2.5 sm:px-6">
-                    <p className="text-sm font-medium text-rose-700">These rows will not be added. Fix them in the sheet and import them again.</p>
-                    <button
-                      type="button"
-                      onClick={() => downloadFlagged(flagged)}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100"
-                    >
-                      <Download size={14} aria-hidden="true" />
-                      Download flagged rows
-                    </button>
+                  <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-2 border-b border-rose-100 bg-rose-50 px-4 py-2.5 sm:px-6">
+                    <p className="text-sm font-medium text-rose-700">
+                      These rows are not imported. Edit a row to fill in or correct its details, then check it to move it to Ready.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void recheck(flagged.map((item) => item.row)); }}
+                        disabled={rechecking.size > 0}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700 disabled:opacity-60"
+                      >
+                        {rechecking.size > 0 && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
+                        Check all again
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadFlagged(flagged)}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                      >
+                        <Download size={14} aria-hidden="true" />
+                        Download
+                      </button>
+                    </div>
                   </div>
-                  <FlaggedTable rows={flagged} />
+                  {flaggedNotice && (
+                    <p role="status" className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 sm:px-6">{flaggedNotice}</p>
+                  )}
+                  <ul className="space-y-3 p-3 sm:p-4">
+                    {flagged.map((item) => (
+                      <FlaggedEditor
+                        key={item.row}
+                        item={item}
+                        draft={draftFor(item)}
+                        colleges={colleges}
+                        open={editing.has(item.row)}
+                        checking={rechecking.has(item.row)}
+                        busy={rechecking.size > 0}
+                        onToggle={() => toggleEditing(item.row)}
+                        onChange={(field, value) => updateDraft(item, field, value)}
+                        onCheck={() => { void recheck([item.row]); }}
+                      />
+                    ))}
+                  </ul>
                 </>
               )}
             </div>
@@ -611,10 +806,10 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
                 <button
                   type="button"
                   onClick={() => { void importRows(); }}
-                  disabled={!ready.length}
+                  disabled={!ready.length || rechecking.size > 0}
                   className="rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-indigo-200 transition-colors hover:bg-indigo-700 disabled:opacity-50 disabled:shadow-none"
                 >
-                  {ready.length === 0 ? 'Nothing to add' : ready.length === 1 ? 'Add 1 instructor' : `Add ${ready.length} instructors`}
+                  {importLabel(ready)}
                 </button>
               </div>
             </div>
@@ -624,12 +819,10 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
         {stage === 'done' && summary && (
           <>
             <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 space-y-4">
-              <div className={`flex items-start gap-3 rounded-md border p-4 ${summary.added ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`} role="status">
-                <CircleCheck size={22} className={summary.added ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
+              <div className={`flex items-start gap-3 rounded-md border p-4 ${summary.added + summary.updated ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`} role="status">
+                <CircleCheck size={22} className={summary.added + summary.updated ? 'text-emerald-600' : 'text-slate-400'} aria-hidden="true" />
                 <div>
-                  <p className="font-bold text-slate-800">
-                    {summary.added === 1 ? 'Added 1 instructor.' : `Added ${summary.added} instructors.`}
-                  </p>
+                  <p className="font-bold text-slate-800">{summaryLine(summary)}</p>
                   {flagged.length > 0 && (
                     <p className="mt-0.5 text-sm text-slate-600">{flagged.length} flagged {flagged.length === 1 ? 'row was' : 'rows were'} left out.</p>
                   )}
@@ -646,13 +839,13 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
               {summary.warnings.length > 0 && (
                 <div className="rounded-md border border-amber-200">
                   <p className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-800">
-                    Added without a photo — add one from Edit
+                    Imported without a photo — add one from Edit
                   </p>
                   <ul className="divide-y divide-amber-100 text-sm">
                     {summary.warnings.map((warning) => (
                       <li key={warning.row} className="px-4 py-2 text-slate-700">
                         <span className="font-mono text-xs text-slate-400">Row {warning.row}</span>{' '}
-                        <span className="font-bold">{warning.name}</span>: {warning.warning.replace(/^Added, but /, '')}
+                        <span className="font-bold">{warning.name}</span>: {warning.warning.replace(/^(Added|Updated), but /, '')}
                       </li>
                     ))}
                   </ul>
@@ -662,7 +855,7 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
               {summary.failed.length > 0 && (
                 <div className="rounded-md border border-rose-200">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-4 py-2">
-                    <p className="text-sm font-bold text-rose-700">Not added — something changed since the preview</p>
+                    <p className="text-sm font-bold text-rose-700">Not imported — something changed since the preview</p>
                     <button type="button" onClick={() => downloadFlagged(summary.failed)} className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 hover:underline">
                       <Download size={14} aria-hidden="true" />
                       Download
@@ -687,11 +880,175 @@ export default function InstructorImportDialog({ colleges, onClose, onImported }
   );
 }
 
-function Thumbnail({ src, name }: { src: string | null; name: string }) {
-  return src ? (
-    <img src={src} alt={`Photo of ${name}`} className="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />
+function importLabel(rows: ReadyRow[]): string {
+  if (!rows.length) return 'Nothing to import';
+  const updates = rows.filter((row) => row.action === 'update').length;
+  const added = rows.length - updates;
+  const parts = [added ? `${added} new` : '', updates ? `${updates} ${updates === 1 ? 'update' : 'updates'}` : ''].filter(Boolean);
+  return `Import ${rows.length} (${parts.join(', ')})`;
+}
+
+function summaryLine(summary: ImportSummary): string {
+  const plural = (count: number) => (count === 1 ? '1 instructor' : `${count} instructors`);
+  if (summary.added && summary.updated) return `Added ${plural(summary.added)} and updated ${plural(summary.updated)}.`;
+  if (summary.updated) return `Updated ${plural(summary.updated)}.`;
+  return `Added ${plural(summary.added)}.`;
+}
+
+function ActionBadge({ action, existingName }: { action: 'create' | 'update'; existingName: string }) {
+  return action === 'update' ? (
+    <span className="inline-flex max-w-[14rem] items-center rounded-full bg-sky-50 px-2 py-0.5 text-xs font-bold text-sky-700 ring-1 ring-sky-200" title={`Updates ${existingName}, who is already in the roster`}>
+      <span className="truncate">Updates {existingName || 'existing'}</span>
+    </span>
   ) : (
-    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400"><UserRound size={18} aria-hidden="true" /></span>
+    <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200">New</span>
+  );
+}
+
+function Thumbnail({ src, name, kept = false }: { src: string | null; name: string; kept?: boolean }) {
+  if (src) {
+    return <img src={src} alt={`Photo of ${name}`} className="h-10 w-10 shrink-0 rounded-full object-cover ring-1 ring-slate-200" />;
+  }
+  return (
+    <span
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400"
+      title={kept ? 'Keeps their current photo' : undefined}
+    >
+      <UserRound size={18} aria-label={kept ? 'Keeps their current photo' : undefined} aria-hidden={kept ? undefined : true} />
+    </span>
+  );
+}
+
+const FIELD_INPUT = 'w-full rounded-md border p-2 text-sm outline-none transition-all focus:ring-2';
+const fieldClass = (flaggedField: boolean) => `${FIELD_INPUT} ${
+  flaggedField
+    ? 'border-rose-400 bg-rose-50/40 focus:border-rose-500 focus:ring-rose-500/20'
+    : 'border-slate-200 focus:border-indigo-500 focus:ring-indigo-500/20'
+}`;
+
+interface FlaggedEditorProps {
+  item: FlaggedRow;
+  draft: ImportRow;
+  colleges: College[];
+  open: boolean;
+  checking: boolean;
+  busy: boolean;
+  onToggle: () => void;
+  onChange: (field: ImportField, value: string) => void;
+  onCheck: () => void;
+}
+
+/**
+ * One flagged row: its reasons, and a form to fill in or correct every field
+ * and send it to be checked again. The fields a reason is about are marked;
+ * a select whose sheet value matched nothing says what the sheet had.
+ */
+function FlaggedEditor({ item, draft, colleges, open, checking, busy, onToggle, onChange, onCheck }: FlaggedEditorProps) {
+  const marked = fieldsInError(item.errors);
+  const blanks = blankRequiredFields(draft);
+  const id = (field: string) => `flagged-${item.row}-${field}`;
+  const sheetHad = (field: 'gender' | 'role' | 'institute') => {
+    const original = (item.raw[field] ?? '').trim();
+    return original && !draft[field] ? original : '';
+  };
+  const label = (field: string, text: string, required = true) => (
+    <label htmlFor={id(field)} className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-slate-500">
+      {text}{required && <span className="text-rose-600" aria-hidden="true"> *</span>}
+    </label>
+  );
+  const text = (field: ImportField, title: string, props: { type?: string; required?: boolean; placeholder?: string } = {}) => (
+    <div>
+      {label(field, title, props.required ?? true)}
+      <input
+        id={id(field)}
+        type={props.type ?? 'text'}
+        value={draft[field] ?? ''}
+        placeholder={props.placeholder}
+        onChange={(event) => onChange(field, event.target.value)}
+        aria-invalid={marked.has(field) || undefined}
+        className={fieldClass(marked.has(field))}
+      />
+    </div>
+  );
+
+  return (
+    <li className="rounded-lg border border-rose-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 p-3 sm:p-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm">
+            <span className="font-mono text-xs text-slate-400">Row {item.row}</span>{' '}
+            <span className="font-bold text-slate-800">{item.name || 'No name'}</span>
+            {item.email && <span className="text-slate-500"> · {item.email}</span>}
+          </p>
+          <div className="mt-1.5 text-sm"><Reasons errors={item.errors} /></div>
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+        >
+          {open ? 'Hide form' : 'Edit row'}
+        </button>
+      </div>
+
+      {open && (
+        <div className="border-t border-rose-100 bg-slate-50/60 p-3 sm:p-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {text('name', 'Name')}
+            {text('email', 'Email', { type: 'email' })}
+            <div>
+              {label('gender', 'Gender')}
+              <select id={id('gender')} value={draft.gender ?? ''} onChange={(event) => onChange('gender', event.target.value)} aria-invalid={marked.has('gender') || undefined} className={fieldClass(marked.has('gender'))}>
+                <option value="">Select gender...</option>
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+              </select>
+              {sheetHad('gender') && <p className="mt-1 text-xs text-slate-500">Sheet had “{sheetHad('gender')}”</p>}
+            </div>
+            <div>
+              {label('role', 'Role')}
+              <select id={id('role')} value={draft.role ?? ''} onChange={(event) => onChange('role', event.target.value)} aria-invalid={marked.has('role') || undefined} className={fieldClass(marked.has('role'))}>
+                <option value="">Select role...</option>
+                {INSTRUCTOR_ROLES.map((role) => <option key={role} value={role}>{roleLabel(role)}</option>)}
+              </select>
+              {sheetHad('role') && <p className="mt-1 text-xs text-slate-500">Sheet had “{sheetHad('role')}”</p>}
+            </div>
+            <div>
+              {label('institute', 'Institute')}
+              <select id={id('institute')} value={draft.institute ?? ''} onChange={(event) => onChange('institute', event.target.value)} aria-invalid={marked.has('institute') || undefined} className={fieldClass(marked.has('institute'))}>
+                <option value="">Select institute...</option>
+                {colleges.map((college) => (
+                  <option key={college._id} value={college._id}>
+                    {college.name}{college.location ? ` (${college.location})` : ''}
+                  </option>
+                ))}
+              </select>
+              {sheetHad('institute') && <p className="mt-1 text-xs text-slate-500">Sheet had “{sheetHad('institute')}”</p>}
+            </div>
+            {text('employee_id', 'Employee ID')}
+            {text('phone_no', 'Phone', { type: 'tel', required: false })}
+            {text('photo_url', 'Photo Link', { type: 'url', required: false, placeholder: 'https://...' })}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-slate-500">
+              {blanks.length
+                ? `Fill in ${blanks.join(', ')} to check this row.`
+                : 'Photo Link is needed unless they are already in the roster with a photo.'}
+            </p>
+            <button
+              type="button"
+              onClick={onCheck}
+              disabled={busy || blanks.length > 0}
+              className="inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {checking && <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />}
+              {checking ? 'Checking…' : 'Check and move to Ready'}
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
