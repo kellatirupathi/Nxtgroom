@@ -5,6 +5,7 @@ import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
 import ReferencePhotoField from './ReferencePhotoField';
 import RowActionsMenu from './RowActionsMenu';
+import { instructorRoleOptions } from '../instructorRoles';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import type { College, Instructor } from '../types';
@@ -226,20 +227,17 @@ export default function InstructorManagement() {
   };
 
   /**
-   * Every distinct role in the roster, plus the one being edited so an unusual
-   * value is never silently replaced by the first option when the form opens.
+   * The standard roles, then any other role in the roster or on the instructor
+   * being edited, so an unusual value is never silently replaced by the first
+   * option when the form opens.
    */
-  const roleOptions = useMemo(() => {
-    const roles = new Set<string>();
-    for (const instructor of instructors) {
-      const role = instructor.instructor_role || instructor.role;
-      if (role) roles.add(role);
-    }
-    if (formData.role) roles.add(formData.role);
-    // A fallback only when the roster is empty, so the form is never unusable.
-    if (roles.size === 0) ["INSTRUCTOR", "CENTRAL_INSTRUCTOR"].forEach((role) => roles.add(role));
-    return [...roles].sort((a, b) => a.localeCompare(b));
-  }, [instructors, formData.role]);
+  const roleOptions = useMemo(
+    () => instructorRoleOptions(
+      instructors.map((instructor) => instructor.instructor_role || instructor.role),
+      formData.role,
+    ),
+    [instructors, formData.role],
+  );
 
   // Search covers the synced columns too, since employee_id is often absent
   // on roster rows and the user id is what identifies them.
@@ -494,10 +492,10 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
-                  {/* Options come from the roles present in the roster, not a
-                      fixed list: the synced data uses CENTRAL_INSTRUCTOR and
-                      INSTRUCTOR, which the old hardcoded three did not include,
-                      so editing a synced instructor silently changed their role. */}
+                  {/* The four standard roles, plus any other role already in
+                      the roster: the synced data uses CENTRAL_INSTRUCTOR and
+                      INSTRUCTOR, and a fixed list that missed a role would
+                      silently change it when a synced instructor was edited. */}
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
                     {/* An empty value must match an option, or the browser
                         shows the first role while the form still holds "",
