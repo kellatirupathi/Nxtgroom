@@ -83,7 +83,6 @@ export function complianceChange(
 
 export type InstituteSortKey =
   | 'name'
-  | 'mode'
   | 'present_percent'
   | 'compliance_percent'
   | 'non_compliant'
