@@ -52,7 +52,9 @@ export default function InstructorManagement() {
     name: '',
     employee_id: '',
     role: '',
-    gender: 'MALE',
+    // Blank, not MALE: the photo check compares against gendered standards,
+    // so a default would quietly grade someone against the wrong ones.
+    gender: '',
     college_id: '',
     email: '',
     phone_no: ''
@@ -194,7 +196,7 @@ export default function InstructorManagement() {
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
-    setFormData({ name: '', employee_id: '', role: '', gender: 'MALE', college_id: '', email: '', phone_no: '' });
+    setFormData({ name: '', employee_id: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
     // Cleared on every open: a file left from a previous dialog would be
     // enrolled against whichever instructor is created next.
     setPendingPhoto(null);
@@ -211,7 +213,9 @@ export default function InstructorManagement() {
       name: ins.name,
       employee_id: ins.employee_id || '',
       role: ins.instructor_role || ins.role || '',
-      gender: String(ins.gender || 'MALE').toUpperCase(),
+      // An instructor with no gender recorded opens blank, so saving the form
+      // asks for one instead of quietly recording them as male.
+      gender: ins.gender ? String(ins.gender).toUpperCase() : '',
       college_id: ins.college_id,
       email: ins.email || '',
       phone_no: ins.phone_no || ''
@@ -509,6 +513,7 @@ export default function InstructorManagement() {
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gender</label>
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
+                    <option value="" disabled>Select gender...</option>
                     <option value="MALE">Male</option>
                     <option value="FEMALE">Female</option>
                   </select>
