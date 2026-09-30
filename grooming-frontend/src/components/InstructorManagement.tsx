@@ -1,10 +1,11 @@
 import { useCallback, useState, useEffect, useMemo, type FormEvent } from 'react';
-import { Plus, UserCog, Search, Mail, CircleAlert } from 'lucide-react';
+import { Plus, UserCog, Search, Mail, CircleAlert, X } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
 import ReferencePhotoField from './ReferencePhotoField';
 import RowActionsMenu from './RowActionsMenu';
+import { instructorRoleOptions } from '../instructorRoles';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import type { College, Instructor } from '../types';
@@ -51,7 +52,9 @@ export default function InstructorManagement() {
     name: '',
     employee_id: '',
     role: '',
-    gender: 'MALE',
+    // Blank, not MALE: the photo check compares against gendered standards,
+    // so a default would quietly grade someone against the wrong ones.
+    gender: '',
     college_id: '',
     email: '',
     phone_no: ''
@@ -193,7 +196,7 @@ export default function InstructorManagement() {
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
-    setFormData({ name: '', employee_id: '', role: '', gender: 'MALE', college_id: '', email: '', phone_no: '' });
+    setFormData({ name: '', employee_id: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
     // Cleared on every open: a file left from a previous dialog would be
     // enrolled against whichever instructor is created next.
     setPendingPhoto(null);
@@ -210,7 +213,9 @@ export default function InstructorManagement() {
       name: ins.name,
       employee_id: ins.employee_id || '',
       role: ins.instructor_role || ins.role || '',
-      gender: String(ins.gender || 'MALE').toUpperCase(),
+      // An instructor with no gender recorded opens blank, so saving the form
+      // asks for one instead of quietly recording them as male.
+      gender: ins.gender ? String(ins.gender).toUpperCase() : '',
       college_id: ins.college_id,
       email: ins.email || '',
       phone_no: ins.phone_no || ''
@@ -226,20 +231,17 @@ export default function InstructorManagement() {
   };
 
   /**
-   * Every distinct role in the roster, plus the one being edited so an unusual
-   * value is never silently replaced by the first option when the form opens.
+   * The standard roles, then any other role in the roster or on the instructor
+   * being edited, so an unusual value is never silently replaced by the first
+   * option when the form opens.
    */
-  const roleOptions = useMemo(() => {
-    const roles = new Set<string>();
-    for (const instructor of instructors) {
-      const role = instructor.instructor_role || instructor.role;
-      if (role) roles.add(role);
-    }
-    if (formData.role) roles.add(formData.role);
-    // A fallback only when the roster is empty, so the form is never unusable.
-    if (roles.size === 0) ["INSTRUCTOR", "CENTRAL_INSTRUCTOR"].forEach((role) => roles.add(role));
-    return [...roles].sort((a, b) => a.localeCompare(b));
-  }, [instructors, formData.role]);
+  const roleOptions = useMemo(
+    () => instructorRoleOptions(
+      instructors.map((instructor) => instructor.instructor_role || instructor.role),
+      formData.role,
+    ),
+    [instructors, formData.role],
+  );
 
   // Search covers the synced columns too, since employee_id is often absent
   // on roster rows and the user id is what identifies them.
@@ -279,7 +281,6 @@ export default function InstructorManagement() {
             <UserCog size={24} className="text-indigo-600" />
             Instructor Management
           </h2>
-          <p className="text-sm text-slate-500 mt-1">Manage instructor profiles and college assignments.</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
           <div className="relative flex-1 min-w-[10rem] sm:flex-none">
@@ -468,8 +469,14 @@ export default function InstructorManagement() {
                 <UserCog size={20} className="text-indigo-600" />
                 {isEditMode ? 'Edit Instructor' : 'Add New Instructor'}
               </h2>
-              <button type="button" aria-label="Close instructor dialog" onClick={closeModal} className="text-slate-400 hover:text-slate-600 transition-colors bg-white p-1 rounded-full border border-slate-200 shadow-sm">
-                ✕
+              <button
+                type="button"
+                aria-label="Close instructor dialog"
+                title="Close"
+                onClick={closeModal}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-rose-200 bg-rose-50 text-rose-600 shadow-sm transition-colors hover:border-rose-600 hover:bg-rose-600 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                <X size={18} strokeWidth={2.5} aria-hidden="true" />
               </button>
             </div>
             
@@ -488,10 +495,10 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
-                  {/* Options come from the roles present in the roster, not a
-                      fixed list: the synced data uses CENTRAL_INSTRUCTOR and
-                      INSTRUCTOR, which the old hardcoded three did not include,
-                      so editing a synced instructor silently changed their role. */}
+                  {/* The four standard roles, plus any other role already in
+                      the roster: the synced data uses CENTRAL_INSTRUCTOR and
+                      INSTRUCTOR, and a fixed list that missed a role would
+                      silently change it when a synced instructor was edited. */}
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
                     {/* An empty value must match an option, or the browser
                         shows the first role while the form still holds "",
@@ -505,6 +512,7 @@ export default function InstructorManagement() {
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Gender</label>
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
+                    <option value="" disabled>Select gender...</option>
                     <option value="MALE">Male</option>
                     <option value="FEMALE">Female</option>
                   </select>

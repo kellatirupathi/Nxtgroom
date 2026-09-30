@@ -102,20 +102,10 @@ export default function Sidebar({
 
       <nav className="flex-1 px-4 space-y-1 overflow-y-auto" aria-label="Main navigation">
         {isElevatedRole(role) && (
-          <>
-            <button type="button" onClick={() => navigate('dashboard')} className={navClass(activeTab === 'dashboard')}>
-              <LayoutDashboard size={20} aria-hidden="true" />
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('institutes')}
-              className={navClass(activeTab === 'institutes')}
-            >
-              <ChartColumnBig size={20} aria-hidden="true" />
-              Institutes
-            </button>
-          </>
+          <button type="button" onClick={() => navigate('dashboard')} className={navClass(activeTab === 'dashboard')}>
+            <LayoutDashboard size={20} aria-hidden="true" />
+            Dashboard
+          </button>
         )}
 
         <button type="button" onClick={() => navigate('overview')} className={navClass(activeTab === 'overview')}>
@@ -143,6 +133,14 @@ export default function Sidebar({
 
         {isElevatedRole(role) && (
           <>
+            <button
+              type="button"
+              onClick={() => navigate('institutes')}
+              className={navClass(activeTab === 'institutes')}
+            >
+              <ChartColumnBig size={20} aria-hidden="true" />
+              Institutes
+            </button>
             <button
               type="button"
               onClick={() => navigate('instructor-management')}
