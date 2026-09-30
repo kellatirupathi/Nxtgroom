@@ -4,7 +4,13 @@ import { withMongoTransaction } from "../config/db.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { asyncRoute, createDocument, dateBoundsInTimeZone, parsePagination, serializeDocument } from "../utils.js";
 import { runtimeConfig } from "../config/env.js";
-import { instructorGenderSchema, instructorSchema, validate } from "../validation.js";
+import {
+  instructorGenderSchema,
+  instructorImportRowsSchema,
+  instructorImportSheetSchema,
+  instructorSchema,
+  validate,
+} from "../validation.js";
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeInstructorImage } from "../imageProcessor.js";
 import { getPhotoUrl } from "../services/photoStorage.js";
@@ -14,6 +20,14 @@ import {
   isFaceRecognitionConfigured,
 } from "../services/faceRecognition.js";
 import { discardReferencePhoto, enrollReferencePhoto } from "../services/referencePhotos.js";
+import {
+  commitImportRows,
+  fetchSheetCsv,
+  MAX_COMMIT_ROWS,
+  MAX_PREVIEW_ROWS,
+  previewImportRows,
+} from "../services/instructorImport.js";
+import { RemoteFetchError } from "../services/remoteFetch.js";
 
 export const instructorRouter = Router();
 
@@ -295,6 +309,61 @@ instructorRouter.post(
       message: "Instructor created successfully",
       id: result.instructor._id,
     });
+  })
+);
+
+/**
+ * The instructor import, in three steps the Instructors page drives.
+ *
+ * The browser parses the file, so these take rows rather than an upload: a
+ * sheet link is fetched here only because Google does not let the browser
+ * read it directly. Rows travel in small batches, so a long sheet shows
+ * progress and no single request waits on hundreds of photo downloads.
+ */
+instructorRouter.post(
+  "/import/sheet",
+  requireSuperAdmin,
+  validate(instructorImportSheetSchema),
+  asyncRoute(async (req, res) => {
+    try {
+      const csv = await fetchSheetCsv(req.validatedBody.url);
+      return res.json({ csv });
+    } catch (error) {
+      if (error instanceof RemoteFetchError) return res.status(400).json({ detail: error.message });
+      throw error;
+    }
+  })
+);
+
+/** Checks a batch and writes nothing. */
+instructorRouter.post(
+  "/import/preview",
+  requireSuperAdmin,
+  validate(instructorImportRowsSchema(MAX_PREVIEW_ROWS)),
+  asyncRoute(async (req, res) => {
+    // A photograph that cannot be enrolled is refused one by one otherwise,
+    // after every row has been checked; saying so up front saves the wait.
+    if (!isFaceRecognitionConfigured()) {
+      return res.status(503).json({ detail: FACE_REASON_MESSAGES.NOT_CONFIGURED });
+    }
+    const results = await previewImportRows(req.app.locals.db, req.validatedBody.rows);
+    return res.json({ results });
+  })
+);
+
+/** Checks a batch again and adds every row that still passes. */
+instructorRouter.post(
+  "/import",
+  requireSuperAdmin,
+  validate(instructorImportRowsSchema(MAX_COMMIT_ROWS)),
+  asyncRoute(async (req, res) => {
+    if (!isFaceRecognitionConfigured()) {
+      return res.status(503).json({ detail: FACE_REASON_MESSAGES.NOT_CONFIGURED });
+    }
+    const results = await commitImportRows(req.app.locals.db, req.validatedBody.rows, {
+      createInstructor: createInstructorGuarded,
+    });
+    return res.json({ results });
   })
 );
 

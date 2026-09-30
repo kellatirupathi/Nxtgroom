@@ -70,6 +70,39 @@ export const instructorGenderSchema = z.object({
     .pipe(z.enum(["MALE", "FEMALE"])),
 });
 
+/**
+ * One batch of spreadsheet rows for the instructor import.
+ *
+ * Only the shape is checked here: every cell is taken as text and bounded in
+ * length. What the values must be is decided per row by the import service,
+ * so a bad row is reported against its row number instead of failing the
+ * whole batch with a 422.
+ */
+const importCell = z.preprocess(
+  (value) => (value == null ? undefined : String(value)),
+  z.string().max(2048).optional()
+);
+
+const importRowSchema = z.object({
+  row: z.number().int().min(1).max(1_000_000).optional(),
+  name: importCell,
+  email: importCell,
+  gender: importCell,
+  role: importCell,
+  institute: importCell,
+  employee_id: importCell,
+  phone_no: importCell,
+  photo_url: importCell,
+});
+
+export function instructorImportRowsSchema(maxRows) {
+  return z.object({ rows: z.array(importRowSchema).min(1).max(maxRows) });
+}
+
+export const instructorImportSheetSchema = z.object({
+  url: z.string().trim().min(1).max(2048),
+});
+
 export const checkoutSchema = z.object({
   // Optional because a face-only college sends no id: the photograph decides
   // whose session is being closed. The route still requires one in selector
