@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Building2, Edit2, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
+import InstituteFormDialog from './InstituteFormDialog';
 import { useToast } from './useToast';
 import type { College } from '../types';
 
 const COLLEGES_PATH = '/api/v2/colleges';
-
-const EMPTY_FORM = { name: '', location: '' };
 
 export default function CollegeManagement() {
   // Seed from the last known response so the table paints immediately on
@@ -17,18 +16,14 @@ export default function CollegeManagement() {
     Array.isArray(cachedColleges) ? cachedColleges : [],
   );
   const [loading, setLoading] = useState(!Array.isArray(cachedColleges));
-  const [submitting, setSubmitting] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [editing, setEditing] = useState<College | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<College | null>(null);
   const [syncing, setSyncing] = useState(false);
   const hasRowsRef = useRef(colleges.length > 0);
   const toast = useToast();
-
-  const isEditMode = Boolean(editingId);
 
   const fetchColleges = useCallback(async () => {
     // Only show the loading state when there is nothing to display; with
@@ -51,60 +46,30 @@ export default function CollegeManagement() {
     fetchColleges();
   }, [fetchColleges]);
 
-  const resetModal = () => {
-    setShowModal(false);
-    setEditingId(null);
-    setFormData(EMPTY_FORM);
-  };
-
-  const closeModal = () => {
-    if (submitting) return;
-    resetModal();
-    setError('');
-  };
-
   const openCreateModal = () => {
-    setEditingId(null);
-    setFormData(EMPTY_FORM);
+    setEditing(null);
     setError('');
     setShowModal(true);
   };
 
   const openEditModal = (college: College) => {
-    setEditingId(String(college._id));
-    setFormData({ name: college.name || '', location: college.location || '' });
+    setEditing(college);
     setError('');
     setShowModal(true);
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setSubmitting(true);
-    setError('');
-    try {
-      // Update local state from the response rather than refetching the list,
-      // so the table never blanks out between edits.
-      const saved = await apiJson<{ id?: string }>(
-        isEditMode ? `${COLLEGES_PATH}/${encodeURIComponent(editingId as string)}` : COLLEGES_PATH,
-        { method: isEditMode ? 'PUT' : 'POST', body: formData },
-      );
-      invalidateCache(COLLEGES_PATH);
-      if (isEditMode) {
-        setColleges((current) => current.map((college) => (
-          String(college._id) === editingId ? { ...college, ...formData } : college
-        )));
-      } else if (saved?.id) {
-        setColleges((current) => [...current, { _id: saved.id as string, ...formData }]);
-      }
-      toast.success(isEditMode ? 'Institute updated' : 'Institute added', { detail: formData.name });
-      resetModal();
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : String(requestError);
-      setError(message);
-      toast.error(isEditMode ? 'Could not update institute' : 'Could not add institute', { detail: message });
-    } finally {
-      setSubmitting(false);
+  // Update local state from the saved values rather than refetching the
+  // list, so the table never blanks out between edits.
+  const handleSaved = (saved: College, wasEdit: boolean) => {
+    if (wasEdit) {
+      setColleges((current) => current.map((college) => (
+        String(college._id) === String(saved._id) ? { ...college, ...saved } : college
+      )));
+    } else if (saved._id) {
+      setColleges((current) => [...current, saved]);
     }
+    setShowModal(false);
+    setEditing(null);
   };
 
   const handleDelete = async (college: College) => {
@@ -180,7 +145,7 @@ export default function CollegeManagement() {
         </div>
       </div>
 
-      {error && !showModal && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
+      {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
       <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex flex-col">
         <div className="overflow-x-auto">
@@ -214,23 +179,12 @@ export default function CollegeManagement() {
         </div>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="college-dialog-title">
-          <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h2 id="college-dialog-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2"><Building2 size={20} className="text-indigo-600" aria-hidden="true" />{isEditMode ? 'Edit Institute' : 'Add New Institute'}</h2>
-              <button type="button" aria-label="Close institute dialog" onClick={closeModal} disabled={submitting} className="text-slate-400 hover:text-slate-600 transition-colors bg-white px-2 py-1 rounded-full border border-slate-200 shadow-sm disabled:opacity-50">×</button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
-              {error && <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
-              <div><label htmlFor="college-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Institute Name</label><input id="college-name" required maxLength={120} placeholder="e.g. Training Institute" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
-              <div><label htmlFor="college-location" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Location</label><input id="college-location" required maxLength={160} placeholder="e.g. Hyderabad" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.location} onChange={(event) => setFormData({ ...formData, location: event.target.value })} /></div>
-              <div className="pt-4 flex gap-3"><button type="button" onClick={closeModal} disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50">Cancel</button><button type="submit" disabled={submitting} className="flex-1 px-4 py-3 rounded-md font-bold text-sm text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200 disabled:opacity-50">{submitting ? 'Saving…' : isEditMode ? 'Save Changes' : 'Add Institute'}</button></div>
-            </form>
-          </div>
-        </div>
-      )}
+      <InstituteFormDialog
+        open={showModal}
+        college={editing}
+        onClose={() => setShowModal(false)}
+        onSaved={handleSaved}
+      />
 
       <ConfirmDialog
         open={Boolean(confirmTarget)}
