@@ -85,7 +85,7 @@ export function androidAppBridge(scope: { Capacitor?: CapacitorBridge } = global
 }
 
 /**
- * Hands the file to the browser, or to the Android app.
+ * Hands a CSV file to the browser, or to the Android app.
  *
  * The byte-order mark is what makes Excel read the file as UTF-8, without which
  * a name in Telugu or Hindi opens as mojibake.
@@ -93,9 +93,8 @@ export function androidAppBridge(scope: { Capacitor?: CapacitorBridge } = global
  * In the app a blob link does nothing - its WebView has no download manager -
  * so the app saves the file itself, to Downloads, and says so.
  */
-export function downloadAttendanceCsv(records: AttendanceRecord[], range: DateRange): Promise<void> {
-  const content = `﻿${attendanceCsv(records)}`;
-  const fileName = attendanceExportFileName(range);
+export function saveCsvFile(fileName: string, csv: string): Promise<void> {
+  const content = `\uFEFF${csv}`;
   const app = androidAppBridge();
   if (app?.nativePromise) {
     return app.nativePromise('FileSaver', 'saveText', { fileName, mimeType: 'text/csv', content }).then(() => undefined);
@@ -112,4 +111,8 @@ export function downloadAttendanceCsv(records: AttendanceRecord[], range: DateRa
   // some browsers before it has started.
   setTimeout(() => URL.revokeObjectURL(url), 0);
   return Promise.resolve();
+}
+
+export function downloadAttendanceCsv(records: AttendanceRecord[], range: DateRange): Promise<void> {
+  return saveCsvFile(attendanceExportFileName(range), attendanceCsv(records));
 }
