@@ -133,8 +133,17 @@ export type ImportRow = { row: number } & Partial<Record<ImportField, string>>;
 
 export interface ImportTable {
   rows: ImportRow[];
-  /** Template headings of required columns the sheet does not have. */
+  /**
+   * Template headings of required columns the sheet does not have. Not fatal:
+   * an instructor already in the roster keeps what is on record for them;
+   * only a new instructor's row is flagged without them.
+   */
   missingColumns: string[];
+  /**
+   * Whether the sheet has an Email or Employee ID column. Without one no row
+   * can be matched to the roster, so the sheet cannot be imported at all.
+   */
+  hasIdentifier: boolean;
   /** Headings that match no column, left out of the import. */
   ignoredColumns: string[];
 }
@@ -151,7 +160,7 @@ export interface ImportTable {
 export function readImportTable(csvRows: CsvRow[]): ImportTable {
   const [header, ...body] = csvRows;
   if (!header) {
-    return { rows: [], missingColumns: IMPORT_COLUMNS.filter((c) => c.required).map((c) => c.label), ignoredColumns: [] };
+    return { rows: [], missingColumns: IMPORT_COLUMNS.filter((c) => c.required).map((c) => c.label), hasIdentifier: false, ignoredColumns: [] };
   }
   const fieldAt = header.cells.map((heading) => headingField(heading));
   const present = new Set(fieldAt.filter(Boolean));
@@ -170,7 +179,7 @@ export function readImportTable(csvRows: CsvRow[]): ImportTable {
     });
     return row;
   });
-  return { rows, missingColumns, ignoredColumns };
+  return { rows, missingColumns, hasIdentifier: present.has('email') || present.has('employee_id'), ignoredColumns };
 }
 
 export interface FlaggedRow {
@@ -209,6 +218,11 @@ export function fieldsInError(errors: readonly string[]): Set<ImportField> {
     for (const [pattern, field] of ERROR_FIELDS) if (pattern.test(error)) fields.add(field);
   }
   return fields;
+}
+
+/** Whether a row gives an email or Employee ID to find the instructor by. */
+export function hasIdentifier(row: ImportRow): boolean {
+  return Boolean((row.email ?? '').trim() || (row.employee_id ?? '').trim());
 }
 
 /**

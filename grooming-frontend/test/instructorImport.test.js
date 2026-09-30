@@ -6,6 +6,7 @@ import {
   fieldsInError,
   firstValue,
   guessCollegeId,
+  hasIdentifier,
   guessGender,
   guessRole,
   headingField,
@@ -95,6 +96,31 @@ test('columns are read in whatever order the sheet has them', () => {
 test('a sheet without a required column says which ones', () => {
   const table = readImportTable(parseCsv('Name,Email,Phone\nAsha,a@x.com,1\n'));
   assert.deepEqual(table.missingColumns, ['Gender', 'Role', 'Institute', 'Employee ID', 'Photo Link']);
+  // Still importable: the email finds anyone already in the roster.
+  assert.equal(table.hasIdentifier, true);
+});
+
+test('a sheet needs an email or employee ID column to find anyone', () => {
+  assert.equal(readImportTable(parseCsv('Emp ID,Phone\nE1,98480\n')).hasIdentifier, true);
+  assert.equal(readImportTable(parseCsv('Name,Phone\nAsha,98480\n')).hasIdentifier, false);
+  assert.equal(readImportTable([]).hasIdentifier, false);
+});
+
+test('an Institute Name column and extra columns, in any order', () => {
+  const table = readImportTable(parseCsv(
+    'Remarks,Institute Name,Photo Link,Employee ID,Role,Gender,Email,Name,Batch\n'
+    + 'ok,Aurora Institute,https://x/a.jpg,E1,Mentor,F,a@x.com,Asha,2024\n',
+  ));
+  assert.deepEqual(table.missingColumns, []);
+  assert.deepEqual(table.ignoredColumns, ['Remarks', 'Batch']);
+  assert.equal(table.rows[0].institute, 'Aurora Institute');
+  assert.equal(table.rows[0].name, 'Asha');
+});
+
+test('a row can be looked up by its email or its employee ID', () => {
+  assert.equal(hasIdentifier({ row: 2, employee_id: 'E1' }), true);
+  assert.equal(hasIdentifier({ row: 2, email: 'a@x.com' }), true);
+  assert.equal(hasIdentifier({ row: 2, name: 'Asha', email: ' ' }), false);
 });
 
 test('an empty sheet is missing every required column', () => {
