@@ -74,15 +74,163 @@ export type Detector = {
     config?: { maxPoses?: number },
   ) => Promise<Pose[]>;
   dispose?: () => void;
+  /**
+   * MoveNet's own parts, reached for preparing the graphics chip. Not part of
+   * its published interface, so both are optional and checked before use. The
+   * detector's reset() is not used: on the multi-person model it throws.
+   */
+  tracker?: { reset?: () => void };
+  moveNetModel?: { execute: (input: unknown) => unknown };
 };
 
+type TfCore = typeof import('@tensorflow/tfjs-core');
+
+/**
+ * MoveNet MultiPose Lightning (Apache 2.0), served by this site.
+ *
+ * From Google's model site the same 9.4 MB came through three redirects to a
+ * signed address marked not to be kept, so every opening of Attendance
+ * downloaded it again: five to ten seconds before the first face box. Served
+ * from here it is cached for a year (vercel.json), and every later opening
+ * reads it from the tablet itself. The version is in the folder's name: a new
+ * model goes in a new folder, so a cached copy can never be a stale one.
+ */
+export const MOVENET_MODEL_URL = '/models/movenet-multipose-lightning-v1/model.json';
+
+/** Long side of the picture readFrame (and readGroupFrame) hands the detector. */
+const ANALYSIS_MAX_SIDE = 480;
+/** Long side MoveNet shrinks that picture to before reading it. */
+const MULTI_POSE_MAX_DIMENSION = 320;
+
 let detectorPromise: Promise<Detector | null> | null = null;
+let detectorSettled = false;
+let tfCore: TfCore | null = null;
+/** One preparation per picture shape, shared by everybody waiting on it. */
+const preparedShapes = new Map<string, Promise<void>>();
+
+/**
+ * Whether loading has finished, well or badly. A camera opened before then
+ * says it is starting instead of asking somebody to step into a frame nothing
+ * is watching yet.
+ */
+export function fullBodyDetectorSettled(): boolean {
+  return detectorSettled;
+}
+
+/** The camera's line while that loading is still under way. */
+export const DETECTOR_STARTING_GUIDANCE = 'Starting face detection…';
+
+/** The picture readFrame makes for a preview of this size: its shape, at most 480 on the long side. */
+export function analysisSize(viewWidth: number, viewHeight: number): { width: number; height: number } {
+  const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(viewWidth, viewHeight));
+  return {
+    width: Math.max(1, Math.round(viewWidth * scale)),
+    height: Math.max(1, Math.round(viewHeight * scale)),
+  };
+}
+
+/**
+ * The [height, width] MoveNet runs its network at for a picture this size:
+ * the long side at 320 and the other rounded up to a multiple of 32, as its
+ * multi-person reading does.
+ */
+export function modelInputShape(width: number, height: number): [number, number] {
+  const short = (side: number, long: number) => (
+    Math.ceil(Math.round(MULTI_POSE_MAX_DIMENSION * side / long) / 32) * 32
+  );
+  return width > height
+    ? [short(height, width), MULTI_POSE_MAX_DIMENSION]
+    : [MULTI_POSE_MAX_DIMENSION, short(width, height)];
+}
+
+/**
+ * Has the graphics chip build every program the network needs, all at once
+ * and off the page's own thread. Built one at a time on the first reading they
+ * took 15 seconds on a laptop, the page frozen throughout; built this way,
+ * about one second. A browser that cannot build in parallel still builds them
+ * here, one at a time, which is no slower than the first reading would be.
+ */
+async function buildPrograms(detector: Detector, [height, width]: [number, number]): Promise<void> {
+  const tf = tfCore;
+  const model = detector.moveNetModel;
+  const backend = tf?.backend() as {
+    checkCompileCompletionAsync?: () => Promise<unknown>;
+    getUniformLocations?: () => void;
+  } | undefined;
+  if (!tf || typeof model?.execute !== 'function'
+    || !backend?.checkCompileCompletionAsync || !backend.getUniformLocations) {
+    return;
+  }
+  const input = tf.zeros([1, height, width, 3], 'int32');
+  let output: unknown;
+  tf.env().set('ENGINE_COMPILE_ONLY', true);
+  try {
+    output = model.execute(input);
+  } finally {
+    // Left on, every later reading would build programs and never run them.
+    tf.env().set('ENGINE_COMPILE_ONLY', false);
+  }
+  try {
+    await backend.checkCompileCompletionAsync();
+    backend.getUniformLocations();
+  } finally {
+    tf.dispose([input, output as Parameters<TfCore['dispose']>[0]]);
+  }
+}
+
+/**
+ * Readies the detector for a preview of this size before anybody stands in
+ * front of it: the network's programs built in parallel, then one reading of a
+ * blank picture of exactly the shape the camera will send, which builds the
+ * few programs around the network. Each shape is prepared once; a camera that
+ * asks again, or asks while it is under way, waits on the same preparation.
+ *
+ * Never throws: whatever this could not prepare, the first real reading does,
+ * as it always did.
+ */
+export function primeFullBodyDetector(
+  detector: Detector | null,
+  viewWidth: number,
+  viewHeight: number,
+): Promise<void> {
+  if (!detector || !(viewWidth > 0) || !(viewHeight > 0) || typeof document === 'undefined') {
+    return Promise.resolve();
+  }
+  const { width, height } = analysisSize(viewWidth, viewHeight);
+  const key = `${width}x${height}`;
+  let preparing = preparedShapes.get(key);
+  if (!preparing) {
+    preparing = (async () => {
+      try {
+        await buildPrograms(detector, modelInputShape(width, height));
+      } catch {
+        // Built on the first reading instead.
+      }
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d')?.fillRect(0, 0, width, height);
+        await detector.estimatePoses(canvas);
+        // A blank picture has nobody in it, but start the tracking from
+        // nothing all the same.
+        detector.tracker?.reset?.();
+      } catch {
+        // The first real reading does this instead.
+      }
+    })();
+    preparedShapes.set(key, preparing);
+  }
+  return preparing;
+}
 
 /**
  * Loads MoveNet once per page.
  *
  * Imported lazily so the weights and the runtime are fetched when a camera is
- * actually opened, rather than by everybody who loads the app.
+ * about to open, rather than by everybody who loads the app. Attendance asks
+ * for it as it opens (preloadFullBodyDetector), so the loading overlaps the
+ * start card and the camera starting rather than following them.
  */
 export function loadFullBodyDetector(): Promise<Detector | null> {
   detectorPromise ||= (async () => {
@@ -94,21 +242,54 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
       const tf = await import('@tensorflow/tfjs-core');
       await tf.setBackend('webgl');
       await tf.ready();
-      return await poseDetection.createDetector(
-        poseDetection.SupportedModels.MoveNet,
-        {
-          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-          enableTracking: true,
-          multiPoseMaxDimension: 320,
-          minPoseScore: 0.15,
-        },
-      ) as unknown as Detector;
+      tfCore = tf;
+      try {
+        // Sizes passed to the programs rather than written into them, so one
+        // set of programs serves every preview shape: a rotated tablet or the
+        // group screen no longer waits seconds for new ones. The readings are
+        // identical either way (checked on real photographs at several sizes).
+        tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
+      } catch {
+        // A runtime without the setting builds per shape, as before.
+      }
+      const config = {
+        modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+        enableTracking: true,
+        multiPoseMaxDimension: MULTI_POSE_MAX_DIMENSION,
+        minPoseScore: 0.15,
+      };
+      let detector: Detector;
+      try {
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
+          { ...config, modelUrl: MOVENET_MODEL_URL },
+        ) as unknown as Detector;
+      } catch {
+        // Our copy unreachable: Google's is the same model, only slower.
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
+          config,
+        ) as unknown as Detector;
+      }
+      // Prepared for the window's shape while nothing is waiting on it; the
+      // camera then prepares its own exact shape, mostly from what this built.
+      if (typeof window !== 'undefined') {
+        await primeFullBodyDetector(detector, window.innerWidth, window.innerHeight);
+      }
+      return detector;
     } catch {
       // No WebGL, blocked download, unsupported device. The camera still works.
       return null;
+    } finally {
+      detectorSettled = true;
     }
   })();
   return detectorPromise;
+}
+
+/** Starts loading without waiting for it; see loadFullBodyDetector. */
+export function preloadFullBodyDetector(): void {
+  void loadFullBodyDetector();
 }
 
 function wristPosition(
@@ -447,7 +628,7 @@ export async function readFrame(
         viewport.width,
         viewport.height,
       );
-      const scale = Math.min(1, 480 / Math.max(crop.width, crop.height));
+      const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(crop.width, crop.height));
       const canvas = viewport.canvas;
       canvas.width = Math.max(1, Math.round(crop.width * scale));
       canvas.height = Math.max(1, Math.round(crop.height * scale));

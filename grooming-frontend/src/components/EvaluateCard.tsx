@@ -15,6 +15,7 @@ import {
 } from '../lib/location';
 import AuditReportModal from './AuditReportModal';
 import CameraCapture from './CameraCapture';
+import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
 import InstructorSearchSelect from './InstructorSearchSelect';
 import { useToast } from './useToast';
 import { pathForTab } from '../routes';
@@ -75,6 +76,12 @@ export default function EvaluateCard({
     } | null
   >(null);
   const toast = useToast();
+
+  // While an instructor is being chosen, so the camera's face boxes are ready
+  // the moment it opens.
+  useEffect(() => {
+    preloadFullBodyDetector();
+  }, []);
 
   const selectInstructor = (instructorId: string) => {
     setSelectedUuid(instructorId);

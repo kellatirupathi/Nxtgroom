@@ -13,7 +13,13 @@ import {
   type GroupVerdict,
   type StableGroupState,
 } from '../lib/groupFrameDetector';
-import { loadFullBodyDetector, AUTO_CAPTURE_COOLDOWN_MS } from '../lib/fullBodyDetector';
+import {
+  AUTO_CAPTURE_COOLDOWN_MS,
+  DETECTOR_STARTING_GUIDANCE,
+  fullBodyDetectorSettled,
+  loadFullBodyDetector,
+  primeFullBodyDetector,
+} from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
 import { stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
 import { coverSourceRect } from '../lib/cameraGeometry';
@@ -164,8 +170,15 @@ export default function GroupCameraCapture({ facing, onFlip, onCapture }: GroupC
     let stableState: StableGroupState = INITIAL_GROUP_STATE;
 
     const inspect = async () => {
+      // As on the one-person camera: say it is starting until it has.
+      if (!fullBodyDetectorSettled()) {
+        setReading((current) => ({ ...current, guidance: DETECTOR_STARTING_GUIDANCE }));
+      }
       const detector = await loadFullBodyDetector();
       clearTimeout(detectorGraceTimer);
+      // As on the one-person camera: this preview's exact shape, prepared first.
+      const preview = viewportRef.current;
+      if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
       const tick = async () => {
         if (disposed) return;
         const video = videoRef.current;

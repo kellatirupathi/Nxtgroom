@@ -5,7 +5,10 @@ import {
   AUTO_CAPTURE_COOLDOWN_MS,
   autoCaptureFallbackDue,
   autoCaptureReady,
+  DETECTOR_STARTING_GUIDANCE,
+  fullBodyDetectorSettled,
   loadFullBodyDetector,
+  primeFullBodyDetector,
   readFrame,
   shutterEnabled,
   stabilizeFrameReading,
@@ -220,8 +223,16 @@ export default function CameraCapture({
     };
 
     const inspect = async () => {
+      // Nothing watches the frame until the detector is ready, so say that
+      // rather than asking somebody to step into it. Once it has loaded, a
+      // camera opened later goes straight to the usual line.
+      if (!fullBodyDetectorSettled()) setGuidance(DETECTOR_STARTING_GUIDANCE);
       const detector = await loadFullBodyDetector();
       clearTimeout(detectorGraceTimer);
+      // The exact shape this preview sends, prepared before its first reading
+      // so that reading is as quick as the rest.
+      const preview = viewportRef.current;
+      if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
       const tick = async () => {
         if (disposed) return;
         const video = videoRef.current;

@@ -3,6 +3,7 @@ import { RefreshCw, User, Users } from 'lucide-react';
 import BrandedLoader from './BrandedLoader';
 import KioskAttendance from './KioskAttendance';
 import { isChunkLoadError, memoizedImport, reloadForNewDeployment } from '../lib/chunkRecovery';
+import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
 
 /**
  * The group screen's code, fetched at most once per page.
@@ -133,6 +134,12 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
   // A lazy component remembers a failed download for good, so a retry needs a
   // new one; the import underneath is shared and fetched once.
   const [GroupScreen, setGroupScreen] = useState(() => lazy(loadGroupScreen));
+
+  // As the screen opens, behind the start card and the camera starting rather
+  // than after them, so the face boxes are ready when somebody steps up.
+  useEffect(() => {
+    preloadFullBodyDetector();
+  }, []);
 
   useEffect(() => {
     clearReopenGroup();
