@@ -7,6 +7,7 @@ import { useAttendanceFullScreen } from './useAttendanceFullScreen';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { isChunkLoadError, memoizedImport, reloadForNewDeployment } from '../lib/chunkRecovery';
 import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
+import { armBeepUnlock } from '../lib/successBeep';
 
 /**
  * The group screen's code, fetched at most once per page.
@@ -145,6 +146,10 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
   useEffect(() => {
     preloadFullBodyDetector();
   }, []);
+
+  // A browser plays sound only after the page is touched; the first tap here
+  // (Start full screen, or anything else) lets the check-in beep play.
+  useEffect(() => armBeepUnlock(), []);
 
   useEffect(() => {
     clearReopenGroup();

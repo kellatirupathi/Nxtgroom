@@ -16,6 +16,7 @@ import {
 import AuditReportModal from './AuditReportModal';
 import CameraCapture from './CameraCapture';
 import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
+import { armBeepUnlock, playSuccessBeep } from '../lib/successBeep';
 import InstructorSearchSelect from './InstructorSearchSelect';
 import { useToast } from './useToast';
 import { pathForTab } from '../routes';
@@ -79,6 +80,9 @@ export default function EvaluateCard({
   useEffect(() => {
     preloadFullBodyDetector();
   }, []);
+
+  // Lets the check-in and check-out beep play after the first tap.
+  useEffect(() => armBeepUnlock(), []);
 
   const selectInstructor = (instructorId: string) => {
     setSelectedUuid(instructorId);
@@ -233,6 +237,8 @@ export default function EvaluateCard({
       }
       resetPhoto();
       setSelectedUuid('');
+      // Recorded: the request above throws on any refusal.
+      playSuccessBeep();
       if (result?.attendance_id) {
         // Hand the id over: the dialog marks saving complete and starts
         // following the analysis.
@@ -326,6 +332,8 @@ export default function EvaluateCard({
         // configured Gemini timeout plus transport overhead.
         { method: 'POST', body: formData, timeoutMs: 150_000 },
       );
+      // Recorded: the request above throws on any refusal.
+      playSuccessBeep();
       if (hasPhoto && result?.attendance_id) {
         // Hand the id over: the dialog marks saving complete and starts
         // following the analysis.

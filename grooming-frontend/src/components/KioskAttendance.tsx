@@ -4,6 +4,7 @@ import { apiFetch, ApiError } from '../api';
 import CameraCapture from './CameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
+import { beepsFor, playSuccessBeep } from '../lib/successBeep';
 
 /**
  * How long a result stays on screen.
@@ -82,6 +83,9 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
   }, []);
 
   const showResult = useCallback((next: KioskResponse) => {
+    // One beep when a check-in or check-out was recorded, as a terminal
+    // gives, so somebody already walking away knows it went through.
+    if (!next.duplicate && beepsFor(next.action, next.recorded)) playSuccessBeep();
     setResult({ ...next, at: Date.now() });
     clearTimeout(resultTimer.current);
     // Cleared on a timer rather than on the next capture: the camera is already

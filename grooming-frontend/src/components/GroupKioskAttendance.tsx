@@ -5,6 +5,7 @@ import GroupCameraCapture from './GroupCameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { formatAttendanceTime } from '../attendanceFilters';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
+import { beepsFor, playSuccessBeep } from '../lib/successBeep';
 
 /**
  * How long a group's results stay on screen.
@@ -80,6 +81,8 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
   }, []);
 
   const showResult = useCallback((next: GroupResponse) => {
+    // One beep for the photograph when anybody in it was checked in or out.
+    if (!next.duplicate && next.people.some((person) => beepsFor(person.action, person.recorded))) playSuccessBeep();
     setResult({ ...next, at: Date.now() });
     clearTimeout(resultTimer.current);
     resultTimer.current = setTimeout(() => setResult(null), RESULT_VISIBLE_MS);
