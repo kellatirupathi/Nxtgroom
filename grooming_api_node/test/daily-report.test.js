@@ -310,6 +310,7 @@ test("the morning report lists that period's check-ins, non-compliant first", as
   assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Asha P"]);
   const [ravi, asha] = report.rows;
   assert.equal(ravi.checkIn, "09:11 AM");
+  assert.equal(ravi.institute, "NIAT Hyderabad");
   assert.equal(ravi.checkOut, "-", "the 6:05 PM check-out had not happened by 1 PM");
   assert.equal(ravi.status, "non_compliant");
   assert.deepEqual(ravi.points, ["Button the collar properly and tuck the shirt in. Wear your instructor ID card."]);
@@ -367,6 +368,8 @@ test("the email gives every instructor a report link, creating a missing one", a
   });
   const report = await buildDailyReportForEmail(db, { ...morningRun, _id: "email-test-run" });
   const kiran = report.rows.find((row) => row.name === "Kiran");
+  // No institute on Kiran's check-in: his own is named.
+  assert.equal(kiran.institute, "Training Institute Bengaluru");
   assert.match(kiran.reportUrl, /^https:\/\/nxtgroom-xi\.vercel\.app\/reports\/[A-Za-z0-9_-]{20,}\/day\/2026-09-30\/check-in$/);
   assert.ok(db.docs("instructors").find((row) => row._id === "i-kiran").report_token, "the token is stored");
 });
@@ -378,7 +381,9 @@ test("the email is the table, with a link to the whole report at the top", async
   const pageUrl = "https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/1-00-pm/secretsecretsecret";
   const email = buildDailyReportEmail({ ...report, pageUrl });
   assert.equal(email.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
-  assert.match(email.html, /<th>Instructor Name<\/th><th>Check-in Time<\/th><th>Check-out Time<\/th><th>Status<\/th><th>Feedback<\/th><th>Report<\/th>/);
+  assert.match(email.html, /<th>Instructor Name<\/th><th>Institute Name<\/th><th>Check-in Time<\/th><th>Check-out Time<\/th><th>Status<\/th><th>Feedback<\/th><th>Report<\/th>/);
+  // The institute sits between the name and the check-in time.
+  assert.ok(email.html.includes('<tr><td>Ravi Teja</td><td>NIAT Hyderabad</td><td class="t">09:11 AM</td>'));
   // The status sits between the check-out time and the feedback, red or green.
   assert.ok(email.html.includes('<td class="t">-</td><td class="t" style="color:#b91c1c;font-weight:700">Non-compliant</td><td>Button the collar properly'));
   assert.ok(email.html.includes('<td class="t" style="color:#15803d;font-weight:700">Compliant</td><td>No improvements needed</td>'));
@@ -389,7 +394,7 @@ test("the email is the table, with a link to the whole report at the top", async
   assert.ok(email.html.includes('<a href="https://nxtgroom-xi.vercel.app/reports/tokRaviTokRaviTokRavi1/day/2026-09-30/check-in" style="color:#2563eb">Report</a>'));
   assert.equal((email.html.match(/>Report<\/a>/g) || []).length, 2, "one per listed instructor");
   assert.ok(email.text.includes(`See all reports: ${pageUrl}`));
-  assert.match(email.text, /Ravi Teja \| Check-in 09:11 AM \| Check-out - \| Non-compliant\n  Feedback: Button the collar/);
+  assert.match(email.text, /Ravi Teja \| NIAT Hyderabad \| Check-in 09:11 AM \| Check-out - \| Non-compliant\n  Feedback: Button the collar/);
 });
 
 test("names are escaped, and an empty period still sends a clear email", () => {
@@ -399,6 +404,7 @@ test("names are escaped, and an empty period still sends a clear email", () => {
   });
   assert.ok(email.html.includes("&lt;b&gt;Evil&lt;/b&gt;"));
   assert.ok(email.html.includes("a &amp; b"));
+  assert.ok(email.html.includes("<td>&lt;b&gt;Evil&lt;/b&gt;</td><td>-</td>"), "no institute reads as a dash");
   const empty = buildDailyReportEmail({ subject: "s", dateLabel: "30/09/2026", windowLabel: "12:00 AM to 01:00 PM", rows: [], pageUrl: "https://x.test/p" });
   assert.match(empty.html, /No check-ins or check-outs between 12:00 AM to 01:00 PM/);
   assert.match(empty.html, /0 instructors/);

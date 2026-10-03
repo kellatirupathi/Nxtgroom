@@ -688,8 +688,8 @@ export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = 
   const countLabel = `${count} ${count === 1 ? "instructor" : "instructors"}`;
   const intro = `Attendance & grooming check, ${dateLabel}, ${windowLabel}: ${countLabel}.`;
   const body = count
-    ? rows.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td class="t">${escapeHtml(row.checkIn)}</td><td class="t">${escapeHtml(row.checkOut)}</td><td class="t" style="color:${row.status === "non_compliant" ? "#b91c1c" : "#15803d"};font-weight:700">${escapeHtml(dailyStatusLabel(row.status))}</td><td>${row.points.map(escapeHtml).join("<br>")}</td><td>${row.reportUrl ? `<a href="${escapeHtml(row.reportUrl)}" style="color:#2563eb">Report</a>` : "-"}</td></tr>`).join("\n")
-    : `<tr><td colspan="6">No check-ins or check-outs between ${escapeHtml(windowLabel)}.</td></tr>`;
+    ? rows.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.institute || "-")}</td><td class="t">${escapeHtml(row.checkIn)}</td><td class="t">${escapeHtml(row.checkOut)}</td><td class="t" style="color:${row.status === "non_compliant" ? "#b91c1c" : "#15803d"};font-weight:700">${escapeHtml(dailyStatusLabel(row.status))}</td><td>${row.points.map(escapeHtml).join("<br>")}</td><td>${row.reportUrl ? `<a href="${escapeHtml(row.reportUrl)}" style="color:#2563eb">Report</a>` : "-"}</td></tr>`).join("\n")
+    : `<tr><td colspan="7">No check-ins or check-outs between ${escapeHtml(windowLabel)}.</td></tr>`;
 
   return {
     subject,
@@ -699,7 +699,7 @@ export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = 
       "",
       ...(count
         ? rows.map((row) => [
-          `${row.name} | Check-in ${row.checkIn} | Check-out ${row.checkOut} | ${dailyStatusLabel(row.status)}`,
+          `${row.name} | ${row.institute || "-"} | Check-in ${row.checkIn} | Check-out ${row.checkOut} | ${dailyStatusLabel(row.status)}`,
           `  Feedback: ${row.points.join(" / ")}`,
           row.reportUrl ? `  Report: ${row.reportUrl}` : null,
         ].filter(Boolean).join("\n"))
@@ -715,7 +715,7 @@ a{color:#2563eb;font-weight:600;text-decoration:none}
 </style></head><body>
 <p style="margin:0 0 12px;font-size:12px;color:#475569">${escapeHtml(intro)} <a href="${escapeHtml(pageUrl)}" style="color:#2563eb">See all reports</a></p>
 <table cellpadding="6" cellspacing="0">
-<tr><th>Instructor Name</th><th>Check-in Time</th><th>Check-out Time</th><th>Status</th><th>Feedback</th><th>Report</th></tr>
+<tr><th>Instructor Name</th><th>Institute Name</th><th>Check-in Time</th><th>Check-out Time</th><th>Status</th><th>Feedback</th><th>Report</th></tr>
 ${body}
 </table>
 </body></html>`,

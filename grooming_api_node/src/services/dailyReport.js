@@ -417,6 +417,7 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
         projection: {
           instructor_id: 1,
           instructor_name: 1,
+          college_id: 1,
           attendance_day: 1,
           check_in_time: 1,
           check_out_time: 1,
@@ -435,11 +436,20 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
     ? await db.collection("instructors")
       .find(
         { _id: { $in: instructorIds.flatMap((id) => idMatch(id).$in) } },
-        { projection: { name: 1, report_token: 1 } }
+        { projection: { name: 1, report_token: 1, college_id: 1 } }
       )
       .toArray()
     : [];
   const instructorById = new Map(instructors.map((instructor) => [String(instructor._id), instructor]));
+  // The institute the check-in was made at, or else the instructor's own.
+  const collegeOf = (record) => record.college_id || instructorById.get(String(record.instructor_id))?.college_id || null;
+  const collegeIds = [...new Set(records.map(collegeOf).filter(Boolean).map(String))];
+  const colleges = collegeIds.length
+    ? await db.collection("colleges")
+      .find({ _id: { $in: collegeIds.flatMap((id) => idMatch(id).$in) } }, { projection: { name: 1 } })
+      .toArray()
+    : [];
+  const collegeName = new Map(colleges.map((college) => [String(college._id), college.name]));
   if (ensureTokens) {
     for (const instructor of instructors) {
       if (!instructor.report_token) instructor.report_token = await ensureReportToken(db, instructor);
@@ -473,8 +483,10 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
     if (!DAILY_STATUS_LABELS[arrival.state]) continue;
     const instructor = instructorById.get(String(record.instructor_id));
     const sessionDay = record.attendance_day || localDateKey(checkIn, timeZone);
+    const college = collegeOf(record);
     rows.push({
       name: record.instructor_name || instructor?.name || "Instructor",
+      institute: (college && collegeName.get(String(college))) || "",
       checkIn: eventTime(checkIn, run.date, timeZone),
       checkOut: checkOut ? eventTime(checkOut, run.date, timeZone) : "-",
       status: arrival.state,
