@@ -234,6 +234,53 @@ test("hair over the forehead and messy hair fail, as the full-length read missed
   assert.ok(tips.includes("Set your hair back or up so your forehead is fully clear."));
 });
 
+test("a forehead the full-length read failed passes on a real face close-up that shows it clear", () => {
+  const failedPosition = () => {
+    const rows = passedRows();
+    Object.assign(row(rows, "M_HAIR_POSITION"), {
+      status: "FAIL",
+      observation: "Several strands of hair are resting on the forehead and obscuring the upper part of the eyebrows.",
+      reason: "Hair is falling across the forehead and eyes, violating the standard.",
+    });
+    Object.assign(row(rows, "M_HAIR_NEATNESS"), { status: "FAIL", reason: "Dishevelled at the crown." });
+    return rows;
+  };
+  const clear = face({
+    hair_on_forehead: "NO",
+    hair_messy: "NO",
+    face_observation: "Curly hair set up and back; the forehead is clear from the hairline to the eyebrows.",
+  });
+
+  const rows = failedPosition();
+  const result = applyDetailFindings(rows, clear, REGIONS, CROPPED);
+  assert.ok(result.passed.includes("M_HAIR_POSITION"));
+  const position = row(rows, "M_HAIR_POSITION");
+  assert.equal(position.status, "PASS");
+  assert.equal(position.observation, "Close-up of the face: Curly hair set up and back; the forehead is clear from the hairline to the eyebrows.");
+  assert.equal(position.reason, "The close-up of the face shows the forehead clear of hair from the hairline to the eyebrows.");
+  assert.ok(!improvementTips(rows).includes("Set your hair back or up so your forehead is fully clear."));
+  // Messy hair the report saw is never passed by the close-up.
+  assert.equal(row(rows, "M_HAIR_NEATNESS").status, "FAIL");
+  assert.equal(row(rows, "M_HAIR_NEATNESS").reason, "Dishevelled at the crown.");
+  assert.ok(!result.passed.includes("M_HAIR_NEATNESS"));
+
+  // Without a real face crop, or with an unclear answer, the failure stands.
+  for (const [findings, options] of [
+    [clear, { croppedRegions: ["waist", "legs", "feet"] }],
+    [face({ hair_on_forehead: "UNCLEAR" }), CROPPED],
+    [face({ face_assessable: false, hair_on_forehead: "NO" }), CROPPED],
+  ]) {
+    const kept = failedPosition();
+    applyDetailFindings(kept, findings, REGIONS, options);
+    assert.equal(row(kept, "M_HAIR_POSITION").status, "FAIL");
+  }
+});
+
+test("the face close-up is told curls at the hairline are not on the forehead, and shaped curls are not messy", () => {
+  assert.match(CLOSE_UP_INSTRUCTIONS, /Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead\./);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /Natural curly or wavy hair that is shaped and under control is NO; curly hair that is uncombed or sticking out is YES\./);
+});
+
 test("a trimmed or light beard the full-length read failed passes on a real face close-up", () => {
   for (const [facialHair, reason] of [
     ["TRIMMED_BEARD", "The close-up of the face shows a short, even beard or one with trimmed, defined edges."],

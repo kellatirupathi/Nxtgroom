@@ -24,15 +24,17 @@ import { z } from "zod";
  *
  * Mostly the answers only tighten: a row the report passed fails when the
  * close-up contradicts it, and nothing the report failed is passed, since a
- * failure may rest on something the crop does not show. The one exception is
- * the beard and moustache, which the report failed whenever it could not make
- * out an edge in a face a few dozen pixels high: there, a real face close-up
- * that shows a clean shave, light stubble or a trimmed beard is trusted over
- * it. Every row read from a close-up keeps the box it was read from, so the
- * report can show it.
+ * failure may rest on something the crop does not show. The exceptions are
+ * the beard, the moustache and hair on the forehead, which the report failed
+ * whenever it could not make out an edge or a hairline in a face a few dozen
+ * pixels high: there, a real face close-up that shows a clean shave, light
+ * stubble, a trimmed beard or a clear forehead is trusted over it. Hair
+ * Neatness is not among them: messy hair the report saw stays failed. Every
+ * row read from a close-up keeps the box it was read from, so the report can
+ * show it.
  */
 
-export const DETAIL_CHECK_VERSION = "2026-10-03.2";
+export const DETAIL_CHECK_VERSION = "2026-10-03.3";
 
 /** The rows the close-up can overrule, and the region each is read from. */
 const ROW_REGIONS = Object.freeze({
@@ -261,8 +263,8 @@ Answer close_up from the close-up crops when the request includes them (labelled
 - head_box, waist_box, legs_box, feet_box: where in the full photograph you looked, as [ymin, xmin, ymax, xmax], integers from 0 to 1000 scaled to the photograph's height and width. head: the head and face, from the top of the hair to the chin. waist: the band around the trouser waistband where a belt is worn, hip to hip. legs: both trouser legs, waistband to hem. feet: both shoes. Use [0, 0, 0, 0] for an area that is not in the photograph.
 
 FACE
-- hair_messy: YES if the hair is uncombed, dishevelled, sticking out or visibly unset at the crown, sides or front hairline; NO if it is combed and set; UNCLEAR if you cannot tell (for example under a cap).
-- hair_on_forehead: YES if any fringe, strands or locks rest on or hang over the forehead, eyebrows or eyes; NO if the forehead is clear from the hairline to the eyebrows; UNCLEAR if you cannot tell.
+- hair_messy: YES if the hair is uncombed, dishevelled, sticking out or visibly unset at the crown, sides or front hairline; NO if it is combed and set; UNCLEAR if you cannot tell (for example under a cap). Natural curly or wavy hair that is shaped and under control is NO; curly hair that is uncombed or sticking out is YES.
+- hair_on_forehead: YES if any fringe, strands or locks rest on or hang over the forehead, eyebrows or eyes; NO if the forehead is clear from the hairline to the eyebrows; UNCLEAR if you cannot tell. Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead.
 - facial_hair: CLEAN_SHAVEN; LIGHT_STUBBLE for short, even stubble or a negligible beard too short to have a shaped edge; TRIMMED_BEARD for a short, close-cropped beard of even length - even when its cheek line and neckline follow natural growth rather than a shaved edge - or a longer beard with defined, shaped edges at the cheek and neck; UNTRIMMED_BEARD only for a grown-out beard (long, bushy or full enough to stand away from the face), one of clearly uneven length, with straggly long hairs or visibly patchy, unkempt growth, or growth reaching well down the neck; UNCLEAR if you cannot tell. A short, even beard is TRIMMED_BEARD, never UNTRIMMED_BEARD, because its edges are natural. Light stubble and a trimmed beard are groomed.
 - moustache: NONE; TRIMMED_CLEAR_OF_LIP for a moustache that stays above the lip line, however thin or light; OVER_LIP for one growing down over the lip line; UNCLEAR if you cannot tell.
 - face_assessable: false if the face is out of frame, turned away, covered or too blurred to judge.
@@ -399,6 +401,16 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
     if (position?.status === "PASS" && face.hair_on_forehead === "YES") {
       failRow(position, `Close-up of the face: ${seen}`, "The close-up of the face shows hair resting on the forehead.");
       failed.push("M_HAIR_POSITION");
+    } else if (position?.status === "FAIL" && faceCropped && face.hair_on_forehead === "NO") {
+      // Dark curls at the hairline and the eyebrows below them run together
+      // in a face a few dozen pixels high, and the report has failed clear
+      // foreheads as "strands over the eyebrows". The real close-up decides.
+      passRow(
+        position,
+        `Close-up of the face: ${seen}`,
+        "The close-up of the face shows the forehead clear of hair from the hairline to the eyebrows.",
+      );
+      passed.push("M_HAIR_POSITION");
     }
 
     const beard = findRow(rows, "M_FACIAL_HAIR");

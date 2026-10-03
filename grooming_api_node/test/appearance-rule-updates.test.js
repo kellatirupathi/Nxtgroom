@@ -43,6 +43,21 @@ test("men: any hair on the forehead fails, and the forehead must be clear", () =
   assert.match(prompt, /Any fringe or strands resting on or hanging over the forehead fail Hair Position/);
 });
 
+test("men: curls at the hairline are not on the forehead, and shaped curly hair is not messy", () => {
+  // Midhun, 3 Oct: curly hair set up and back, forehead clear to the
+  // eyebrows, failed as "strands obscuring the upper part of the eyebrows".
+  const position = find("MALE", "FORMAL", "M_HAIR_POSITION").rule;
+  assert.match(position, /Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead: FAIL only hair that lies over the forehead skin or the eyebrows\./);
+  const neatness = find("MALE", "FORMAL", "M_HAIR_NEATNESS").rule;
+  assert.match(neatness, /Natural curly or wavy hair is not messy in itself: judge whether it is combed or shaped and kept under control, and FAIL it on the same terms when it is not\./);
+
+  const prompt = buildSystemPrompt("MALE", "FORMAL");
+  assert.match(prompt, /Curls or waves whose front edge\nsits at the hairline, and hair at the temples, are not on the forehead\./);
+  assert.match(prompt, /natural curls or waves that are shaped and\nunder control are not messy/);
+  // Women's hair rules are not touched.
+  assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /Curls or waves/);
+});
+
 test("women: sleeves must reach halfway to the elbow on every outfit", () => {
   for (const [attire, code] of [
     ["KURTI_WITH_DUPATTA", "W_KURTI_NECKLINE_SLEEVES"],
@@ -105,6 +120,7 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  // 2026-10-03.2: shirt and trousers are no longer accepted for women.
-  assert.equal(PROMPT_VERSION, "2026-10-03.2");
+  // 2026-10-03.3: curls at the hairline are not on the forehead, and shaped
+  // curly hair is not messy.
+  assert.equal(PROMPT_VERSION, "2026-10-03.3");
 });

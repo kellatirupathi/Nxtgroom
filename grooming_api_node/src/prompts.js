@@ -37,7 +37,10 @@ import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 // follow natural growth; only a longer beard needs shaped edges.
 // 2026-10-03.2 stops accepting shirt and trousers for women: the FORMAL
 // family's Attire Type always fails. No other family or row changed.
-export const PROMPT_VERSION = "2026-10-03.2";
+// 2026-10-03.3: for men, curls or waves at the hairline and hair at the
+// temples are not on the forehead, and natural curly or wavy hair is not
+// messy in itself when it is shaped and under control.
+export const PROMPT_VERSION = "2026-10-03.3";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -298,8 +301,10 @@ or kurti standards, and do not comment on makeup.
 ### HAIR ON THE FOREHEAD
 Hair must be set back or up on top of the head with the whole forehead clear.
 Any fringe or strands resting on or hanging over the forehead fail Hair Position,
-however neat or deliberately styled they are. Messy or unset hair fails Hair
-Neatness. Say where the front of the hair sits.
+however neat or deliberately styled they are. Curls or waves whose front edge
+sits at the hairline, and hair at the temples, are not on the forehead. Messy
+or unset hair fails Hair Neatness; natural curls or waves that are shaped and
+under control are not messy. Say where the front of the hair sits.
 `.trim();
 
 const WOMEN_ANALYSIS_RULES = `
