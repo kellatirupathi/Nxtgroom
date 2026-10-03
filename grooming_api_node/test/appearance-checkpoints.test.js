@@ -29,16 +29,17 @@ test("each variant returns its agreed number of checkpoints", () => {
   const shape = (gender, attire) =>
     SECTION_KEYS.map((key) => checkpointSet(gender, attire)[key].length);
 
-  assert.deepEqual(shape("MALE", "FORMAL"), [1, 5, 8, 4, 2]);
-  assert.deepEqual(shape("FEMALE", "SAREE"), [1, 5, 6, 5, 2]);
-  assert.deepEqual(shape("FEMALE", "KURTI_WITH_DUPATTA"), [1, 5, 7, 5, 2]);
-  assert.deepEqual(shape("FEMALE", "FORMAL"), [1, 5, 6, 5, 2]);
-  assert.deepEqual(shape("FEMALE", "UNKNOWN"), [1, 5, 0, 5, 2]);
+  // Accessories gained the Headwear row (2026-10-03.1).
+  assert.deepEqual(shape("MALE", "FORMAL"), [1, 5, 8, 5, 2]);
+  assert.deepEqual(shape("FEMALE", "SAREE"), [1, 5, 6, 6, 2]);
+  assert.deepEqual(shape("FEMALE", "KURTI_WITH_DUPATTA"), [1, 5, 7, 6, 2]);
+  assert.deepEqual(shape("FEMALE", "FORMAL"), [1, 5, 6, 6, 2]);
+  assert.deepEqual(shape("FEMALE", "UNKNOWN"), [1, 5, 0, 6, 2]);
 
-  assert.equal(codesOf("MALE", "FORMAL").length, 20);
-  assert.equal(codesOf("FEMALE", "SAREE").length, 19);
-  assert.equal(codesOf("FEMALE", "KURTI_WITH_DUPATTA").length, 20);
-  assert.equal(codesOf("FEMALE", "FORMAL").length, 19);
+  assert.equal(codesOf("MALE", "FORMAL").length, 21);
+  assert.equal(codesOf("FEMALE", "SAREE").length, 20);
+  assert.equal(codesOf("FEMALE", "KURTI_WITH_DUPATTA").length, 21);
+  assert.equal(codesOf("FEMALE", "FORMAL").length, 20);
 });
 
 test("the female attire prompt names every family and asks for no checkpoints", () => {

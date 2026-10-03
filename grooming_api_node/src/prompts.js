@@ -30,7 +30,12 @@ import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 // kurta with payjama for men (no beard checkpoints, no jeans), chosen by the
 // men's report request itself; allows light stubble and a thin moustache
 // clear of the lip.
-export const PROMPT_VERSION = "2026-10-02.1";
+// 2026-10-03.1 adds a Headwear row for everyone except the kurta family:
+// caps and hats fail; a prayer cap, turban or hijab passes. The kurta family
+// also stops assessing hair, and its condition row no longer judges creases.
+// Facial Hair passes a short, close-cropped beard of even length whose edges
+// follow natural growth; only a longer beard needs shaped edges.
+export const PROMPT_VERSION = "2026-10-03.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -400,8 +405,9 @@ Set attire_type from the photograph before you judge the attire rows:
 
 The attire section lists the rows of both families. Judge the rows of the
 family you chose. Answer every attire row of the other family N/A, with the
-observation "Not applicable to this attire." For KURTA_PAJAMA the beard is
-not assessed: answer Facial Hair and Moustache N/A with the observation "Not
+observation "Not applicable to this attire." For KURTA_PAJAMA the hair, the
+beard and the headwear are not assessed: answer Hair Neatness, Hair Position,
+Hair Length, Facial Hair, Moustache and Headwear N/A with the observation "Not
 assessed for a kurta." Every other checkpoint applies to both families.
 `.trim();
 

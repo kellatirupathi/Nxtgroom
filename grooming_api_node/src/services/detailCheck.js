@@ -32,7 +32,7 @@ import { z } from "zod";
  * report can show it.
  */
 
-export const DETAIL_CHECK_VERSION = "2026-10-02.1";
+export const DETAIL_CHECK_VERSION = "2026-10-03.1";
 
 /** The rows the close-up can overrule, and the region each is read from. */
 const ROW_REGIONS = Object.freeze({
@@ -263,7 +263,7 @@ Answer close_up from the close-up crops when the request includes them (labelled
 FACE
 - hair_messy: YES if the hair is uncombed, dishevelled, sticking out or visibly unset at the crown, sides or front hairline; NO if it is combed and set; UNCLEAR if you cannot tell (for example under a cap).
 - hair_on_forehead: YES if any fringe, strands or locks rest on or hang over the forehead, eyebrows or eyes; NO if the forehead is clear from the hairline to the eyebrows; UNCLEAR if you cannot tell.
-- facial_hair: CLEAN_SHAVEN; LIGHT_STUBBLE for short, even stubble or a negligible beard too short to have a shaped edge; TRIMMED_BEARD for a beard of any length with defined, shaped edges at the cheek and neck; UNTRIMMED_BEARD for a grown-out, uneven, patchy or ragged beard, or one straying onto the neck; UNCLEAR if you cannot tell. Light stubble and a trimmed beard are groomed.
+- facial_hair: CLEAN_SHAVEN; LIGHT_STUBBLE for short, even stubble or a negligible beard too short to have a shaped edge; TRIMMED_BEARD for a short, close-cropped beard of even length - even when its cheek line and neckline follow natural growth rather than a shaved edge - or a longer beard with defined, shaped edges at the cheek and neck; UNTRIMMED_BEARD only for a grown-out beard (long, bushy or full enough to stand away from the face), one of clearly uneven length, with straggly long hairs or visibly patchy, unkempt growth, or growth reaching well down the neck; UNCLEAR if you cannot tell. A short, even beard is TRIMMED_BEARD, never UNTRIMMED_BEARD, because its edges are natural. Light stubble and a trimmed beard are groomed.
 - moustache: NONE; TRIMMED_CLEAR_OF_LIP for a moustache that stays above the lip line, however thin or light; OVER_LIP for one growing down over the lip line; UNCLEAR if you cannot tell.
 - face_assessable: false if the face is out of frame, turned away, covered or too blurred to judge.
 - face_observation: one sentence naming what you saw of the hair at the forehead and of the beard and moustache.
@@ -416,7 +416,7 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
           ? "The close-up of the face shows a clean shave."
           : face.facial_hair === "LIGHT_STUBBLE"
             ? "The close-up of the face shows light, even stubble, which is groomed."
-            : "The close-up of the face shows a beard with trimmed, defined edges.",
+            : "The close-up of the face shows a short, even beard or one with trimmed, defined edges.",
       );
       passed.push("M_FACIAL_HAIR");
     }

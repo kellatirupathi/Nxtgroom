@@ -105,6 +105,6 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  // 2026-10-02.1: the abaya, the kurta with payjama, light stubble and a thin moustache.
-  assert.equal(PROMPT_VERSION, "2026-10-02.1");
+  // 2026-10-03.1: the Headwear row (caps and hats fail; religious coverings pass).
+  assert.equal(PROMPT_VERSION, "2026-10-03.1");
 });

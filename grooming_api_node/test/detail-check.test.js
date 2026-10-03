@@ -202,7 +202,7 @@ test("hair over the forehead and messy hair fail, as the full-length read missed
 
 test("a trimmed or light beard the full-length read failed passes on a real face close-up", () => {
   for (const [facialHair, reason] of [
-    ["TRIMMED_BEARD", "The close-up of the face shows a beard with trimmed, defined edges."],
+    ["TRIMMED_BEARD", "The close-up of the face shows a short, even beard or one with trimmed, defined edges."],
     ["LIGHT_STUBBLE", "The close-up of the face shows light, even stubble, which is groomed."],
     ["CLEAN_SHAVEN", "The close-up of the face shows a clean shave."],
   ]) {
