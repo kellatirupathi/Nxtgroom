@@ -304,34 +304,9 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <select id="escalations-period" value={period} onChange={(event) => choosePeriod(event.target.value as EscalationPeriod)} aria-label="Dates" className={FIELD}>
-          {ESCALATION_PERIODS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-        {period === 'custom' && (
-          <span className="flex flex-wrap items-center gap-2">
-            <input
-              id="escalations-from"
-              type="date"
-              value={custom.from}
-              max={custom.to || undefined}
-              onChange={(event) => setCustom((current) => ({ ...current, from: event.target.value }))}
-              aria-label="From date"
-              className={FIELD}
-            />
-            <span className="text-xs font-semibold text-slate-500">to</span>
-            <input
-              id="escalations-to"
-              type="date"
-              value={custom.to}
-              min={custom.from || undefined}
-              onChange={(event) => setCustom((current) => ({ ...current, to: event.target.value }))}
-              aria-label="To date"
-              className={FIELD}
-            />
-          </span>
-        )}
-        <span className="relative min-w-0 flex-1 sm:flex-none">
+      {/* Search on the left; the dates, the institute, the day and Export on the right. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <span className="relative w-full min-w-0 sm:w-72">
           <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
           <input
             id="escalations-search"
@@ -341,38 +316,66 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search instructor or institute…"
             aria-label="Search instructor or institute"
-            className={`${FIELD} w-full pl-8 sm:w-60`}
+            className={`${FIELD} w-full pl-8`}
           />
         </span>
-        <select id="escalations-institute" value={college} onChange={(event) => setCollege(event.target.value)} aria-label="Institute" className={`${FIELD} min-w-0 max-w-full`}>
-          <option value="">All institutes</option>
-          {(report?.institutes ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        <select id="escalations-day" value={weekday} onChange={(event) => setWeekday(event.target.value)} aria-label="Day" className={FIELD}>
-          <option value="">All days</option>
-          {WEEKDAYS.map((day) => <option key={day} value={day}>{day}</option>)}
-        </select>
-        {filtered && (
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:justify-end">
+          <select id="escalations-period" value={period} onChange={(event) => choosePeriod(event.target.value as EscalationPeriod)} aria-label="Dates" className={FIELD}>
+            {ESCALATION_PERIODS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          {period === 'custom' && (
+            <span className="flex flex-wrap items-center gap-2">
+              <input
+                id="escalations-from"
+                type="date"
+                value={custom.from}
+                max={custom.to || undefined}
+                onChange={(event) => setCustom((current) => ({ ...current, from: event.target.value }))}
+                aria-label="From date"
+                className={FIELD}
+              />
+              <span className="text-xs font-semibold text-slate-500">to</span>
+              <input
+                id="escalations-to"
+                type="date"
+                value={custom.to}
+                min={custom.from || undefined}
+                onChange={(event) => setCustom((current) => ({ ...current, to: event.target.value }))}
+                aria-label="To date"
+                className={FIELD}
+              />
+            </span>
+          )}
+          <select id="escalations-institute" value={college} onChange={(event) => setCollege(event.target.value)} aria-label="Institute" className={`${FIELD} min-w-0 max-w-full sm:w-60`}>
+            <option value="">All institutes</option>
+            {(report?.institutes ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select id="escalations-day" value={weekday} onChange={(event) => setWeekday(event.target.value)} aria-label="Day" className={FIELD}>
+            <option value="">All days</option>
+            {WEEKDAYS.map((day) => <option key={day} value={day}>{day}</option>)}
+          </select>
+          {filtered && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              aria-label="Clear filters"
+              className="flex h-10 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+            >
+              <X size={16} aria-hidden="true" />
+              Clear
+            </button>
+          )}
           <button
             type="button"
-            onClick={clearFilters}
-            aria-label="Clear filters"
-            className="flex h-10 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+            onClick={exportRows}
+            disabled={loading || Boolean(problem) || rows.length === 0}
+            title={rows.length ? `Download ${rows.length} failed check-ins as CSV` : 'Nothing to export'}
+            className="flex h-10 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <X size={16} aria-hidden="true" />
-            Clear
+            <Download size={16} aria-hidden="true" />
+            Export
           </button>
-        )}
-        <button
-          type="button"
-          onClick={exportRows}
-          disabled={loading || Boolean(problem) || rows.length === 0}
-          title={rows.length ? `Download ${rows.length} failed check-ins as CSV` : 'Nothing to export'}
-          className="flex h-10 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:ml-auto"
-        >
-          <Download size={16} aria-hidden="true" />
-          Export
-        </button>
+        </div>
       </div>
 
       {problem && <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-800">{problem}</div>}

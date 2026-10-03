@@ -173,3 +173,14 @@ test('the table is Instructor, Institute and Dates, one clickable row per person
   assert.match(page, /<Half label="Check-in" time=\{day\.check_in_time\} status=\{day\.check_in_status\} remarks=\{day\.check_in_remarks\} \/>/);
   assert.match(page, /<Half label="Check-out" time=\{day\.check_out_time\} status=\{day\.check_out_status\} remarks=\{day\.check_out_remarks\} \/>/);
 });
+
+test('the toolbar has search on the left, then the dates, institute, day and Export on the right', () => {
+  const page = source('components/EscalationsPage.tsx');
+  const order = ['id="escalations-search"', 'id="escalations-period"', 'id="escalations-institute"', 'id="escalations-day"', 'onClick={exportRows}'];
+  const positions = order.map((piece) => page.indexOf(piece));
+  assert.ok(positions.every((position) => position > 0), 'every control is on the page');
+  assert.deepEqual([...positions].sort((left, right) => left - right), positions, order.join(' then '));
+  // The right-hand group is pushed to the right edge.
+  const group = page.lastIndexOf('<div className="flex min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:justify-end">', positions[1]);
+  assert.ok(group > positions[0] && group < positions[1]);
+});
