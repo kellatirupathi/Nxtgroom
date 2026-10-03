@@ -212,6 +212,8 @@ async function loadInstructorMonth(db, instructor, monthKey) {
     saree_days: counted.filter((r) => r.attire_type === "SAREE").length,
     kurti_days: counted.filter((r) => r.attire_type === "KURTI_WITH_DUPATTA").length,
     formal_days: counted.filter((r) => r.attire_type === "FORMAL").length,
+    abaya_days: counted.filter((r) => r.attire_type === "ABAYA").length,
+    kurta_days: counted.filter((r) => r.attire_type === "KURTA_PAJAMA").length,
     missed_checkouts: counted.filter((r) => !r.check_out_time).length,
   };
 }

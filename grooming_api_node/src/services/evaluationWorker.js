@@ -485,6 +485,9 @@ function publicEvaluation(report, job, now) {
     // Which parts of the body the photo actually showed. Stored because it is
     // what explains an N/A row to whoever reads the report later.
     visible_regions: report.visible_regions || null,
+    // What the close-up of the waist, trousers and shoes did, for a man:
+    // whether it ran and which rows it failed. The boxes it read sit on the rows.
+    detail_check: report.detail_check || null,
     // Set only when no assessment was attempted, so the report can say why
     // rather than showing five empty tables.
     unassessed_reason: report.unassessed_reason || null,
@@ -631,6 +634,22 @@ async function claimEvaluation(db) {
     { sort: { created_at: 1 }, returnDocument: "after" }
   );
   return result?.value || result;
+}
+
+/**
+ * Where the tablet found the waist, trousers and shoes in this half's
+ * photograph, if it sent them: they become close-up crops in the report
+ * request. Read here rather than carried on the job, so every way a job is
+ * queued - and a re-analysis - finds them. Absent or unreadable is fine.
+ */
+async function bodyRegionsFor(db, attendanceId, kind) {
+  const field = kind === "checkout" ? "check_out_body_regions" : "check_in_body_regions";
+  try {
+    const record = await db.collection("attendance").findOne({ _id: attendanceId }, { projection: { [field]: 1 } });
+    return record?.[field] || null;
+  } catch {
+    return null;
+  }
 }
 
 async function evaluationTargetExists(db, job) {
@@ -918,7 +937,8 @@ export async function evaluateCheckoutNow(db, {
     {
       timeoutMs: config.geminiInteractiveTimeoutMs,
       maxRetries: config.geminiInteractiveMaxRetries,
-    }
+    },
+    { bodyRegions: await bodyRegionsFor(db, attendanceId, "checkout") }
   );
   const now = new Date();
   const job = {
@@ -1372,7 +1392,9 @@ export function startEvaluationWorker(db) {
         const report = await evaluateImage(
           source.buffer,
           source.mimeType || job.mime_type,
-          job.instructor.gender
+          job.instructor.gender,
+          undefined,
+          { bodyRegions: await bodyRegionsFor(db, job.attendance_id, jobKind(job)) }
         );
         monitor.progress("vision_request_completed");
         await completeEvaluation(db, job, report);

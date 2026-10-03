@@ -25,6 +25,8 @@ export interface FrameReading {
   poseSignals?: PoseSignals;
   /** Automatic capture requires relaxed, visible arms as well as body framing. */
   capturePosture?: CapturePosture;
+  /** Where the waist, trousers and shoes are, sent with the photograph. See bodyRegions. */
+  bodyRegions?: BodyRegions | null;
   /**
    * Where the face is, for drawing a box on the preview.
    *
@@ -51,6 +53,7 @@ import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
 import { faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
 import { assessBody, describeBodyProblem } from './bodyCompleteness.ts';
 import { assessCapturePosture, type CapturePosture } from './capturePosture.ts';
+import { bodyRegionsFromKeypoints, type BodyRegions } from './bodyRegions.ts';
 
 /** Large enough for face recognition and grooming details without crowding the guide. */
 export const MIN_BODY_SPAN_RATIO = 0.48;
@@ -427,6 +430,7 @@ export function readKeypoints(
       guidance: null,
       poseSignals: poseSignals(keypoints, frameHeight),
       capturePosture: assessCapturePosture(keypoints, frameHeight, frameWidth),
+      bodyRegions: frameWidth && frameHeight ? bodyRegionsFromKeypoints(keypoints, frameWidth, frameHeight) : null,
     };
   }
   return {

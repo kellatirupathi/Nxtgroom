@@ -88,6 +88,8 @@ const ROTATION_LABEL: Record<WeeklyRotation['status'], { text: string; className
   FAIL: { text: 'Not met', className: 'text-rose-700' },
   IN_PROGRESS: { text: 'In progress', className: 'text-indigo-600' },
   INSUFFICIENT_DATA: { text: 'Insufficient data', className: 'text-slate-500' },
+  // An abaya week: the saree/kurti rotation does not apply to it.
+  NOT_APPLICABLE: { text: 'Not applicable (abaya)', className: 'text-slate-500' },
 };
 
 /**

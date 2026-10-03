@@ -44,8 +44,8 @@ export const MEN_GROOMING_CHECKS = [
   { code: "M_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, combed, controlled and deliberately maintained, set neatly on top of the head. Classic side parts, tapers, short back-and-sides and crew cuts are acceptable. FAIL messy, uncombed, dishevelled, shaggy, uncontrolled or visibly over-spiked hair. Look at the crown, the sides and the front hairline, where unset hair shows first, and say in the observation which of them you judged. Do not judge hair colour or infer whether hair products were used." },
   { code: "M_HAIR_POSITION", name: "Hair Position / Away From Face", rule: "Hair is set back or up on top of the head, and the whole forehead is clear of it. Look at the front hairline: FAIL when any fringe, strands or locks rest on, hang over or cover any part of the forehead, the eyebrows or the eyes - even when that hair is otherwise tidy or deliberately styled forward. A forehead visible from the hairline down to the eyebrows is the evidence for a PASS. Say in the observation where the front of the hair sits relative to the forehead." },
   { code: "M_HAIR_LENGTH", name: "Hair Length", rule: "Hair does not extend past the shirt collar." },
-  { code: "M_FACIAL_HAIR", name: "Facial Hair", rule: "Inspect the face, cheeks, jaw and chin closely. PASS requires positive evidence of grooming, not merely the presence of a beard: a clean shave, maintained light stubble of even length, a short trimmed beard, or a beard with a deliberately shaped cheek line and neckline. A beard is groomed only when its outer edges are defined: look for a cheek line that follows a clean boundary rather than fading into stray growth, and a neckline trimmed at or above the jaw. FAIL an untrimmed or grown-out beard, uneven or patchy density, an undefined or ragged cheek edge, growth straying onto the neck, or hair long enough to look bushy rather than close-trimmed. Length alone does not pass or fail: a long beard that is evenly trimmed and cleanly shaped passes, and a short one with ragged edges fails. If you cannot point to a specific groomed edge, the correct answer is FAIL, not PASS. Do not return N/A merely because this is a full-body photograph: when the face, jaw and chin are discernible, make the assessment. Use N/A only when the face is actually cropped, occluded or too blurred to distinguish facial hair." },
-  { code: "M_MOUSTACHE", name: "Moustache", rule: "Inspect the upper-lip area closely. A clean-shaven upper lip passes. A visible moustache passes only when the hair is trimmed clear of the lip line, so the top edge of the upper lip is unobscured along its width. FAIL a moustache whose hair grows down over the lip line or into the mouth line, one that is long or bushy enough to hide the lip edge, and one with straggling or uneven hairs at its lower border. A moustache merging into the beard without any trimmed separation at the lip is not evidence of maintenance and does not by itself pass. Judge this on the lip edge you can actually see: if the lip line is obscured by hair, that is a FAIL. Do not return N/A merely because this is a full-body photograph: when the mouth and upper lip are discernible, make the assessment. Use N/A only when the upper lip is actually cropped, occluded or too blurred to judge." },
+  { code: "M_FACIAL_HAIR", name: "Facial Hair", rule: "Inspect the face, cheeks, jaw and chin closely. PASS requires positive evidence of grooming, not merely the presence of a beard: a clean shave, maintained light stubble of even length, a short trimmed beard, or a beard with a deliberately shaped cheek line and neckline. A beard is groomed only when its outer edges are defined: look for a cheek line that follows a clean boundary rather than fading into stray growth, and a neckline trimmed at or above the jaw. FAIL an untrimmed or grown-out beard, uneven or patchy density, an undefined or ragged cheek edge, growth straying onto the neck, or hair long enough to look bushy rather than close-trimmed. Length alone does not pass or fail: a long beard that is evenly trimmed and cleanly shaped passes, and a short one with ragged edges fails. For a beard long enough to have a shaped edge, if you cannot point to a specific groomed edge, the correct answer is FAIL, not PASS. Light, even stubble or a negligible beard too short to have a shaped edge is groomed and passes: there is no edge to define, so do not fail it for an undefined cheek line or neckline. Do not return N/A merely because this is a full-body photograph: when the face, jaw and chin are discernible, make the assessment. Use N/A only when the face is actually cropped, occluded or too blurred to distinguish facial hair." },
+  { code: "M_MOUSTACHE", name: "Moustache", rule: "Inspect the upper-lip area closely. A clean-shaven upper lip passes. A visible moustache passes only when the hair is trimmed clear of the lip line, so the top edge of the upper lip is unobscured along its width. A thin, light or short moustache that stays above the lip line passes. FAIL a moustache whose hair grows down over the lip line or into the mouth line, one that is long or bushy enough to hide the lip edge, and one with straggling or uneven hairs at its lower border. A moustache merging into the beard without any trimmed separation at the lip is not evidence of maintenance and does not by itself pass. Judge this on the lip edge you can actually see: if the lip line is obscured by hair, that is a FAIL. Do not return N/A merely because this is a full-body photograph: when the mouth and upper lip are discernible, make the assessment. Use N/A only when the upper lip is actually cropped, occluded or too blurred to judge." },
 ];
 
 export const MEN_ATTIRE_CHECKS = [
@@ -75,6 +75,53 @@ export const MEN_FOOTWEAR_CHECKS = [
   { code: "M_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Formal leather or formal synthetic shoes pass: Oxfords, Derbys, leather loafers, monk straps, sleek Chelsea boots and other dress boots. FAIL sneakers, sports shoes, sandals, chappals, floaters, casual driving shoes, rugged biker boots, bulky casual boots and clearly flashy or trendy footwear." },
   { code: "M_FOOTWEAR_CONDITION", name: "Footwear Condition", rule: "Covers cleanliness, polish, visible damage and worn-out state together." },
 ];
+
+/**
+ * A long kurta with payjama or trousers, the men's alternative to a formal
+ * shirt and trousers, with or without a prayer cap.
+ *
+ * Its own family, like the women's: the shirt, tuck and belt rows have no
+ * meaning over a kurta, and the beard is not assessed for it (see
+ * KURTA_SKIPPED_GROOMING). Jeans are not permitted with it.
+ */
+export const MEN_KURTA_ATTIRE_CHECKS = [
+  { code: "M_KURTA_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a long kurta is the visible outfit: a tunic reaching at least to the knee, worn with payjama or trousers, with or without a prayer cap. Plain, solid or subtle designs pass. FAIL a t-shirt or other casual top, and FAIL any kurta outfit worn with jeans or denim." },
+  { code: "M_KURTA_BOTTOM", name: "Bottom Wear", rule: "Payjama - straight or loose cotton trousers - or formal trousers pass. FAIL jeans and denim of any colour, including black jeans, and FAIL joggers, track pants, cargo pants and shorts. Read the fabric and cut from the hip to the ankle and say what you saw." },
+  { code: "M_KURTA_CONDITION", name: "Kurta Condition", rule: "Covers cleanliness, pressing and damage together: clean, pressed and undamaged. FAIL visible stains, tears, fraying, or heavy creasing that holds its shape across the body. Say in the observation where your evidence came from." },
+  {
+    code: "M_PRAYER_CAP",
+    name: "Prayer Cap",
+    informational: true,
+    rule: "Record whether a prayer cap is worn, and nothing more. It is optional, so this never affects compliance. Use PASS with an observation stating what is visible, or N/A when the head is not visible. Never FAIL.",
+  },
+];
+
+/** Grooming rows not assessed for a man in a kurta: the beard is left to him. */
+export const KURTA_SKIPPED_GROOMING = Object.freeze(["M_FACIAL_HAIR", "M_MOUSTACHE"]);
+
+/**
+ * An abaya, with or without a head scarf (hijab).
+ *
+ * Its own family, judged on how it is worn and kept. The hair checks do not
+ * apply to it (see ABAYA_SKIPPED_GROOMING), with or without the scarf.
+ */
+export const ABAYA_ATTIRE_CHECKS = [
+  { code: "W_ABAYA_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms an abaya is the visible outfit: a loose outer robe covering the body from the shoulders to the ankles, with or without a head scarf (hijab). Plain, solid or subtle designs pass. FAIL loud, conspicuous or strongly distracting prints, and heavy party-style embellishment." },
+  { code: "W_ABAYA_FIT_LENGTH", name: "Abaya Fit & Length", rule: "The abaya falls loosely from the shoulders and reaches the ankles. FAIL an abaya that is tight or body-hugging, or that ends above the middle of the calf. Read the hem at the ankles and the fall of the cloth at the hips and say what you saw." },
+  { code: "W_ABAYA_CONDITION", name: "Abaya Condition", rule: "Covers cleanliness, pressing, opacity and damage together: clean, pressed, opaque and undamaged. FAIL visible stains, tears, fraying, heavy creasing that holds its shape, or sheer fabric that shows an underlayer. Say in the observation where your evidence came from." },
+  {
+    code: "W_HEAD_SCARF",
+    name: "Head Scarf",
+    informational: true,
+    rule: "Record whether a head scarf (hijab) is worn, and nothing more. It is optional, so this never affects compliance. Use PASS with an observation stating what is visible, or N/A when the head is not visible. Never FAIL.",
+  },
+];
+
+/** Grooming rows not assessed for a woman in an abaya: her hair is not judged. */
+export const ABAYA_SKIPPED_GROOMING = Object.freeze(["W_HAIR_NEATNESS", "W_HAIR_POSITION", "W_HAIR_ACCESSORIES"]);
+
+/** The men's attire families one report request chooses between. */
+export const MALE_ATTIRE_TYPES = Object.freeze(["FORMAL", "KURTA_PAJAMA"]);
 
 export const WOMEN_GROOMING_CHECKS = [
   { code: "W_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, neat, controlled and deliberately maintained. A neat ponytail, bun, braid, half pony, or loose hair tucked back are acceptable. FAIL clearly messy, frizzy, unkempt, uncontrolled or dishevelled hair, including a visibly casual messy bun or uncontrolled high ponytail. Do not judge hair colour or infer whether hair products were used." },
@@ -187,6 +234,15 @@ export const SECTION_KEYS = [
  */
 export function checkpointSet(gender, attireType) {
   if (gender === "MALE") {
+    if (attireType === "KURTA_PAJAMA") {
+      return {
+        general_idcard_check: ID_CARD_CHECKS,
+        grooming_check: MEN_GROOMING_CHECKS.filter((item) => !KURTA_SKIPPED_GROOMING.includes(item.code)),
+        attire_check: MEN_KURTA_ATTIRE_CHECKS,
+        accessories_check: MEN_ACCESSORIES_CHECKS,
+        footwear_check: MEN_FOOTWEAR_CHECKS,
+      };
+    }
     return {
       general_idcard_check: ID_CARD_CHECKS,
       grooming_check: MEN_GROOMING_CHECKS,
@@ -202,16 +258,36 @@ export function checkpointSet(gender, attireType) {
         ? KURTI_ATTIRE_CHECKS
         : attireType === "FORMAL"
           ? WOMEN_FORMAL_ATTIRE_CHECKS
-          : [];
+          : attireType === "ABAYA"
+            ? ABAYA_ATTIRE_CHECKS
+            : [];
     return {
       general_idcard_check: ID_CARD_CHECKS,
-      grooming_check: WOMEN_GROOMING_CHECKS,
+      grooming_check: attireType === "ABAYA"
+        ? WOMEN_GROOMING_CHECKS.filter((item) => !ABAYA_SKIPPED_GROOMING.includes(item.code))
+        : WOMEN_GROOMING_CHECKS,
       attire_check: attireChecks,
       accessories_check: WOMEN_ACCESSORIES_CHECKS,
       footwear_check: WOMEN_FOOTWEAR_CHECKS,
     };
   }
   return null;
+}
+
+/**
+ * Every row a man's single report request asks for: both attire families, and
+ * the beard rows the kurta family skips. The reply names which family the
+ * photograph shows, and checkpointSet("MALE", thatFamily) picks the rows that
+ * belong to it, so the other family's answers are never reported.
+ */
+export function maleCombinedSet() {
+  return {
+    general_idcard_check: ID_CARD_CHECKS,
+    grooming_check: MEN_GROOMING_CHECKS,
+    attire_check: [...MEN_ATTIRE_CHECKS, ...MEN_KURTA_ATTIRE_CHECKS],
+    accessories_check: MEN_ACCESSORIES_CHECKS,
+    footwear_check: MEN_FOOTWEAR_CHECKS,
+  };
 }
 
 /**
@@ -237,13 +313,15 @@ export const CHECKPOINT_VERSION = createHash("sha256")
     women_formal_attire: WOMEN_FORMAL_ATTIRE_CHECKS,
     women_accessories: WOMEN_ACCESSORIES_CHECKS,
     women_footwear: WOMEN_FOOTWEAR_CHECKS,
+    men_kurta_attire: MEN_KURTA_ATTIRE_CHECKS,
+    abaya_attire: ABAYA_ATTIRE_CHECKS,
   }))
   .digest("hex")
   .slice(0, 12);
 
 /** Codes that are recorded but never scored. */
 export const INFORMATIONAL_CODES = new Set(
-  [...MEN_ACCESSORIES_CHECKS, ...WOMEN_ACCESSORIES_CHECKS]
+  [...MEN_ACCESSORIES_CHECKS, ...WOMEN_ACCESSORIES_CHECKS, ...MEN_KURTA_ATTIRE_CHECKS, ...ABAYA_ATTIRE_CHECKS]
     .filter((item) => item.informational)
     .map((item) => item.code)
 );
@@ -271,6 +349,9 @@ export const IMPROVEMENT_TIPS = {
   M_TROUSERS_TYPE: "Replace jeans with formal trousers.",
   M_TROUSERS_FIT_CONDITION: "Wear well-fitted, undamaged, pressed trousers.",
   M_BELT: "Wear a formal belt with your trousers.",
+  M_KURTA_ATTIRE_TYPE: "Wear a long kurta with payjama or formal trousers.",
+  M_KURTA_BOTTOM: "Wear payjama or formal trousers with the kurta, not jeans.",
+  M_KURTA_CONDITION: "Wear a clean, pressed kurta.",
   M_RINGS: "Wear at most one ring per hand.",
   M_CHAIN: "Keep chains below the collar line.",
   M_DISTRACTING_ACCESSORIES: "Remove bracelets and statement accessories.",
@@ -300,6 +381,9 @@ export const IMPROVEMENT_TIPS = {
   W_FORMAL_BOTTOM_TYPE: "Wear straight formal trousers instead of leggings or casual bottom wear.",
   W_FORMAL_BOTTOM_FIT_CONDITION: "Wear clean, pressed and well-fitted formal trousers.",
   W_FORMAL_PRESENTATION: "Wear a coordinated professional formal outfit.",
+  W_ABAYA_ATTIRE_TYPE: "Wear a plain or subtly designed abaya.",
+  W_ABAYA_FIT_LENGTH: "Wear a loose abaya that reaches the ankles.",
+  W_ABAYA_CONDITION: "Wear a clean, pressed, opaque abaya.",
   W_EARRINGS: "Wear simple studs or small earrings, no larger than 2 cm.",
   W_BANGLES: "Reduce the number of bangles worn.",
   W_BINDI: "Wear a small, plain bindi.",

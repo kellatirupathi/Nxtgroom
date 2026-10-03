@@ -57,6 +57,8 @@ function AttireTag({ attire }: { attire?: string | null }) {
     FORMAL: { text: 'Formal', style: 'bg-sky-50 text-sky-700 border-sky-200' },
     SAREE: { text: 'Saree', style: 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200' },
     KURTI_WITH_DUPATTA: { text: 'Kurti + Dupatta', style: 'bg-violet-50 text-violet-700 border-violet-200' },
+    ABAYA: { text: 'Abaya', style: 'bg-teal-50 text-teal-700 border-teal-200' },
+    KURTA_PAJAMA: { text: 'Kurta + Payjama', style: 'bg-amber-50 text-amber-700 border-amber-200' },
   };
   const match = attire ? labels[attire] : undefined;
   // UNKNOWN and missing both render as a dash: an unclassified photo must not

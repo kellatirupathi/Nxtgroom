@@ -17,6 +17,7 @@ import AuditReportModal from './AuditReportModal';
 import CameraCapture from './CameraCapture';
 import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
 import { armBeepUnlock, playSuccessBeep } from '../lib/successBeep';
+import { BODY_REGIONS_FIELD, type BodyRegions, type CaptureDetails } from '../lib/bodyRegions';
 import InstructorSearchSelect from './InstructorSearchSelect';
 import { useToast } from './useToast';
 import { pathForTab } from '../routes';
@@ -46,6 +47,8 @@ export default function EvaluateCard({
 }: EvaluateCardProps) {
   const [selectedUuid, setSelectedUuid] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  /** Where the camera found the waist, trousers and shoes in that photo, for the report. */
+  const [bodyRegions, setBodyRegions] = useState<BodyRegions | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -141,9 +144,10 @@ export default function EvaluateCard({
   const resetPhoto = () => {
     setFile(null);
     setPreview(null);
+    setBodyRegions(null);
   };
 
-  const handleCapture = async (selected: File) => {
+  const handleCapture = async (selected: File, details?: CaptureDetails) => {
     setCameraOpen(false);
 
     // Check the camera file loosely, then downscale, then apply the real
@@ -169,6 +173,8 @@ export default function EvaluateCard({
       }
       setFile(prepared.file);
       setPreview(URL.createObjectURL(prepared.file));
+      // Resizing keeps the proportions, so the camera's areas still fit.
+      setBodyRegions(details?.bodyRegions ?? null);
     } catch {
       resetPhoto();
       setMessage({ type: 'error', text: 'That photo could not be read. Try taking it again.' });
@@ -217,6 +223,7 @@ export default function EvaluateCard({
     if (!faceIdentification) formData.append('instructor_id', selectedUuid);
     // Already downscaled when it was selected, so upload as-is.
     formData.append('file', file as File);
+    if (bodyRegions) formData.append(BODY_REGIONS_FIELD, JSON.stringify(bodyRegions));
     if (coordinates) {
       formData.append('location_coordinates', coordinates);
       formData.append('location_accuracy_m', String(currentFix?.accuracyMetres ?? ''));
@@ -312,6 +319,7 @@ export default function EvaluateCard({
       if (!faceIdentification) formData.append('instructor_id', selectedUuid);
       // Downscaled at selection time, so no further processing is needed.
       if (file) formData.append('file', file);
+      if (file && bodyRegions) formData.append(BODY_REGIONS_FIELD, JSON.stringify(bodyRegions));
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) {

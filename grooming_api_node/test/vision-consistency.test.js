@@ -183,7 +183,8 @@ test("vision evaluation sends only the instructor image and structured output to
     assert.equal(cacheRequest.body.model, "models/gemini-2.5-flash-lite");
     assert.equal(cacheRequest.body.ttl, "3600s");
     assert.equal(typeof cacheRequest.body.systemInstruction.parts[0].text, "string");
-    assert.match(cacheRequest.body.displayName, /^nxtgroom-male-formal-/);
+    // One request serves both men's attire families and the close-up.
+    assert.match(cacheRequest.body.displayName, /^nxtgroom-male-combined-closeup-/);
     assert.equal(captured.body.cachedContent, "cachedContents/nxtgroom-male-test");
     assert.equal(captured.body.systemInstruction, undefined, "cached requests must not resend the full prompt");
     assert.equal(captured.body.generationConfig.responseMimeType, "application/json");

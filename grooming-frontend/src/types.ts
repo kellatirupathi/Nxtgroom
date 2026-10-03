@@ -130,7 +130,7 @@ export interface AttendanceRecord {
   /** queued or processing while a job is outstanding; cleared when it ends. */
   evaluation_queue_status?: string | null;
   checkout_evaluation_queue_status?: string | null;
-  /** FORMAL | SAREE | KURTI_WITH_DUPATTA | UNKNOWN, set by the AI analysis. */
+  /** FORMAL | SAREE | KURTI_WITH_DUPATTA | ABAYA | KURTA_PAJAMA | UNKNOWN, set by the AI analysis. */
   attire_type?: string | null;
   /** The instructor's public report token, for linking to their own report. */
   report_token?: string | null;
@@ -167,6 +167,14 @@ export interface CheckItem {
   observation: string;
   status: 'PASS' | 'FAIL' | 'N/A';
   reason: string;
+  /**
+   * The area of the photograph a close-up check read this row from, as
+   * [ymin, xmin, ymax, xmax] on a 0-1000 scale. Set on a man's tuck, belt,
+   * trousers and footwear rows; the report shows that area as evidence.
+   */
+  evidence_box?: [number, number, number, number];
+  /** What that area is, e.g. "Close-up of the waist". */
+  evidence_label?: string;
 }
 
 export type Visibility = 'VISIBLE' | 'PARTIAL' | 'NOT_VISIBLE';
@@ -181,7 +189,7 @@ export interface VisibleRegions {
   hands: Visibility;
 }
 
-export type AttireType = 'FORMAL' | 'SAREE' | 'KURTI_WITH_DUPATTA' | 'UNKNOWN';
+export type AttireType = 'FORMAL' | 'SAREE' | 'KURTI_WITH_DUPATTA' | 'ABAYA' | 'KURTA_PAJAMA' | 'UNKNOWN';
 
 /** Counted from the week's records, never from a single photograph. */
 export interface WeeklyRotation {
@@ -190,7 +198,9 @@ export interface WeeklyRotation {
   unknown_days: number;
   required_saree_days: number;
   required_kurti_days: number;
-  status: 'IN_PROGRESS' | 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA';
+  /** Present when the week had abaya days, which make the rotation not apply. */
+  abaya_days?: number;
+  status: 'IN_PROGRESS' | 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA' | 'NOT_APPLICABLE';
 }
 
 export interface Evaluation {

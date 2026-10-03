@@ -1,4 +1,4 @@
-import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
+import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 
 // Version every material prompt change so stored evaluations remain auditable.
 // 2026-08-18.1 replaced the single free-form prompt with fixed checkpoint sets
@@ -26,7 +26,11 @@ import { checkpointSet, SECTION_KEYS } from "./checkpoints.js";
 // disappearance against fabric hanging below the waistband. No checkpoint was
 // added, removed or rescoped: the condition and tuck rows already owned these
 // questions and were deciding them from a general impression of the garment.
-export const PROMPT_VERSION = "2026-09-25.1";
+// 2026-10-02.1 adds the abaya for women (no hair checkpoints) and the long
+// kurta with payjama for men (no beard checkpoints, no jeans), chosen by the
+// men's report request itself; allows light stubble and a thin moustache
+// clear of the lip.
+export const PROMPT_VERSION = "2026-10-02.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -329,6 +333,10 @@ separately from what it is made of.
 
 Earrings are limited to about 2 cm. Multi-coloured, multi-gem or strongly
 decorative earrings fail at any size when you can identify them clearly.
+
+### ABAYA
+An abaya, with or without a head scarf (hijab), is accepted attire. Her hair
+is not assessed when she wears one, so no hair checkpoint is given for it.
 `.trim();
 
 /** Renders one section's checkpoints as a numbered, ordered list. */
@@ -367,6 +375,58 @@ checkpoint_name character for character. Do not invent, rename, merge, split,
 reorder or omit a checkpoint. Where a standard covers several related things,
 that is deliberate — judge them together in the one entry rather than adding
 rows of your own.
+
+${rendered}`,
+  ].join("\n\n");
+}
+
+/**
+ * How a man's report request chooses between his two attire families.
+ *
+ * A man's photograph is assessed in one request, so the family is named in the
+ * same reply rather than asked first, as a woman's is: the checkpoints of both
+ * families are listed, and the rows of the one he is not wearing come back
+ * N/A and are discarded (checkpointSet picks the chosen family's rows).
+ */
+const MEN_ATTIRE_FAMILY_RULES = `
+### WHICH ATTIRE FAMILY
+Set attire_type from the photograph before you judge the attire rows:
+
+- FORMAL: a shirt worn with trousers, including a visibly casual or
+  non-compliant version of that combination, so its checkpoints can fail.
+- KURTA_PAJAMA: a long kurta - a tunic reaching at least to the knee - worn
+  with payjama or trousers, with or without a prayer cap. A kurta worn with
+  jeans is still KURTA_PAJAMA, and fails its Attire Type and Bottom Wear rows.
+
+The attire section lists the rows of both families. Judge the rows of the
+family you chose. Answer every attire row of the other family N/A, with the
+observation "Not applicable to this attire." For KURTA_PAJAMA the beard is
+not assessed: answer Facial Hair and Moustache N/A with the observation "Not
+assessed for a kurta." Every other checkpoint applies to both families.
+`.trim();
+
+/**
+ * The system prompt for a man's report: both attire families' checkpoints,
+ * and how to choose between them. buildSystemPrompt("MALE", "FORMAL") is still
+ * used, unchanged, when this request cannot be served.
+ */
+export function buildMaleReportPrompt() {
+  const sections = maleCombinedSet();
+  const total = SECTION_KEYS.reduce((sum, key) => sum + sections[key].length, 0);
+  const rendered = SECTION_KEYS.map((key) => renderSection(key, sections[key])).join("\n\n");
+  return [
+    COMMON_ANALYSIS_RULES,
+    GARMENT_EVIDENCE_RULES,
+    MEN_ANALYSIS_RULES,
+    MEN_ATTIRE_FAMILY_RULES,
+    `### CHECKPOINTS
+Return every checkpoint listed below and no others: ${total} in total, each
+exactly once, in the order given, in the section named. Copy each code and
+checkpoint_name character for character. Do not invent, rename, merge, split,
+reorder or omit a checkpoint. Where a standard covers several related things,
+that is deliberate — judge them together in the one entry rather than adding
+rows of your own. The rows that do not apply to the attire family you chose
+are still returned, as N/A.
 
 ${rendered}`,
   ].join("\n\n");
@@ -414,6 +474,8 @@ Choose exactly one attire_type from the photograph:
 - FORMAL: the outfit belongs to the western formal-wear family. Use this family
   for a shirt/blouse-and-trousers outfit, including a visibly casual or
   non-compliant version of that combination so its formal checkpoints can fail.
+- ABAYA: an abaya is being worn - a loose outer robe covering the body from
+  the shoulders to the ankles - with or without a head scarf (hijab).
 - UNKNOWN: the photograph does not show enough clothing to identify the attire
   family reliably. Do not use UNKNOWN merely because a visible outfit violates
   its applicable standard.

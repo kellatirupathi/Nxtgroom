@@ -7,6 +7,7 @@ import { idMatch, instructorScope, isElevated, requireSuperAdmin } from "../midd
 import { validateImageUpload } from "../imageValidation.js";
 import { normalizeGroupImage, normalizeInstructorImage } from "../imageProcessor.js";
 import { enqueueEvaluation, evaluateCheckoutNow } from "../services/evaluationWorker.js";
+import { parseBodyRegions } from "../services/detailCheck.js";
 import {
   deleteEvaluation,
   deleteEvaluationsForAttendance,
@@ -419,6 +420,9 @@ export async function commitGuardedCheckIn(
     locationAccuracyM = null,
     capturedAt = null,
     identification = null,
+    // Where the tablet found the waist, trousers and shoes in the photograph;
+    // read by the report request (detailCheck.js). Optional.
+    bodyRegions = null,
     now = new Date(),
   },
   runTransaction = withMongoTransaction
@@ -484,6 +488,7 @@ export async function commitGuardedCheckIn(
       location_accuracy_m: locationAccuracyM,
       check_in_photo_key: photoKey,
       check_in_photo_captured_at: capturedAt || now,
+      ...(bodyRegions ? { check_in_body_regions: bodyRegions } : {}),
       check_out_photo_key: null,
       status: "pending",
       compliance_status: null,
@@ -550,6 +555,9 @@ attendanceRouter.post(
     if (req.body.location_coordinates && !coordinates) {
       return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
     }
+    // Where the tablet found the waist, trousers and shoes. Optional, and
+    // dropped if malformed: it sharpens the report, it never gates attendance.
+    const bodyRegions = parseBodyRegions(req.body?.body_regions);
     const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
 
     // Normalized once. The same buffer is recognised, stored and analysed, so a
@@ -750,6 +758,7 @@ attendanceRouter.post(
           locationAccuracyM: accuracyMetres,
           capturedAt: now,
           identification,
+          bodyRegions,
           now,
         });
       } catch (error) {
@@ -813,6 +822,7 @@ attendanceRouter.post(
           check_out_time: now,
           check_out_photo_key: stored.key,
           check_out_photo_captured_at: now,
+          ...(bodyRegions ? { check_out_body_regions: bodyRegions } : {}),
           ...(coordinates ? { check_out_coordinates: coordinates } : {}),
           ...(accuracyMetres != null ? { check_out_location_accuracy_m: accuracyMetres } : {}),
           checkout_identification: identification,
@@ -1501,6 +1511,7 @@ attendanceRouter.post(
         photoKey,
         locationAccuracyM: Number.parseInt(req.body.location_accuracy_m, 10) || null,
         capturedAt: now,
+        bodyRegions: parseBodyRegions(req.body?.body_regions),
         now,
       });
     } catch (error) {
@@ -1778,6 +1789,9 @@ attendanceRouter.post(
     const checkoutSet = {
       check_out_time: checkOutTime,
       ...(checkOutPhotoKey ? { check_out_photo_key: checkOutPhotoKey } : {}),
+      ...(checkOutPhotoKey && parseBodyRegions(req.body?.body_regions)
+        ? { check_out_body_regions: parseBodyRegions(req.body?.body_regions) }
+        : {}),
       ...(checkoutCoordinates ? { check_out_coordinates: checkoutCoordinates } : {}),
       ...(req.validatedBody.location_accuracy_m != null
         ? { check_out_location_accuracy_m: req.validatedBody.location_accuracy_m }

@@ -5,6 +5,7 @@ import CameraCapture from './CameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
+import { BODY_REGIONS_FIELD, type CaptureDetails } from '../lib/bodyRegions';
 
 /**
  * How long a result stays on screen.
@@ -101,7 +102,7 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
    * told "already checked out today" is the answer, not a failure. Only a
    * transport or server fault becomes an error.
    */
-  const submit = useCallback(async (file: File) => {
+  const submit = useCallback(async (file: File, details?: CaptureDetails) => {
     // React state is not synchronous. This ref closes the small gap in which a
     // second capture can arrive before `submitting` has caused a render.
     if (submitInFlight.current) return;
@@ -112,6 +113,9 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
     try {
       const form = new FormData();
       form.append('file', file);
+      // Where the waist, trousers and shoes are, so the report can look at
+      // each close up. Optional: the server judges the photograph without it.
+      if (details?.bodyRegions) form.append(BODY_REGIONS_FIELD, JSON.stringify(details.bodyRegions));
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) {

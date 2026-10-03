@@ -21,6 +21,7 @@ import type { FaceBox } from '../lib/faceBoxes';
 import { bodyGuideSourceRect } from '../lib/cameraGeometry';
 import { openCameraStream } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
+import type { BodyRegions, CaptureDetails } from '../lib/bodyRegions';
 import { PHOTO_JPEG_QUALITY } from '../lib/photoEncoding';
 import { postureHoldComplete, postureHoldStart } from '../lib/capturePosture';
 
@@ -29,7 +30,8 @@ type Facing = 'user' | 'environment';
 interface CameraCaptureProps {
   facing: Facing;
   onFlip: () => void;
-  onCapture: (file: File) => void | Promise<void>;
+  /** details carries where the waist, trousers and shoes were, for the report. */
+  onCapture: (file: File, details?: CaptureDetails) => void | Promise<void>;
   onClose: () => void;
   /**
    * Take the photograph as soon as one whole person stands still, with no
@@ -125,6 +127,8 @@ export default function CameraCapture({
    * built rather than what the camera is seeing now.
    */
   const verdictRef = useRef<FrameVerdict>('NO_PERSON');
+  /** The latest whole-body reading's waist, trousers and shoes; null otherwise. */
+  const bodyRegionsRef = useRef<BodyRegions | null>(null);
   // The same reasoning as cooldownUntilRef: the tick reads these every 200ms,
   // and as state they would be captured stale by the running timer.
   const steadyRef = useRef(0);
@@ -259,6 +263,9 @@ export default function CameraCapture({
           ? reading.capturePosture?.guidance ?? 'Keep both arms and hands visible'
           : stableReading.guidance);
         verdictRef.current = stableReading.verdict;
+        // Only a whole-body frame's areas: a stale box would point the report
+        // at the wrong part of the photograph.
+        bodyRegionsRef.current = reading.verdict === 'FULL_BODY' ? (reading.bodyRegions ?? null) : null;
         setFaceBoxes(reading.boxes ?? []);
 
         if (autoCapture) {
@@ -340,6 +347,8 @@ export default function CameraCapture({
     firingRef.current = true;
     setCapturing(true);
     try {
+      // Taken with the shutter, so they describe the frame being photographed.
+      const bodyRegions = bodyRegionsRef.current;
       const viewport = viewportRef.current;
       const crop = bodyGuideSourceRect(
         video.videoWidth,
@@ -362,7 +371,7 @@ export default function CameraCapture({
       // Keep the shutter locked until the owner has finished handling the
       // photograph. In kiosk mode that includes identification and the
       // attendance response, so a slow request cannot trigger a second frame.
-      await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }), { bodyRegions });
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {

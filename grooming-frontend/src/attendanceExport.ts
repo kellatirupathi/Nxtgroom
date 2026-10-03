@@ -22,6 +22,8 @@ const ATTIRE_LABELS: Record<string, string> = {
   FORMAL: 'Formal',
   SAREE: 'Saree',
   KURTI_WITH_DUPATTA: 'Kurti + Dupatta',
+  ABAYA: 'Abaya',
+  KURTA_PAJAMA: 'Kurta + Payjama',
 };
 
 const COLUMNS: ReadonlyArray<[string, (record: AttendanceRecord) => unknown]> = [

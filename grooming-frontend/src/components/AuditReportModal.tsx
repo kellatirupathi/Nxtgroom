@@ -320,7 +320,14 @@ export default function AuditReportModal({
             </p>
           )}
 
-          {!running && evaluation && <GroomingReport evaluation={evaluation} />}
+          {!running && evaluation && (
+            <GroomingReport
+              evaluation={evaluation}
+              photo={attendanceId
+                ? { path: `/api/v2/attendance/${encodeURIComponent(attendanceId)}/photo/${kind === 'checkout' ? 'checkout' : 'checkin'}` }
+                : null}
+            />
+          )}
 
           {!running && !evaluation && !timedOut && !failedToSave && (
             <p className="py-6 text-center text-sm text-slate-500">

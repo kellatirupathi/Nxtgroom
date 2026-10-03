@@ -357,6 +357,8 @@ const ATTIRE_LABELS = {
   FORMAL: "Formal",
   SAREE: "Saree",
   KURTI_WITH_DUPATTA: "Kurti with dupatta",
+  ABAYA: "Abaya",
+  KURTA_PAJAMA: "Kurta with payjama",
 };
 
 /** Weekly summary with a link to the instructor's own report page. */

@@ -106,8 +106,11 @@ export const REQUIRED_KURTI_DAYS = 3;
  * A week still running reports IN_PROGRESS rather than FAIL. Failing someone
  * on Tuesday for a rule about Saturday would be wrong, and the report goes to
  * the instructor and their RP.
+ *
+ * A week with an abaya day is NOT_APPLICABLE: the abaya is accepted attire in
+ * its own right, and the saree/kurti count cannot be met around it.
  */
-export function weeklyRotation({ gender, sareeDays, kurtiDays, unknownDays, weekComplete }) {
+export function weeklyRotation({ gender, sareeDays, kurtiDays, unknownDays, weekComplete, abayaDays = 0 }) {
   if (String(gender || "").toUpperCase() !== "FEMALE") return null;
   const base = {
     saree_days: sareeDays,
@@ -115,7 +118,9 @@ export function weeklyRotation({ gender, sareeDays, kurtiDays, unknownDays, week
     unknown_days: unknownDays,
     required_saree_days: REQUIRED_SAREE_DAYS,
     required_kurti_days: REQUIRED_KURTI_DAYS,
+    ...(abayaDays ? { abaya_days: abayaDays } : {}),
   };
+  if (abayaDays > 0) return { ...base, status: "NOT_APPLICABLE" };
   if (!weekComplete) return { ...base, status: "IN_PROGRESS" };
   // An unclassified day could have been either garment, so the week cannot be
   // judged either way: reporting FAIL here would penalise a bad photograph.
@@ -170,11 +175,14 @@ export function summariseWeek(records, startKey, options = {}) {
     saree_days: counted.filter((day) => day.attire_type === "SAREE").length,
     kurti_days: counted.filter((day) => day.attire_type === "KURTI_WITH_DUPATTA").length,
     formal_days: counted.filter((day) => day.attire_type === "FORMAL").length,
+    abaya_days: counted.filter((day) => day.attire_type === "ABAYA").length,
+    kurta_days: counted.filter((day) => day.attire_type === "KURTA_PAJAMA").length,
     missed_checkouts: counted.filter((day) => day.missed_checkout).length,
     weekly_rotation: weeklyRotation({
       gender: options.gender,
       sareeDays: counted.filter((day) => day.attire_type === "SAREE").length,
       kurtiDays: counted.filter((day) => day.attire_type === "KURTI_WITH_DUPATTA").length,
+      abayaDays: counted.filter((day) => day.attire_type === "ABAYA").length,
       // A day worked but not classified, which is what makes the week
       // unjudgeable rather than failed.
       unknownDays: counted.filter(

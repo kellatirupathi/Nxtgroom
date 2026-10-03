@@ -3,11 +3,21 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { runtimeConfig } from "../config/env.js";
 import { incrementMetric, observeDuration } from "./telemetry.js";
-import { buildFemaleAttirePrompt, buildSystemPrompt } from "../prompts.js";
-import { checkpointSet, INFORMATIONAL_CODES, SECTION_KEYS } from "../checkpoints.js";
+import { buildFemaleAttirePrompt, buildMaleReportPrompt, buildSystemPrompt } from "../prompts.js";
+import { checkpointSet, INFORMATIONAL_CODES, MALE_ATTIRE_TYPES, maleCombinedSet, SECTION_KEYS } from "../checkpoints.js";
+import {
+  applyDetailFindings,
+  buildCloseUps,
+  CLOSE_UP_INSTRUCTIONS,
+  CLOSE_UP_JSON_SCHEMA,
+  CloseUpAnswer,
+  DETAIL_CHECK_VERSION,
+  evidenceBoxes,
+  findingsFromCloseUp,
+} from "./detailCheck.js";
 
 const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
-const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "UNKNOWN"];
+const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "ABAYA", "UNKNOWN"];
 // Enough room to inspect each body area before committing to a verdict,
 // without paying for open-ended reasoning on a bounded checklist. Grooming
 // needs the most of it: a beard's cheek line and a moustache's lip edge are
@@ -455,7 +465,7 @@ async function requestGeminiStructured({
  * duplicated, returned under a foreign code, or returned out of order. The
  * previous array schema could express all four, and did.
  */
-function buildReportSchema(sections, { attireType = null } = {}) {
+function buildReportSchema(sections, { attireType = null, attireTypes = null, closeUp = false, optionalCodes = null } = {}) {
   const shape = {
     // Asked directly rather than inferred from the checkpoints. "Nothing was
     // examined" and "nothing was wrong" both produce a report with no
@@ -473,20 +483,52 @@ function buildReportSchema(sections, { attireType = null } = {}) {
     }),
   };
   if (attireType) shape.attire_type = z.literal(attireType);
+  // Optional when read back: a reply without it is taken as the first family.
+  if (attireTypes) shape.attire_type = z.enum(attireTypes).optional();
+  // Read separately and leniently (CloseUpAnswer.safeParse): a malformed
+  // close-up is ignored, never a reason to lose the report.
+  if (closeUp) shape.close_up = z.unknown().optional();
   for (const key of SECTION_KEYS) {
     // A family with no rows in a section is omitted rather than asked for as
     // an empty object. UNKNOWN attire has no attire_check, and toOrderedRows
     // reads the checkpoint table rather than the response, so nothing looks
     // for a key that was never requested.
     if (!sections[key].length) continue;
+    // Rows that belong to only one of several families are optional when read
+    // back; the chosen family's are checked for afterwards (assertFamilyRows).
     shape[key] = z.object(
-      Object.fromEntries(sections[key].map((item) => [item.code, Entry]))
+      Object.fromEntries(sections[key].map((item) => [item.code, optionalCodes?.has(item.code) ? Entry.optional() : Entry]))
     );
   }
   return z.object(shape);
 }
 
-function buildReportJsonSchema(sections, { attireType = null } = {}) {
+/** Codes in a man's combined request that only one attire family uses. */
+function maleFamilyOnlyCodes() {
+  const codes = (family) => new Set(SECTION_KEYS.flatMap((key) => checkpointSet("MALE", family)[key].map((item) => item.code)));
+  const [first, ...rest] = MALE_ATTIRE_TYPES.map(codes);
+  const shared = new Set([...first].filter((code) => rest.every((set) => set.has(code))));
+  const combined = maleCombinedSet();
+  return new Set(SECTION_KEYS.flatMap((key) => combined[key].map((item) => item.code)).filter((code) => !shared.has(code)));
+}
+
+/**
+ * Every row of the chosen family must be in the reply. Its rows are optional
+ * in the combined schema only because the other family's are; a reply missing
+ * one of its own is as unusable as any other malformed reply.
+ */
+function assertFamilyRows(parsed, sections) {
+  const missing = SECTION_KEYS.flatMap((key) => sections[key].map((item) => item.code)
+    .filter((code) => !parsed?.[key]?.[code]));
+  if (missing.length) {
+    throw createGeminiError(
+      `Gemini omitted ${missing.length} checkpoint${missing.length === 1 ? "" : "s"} for the attire it chose`,
+      "GEMINI_INVALID_RESPONSE"
+    );
+  }
+}
+
+function buildReportJsonSchema(sections, { attireType = null, attireTypes = null, closeUp = false } = {}) {
   const properties = {
     subject_visible: { type: "boolean" },
     image_quality: { type: "string", enum: ["ADEQUATE", "RETAKE_RECOMMENDED"] },
@@ -501,6 +543,8 @@ function buildReportJsonSchema(sections, { attireType = null } = {}) {
     },
   };
   if (attireType) properties.attire_type = { type: "string", enum: [attireType] };
+  if (attireTypes) properties.attire_type = { type: "string", enum: [...attireTypes] };
+  if (closeUp) properties.close_up = CLOSE_UP_JSON_SCHEMA;
   const populatedKeys = SECTION_KEYS.filter((key) => sections[key].length);
   for (const key of populatedKeys) {
     properties[key] = {
@@ -519,7 +563,8 @@ function buildReportJsonSchema(sections, { attireType = null } = {}) {
       "image_quality",
       "ai_summary",
       "visible_regions",
-      ...(attireType ? ["attire_type"] : []),
+      ...(attireType || attireTypes ? ["attire_type"] : []),
+      ...(closeUp ? ["close_up"] : []),
       ...populatedKeys,
     ],
   };
@@ -818,7 +863,12 @@ function sharedDeadline(limits) {
   return { ...limits, deadlineAt: Date.now() + perAttempt * attempts };
 }
 
-export async function evaluateImage(imageBuffer, mimeType, gender = null, limits = undefined) {
+/**
+ * `options.bodyRegions` are the waist, trousers and shoes areas the tablet
+ * found in this photograph ({ waist, legs, feet } boxes on a 0-1000 scale);
+ * for a man they become close-up crops in the same request. See detailCheck.js.
+ */
+export async function evaluateImage(imageBuffer, mimeType, gender = null, limits = undefined, options = {}) {
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
     throw new Error("Instructor image is empty or invalid");
   }
@@ -836,6 +886,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
 
   let attireType = "FORMAL";
   let parsed;
+  let closeUps = { parts: [], boxes: {} };
   if (normalizedGender === "FEMALE") {
     // Which garment, asked on its own. Folding this into the report request
     // meant offering all four attire families in one schema, which Gemini now
@@ -886,18 +937,50 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
     });
   } else {
     const maleSections = checkpointSet("MALE", attireType);
-    parsed = await requestGeminiStructured({
-      systemInstruction: buildSystemPrompt("MALE", attireType),
-      cacheNamespace: `male-${attireType.toLowerCase()}`,
+    // Still one request: the close-up crops of the face, waist, trousers and
+    // shoes travel with the photograph, and close_up is answered in the same reply.
+    closeUps = await buildCloseUps(imageBuffer, options.bodyRegions);
+    // One request decides the attire family as well: both families' rows
+    // are asked for, and the family named in the reply picks which are
+    // reported (checkpointSet below). A kurta skips the beard rows.
+    const combinedSections = maleCombinedSet();
+    const combinedRequest = () => requestGeminiStructured({
+      systemInstruction: `${buildMaleReportPrompt()}\n\n${CLOSE_UP_INSTRUCTIONS}`,
+      cacheNamespace: "male-combined-closeup",
+      input: [...content, ...closeUps.parts],
+      jsonSchema: buildReportJsonSchema(combinedSections, { attireTypes: MALE_ATTIRE_TYPES, closeUp: true }),
+      validator: buildReportSchema(combinedSections, { attireTypes: MALE_ATTIRE_TYPES, closeUp: true, optionalCodes: maleFamilyOnlyCodes() }),
+      // Covers the JSON report plus the thinking budget, which Gemini counts
+      // against the same ceiling: at 6000 a full checkpoint set could stop on
+      // MAX_TOKENS once thinking was enabled. Two families' rows and the
+      // close-up add about 1500.
+      maxOutputTokens: 7500 + DEFAULT_THINKING_BUDGET,
+      limits,
+    });
+    // Exactly the request a man's report used before the kurta and the
+    // close-up existed: formal rows only.
+    const formalRequest = () => requestGeminiStructured({
+      systemInstruction: buildSystemPrompt("MALE", "FORMAL"),
+      cacheNamespace: "male-formal",
       input: content,
       jsonSchema: buildReportJsonSchema(maleSections),
       validator: buildReportSchema(maleSections),
-      // Covers the JSON report plus the thinking budget, which Gemini counts
-      // against the same ceiling: at 6000 a full checkpoint set could stop on
-      // MAX_TOKENS once thinking was enabled.
       maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
       limits,
     });
+    try {
+      parsed = await combinedRequest();
+    } catch (error) {
+      // A request the provider refuses outright (a schema it will not serve,
+      // a crop it rejects) must not cost the report: ask again as before.
+      if (error?.code !== "GEMINI_REQUEST_ERROR") throw error;
+      incrementMetric("detail_check_fallbacks_total");
+      console.warn(`Combined request refused by the provider; reporting formal rows only: ${error.message}`);
+      closeUps = { parts: [], boxes: {} };
+      parsed = await formalRequest();
+    }
+    attireType = MALE_ATTIRE_TYPES.includes(parsed.attire_type) ? parsed.attire_type : "FORMAL";
+    assertFamilyRows(parsed, checkpointSet("MALE", attireType));
   }
   const sections = checkpointSet(normalizedGender, attireType);
 
@@ -915,8 +998,29 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
 
   const rows = toOrderedRows(sections, parsed);
   resolveIdCardAbstention(rows, parsed.visible_regions);
+  let detailCheck = null;
   if (normalizedGender === "MALE") {
     resolveMaleAttireVisibility(rows, parsed.visible_regions);
+    // The close-up of the face, waist, trousers and shoes, answered in the
+    // same reply: see detailCheck.js.
+    const closeUp = CloseUpAnswer.safeParse(parsed.close_up);
+    if (closeUp.success) {
+      const { failed, passed } = applyDetailFindings(
+        rows,
+        findingsFromCloseUp(closeUp.data),
+        evidenceBoxes(closeUps.boxes, closeUp.data),
+        { croppedRegions: Object.keys(closeUps.boxes) },
+      );
+      if (failed.length || passed.length) incrementMetric("detail_check_overrides_total");
+      detailCheck = {
+        version: DETAIL_CHECK_VERSION,
+        crops: Object.keys(closeUps.boxes),
+        overridden: failed,
+        ...(passed.length ? { passed } : {}),
+      };
+    } else if (parsed.close_up !== undefined) {
+      incrementMetric("detail_check_unreadable_total");
+    }
   }
   // An unidentified garment cannot be scored against a dress code, however
   // many of the garment-independent rows came back.
@@ -930,6 +1034,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
     attire_type: attireType,
     ai_summary: String(parsed.ai_summary || "").slice(0, 1500),
     visible_regions: parsed.visible_regions,
+    ...(detailCheck ? { detail_check: detailCheck } : {}),
     ...(attireType === "UNKNOWN" ? { unassessed_reason: "ATTIRE_NOT_IDENTIFIED" } : {}),
     ...rows,
   };
