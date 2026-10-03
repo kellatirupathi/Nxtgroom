@@ -16,8 +16,6 @@ export interface DayRow {
   institute: string;
   /** The check-in's result. */
   status: DayStatus;
-  /** The check-out's result; null (or absent, from an older server) without a check-out. */
-  checkout_status?: DayStatus | null;
   check_in: string;
   check_out: string;
   /** The check-in's feedback. */
@@ -72,8 +70,7 @@ const COLUMNS: ReadonlyArray<[string, (row: DayRow) => unknown]> = [
   ['Date', (row) => row.date],
   ['Instructor Name', (row) => row.name],
   ['Institute', (row) => row.institute],
-  ['Check-in Status', (row) => DAY_STATUS_LABELS[row.status] ?? ''],
-  ['Check-out Status', (row) => (row.checkout_status ? DAY_STATUS_LABELS[row.checkout_status] ?? '' : '')],
+  ['Status', (row) => DAY_STATUS_LABELS[row.status] ?? ''],
   ['Check-in Time', (row) => (row.check_in === '-' ? '' : row.check_in)],
   ['Check-out Time', (row) => (row.check_out === '-' ? '' : row.check_out)],
   ['Feedback', (row) => row.feedback],

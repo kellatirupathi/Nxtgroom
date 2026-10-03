@@ -52,28 +52,15 @@ const STATUS_STYLE: Partial<Record<DayStatus, string>> = {
   non_compliant: 'border-rose-200 bg-rose-50 text-rose-700',
 };
 
-/** One half's result: green when compliant, red when not, grey otherwise. */
+/**
+ * The Status cell: the check-in's result, as the email's Status column reads
+ * it - green when compliant, red when not, grey while it is not yet known.
+ */
 function StatusPill({ status }: { status: DayStatus }) {
   return (
     <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-bold ${STATUS_STYLE[status] || 'border-slate-200 bg-slate-50 text-slate-600'}`}>
       {DAY_STATUS_LABELS[status] || status}
     </span>
-  );
-}
-
-/** The Status cell: the check-in's result, then the check-out's. */
-function HalfStatuses({ row }: { row: DayRow }) {
-  return (
-    <dl className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
-        <dt className="w-16 shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-in</dt>
-        <dd><StatusPill status={row.status} /></dd>
-      </div>
-      <div className="flex items-center gap-2">
-        <dt className="w-16 shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-out</dt>
-        <dd>{row.checkout_status ? <StatusPill status={row.checkout_status} /> : <span className="text-xs text-slate-400">-</span>}</dd>
-      </div>
-    </dl>
   );
 }
 
@@ -347,7 +334,6 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
                 <div>
                   <dt className="font-bold uppercase tracking-wide text-slate-400">Check-out Time</dt>
                   <dd className="mt-0.5 font-semibold text-slate-700">{row.check_out}</dd>
-                  {row.checkout_status && <dd className="mt-1"><StatusPill status={row.checkout_status} /></dd>}
                 </div>
               </dl>
               <p className="mt-2 text-sm text-slate-600">{row.feedback}</p>
@@ -367,7 +353,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
 
         <div className="hidden overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1150px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
                 <tr>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Date</th>
@@ -391,7 +377,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
                     <td className="p-3 text-slate-600">{row.institute || '-'}</td>
                     <td className="p-3 whitespace-nowrap text-slate-700">{row.check_in}</td>
                     <td className="p-3 whitespace-nowrap text-slate-700">{row.check_out}</td>
-                    <td className="p-3"><HalfStatuses row={row} /></td>
+                    <td className="p-3"><StatusPill status={row.status} /></td>
                     <td className="p-3 text-slate-600">{row.feedback}</td>
                     <td className="p-3"><PhotoIcons row={row} onOpen={setPhoto} /></td>
                     <td className="p-3"><ReportIcons row={row} /></td>
