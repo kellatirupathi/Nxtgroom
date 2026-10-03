@@ -15,8 +15,6 @@ const NOTIFICATION_OUTBOX_FIELDS = {
 const TERMINAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const NOTIFICATION_DEADLINE_MS = 24 * 60 * 60 * 1000;
 const TERMINAL_STATUSES = new Set(["sent", "failed", "delivery_unknown"]);
-// Lets a report email go out as soon as it is queued rather than on the next
-// idle poll. See workerPacing.js.
 const notificationQueued = createWakeSignal();
 
 function updated(result) {
@@ -78,11 +76,6 @@ async function syncNotificationStatus(db, job) {
   }
 }
 
-/**
- * A stable id prevents duplicate jobs during retries and outbox reconciliation.
- * Terminal tombstones are retained briefly so a stale request cannot recreate a
- * notification that was already sent.
- */
 export async function enqueueNotification(db, {
   attendanceId,
   type,
@@ -103,8 +96,6 @@ export async function enqueueNotification(db, {
     return false;
   }
 
-  // Administrator email preferences are applied before a job is queued, so a
-  // suppressed report never holds recipient PII in the notification queue.
   const settings = await getNotificationSettings(db);
   if (!shouldSendNotification(settings, type, report || {})) {
     await db.collection("attendance").updateOne(
@@ -302,10 +293,6 @@ export async function prepareCheckinReport(db, job) {
     error.name = "ATTENDANCE_NOT_FOUND";
     throw error;
   }
-  // Always rebuild the URL at delivery time. Jobs can survive deployments and
-  // may contain the localhost APP_URL that was active when they were queued.
-  // Keeping that persisted value would send a recipient to their own machine
-  // even after production has been configured with the public frontend URL.
   const reportUrl = await reportUrlForAttendance(db, attendance, "checkin");
   return { ...job, report: { ...job.report, reportUrl } };
 }
@@ -320,9 +307,6 @@ export async function prepareCheckoutReport(db, job) {
   }
 
   const hasCheckoutPhoto = Boolean(attendance.check_out_photo_key);
-  // New photographed check-outs are queued for email only after direct
-  // analysis completes. Retain this guard for notification jobs created by an
-  // older deployment while their checkout evaluation was still pending.
   const checkoutAnalysisTerminal = new Set([
     "COMPLIANT",
     "NON_COMPLIANT",
@@ -333,8 +317,6 @@ export async function prepareCheckoutReport(db, job) {
     await deferCheckoutNotification(db, job);
     return null;
   }
-  // See prepareCheckinReport: retries must use today's canonical production
-  // origin, not an origin captured in a previously persisted job payload.
   const reportUrl = await reportUrlForAttendance(db, attendance, "checkout");
 
   return {
@@ -407,8 +389,6 @@ async function deliverNotification(db, job) {
     ? await sendCheckoutEmail(preparedJob.to_email, preparedJob.report)
     : await sendEvaluationEmail(preparedJob.to_email, preparedJob.report);
   if (!result.sent) {
-    // errorCode() reads `.code`/`.name`, not the message, so carry the SES
-    // reason on `.code` or it degrades to a useless generic "ERROR".
     const failure = new Error(result.reason || "ses_delivery_failed");
     failure.code = result.reason || "ses_delivery_failed";
     throw failure;
@@ -440,21 +420,6 @@ async function deliverNotification(db, job) {
     return true;
   }
 
-  /**
-   * The lease was lost while SES was accepting the message.
-   *
-   * Throwing here sent the job back through retryNotification, and the next
-   * worker to lease it sent the same report again — SES has no idempotency
-   * token, so the instructor received it twice. The email is already gone; the
-   * only question left is bookkeeping, and retrying answers it by making the
-   * mistake worse.
-   *
-   * So the job is settled where it stands. The write drops the worker_id and
-   * status guards that just failed, because the point is to record an outcome
-   * this worker no longer owns. "sent" rather than "delivery_unknown": that
-   * status exists for a message whose fate nobody knows, and this one was
-   * accepted — the message id proves it.
-   */
   const settled = {
     ...preparedJob,
     status: "sent",
@@ -484,12 +449,6 @@ async function deliverNotification(db, job) {
   return true;
 }
 
-/**
- * SES failures that cannot succeed on a later attempt. Retrying these only
- * delays the terminal state and holds recipient PII in the queue for longer,
- * so they exhaust immediately instead of consuming every attempt.
- */
-// Values are compared against errorCode(), which uppercases `.code`/`.name`.
 const NON_RETRYABLE_DELIVERY_REASONS = new Set([
   "SES_NOT_CONFIGURED",
   "MISSING_RECIPIENT",
@@ -540,7 +499,6 @@ async function retryNotification(db, job, error) {
   if (terminalJob) await syncNotificationStatus(db, terminalJob);
 }
 
-/** Clears recipient/report PII when a notification cannot be delivered within 24 hours. */
 export async function reconcileOverdueNotificationJobs(db, now = new Date()) {
   const legacyCutoff = new Date(now.getTime() - NOTIFICATION_DEADLINE_MS);
   let result = await db.collection("notification_jobs").findOneAndUpdate(
@@ -601,11 +559,6 @@ export async function reconcileOverdueNotificationJobs(db, now = new Date()) {
   return true;
 }
 
-/**
- * SES SendEmail has no idempotency token. After a final-attempt process crash we
- * cannot safely know whether SES accepted the message, so record an explicit
- * delivery_unknown terminal state instead of leaving an unclaimable job.
- */
 export async function reconcileExpiredNotificationJobs(db, now = new Date()) {
   const config = runtimeConfig();
   const result = await db.collection("notification_jobs").findOneAndUpdate(
@@ -662,8 +615,6 @@ export function startNotificationWorker(db) {
     busyStaleAfterMs: config.notificationLeaseMs + 60000,
   });
 
-  // Set while sleeping on an empty queue: only then is there a timer worth
-  // cancelling, and re-entering tick() mid-cycle would run two at once.
   let idle = false;
   let wokenMidCycle = false;
   const schedule = (delay = interval) => {
@@ -677,8 +628,6 @@ export function startNotificationWorker(db) {
   const wake = () => {
     if (stopped) return;
     if (!idle) {
-      // Mid-cycle: this cycle may already have looked for jobs. Remember the
-      // wake-up so it runs again at once instead of backing off.
       wokenMidCycle = true;
       return;
     }
@@ -706,8 +655,6 @@ export function startNotificationWorker(db) {
     let processedCount = 0;
     inFlight = (async () => {
       try {
-        // Each sweep repairs one record per call, so a sweep that found
-        // something runs again on the next cycle until the backlog is gone.
         if (sweepBacklog || sweeps.due()) {
           sweepBacklog = false;
           let repaired = await reconcileCheckinOutbox(db);

@@ -3,16 +3,6 @@ import { Eye, EyeOff } from 'lucide-react';
 
 type PasswordInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
 
-/**
- * A password field with a reveal toggle.
- *
- * Typing a password blind is error-prone everywhere and worse on a phone
- * keyboard, where a mistyped character is invisible and the only feedback is a
- * failed sign-in. The toggle is a button rather than a checkbox so it does not
- * take part in form submission, and it is excluded from the tab order: someone
- * tabbing from the field expects to reach the submit button, not a control
- * that would expose their password.
- */
 export default function PasswordInput({ className = '', ...props }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
   const describedBy = useId();
@@ -22,7 +12,6 @@ export default function PasswordInput({ className = '', ...props }: PasswordInpu
       <input
         {...props}
         type={visible ? 'text' : 'password'}
-        // Right padding keeps the text clear of the button.
         className={`${className} pr-11`}
         aria-describedby={describedBy}
       />

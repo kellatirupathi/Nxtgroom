@@ -1,14 +1,3 @@
-/**
- * Decides whether a live camera frame shows a whole person, head to feet.
- *
- * The test follows the complete body chain rather than relying on a face or a
- * bounding box: face, shoulders, hips, knees and both ankles must all be
- * confidently visible inside the part of the preview that will be saved.
- *
- * Detector infrastructure failures remain available to the manual fallback,
- * but automatic capture requires a successful, complete reading.
- */
-
 export type FrameVerdict =
   | 'FULL_BODY'
   | 'TOO_FAR'
@@ -19,23 +8,10 @@ export type FrameVerdict =
 
 export interface FrameReading {
   verdict: FrameVerdict;
-  /** What to tell the person in front of the camera, or null when nothing is wrong. */
   guidance: string | null;
-  /** Relative arm positions used by the live challenge before capture. */
   poseSignals?: PoseSignals;
-  /** Automatic capture requires relaxed, visible arms as well as body framing. */
   capturePosture?: CapturePosture;
-  /** Where the waist, trousers and shoes are, sent with the photograph. See bodyRegions. */
   bodyRegions?: BodyRegions | null;
-  /**
-   * Where the face is, for drawing a box on the preview.
-   *
-   * Shown to the person in front of the camera and used for nothing else: no
-   * verdict, no gate and no request depends on it, and a reading with no boxes
-   * behaves exactly as this one always has. Carried on the reading rather than
-   * fetched separately because the poses it comes from are computed here and
-   * were previously discarded.
-   */
   boxes?: FaceBox[];
 }
 
@@ -46,7 +22,6 @@ export interface PoseSignals {
   rightWrist: WristPosition;
 }
 
-/** Below this a keypoint is a guess, not a sighting. */
 export const KEYPOINT_CONFIDENCE = 0.35;
 
 import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
@@ -55,9 +30,7 @@ import { assessBody, describeBodyProblem } from './bodyCompleteness.ts';
 import { assessCapturePosture, type CapturePosture } from './capturePosture.ts';
 import { bodyRegionsFromKeypoints, type BodyRegions } from './bodyRegions.ts';
 
-/** Large enough for face recognition and grooming details without crowding the guide. */
 export const MIN_BODY_SPAN_RATIO = 0.48;
-/** MoveNet's ankle and head keypoints, by the names the model returns. */
 export const HEAD_KEYPOINTS = ['nose', 'left_eye', 'right_eye'];
 const REQUIRED_KEYPOINT_GROUPS = [
   ['left_shoulder', 'right_shoulder'],
@@ -67,7 +40,6 @@ const REQUIRED_KEYPOINT_GROUPS = [
 ] as const;
 const ANKLE_KEYPOINTS = ['left_ankle', 'right_ankle'];
 
-/** Fast pixel checks run on the already downscaled detector canvas. */
 export const MIN_FRAME_BRIGHTNESS = 42;
 export const MIN_FRAME_SHARPNESS = 7;
 
@@ -80,53 +52,28 @@ export type Detector = {
     config?: { maxPoses?: number },
   ) => Promise<Pose[]>;
   dispose?: () => void;
-  /**
-   * MoveNet's own parts, reached for preparing the graphics chip. Not part of
-   * its published interface, so both are optional and checked before use. The
-   * detector's reset() is not used: on the multi-person model it throws.
-   */
   tracker?: { reset?: () => void };
   moveNetModel?: { execute: (input: unknown) => unknown };
 };
 
 type TfCore = typeof import('@tensorflow/tfjs-core');
 
-/**
- * MoveNet MultiPose Lightning (Apache 2.0), served by this site.
- *
- * From Google's model site the same 9.4 MB came through three redirects to a
- * signed address marked not to be kept, so every opening of Attendance
- * downloaded it again: five to ten seconds before the first face box. Served
- * from here it is cached for a year (vercel.json), and every later opening
- * reads it from the tablet itself. The version is in the folder's name: a new
- * model goes in a new folder, so a cached copy can never be a stale one.
- */
 export const MOVENET_MODEL_URL = '/models/movenet-multipose-lightning-v1/model.json';
 
-/** Long side of the picture readFrame (and readGroupFrame) hands the detector. */
 const ANALYSIS_MAX_SIDE = 480;
-/** Long side MoveNet shrinks that picture to before reading it. */
 const MULTI_POSE_MAX_DIMENSION = 320;
 
 let detectorPromise: Promise<Detector | null> | null = null;
 let detectorSettled = false;
 let tfCore: TfCore | null = null;
-/** One preparation per picture shape, shared by everybody waiting on it. */
 const preparedShapes = new Map<string, Promise<void>>();
 
-/**
- * Whether loading has finished, well or badly. A camera opened before then
- * says it is starting instead of asking somebody to step into a frame nothing
- * is watching yet.
- */
 export function fullBodyDetectorSettled(): boolean {
   return detectorSettled;
 }
 
-/** The camera's line while that loading is still under way. */
 export const DETECTOR_STARTING_GUIDANCE = 'Starting face detection…';
 
-/** The picture readFrame makes for a preview of this size: its shape, at most 480 on the long side. */
 export function analysisSize(viewWidth: number, viewHeight: number): { width: number; height: number } {
   const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(viewWidth, viewHeight));
   return {
@@ -135,11 +82,6 @@ export function analysisSize(viewWidth: number, viewHeight: number): { width: nu
   };
 }
 
-/**
- * The [height, width] MoveNet runs its network at for a picture this size:
- * the long side at 320 and the other rounded up to a multiple of 32, as its
- * multi-person reading does.
- */
 export function modelInputShape(width: number, height: number): [number, number] {
   const short = (side: number, long: number) => (
     Math.ceil(Math.round(MULTI_POSE_MAX_DIMENSION * side / long) / 32) * 32
@@ -149,13 +91,6 @@ export function modelInputShape(width: number, height: number): [number, number]
     : [MULTI_POSE_MAX_DIMENSION, short(width, height)];
 }
 
-/**
- * Has the graphics chip build every program the network needs, all at once
- * and off the page's own thread. Built one at a time on the first reading they
- * took 15 seconds on a laptop, the page frozen throughout; built this way,
- * about one second. A browser that cannot build in parallel still builds them
- * here, one at a time, which is no slower than the first reading would be.
- */
 async function buildPrograms(detector: Detector, [height, width]: [number, number]): Promise<void> {
   const tf = tfCore;
   const model = detector.moveNetModel;
@@ -173,7 +108,6 @@ async function buildPrograms(detector: Detector, [height, width]: [number, numbe
   try {
     output = model.execute(input);
   } finally {
-    // Left on, every later reading would build programs and never run them.
     tf.env().set('ENGINE_COMPILE_ONLY', false);
   }
   try {
@@ -184,16 +118,6 @@ async function buildPrograms(detector: Detector, [height, width]: [number, numbe
   }
 }
 
-/**
- * Readies the detector for a preview of this size before anybody stands in
- * front of it: the network's programs built in parallel, then one reading of a
- * blank picture of exactly the shape the camera will send, which builds the
- * few programs around the network. Each shape is prepared once; a camera that
- * asks again, or asks while it is under way, waits on the same preparation.
- *
- * Never throws: whatever this could not prepare, the first real reading does,
- * as it always did.
- */
 export function primeFullBodyDetector(
   detector: Detector | null,
   viewWidth: number,
@@ -210,7 +134,6 @@ export function primeFullBodyDetector(
       try {
         await buildPrograms(detector, modelInputShape(width, height));
       } catch {
-        // Built on the first reading instead.
       }
       try {
         const canvas = document.createElement('canvas');
@@ -218,11 +141,8 @@ export function primeFullBodyDetector(
         canvas.height = height;
         canvas.getContext('2d')?.fillRect(0, 0, width, height);
         await detector.estimatePoses(canvas);
-        // A blank picture has nobody in it, but start the tracking from
-        // nothing all the same.
         detector.tracker?.reset?.();
       } catch {
-        // The first real reading does this instead.
       }
     })();
     preparedShapes.set(key, preparing);
@@ -230,14 +150,6 @@ export function primeFullBodyDetector(
   return preparing;
 }
 
-/**
- * Loads MoveNet once per page.
- *
- * Imported lazily so the weights and the runtime are fetched when a camera is
- * about to open, rather than by everybody who loads the app. Attendance asks
- * for it as it opens (preloadFullBodyDetector), so the loading overlaps the
- * start card and the camera starting rather than following them.
- */
 export function loadFullBodyDetector(): Promise<Detector | null> {
   detectorPromise ||= (async () => {
     try {
@@ -250,13 +162,8 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
       await tf.ready();
       tfCore = tf;
       try {
-        // Sizes passed to the programs rather than written into them, so one
-        // set of programs serves every preview shape: a rotated tablet or the
-        // group screen no longer waits seconds for new ones. The readings are
-        // identical either way (checked on real photographs at several sizes).
         tf.env().set('WEBGL_USE_SHAPES_UNIFORMS', true);
       } catch {
-        // A runtime without the setting builds per shape, as before.
       }
       const config = {
         modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
@@ -271,20 +178,16 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
           { ...config, modelUrl: MOVENET_MODEL_URL },
         ) as unknown as Detector;
       } catch {
-        // Our copy unreachable: Google's is the same model, only slower.
         detector = await poseDetection.createDetector(
           poseDetection.SupportedModels.MoveNet,
           config,
         ) as unknown as Detector;
       }
-      // Prepared for the window's shape while nothing is waiting on it; the
-      // camera then prepares its own exact shape, mostly from what this built.
       if (typeof window !== 'undefined') {
         await primeFullBodyDetector(detector, window.innerWidth, window.innerHeight);
       }
       return detector;
     } catch {
-      // No WebGL, blocked download, unsupported device. The camera still works.
       return null;
     } finally {
       detectorSettled = true;
@@ -293,7 +196,6 @@ export function loadFullBodyDetector(): Promise<Detector | null> {
   return detectorPromise;
 }
 
-/** Starts loading without waiting for it; see loadFullBodyDetector. */
 export function preloadFullBodyDetector(): void {
   void loadFullBodyDetector();
 }
@@ -312,9 +214,6 @@ function wristPosition(
   const shoulder = find(`${side}_shoulder`);
   if (!wrist || !shoulder) return 'UNKNOWN';
 
-  // The dead zone stops normal detector jitter around shoulder height from
-  // completing a challenge. At full-body scale, 4% of the frame is a clear
-  // movement without requiring a perfectly vertical arm.
   const margin = Math.max(8, (frameHeight || 0) * 0.04);
   if ((wrist.y as number) < (shoulder.y as number) - margin) return 'RAISED';
   if ((wrist.y as number) > (shoulder.y as number) + margin) return 'LOWERED';
@@ -328,7 +227,6 @@ function poseSignals(keypoints: Keypoint[], frameHeight?: number): PoseSignals {
   };
 }
 
-/** Turns one set of keypoints into a verdict and, when needed, an instruction. */
 export function readKeypoints(
   keypoints: Keypoint[] | undefined,
   frameHeight?: number,
@@ -349,7 +247,6 @@ export function readKeypoints(
 
   const visibleFacePoints = HEAD_KEYPOINTS.filter((name) => seen([name])).length;
   const headVisible = visibleFacePoints >= 2;
-  // Both ankles, not either: one foot in frame is not a full-body photograph.
   const anklesVisible = ANKLE_KEYPOINTS.every((name) => seen([name]));
 
   if (!headVisible && !anklesVisible) {
@@ -381,10 +278,6 @@ export function readKeypoints(
       if (belowOutline || outsideElsewhere) {
         return {
           verdict: 'PARTIAL',
-          // Feet past the bottom edge is the one case "center yourself" does
-          // not fix. The person is too close, and the joints the model pushed
-          // to the edge are the invented ankles of legs it cannot see, so the
-          // instruction that works is the one the body check would give.
           guidance: belowOutline && !outsideElsewhere
             ? describeBodyProblem('FEET')
             : 'Center your complete body in the camera',
@@ -408,14 +301,6 @@ export function readKeypoints(
       }
     }
 
-    /**
-     * The keypoints are all present and inside the frame, and the person is
-     * close enough. What is left to rule out is a body the model completed by
-     * guessing: MoveNet predicts joints it cannot see, so somebody cut off at
-     * the knees still arrives with two ankles. This is the check that tells a
-     * seen foot from an invented one, and it is why a half-body frame is told
-     * to step back rather than photographed.
-     */
     const body = assessBody(keypoints, { frameHeight, minScore: KEYPOINT_CONFIDENCE });
     if (!body.complete) {
       return {
@@ -450,14 +335,6 @@ export interface StableFrameState {
   candidateCount: number;
 }
 
-/**
- * A credible partial face or body is evidence that another person is present.
- *
- * MoveNet sometimes emits a second, weak pose made from four points belonging
- * to the main person. Treating that guess as a second person made an otherwise
- * empty frame flash "multiple people" on tablets. A partial face remains
- * sufficient, while a body-only detection needs several coherent landmarks.
- */
 export function isDetectedPerson(pose: Pose): boolean {
   const confident = pose.keypoints.filter((point) => (
     (point.score ?? 0) >= KEYPOINT_CONFIDENCE
@@ -491,7 +368,6 @@ function poseBounds(pose: Pose): PoseBounds | null {
   };
 }
 
-/** True when two model outputs are overlapping copies of the same person. */
 export function duplicatePose(first: Pose, second: Pose, frameHeight?: number): boolean {
   const a = poseBounds(first);
   const b = poseBounds(second);
@@ -518,7 +394,6 @@ export function duplicatePose(first: Pose, second: Pose, frameHeight?: number): 
   return distance <= Math.max(20, (frameHeight || 0) * 0.055);
 }
 
-/** Converts all poses in a frame into one capture decision. */
 export function readPoses(
   poses: Pose[] | undefined,
   frameHeight?: number,
@@ -550,11 +425,6 @@ export interface FrameQuality {
   sharpness: number;
 }
 
-/**
- * Estimates exposure and blur from luminance only. Sampling every other pixel
- * keeps this well below pose-inference cost on a tablet while still detecting
- * a dark room or a badly smeared frame.
- */
 export function measureFrameQuality(
   pixels: Uint8ClampedArray,
   width: number,
@@ -590,10 +460,6 @@ export function measureFrameQuality(
   };
 }
 
-/**
- * Requires the same result across several analyses before changing the UI.
- * One noisy frame must not make the outline or guidance flash.
- */
 export function stabilizeFrameReading(
   state: StableFrameState,
   next: FrameReading,
@@ -611,16 +477,10 @@ export function stabilizeFrameReading(
   return { reading: state.reading, candidate: next, candidateCount };
 }
 
-/**
- * Reads one frame. Never throws: a detector that fails mid-session reports
- * UNAVAILABLE, which blocks auto-capture but leaves the manual fallback usable.
- */
 export async function readFrame(
   detector: Detector | null,
   video: HTMLVideoElement,
   viewport?: { width: number; height: number; canvas: HTMLCanvasElement },
-  // Only the front camera's preview is flipped, and a box drawn without
-  // accounting for that lands on the opposite side of the screen from the face.
   options?: { mirrored?: boolean },
 ): Promise<FrameReading> {
   if (!detector || !video.videoWidth) {
@@ -659,8 +519,6 @@ export async function readFrame(
     }
     const poses = await detector.estimatePoses(input, { maxPoses: 6 });
     const frameWidth = input instanceof HTMLCanvasElement ? input.width : video.videoWidth;
-    // One box, because this camera photographs one person: the largest face,
-    // which is the one nearest the lens. Everything below is unchanged.
     const boxes = faceBoxesFromPoses(poses, {
       frameWidth,
       frameHeight,
@@ -691,18 +549,9 @@ export async function readFrame(
   }
 }
 
-/** Retained for callers compiled against the earlier strict capture gate. */
 export const STEADY_MS = 0;
 export const OVERRIDE_AFTER_MS = 0;
 
-/**
- * Whether the shutter should be enabled.
- *
- * Framing is guidance, not an attendance blocker. Once the detector sees one
- * person, the shutter opens even if feet are cropped or the person is farther
- * away than recommended. Only a confidently empty frame or a confidently
- * detected group remains blocked. Detector failures fail open.
- */
 export function shutterEnabled(
   verdict: FrameVerdict,
   _steadyForMs: number,
@@ -712,65 +561,21 @@ export function shutterEnabled(
   return true;
 }
 
-/**
- * Readings of the same good frame required before the camera fires itself.
- *
- * Three at five readings a second is a little over half a second of standing
- * still, which is short enough not to feel like waiting and long enough that
- * somebody walking through the frame is not photographed.
- */
 export const AUTO_CAPTURE_CONFIRMATIONS = 3;
 
-/**
- * How long the camera waits after firing before it will fire again.
- *
- * Two seconds after the response lets the captured person move away before
- * another photograph is taken. The request itself remains locked separately.
- * Fresh frame confirmations begin only once this pause has finished.
- */
 export const AUTO_CAPTURE_COOLDOWN_MS = 2_000;
 
-/** Frames collected during a request or pause cannot arm the next capture. */
 export function captureConfirmationCount(verdict: FrameVerdict, frames: number, busy: boolean, cooldownUntil: number, now: number): number {
   return !busy && now >= cooldownUntil && verdict === 'FULL_BODY' ? frames + 1 : 0;
 }
 
-/**
- * Consecutive unusable readings before the manual shutter is offered.
- *
- * Auto-capture needs a confident whole-body frame, which a cramped room, a
- * low-mounted tablet or a failed detector may never produce. At that point the
- * strict rule is the thing standing between somebody and their attendance, so
- * the count is deliberately low: about five seconds of trying.
- */
 export const AUTO_CAPTURE_FALLBACK_ATTEMPTS = 25;
 
-/**
- * Whether the camera should take the photograph by itself.
- *
- * Deliberately stricter than shutterEnabled, which stays permissive because a
- * person pressing the button has already judged the frame. Nobody judges an
- * automatic capture, so PARTIAL, TOO_FAR and UNAVAILABLE are refused here even
- * though a human may capture through all three: every automatic frame becomes a
- * recognition call, a vision call and a photograph of somebody, and a
- * half-framed one buys none of that.
- *
- * FULL_BODY only, held steady. MULTIPLE_PEOPLE is refused for the same reason
- * the manual gate refuses it — there is no way to tell whose attendance it
- * would be.
- */
 export function autoCaptureReady(verdict: FrameVerdict, steadyFrames: number): boolean {
   if (verdict !== 'FULL_BODY') return false;
   return steadyFrames >= AUTO_CAPTURE_CONFIRMATIONS;
 }
 
-/**
- * Whether a run of unusable frames has gone on long enough to offer the button.
- *
- * Counts only readings that auto-capture cannot use. A frame good enough to fire
- * on resets the count, so the fallback appears when the camera genuinely cannot
- * get a usable view rather than after a slow start.
- */
 export function autoCaptureFallbackDue(unusableFrames: number): boolean {
   return unusableFrames >= AUTO_CAPTURE_FALLBACK_ATTEMPTS;
 }

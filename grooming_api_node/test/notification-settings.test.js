@@ -12,7 +12,6 @@ test("defaults preserve the previous always-send behaviour", () => {
   assert.equal(shouldSendNotification(DEFAULT_NOTIFICATION_SETTINGS, "checkin", {}), true);
   assert.equal(shouldSendNotification(DEFAULT_NOTIFICATION_SETTINGS, "checkout", {}), true);
   assert.equal(shouldSendWeeklyReport(DEFAULT_NOTIFICATION_SETTINGS), false);
-  // An empty/missing document must not silently disable mail.
   assert.deepEqual(normalizeNotificationSettings(undefined), DEFAULT_NOTIFICATION_SETTINGS);
 });
 
@@ -59,8 +58,6 @@ test("validation rejects unknown keys and non-boolean values", () => {
 });
 
 test("re-analysis is off until a workspace turns it on", () => {
-  // Re-running spends a vision call and replaces a report the instructor may
-  // already have been emailed, so an empty database must not offer it.
   assert.equal(DEFAULT_NOTIFICATION_SETTINGS.reanalyse_enabled, false);
   assert.equal(normalizeNotificationSettings({}).reanalyse_enabled, false);
   assert.equal(normalizeNotificationSettings({ reanalyse_enabled: true }).reanalyse_enabled, true);
@@ -68,7 +65,6 @@ test("re-analysis is off until a workspace turns it on", () => {
   const enabled = validateNotificationSettings({ reanalyse_enabled: true });
   assert.equal(enabled.valid, true);
   assert.equal(enabled.value.reanalyse_enabled, true);
-  // The other preferences keep their defaults rather than being cleared.
   assert.equal(enabled.value.checkin_email_enabled, true);
 
   assert.equal(validateNotificationSettings({ reanalyse_enabled: "yes" }).valid, false);

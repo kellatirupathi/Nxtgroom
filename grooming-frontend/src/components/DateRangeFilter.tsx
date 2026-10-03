@@ -18,14 +18,6 @@ interface DateRangeFilterProps {
   onChange: (preset: DatePreset, range: DateRange) => void;
 }
 
-/**
- * Date filter for the records table.
- *
- * The presets are the questions people actually ask, and a custom range is
- * there for the ones they do not. The panel is rendered through a portal and
- * positioned against the trigger, because the toolbar sits inside the table's
- * horizontally scrolling container, which would otherwise clip it.
- */
 const PANEL_WIDTH = 256;
 
 export default function DateRangeFilter({ preset, range, today, onChange }: DateRangeFilterProps) {
@@ -38,12 +30,9 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
 
   const place = () => {
     const rect = triggerRef.current?.getBoundingClientRect();
-    // PANEL_WIDTH matches the panel's w-64 class.
     if (rect) setPosition(floatingPanelPosition(rect, PANEL_WIDTH, window.innerWidth));
   };
 
-  // A layout effect, so a re-measure on opening lands before the browser
-  // paints rather than a frame after it.
   useLayoutEffect(() => {
     if (!open) return undefined;
     place();
@@ -55,8 +44,6 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
-    // Follows the trigger rather than detaching from it, since the toolbar
-    // scrolls with the page.
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
     document.addEventListener('mousedown', onPointerDown);
@@ -71,8 +58,6 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
 
   const choosePreset = (value: DatePreset) => {
     if (value === 'custom') {
-      // Seed the pickers with the range already showing, so switching to
-      // custom starts from what the user is looking at.
       setDraft(range.from || range.to ? range : rangeForPreset('today', today));
       setPanelView('custom');
       return;
@@ -94,13 +79,7 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
       setOpen(false);
       return;
     }
-    // Every fresh opening starts at the compact preset menu. The custom form
-    // is a deliberate second screen, not permanent content beneath the menu.
     setPanelView('menu');
-    // Measured in the same click that opens it, so the panel's first frame is
-    // already under the button. Opening first and measuring afterwards drew
-    // one frame at the starting position - the top-left corner of the screen -
-    // which showed as a flash there every time the filter was clicked.
     place();
     setOpen(true);
   };
@@ -186,8 +165,6 @@ export default function DateRangeFilter({ preset, range, today, onChange }: Date
                 >
                   Apply range
                 </button>
-                {/* Only shown once both ends are set, so it reads as a correction
-                    rather than an error about an unfinished form. */}
                 {draft.from && draft.to && !draftValid && (
                   <p role="alert" className="mt-2 text-xs font-medium text-rose-600">
                     The start date must be on or before the end date.

@@ -8,44 +8,24 @@ import {
   weekStartKey,
 } from "./evaluationWorker.js";
 
-/**
- * The Escalations page: every run of three or more non-compliant check-ins in
- * a row in one Monday-to-Sunday week, one row per failed day of the run, with
- * that day's check-in and check-out, their verdicts, and what the page needs
- * to show their photographs and reports. The page groups the rows by person.
- *
- * The runs are found by failedDayStreaks, the function that sends reporting
- * partners the URGENT email, so the page lists exactly who was emailed about.
- * An instructor with two separate runs appears for both.
- *
- * A range other than one week (this month, a custom range) is read week by
- * week, since a run never crosses a Monday: every week the range touches is
- * read whole, so a run that began before the range still counts its earlier
- * days, and only the failed days inside the range are listed.
- */
-
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-/** The longest range one request may ask for: a quarter, with room for its edges. */
 export const MAX_RANGE_DAYS = 93;
 
 export class EscalationRangeError extends Error {}
 
-/** The weekday of a YYYY-MM-DD key. */
 export function weekdayOf(dayKey) {
   const [year, month, day] = String(dayKey).split("-").map(Number);
   return WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
 }
 
-/** A real calendar date as YYYY-MM-DD: not 2026-02-30, not 24-09-2026. */
 function isDayKey(value) {
   if (typeof value !== "string" || !DAY_KEY.test(value)) return false;
   const [year, month, day] = value.split("-").map(Number);
   return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
 }
 
-/** The Monday of the requested week: any day in it, or this week by default. */
 export function requestedWeekStart(week, now = new Date()) {
   if (week === undefined || week === null || week === "") {
     return weekStartKey(localDateKey(now, runtimeConfig().appTimeZone));
@@ -54,10 +34,6 @@ export function requestedWeekStart(week, now = new Date()) {
   return weekStartKey(week);
 }
 
-/**
- * The dates asked for, both ends included: `from` and `to` when given, or
- * else the week of `week`, or this week.
- */
 export function requestedRange({ week, from, to } = {}, now = new Date()) {
   if (from !== undefined || to !== undefined) {
     if (!isDayKey(from) || !isDayKey(to)) {
@@ -73,7 +49,6 @@ export function requestedRange({ week, from, to } = {}, now = new Date()) {
   return { from: weekStart, to: addDaysToKey(weekStart, 6) };
 }
 
-/** "compliant", "non_compliant", or the record's own word for anything else. */
 function checkInVerdict(status) {
   const value = String(status || "").toLowerCase();
   if (["compliant", "done", "needs_review", "review_required"].includes(value)) return "compliant";
@@ -93,10 +68,6 @@ function checkOutVerdict(record) {
 
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 
-/**
- * The rows for a range of dates (see requestedRange). `collegeId` narrows them
- * to one institute. Rows are ordered by instructor, then by day.
- */
 export async function escalationReport(db, { week, from, to, collegeId = null, now = new Date() } = {}) {
   const range = requestedRange({ week, from, to }, now);
   const weekStarts = [];
@@ -143,8 +114,6 @@ export async function escalationReport(db, { week, from, to, collegeId = null, n
     for (const weekStart of weekStarts) {
       for (const streak of failedDayStreaks(group, weekStart)) {
         if (streak.length < ESCALATION_THRESHOLD) continue;
-        // Only the failed days inside the range are listed; a run wholly
-        // outside it is not read at all.
         if (streak.some((record) => record.attendance_day >= range.from && record.attendance_day <= range.to)) {
           runs.push({ instructorId, streak });
         }
@@ -189,7 +158,6 @@ export async function escalationReport(db, { week, from, to, collegeId = null, n
         institute: college ? (collegeName.get(String(college)) || "Unknown institute") : "No institute",
         date: record.attendance_day,
         weekday: weekdayOf(record.attendance_day),
-        // Which failed check-in of the run this is, and how long the run is.
         run_day: index + 1,
         run_length: streak.length,
         run_start: streak[0].attendance_day,

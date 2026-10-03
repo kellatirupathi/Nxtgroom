@@ -11,8 +11,6 @@ import {
 } from '../src/routes.ts';
 
 test('every screen has its own address', () => {
-  // Before this, every screen rendered at "/", so a refresh always returned
-  // to Attendance and no page could be bookmarked or shared.
   const paths = Object.values(TABS).map(pathForTab);
   assert.equal(new Set(paths).size, paths.length, 'no two tabs may share a path');
   assert.equal(pathForTab(TABS.DAILY_RECORDS), '/daily-records');
@@ -55,8 +53,6 @@ test('the password link path is not claimed by a tab', () => {
 });
 
 test('the detail path carries the record id', () => {
-  // Without the id, a refresh or a shared link had nothing to render and the
-  // page fell back to "choose a record".
   assert.equal(
     pathForTab(TABS.INSTRUCTOR_DETAIL, 'abc-123'),
     '/daily-records/record/abc-123',
@@ -71,7 +67,6 @@ test('the detail path carries the record id', () => {
 test('a detail path with an id still resolves to the detail tab', () => {
   assert.equal(tabForPath('/daily-records/record/abc-123'), TABS.INSTRUCTOR_DETAIL);
   assert.equal(tabForPath('/daily-records/record'), TABS.INSTRUCTOR_DETAIL);
-  // The list itself must not be captured by the detail prefix.
   assert.equal(tabForPath('/daily-records'), TABS.DAILY_RECORDS);
 });
 
@@ -83,8 +78,6 @@ test('record ids are encoded so an unusual id cannot break the path', () => {
 });
 
 test('emailed report links are recognised before the auth gate', () => {
-  // These are opened by instructors with no account. Falling through to the
-  // tab map sent them to the dashboard instead of their report.
   const path = '/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/day/2026-08-17';
   const match = path.match(/^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/);
   assert.ok(match, 'the real emailed link must match');
@@ -105,11 +98,6 @@ test('malformed report links are not treated as reports', () => {
   }
 });
 
-/**
- * Every address the application can be opened at, checked in one place.
- * A page that resolves to the wrong screen rewrites the address bar to match,
- * so a mistake here silently changes the URL under the user.
- */
 test('every route resolves to the screen that owns it', () => {
   const REPORT_RE = /^\/reports\/([A-Za-z0-9_-]{8,128})\/(day|week)\/(\d{4}-\d{2}-\d{2})\/?$/;
   const resolve = (path) => {
@@ -139,8 +127,6 @@ test('every route resolves to the screen that owns it', () => {
 });
 
 test('a report link is never mistaken for a tab', () => {
-  // tabForPath falling back to Attendance is what rewrote the address bar
-  // while the report was on screen.
   assert.equal(tabForPath('/reports/LIJJMEDrikTgiuqmUUv3ueOPZftXOnBs/day/2026-08-17'), TABS.OVERVIEW);
   assert.equal(
     Object.values(TABS).some((tab) => pathForTab(tab).startsWith('/reports')),
@@ -172,24 +158,15 @@ test('both halves are recognised, and an older link still opens', () => {
   assert.deepEqual(at('/reports/abcdefgh12345678/day/2026-08-18/check-out'), {
     token: 'abcdefgh12345678', kind: 'day', date: '2026-08-18', half: 'checkout',
   });
-  // Links already sent by email carry no half and are check-ins. They have to
-  // keep working, so the bare form is not a 404.
   assert.deepEqual(at('/reports/abcdefgh12345678/day/2026-08-18'), {
     token: 'abcdefgh12345678', kind: 'day', date: '2026-08-18', half: 'checkin',
   });
-  // A weekly report covers both halves, so it takes no suffix.
   assert.equal(at('/reports/abcdefgh12345678/week/2026-08-17').half, 'checkin');
-  // An unrecognised suffix is not a report link at all.
   assert.equal(at('/reports/abcdefgh12345678/day/2026-08-18/check-sideways'), null);
   delete globalThis.window;
 });
 
 test('every parsed report route carries a half the page can render', () => {
-  // The parser was always right; the shell dropped the half on the way to the
-  // page, which then defaulted to check-in. So an emailed check-out link
-  // showed the morning's report under a check-out URL. The prop is required
-  // now, but assert the parser's side of that contract holds for every shape
-  // of link: an undefined here would put the default back.
   const at = (pathname) => {
     globalThis.window = { location: { pathname } };
     return publicReportFromLocation();
@@ -209,8 +186,6 @@ test('every parsed report route carries a half the page can render', () => {
     );
   }
 
-  // The half a check-out link carries must survive a round trip through the
-  // builder, so the link the email sends reopens the same report.
   const built = publicDayReportPath('abcdefgh12345678', '2026-08-18', 'checkout');
   assert.equal(at(built).half, 'checkout');
 });
@@ -219,8 +194,6 @@ test('administrators start on the Dashboard; a BOA starts on Attendance', () => 
   assert.equal(pathForTab(TABS.DASHBOARD), '/dashboard');
   assert.equal(homeTabForRole(true), TABS.DASHBOARD);
   assert.equal(homeTabForRole(false), TABS.OVERVIEW);
-  // The role-free resolver is unchanged: "/" is resolved to a home screen by
-  // the shell once the role is known, not by the path alone.
   assert.equal(tabForPath('/'), TABS.OVERVIEW);
 });
 

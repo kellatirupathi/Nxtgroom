@@ -73,8 +73,6 @@ test("login preserves the frontend authentication contract", async () => {
   const passwordHash = await getPasswordHash("admin@123");
   app.locals.db = {
     collection(name) {
-      // /me also reads the workspace permission defaults, so it can tell the
-      // browser which actions to offer.
       if (name === "app_settings") return { findOne: async () => null };
       assert.equal(name, "users");
       return {
@@ -104,17 +102,9 @@ test("login preserves the frontend authentication contract", async () => {
     email: "admin@nxtwave.com",
     role: "SUPER_ADMIN",
     college_id: null,
-    // Sent so the interface only offers actions the server would allow. An
-    // admin always may; a BOA depends on the workspace and per-user settings.
     can_delete_records: true,
     can_delete_checkout: true,
-    // Workspace-wide, and off unless an administrator turns it on, so the
-    // record view knows whether to offer re-analysis without needing the
-    // super-admin-only settings endpoint.
     reanalyse_enabled: false,
-    // Whether this tablet's college identifies from the photograph. FACE_ONLY is
-    // the default, and a super admin belongs to no college, so the workspace
-    // default is what answers here.
     face_identification: true,
   });
 });
@@ -264,8 +254,6 @@ test("SES report asks for a retake when the photo could not be assessed", () => 
     aiSummary: "Footwear was not visible.",
     imageQuality: "RETAKE_RECOMMENDED",
   });
-  // Nothing failed, so the result stands. The photo is still the problem, and
-  // saying so is what gets a usable one next time.
   assert.match(email.text, /Appearance status: COMPLIANT/);
   assert.match(email.text, /clearer full-body photo/);
 });

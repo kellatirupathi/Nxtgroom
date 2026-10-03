@@ -3,12 +3,6 @@ import { test } from "node:test";
 import * as faceRecognition from "../src/services/faceRecognition.js";
 import { enrollReferencePhoto } from "../src/services/referencePhotos.js";
 
-/**
- * enrollReferencePhoto is shared by the photo upload and the instructor
- * import. What must hold for both: a refused photograph changes nothing on the
- * instructor, and the refusal carries the status and wording the screen shows.
- */
-
 const configured = {
   REKOGNITION_COLLECTION_ID: "facultytrack-faces-test",
   AWS_REKOGNITION_REGION: "ap-south-1",
@@ -94,8 +88,6 @@ test("a provider outage is a 503, so the admin is told to retry rather than reta
 });
 
 test("an already checked photograph skips the second quality check", async () => {
-  // Storage is unconfigured here, so the call stops at the upload; what is
-  // proved is that DetectFaces was not paid for twice on the way.
   await withEnv(configured, async () => {
     const sent = stubRekognition({});
     const db = recordingDb();

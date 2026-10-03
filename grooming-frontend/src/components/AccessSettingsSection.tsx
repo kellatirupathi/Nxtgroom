@@ -7,14 +7,6 @@ import type { AccessSettings } from '../types';
 
 const ACCESS_PATH = '/api/v2/settings/access';
 
-/**
- * Who, besides administrators, may delete an attendance record.
- *
- * Kept apart from the notification preferences above: those decide what gets
- * emailed, this decides who can destroy a record and its photographs. Off
- * until somebody turns it on, and individual accounts can still be granted or
- * refused it under Users regardless of what is set here.
- */
 export default function AccessSettingsSection() {
   const [settings, setSettings] = useState<AccessSettings>({ boa_can_delete_records: false, boa_can_delete_checkout: false });
   const [loading, setLoading] = useState(true);
@@ -28,8 +20,6 @@ export default function AccessSettingsSection() {
         if (!disposed && data) setSettings(data);
       })
       .catch(() => {
-        // A failed read leaves the safe default showing rather than an empty
-        // control that looks switched off but was never loaded.
         if (!disposed) toast.error('Could not load permission settings');
       })
       .finally(() => {
@@ -69,8 +59,6 @@ export default function AccessSettingsSection() {
         Permissions
       </h3>
       <div className="bg-white border border-slate-200 rounded-md">
-        {/* Narrower gap on a phone: these descriptions are two and three lines
-            long, and 24px beside a fixed-width switch came out of the text. */}
         <div className="flex items-start justify-between gap-3 sm:gap-6 p-4">
           <div className="min-w-0">
             <label htmlFor="boa_can_delete_records" className="block text-sm font-semibold text-slate-800">

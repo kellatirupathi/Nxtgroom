@@ -2,16 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-/**
- * Phone layouts.
- *
- * On a phone the desktop tables showed two columns and scrolled everything
- * else off to the right. Instructors and Users have a card layout below their
- * breakpoint and keep the table above it. Daily Records is the exception, by
- * request: the same table on every screen, fitted to it. These read the
- * source, so they cannot judge the pixels.
- */
-
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
 test('Daily Records: one table on every screen, and no cards', () => {
@@ -20,7 +10,6 @@ test('Daily Records: one table on every screen, and no cards', () => {
   assert.ok(!table.includes('function RecordCard'), 'the card layout is gone');
   assert.ok(!table.includes('<div className="lg:hidden">'));
   assert.ok(!table.includes('hidden lg:flex'), 'the table is not hidden below lg');
-  // A sideways swipe at the end must not become the browser's back gesture.
   assert.match(table, /overflow-x-auto flex-1 max-lg:overscroll-x-contain/);
 });
 
@@ -31,8 +20,6 @@ test('Daily Records: every column width adds up to the table width, on phones an
   assert.equal(widths.length, 13);
   const compact = widths.reduce((sum, [small]) => sum + small, 0);
   const wide = widths.reduce((sum, [, large]) => sum + large, 0);
-  // The desktop's columns, unchanged. Its stated total used to be 2010px, but a
-  // fixed table is never narrower than its columns, so it always drew at 2110.
   assert.equal(wide, 2110);
   assert.match(table, /const SELECT_COLUMN_WIDTH = 'w-10 lg:w-12';/);
   assert.match(table, new RegExp(`withSelect: 'w-\\[${compact + 40}px\\] lg:w-\\[${wide + 48}px\\]'`));
@@ -41,14 +28,11 @@ test('Daily Records: every column width adds up to the table width, on phones an
 
 test('Daily Records: the name stays pinned on phones and tablets, and every cell keeps its content', () => {
   const table = read('src/components/DailyAttendanceTable.tsx');
-  // Pinned only below lg; the desktop's header and cells are unchanged there.
   assert.match(table, /const PINNED_HEAD = 'max-lg:sticky max-lg:left-0 max-lg:z-20 bg-slate-50/);
   assert.match(table, /const PINNED_CELL = 'max-lg:sticky max-lg:left-0 max-lg:z-\[1\]/);
   assert.match(table, /\$\{index === 0 \? PINNED_HEAD : ''\}/);
-  // Opaque behind the pinned name, matching a selected row.
   assert.match(table, /\$\{selected \? 'max-lg:bg-indigo-50' : 'max-lg:bg-white'\}/);
   assert.match(table, /\$\{selected \? 'bg-indigo-50\/70 max-lg:bg-indigo-50' : ''\}/);
-  // Tighter below lg, the desktop's p-4 from lg.
   assert.match(table, /const CELL = 'px-3 py-2\.5 lg:p-4';/);
   assert.match(table, /const HEAD_CELL = 'px-3 py-3 lg:p-4';/);
   for (const piece of [
@@ -67,8 +51,6 @@ test('Daily Records: the name stays pinned on phones and tablets, and every cell
   ]) {
     assert.ok(table.includes(piece), `the table is missing ${piece}`);
   }
-  // The empty-table message stays on screen on a phone instead of being
-  // centred across the table's full width.
   assert.match(table, /max-lg:sticky max-lg:left-0 max-lg:w-\[calc\(100vw-2\.25rem\)\]">\{message\}/);
 });
 
@@ -78,7 +60,6 @@ test('the phone header keeps search, Filters and Export in that order, as full t
   const filters = table.indexOf('setFiltersOpen(true)');
   const exportButton = table.indexOf('downloadAttendanceCsv(filteredRecords, range)');
   assert.ok(search > 0 && search < filters && filters < exportButton);
-  // 44px high on a phone, the desktop's 36px from sm up.
   assert.match(table, /h-11 w-full rounded-lg[^"]*sm:h-9/);
   assert.match(table, /aria-label=\{activeFilterCount \? `Filters, \$\{activeFilterCount\} active` : 'Filters'\}/);
   assert.match(table, /aria-label="Export"/);
@@ -89,7 +70,6 @@ test('Instructors and Users: cards below md, the table from md', () => {
     const source = read(file);
     assert.match(source, /<div className="md:hidden">/, `${file} has no phone layout`);
     assert.match(source, /<div className="hidden md:flex bg-white/, `${file} shows its table on a phone`);
-    // The same row actions in both layouts.
     assert.equal((source.match(/<RowActionsMenu/g) || []).length, 2, `${file} lost an actions menu`);
   }
   const instructors = read('src/components/InstructorManagement.tsx');

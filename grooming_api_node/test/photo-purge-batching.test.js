@@ -3,18 +3,6 @@ import { after, test } from "node:test";
 import express from "express";
 import { reportRouter } from "../src/routes/reportRoutes.js";
 
-/**
- * The purge took exactly one batch of 200 records per call and returned
- * `more: true` with nothing to act on it, so a roster producing more than 200
- * expiring photographs a day could never be caught up with and the two-month
- * retention window quietly stopped being true.
- *
- * Working through batches introduces the opposite risk: a record whose object
- * cannot be deleted still matches the filter, so a naive loop re-reads the
- * same rows forever. R2 is deliberately left unconfigured here, which makes
- * every delete fail, which is precisely that path.
- */
-
 const CRON_SECRET = "test-cron-secret-value";
 
 function fakeDb(records) {
@@ -76,7 +64,6 @@ const openServer = (db) => {
   return handle;
 };
 
-/** Old enough to be well past any retention window under test. */
 const expired = (index) => ({
   _id: `a${index}`,
   check_in_time: new Date("2020-01-01T00:00:00.000Z"),
@@ -86,7 +73,6 @@ const expired = (index) => ({
 test("a backlog larger than one batch is worked through in a single run", async (t) => {
   t.after(() => { delete process.env.CRON_SECRET; });
   process.env.CRON_SECRET = CRON_SECRET;
-  // 250 records: one 200-row batch cannot clear it, which is the whole bug.
   const db = fakeDb(Array.from({ length: 250 }, (_, index) => expired(index)));
   const { purge } = openServer(db);
 
@@ -100,7 +86,6 @@ test("a backlog larger than one batch is worked through in a single run", async 
 test("records whose object cannot be deleted are not read again", async (t) => {
   t.after(() => { delete process.env.CRON_SECRET; });
   process.env.CRON_SECRET = CRON_SECRET;
-  // R2 is unconfigured, so deletePhoto reports failure for every key.
   const db = fakeDb(Array.from({ length: 250 }, (_, index) => expired(index)));
   const { purge } = openServer(db);
 
@@ -108,8 +93,6 @@ test("records whose object cannot be deleted are not read again", async (t) => {
 
   assert.equal(body.photos_failed, 250);
   assert.equal(body.photos_deleted, 0);
-  // Two reads: the opening batch of 200, then the remaining 50 with the first
-  // 200 excluded. Without the exclusion the same rows return forever.
   assert.equal(db.queries.length, 2);
   assert.deepEqual(db.queries[1]._id.$nin.length, 200);
 });
@@ -122,7 +105,6 @@ test("a failed delete leaves the key on the record for the next run", async (t) 
 
   await purge();
 
-  // Clearing it regardless would orphan a file nothing points at any more.
   assert.equal(db.rows[0].check_in_photo_key, "attendance/2020/01/01/0-checkin.jpg");
   assert.equal(db.rows[0].photos_purged_at, undefined);
 });

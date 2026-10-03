@@ -2,15 +2,6 @@ import "dotenv/config";
 import { createDynamoClient, dynamoConfig } from "../src/config/dynamo.js";
 import { ensureDynamoTables } from "../src/stores/dynamoTables.js";
 
-/**
- * Checks, and with --apply creates, the DynamoDB tables in DYNAMO_TABLES.
- *
- *   npm run dynamo:tables          report only, changes nothing
- *   npm run dynamo:tables:apply    create the missing tables
- *
- * Uses DYNAMODB_REGION and the DYNAMODB_* keys, or DYNAMODB_ENDPOINT for
- * DynamoDB Local. Existing tables are never changed or deleted.
- */
 const apply = process.argv.includes("--apply");
 const config = dynamoConfig();
 

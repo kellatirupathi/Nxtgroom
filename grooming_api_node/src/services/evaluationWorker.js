@@ -23,20 +23,6 @@ import { appUrl } from "../config/env.js";
 const WORKER_ID = randomUUID();
 const EVALUATION_OUTBOX_FIELD = "_private_evaluation_outbox";
 
-/**
- * Wakes an idle evaluation worker the moment a job is queued.
- *
- * The loop already drains back-to-back while work exists; it waits only when
- * it finds the queue empty, which is exactly the case after a check-in. That
- * wait was up to EVALUATION_POLL_MS of dead time between the photograph being
- * accepted and the analysis starting, for no reason other than the next poll
- * not having come round yet.
- *
- * In-process only, and deliberately best-effort: when the API and the workers
- * run as separate services (PROCESS_ROLE=api and =worker) there is nobody
- * listening here, and the polling loop remains the thing that guarantees a
- * job is picked up. Nothing may depend on this having been delivered.
- */
 const evaluationWakeups = new Set();
 
 export function onEvaluationQueued(listener) {
@@ -49,7 +35,6 @@ function notifyEvaluationQueued() {
     try {
       listener();
     } catch {
-      // A wake-up is an optimisation. The poll still covers this job.
     }
   }
 }
@@ -67,36 +52,16 @@ function updated(result) {
   return Boolean(result && (result.matchedCount > 0 || result.modifiedCount > 0));
 }
 
-/**
- * One job per half of the record.
- *
- * The check-in keeps its original id so jobs queued before check-out analysis
- * existed still run rather than being orphaned by a rename.
- */
 function evaluationJobId(attendanceId, kind = "checkin") {
   return kind === "checkout"
     ? `${attendanceId}:evaluation:checkout`
     : `${attendanceId}:evaluation`;
 }
 
-/** Evaluations stored before check-out analysis existed are all check-ins. */
 function jobKind(job) {
   return job?.kind === "checkout" ? "checkout" : "checkin";
 }
 
-/**
- * Failures that running the job again cannot clear.
- *
- * A 400 means the request itself was refused - a schema the provider will not
- * serve, or a malformed body - and a 401/403 means the credential is wrong.
- * Neither answer changes between attempts, so retrying only multiplied the
- * cost: when Gemini began rejecting the combined female schema, every job
- * spent its full three attempts arriving at the identical refusal, and each
- * re-analysis spent three more.
- *
- * Everything else, including timeouts, rate limits and provider 5xx, stays on
- * the normal retry path.
- */
 const PERMANENT_EVALUATION_ERRORS = new Set([
   "GEMINI_REQUEST_ERROR",
   "GEMINI_AUTH_ERROR",
@@ -111,13 +76,6 @@ function errorCode(error, fallback = "EVALUATION_ERROR") {
   return /^[A-Z][A-Z0-9_]{0,79}$/.test(value) ? value : fallback;
 }
 
-/**
- * Sends a failed or review-required result to the instructor and to every
- * Reporting Partner, each with a link to that day's report.
- *
- * The instructor's link is keyed on their own report token; RPs receive the
- * same link, since they are trusted recipients configured by an administrator.
- */
 async function sendGroomingAlerts(db, {
   attendanceId,
   instructorId,
@@ -129,11 +87,6 @@ async function sendGroomingAlerts(db, {
   eventTime = checkInTime,
   kind = "checkin",
 }) {
-  // idMatch, not the raw value: attendance stores instructor_id as a string,
-  // while a synced instructor's _id is an ObjectId. Matching on the string
-  // alone found nobody for all 599 imported instructors, and the early return
-  // below then silently cancelled the alert — to the instructor and to every
-  // reporting partner alike.
   const instructor = instructorId
     ? await db.collection("instructors").findOne({ _id: idMatch(String(instructorId)) })
     : null;
@@ -144,8 +97,6 @@ async function sendGroomingAlerts(db, {
 
   const token = await ensureReportToken(db, instructor);
   const dayKey = localDateKey(new Date(checkInTime || Date.now()));
-  // The link names the half it belongs to, so an alert about a check-out
-  // opens the check-out report rather than the morning's.
   const reportUrl = `${appUrl()}/reports/${token}/day/${dayKey}/${
     kind === "checkout" ? "check-out" : "check-in"
   }`;
@@ -153,8 +104,6 @@ async function sendGroomingAlerts(db, {
     name: instructorName || instructor.name,
     status,
     summary,
-    // The link remains keyed to the attendance session day, while the email
-    // names the actual event day (important for a checkout after midnight).
     dateLabel: localDateKey(new Date(eventTime || checkInTime || Date.now())),
     reportUrl,
     kind,
@@ -166,9 +115,6 @@ async function sendGroomingAlerts(db, {
     deliveries.push({ to, role: "instructor", payload });
   }
 
-  // Reporting partners are copied per half, each behind its own switch: an
-  // administrator may want the morning's failures without a second message
-  // every evening.
   const recipients = (await reportRecipientsFor(db, kind));
   for (const recipient of recipients) {
     deliveries.push({
@@ -201,25 +147,14 @@ async function sendGroomingAlerts(db, {
   return deliveries.length;
 }
 
-/** The short hash used to key one recipient's copy of a message. */
 function recipientKey(email) {
   return createHash("sha256").update(String(email).trim().toLowerCase()).digest("hex").slice(0, 20);
 }
 
-/** A link to one half of one day's report. */
 function halfReportUrl(token, dayKey, kind) {
   return `${appUrl()}/reports/${token}/day/${dayKey}/${kind === "checkout" ? "check-out" : "check-in"}`;
 }
 
-/**
- * A compliant result, for the reporting partners.
- *
- * Partners are copied on failures by sendGroomingAlerts; this is the other
- * half, so they hear about every assessed result rather than only the bad
- * ones. Partners only: the instructor already receives their own report for
- * every result, compliant or not. Governed by the same per-half switches as the
- * alerts, and keyed separately from them so neither can suppress the other.
- */
 async function sendComplianceReports(db, {
   attendanceId,
   instructorId,
@@ -259,16 +194,10 @@ async function sendComplianceReports(db, {
   return recipients.length;
 }
 
-/**
- * Non-compliant check-ins in a row, inside one Monday-to-Sunday week, at which
- * reporting partners are sent an escalation. Days not at work do not break the
- * row; a compliant check-in does.
- */
 export const ESCALATION_THRESHOLD = 3;
 
 const NON_COMPLIANT_STATUSES = new Set(["non_compliant", "fail"]);
 
-/** The Monday of the week containing a local date key, as a key. */
 export function weekStartKey(dayKey) {
   const [year, month, day] = String(dayKey).split("-").map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -282,11 +211,6 @@ export function addDaysToKey(dayKey, days) {
   return date.toISOString().slice(0, 10);
 }
 
-/**
- * Every non-compliant result in a set of one instructor's attendance records,
- * oldest first. A check-in and a check-out are separate results and count
- * separately: each is its own photograph judged against the standards.
- */
 export function nonCompliantOccurrences(records) {
   const occurrences = [];
   for (const record of records || []) {
@@ -314,28 +238,13 @@ export function nonCompliantOccurrences(records) {
   return occurrences.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 }
 
-/** Check-in statuses that end a run of failures: a verdict of compliance. */
 const RUN_BREAKING_STATUSES = new Set(["compliant", "done", "needs_review", "review_required"]);
 
-/**
- * The runs of non-compliant check-ins, one after another, inside the
- * Monday-to-Sunday week starting at weekStart, in day order. Each run is its
- * failed days' records, oldest first.
- *
- * A day counts as failed by its check-in alone, as the daily report does; the
- * check-out does not count. Only a compliant check-in ends a run. A day the
- * instructor was not at work - absent, on leave, a holiday or a weekly off -
- * is skipped rather than ending it, and so is a check-in with no verdict
- * (still being analysed, not assessed, or analysis failed): neither says
- * anything about how they came to work. A run never crosses into another
- * week.
- */
 export function failedDayStreaks(records, weekStart) {
   const byDay = new Map();
   for (const record of records || []) {
     if (record?.deleting_at || !record?.attendance_day) continue;
     const existing = byDay.get(record.attendance_day);
-    // The day's first check-in, as everywhere else a day is counted.
     if (!existing || new Date(record.check_in_time || 0) < new Date(existing.check_in_time || 0)) {
       byDay.set(record.attendance_day, record);
     }
@@ -351,30 +260,16 @@ export function failedDayStreaks(records, weekStart) {
       streaks.push(current);
       current = [];
     }
-    // Anything else - no attendance that day, or no verdict yet - is skipped.
   }
   if (current.length) streaks.push(current);
   return streaks;
 }
 
-/** The longest run of failed days in the week, the latest of equals; [] if none. */
 export function longestFailedStreak(records, weekStart) {
   return failedDayStreaks(records, weekStart)
     .reduce((longest, streak) => (streak.length >= longest.length ? streak : longest), []);
 }
 
-/**
- * Escalates to the reporting partners once an instructor's check-in has been
- * non-compliant three times in a row in one Monday-to-Sunday week - counting
- * the days they came to work, so an absence in between does not reset it.
- *
- * Sent on the third failed check-in of the run and again on each further
- * one, each message listing the whole run. The job is keyed by the run's
- * first day and length, so a retried or repeated evaluation reaching the same
- * run sends nothing twice, while a longer run always sends. A check-out never
- * starts one: only the check-in decides whether a day failed. Copied to the
- * same partners, under the same switch, as the check-in alert.
- */
 async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, kind = "checkin" }) {
   if (!instructorId) return 0;
   if (kind !== "checkin") return 0;
@@ -406,7 +301,6 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
       },
     }
   ).toArray();
-  // The run this day belongs to: a re-analysed earlier day can join two runs.
   const streak = failedDayStreaks(records, weekStart)
     .find((days) => days.some((record) => record.attendance_day === dayKey)) || [];
   if (streak.length < ESCALATION_THRESHOLD) return 0;
@@ -426,7 +320,6 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
   const payload = {
     name: instructor.name,
     count: occurrences.length,
-    // Days in a row, not results in a week: the email words it that way.
     streak: true,
     weekStart,
     weekEnd,
@@ -451,14 +344,6 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
   return recipients.length;
 }
 
-/**
- * What reporting partners receive for one result, beyond the existing alert:
- * a report when it was compliant, an escalation check when it was not.
- *
- * Each is attempted on its own and never throws: the evaluation is committed
- * before this runs, and must not be retried and paid for again because an
- * email could not be queued.
- */
 async function notifyReportingPartners(db, { attendanceStatus, ...details }) {
   if (attendanceStatus === "compliant") {
     try {
@@ -489,35 +374,19 @@ function publicEvaluation(report, job, now) {
     accessories_check: report.accessories_check || [],
     footwear_check: report.footwear_check || [],
     image_quality: imageQuality,
-    // Classified independently of pass/fail so the weekly saree/kurti split
-    // can be counted even on a non-compliant day.
     attire_type: report.attire_type || "UNKNOWN",
-    // Which parts of the body the photo actually showed. Stored because it is
-    // what explains an N/A row to whoever reads the report later.
     visible_regions: report.visible_regions || null,
-    // What the close-up of the waist, trousers and shoes did, for a man:
-    // whether it ran and which rows it failed. The boxes it read sit on the rows.
     detail_check: report.detail_check || null,
-    // Set only when no assessment was attempted, so the report can say why
-    // rather than showing five empty tables.
     unassessed_reason: report.unassessed_reason || null,
-    // Derived from the failing checkpoints here rather than in the browser, so
-    // the report page and the emails cannot advise different things.
     improvement_tips: improvementTips(report),
     model: runtimeConfig().geminiModel,
     prompt_version: PROMPT_VERSION,
-    // Derived from the checkpoint tables, so a rule reworded without touching
-    // PROMPT_VERSION is still distinguishable in a stored report.
     checkpoint_version: CHECKPOINT_VERSION,
     processed_at: now,
     attempts: job.attempts,
   };
 }
 
-/**
- * The attendance document is the durable source outbox. The deterministic job id
- * makes a crash between this upsert and clearing the embedded payload harmless.
- */
 export async function enqueueEvaluation(db, payload) {
   const now = new Date();
   const deadlineAt = payload.deadlineAt || new Date(now.getTime() + EVALUATION_DEADLINE_MS);
@@ -531,16 +400,10 @@ export async function enqueueEvaluation(db, payload) {
         attendance_id: payload.attendanceId,
         kind,
         instructor: payload.instructor,
-        // The job carries a pointer, not the image. Bytes live only in R2.
-        // imageBuffer is still honoured so jobs queued before the move to
-        // object storage continue to run instead of failing on retry.
         photo_key: payload.photoKey || null,
         ...(payload.imageBuffer ? { image: payload.imageBuffer } : {}),
         mime_type: payload.mimeType,
         check_in_time: payload.checkInTime,
-        // Carried for a checkout job so the report it produces can state when
-        // the instructor actually left. Absent on a checkin job, where there is
-        // no check-out yet to describe.
         ...(payload.checkOutTime ? { check_out_time: payload.checkOutTime } : {}),
         status: "queued",
         attempts: 0,
@@ -565,8 +428,6 @@ export async function enqueueEvaluation(db, payload) {
       $unset: { [EVALUATION_OUTBOX_FIELD]: "" },
     }
   );
-  // Last, so a worker that wakes on this signal finds the job already visible
-  // and the attendance row already pointing at it.
   notifyEvaluationQueued();
   return jobId;
 }
@@ -592,8 +453,6 @@ export async function reconcileEvaluationOutbox(db) {
     await terminalizeEvaluationOutbox(db, attendance, payload, "EVALUATION_DEADLINE_EXCEEDED");
     return true;
   }
-  // A recovered outbox must name its image: either an R2 key (current) or
-  // inline bytes (queued before photos moved to object storage).
   const hasPhotoSource = Boolean(payload?.photo_key || payload?.image);
   if (!hasPhotoSource || !payload?.mime_type || !payload?.instructor) {
     await terminalizeEvaluationOutbox(db, attendance, payload, "INVALID_EVALUATION_OUTBOX");
@@ -646,12 +505,6 @@ async function claimEvaluation(db) {
   return result?.value || result;
 }
 
-/**
- * Where the tablet found the waist, trousers and shoes in this half's
- * photograph, if it sent them: they become close-up crops in the report
- * request. Read here rather than carried on the job, so every way a job is
- * queued - and a re-analysis - finds them. Absent or unreadable is fine.
- */
 async function bodyRegionsFor(db, attendanceId, kind) {
   const field = kind === "checkout" ? "check_out_body_regions" : "check_in_body_regions";
   try {
@@ -699,12 +552,6 @@ async function renewEvaluationLease(db, job) {
 }
 
 async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
-  // The evaluation must belong to the half being written. A lookup that
-  // matched on attendance_id alone once handed a check-out job the check-in's
-  // report, and this wrote the morning's verdict into the check-out fields
-  // while no check-out report existed at all — a record showing a result with
-  // no checkpoints behind it. Refusing here means the job is retried rather
-  // than a wrong answer being recorded.
   const evaluationKind = evaluation?.kind === "checkout" ? "checkout" : "checkin";
   if (evaluationKind !== jobKind(job)) {
     throw new Error(
@@ -715,18 +562,10 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   const now = new Date();
   const overallStatus = evaluation.overall_status;
   const imageQuality = evaluation.image_quality || "RETAKE_RECOMMENDED";
-  // UNASSESSED is neither. A photograph that does not show the instructor is
-  // not a violation, and it is not a clean check-in either — recording it as
-  // compliant is how a picture of a ceiling used to pass. It is left out of
-  // the compliant and non-compliant counts entirely.
   const attendanceStatus = overallStatus === "UNASSESSED"
     ? "unassessed"
     : overallStatus === "COMPLIANT" ? "compliant" : "non_compliant";
 
-  // The day's status belongs to the check-in. A check-out assessment is
-  // recorded alongside it under its own fields: overwriting status and remarks
-  // would rewrite the morning's verdict with the evening's photograph, and the
-  // weekly counts read those fields.
   if (jobKind(job) === "checkout") {
     const attendanceUpdate = await db.collection("attendance").updateOne(
       {
@@ -747,16 +586,6 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
     );
     if (!attendanceUpdate.matchedCount) return false;
 
-    /**
-     * The routine check-out report, queued exactly as the check-in one is.
-     *
-     * This branch previously sent only the non-compliant alert below, because
-     * check-out ran its analysis inside the HTTP request and the route built the
-     * email outbox itself. Once check-out is queued like check-in the route no
-     * longer runs, so without this a compliant check-out would store its report
-     * and send nothing — while a failing one still emailed. A partial silence
-     * that no test covered and nobody would report as a bug.
-     */
     await enqueueNotification(db, {
       attendanceId: job.attendance_id,
       type: "checkout",
@@ -771,9 +600,6 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
       },
     });
 
-    // The check-out gets its own report email, built from its own evaluation
-    // and linking to its own half. Previously nothing was sent for it, so the
-    // only report anybody ever received described the morning.
     if (attendanceStatus === "non_compliant") {
       try {
         await sendGroomingAlerts(db, {
@@ -820,8 +646,6 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         remarks: evaluation.ai_summary || "",
         analysis_completed_at: evaluation.processed_at || now,
         evaluation_queue_status: "completed",
-        // Denormalised onto attendance so Daily Records and the weekly report
-        // need no join to the evaluations collection.
         attire_type: evaluation.attire_type || "UNKNOWN",
         image_quality: imageQuality,
         updated_at: now,
@@ -846,10 +670,6 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
     },
   });
 
-  // A failed result is durably queued for the instructor and reporting
-  // partners rather than waiting for the weekly summary. Enqueue failures are
-  // logged and swallowed: the evaluation itself is already committed and must
-  // not be retried (and paid for again) because an alert could not be queued.
   if (attendanceStatus === "non_compliant") {
     try {
       await sendGroomingAlerts(db, {
@@ -883,7 +703,6 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
   return true;
 }
 
-// Moved to the evaluation store; re-exported for existing callers.
 export { evaluationFilter };
 
 async function completeEvaluation(db, job, report) {
@@ -898,8 +717,6 @@ async function completeEvaluation(db, job, report) {
   }
 
   const now = new Date();
-  // Tagged before it is written or synced, so the half it belongs to travels
-  // with it rather than being inferred at each use.
   const evaluation = { ...publicEvaluation(report, job, now), kind: jobKind(job) };
   await saveEvaluation(db, job.attendance_id, jobKind(job), evaluation, now);
   const synced = await syncStoredEvaluation(db, job, evaluation, "processing");
@@ -910,13 +727,6 @@ async function completeEvaluation(db, job, report) {
   return true;
 }
 
-/**
- * Analyses a check-out photo in the request that saved it.
- *
- * Check-ins deliberately retain the durable evaluation worker. Check-outs use
- * this direct path so their detailed report is persisted before the route
- * creates the checkout-email outbox. No evaluation_jobs document is created.
- */
 export async function evaluateCheckoutNow(db, {
   attendanceId,
   instructor,
@@ -936,10 +746,6 @@ export async function evaluateCheckoutNow(db, {
     ? { buffer: asBuffer(imageBuffer), mimeType }
     : await downloadPhoto(photoKey);
   const config = runtimeConfig();
-  // This runs inside the check-out request, so it uses the shortened
-  // interactive budget: the caller is holding a connection that the server
-  // will destroy at requestTimeout, and a reply the client never receives is
-  // worse than one retry fewer.
   const report = await evaluateImage(
     source.buffer,
     source.mimeType || mimeType,
@@ -955,9 +761,6 @@ export async function evaluateCheckoutNow(db, {
     attendance_id: attendanceId,
     kind: "checkout",
     instructor,
-    // Reports are addressed by the attendance session's check-in day. Keep
-    // the actual checkout timestamp separate so a session crossing midnight
-    // does not create a link to a day where no check-in record exists.
     check_in_time: checkInTime || checkOutTime,
     check_out_time: checkOutTime,
     attempts: 1,
@@ -1111,8 +914,6 @@ export async function syncFailedEvaluationOutcome(db, job) {
 async function markEvaluationFailed(db, job, error, ownedStatus = "processing") {
   const now = new Date();
   if (jobKind(job) === "checkout") {
-    // Only the check-out fields: the check-in half keeps its own report and
-    // its own status, which this failure says nothing about.
     await db.collection("attendance").updateOne(
       { _id: job.attendance_id },
       {
@@ -1123,8 +924,6 @@ async function markEvaluationFailed(db, job, error, ownedStatus = "processing") 
         },
       }
     ).catch(() => {
-      // The job is already being marked failed; losing this note must not
-      // stop that.
     });
   }
   const failureNotification = buildFailureNotification(job, now);
@@ -1165,17 +964,7 @@ export async function reconcileFailedEvaluationOutcomes(db) {
   return true;
 }
 
-/**
- * Exported for the tests. The retry decision is the one place a permanent
- * failure and a transient one are told apart, and driving it through the whole
- * worker loop would mean stubbing Gemini to assert a branch that is three lines
- * of policy.
- */
 export async function retryEvaluation(db, job, error) {
-  // Scoped to this half. Matching on attendance_id alone found the check-in
-  // report and reused it for the check-out job, so the check-out was never
-  // analysed at all — it inherited the morning's verdict, remarks and
-  // timestamp, and the two reports were identical by construction.
   const storedEvaluation = await getEvaluation(db, job.attendance_id, jobKind(job));
   if (storedEvaluation) {
     if (await renewEvaluationLease(db, job)) {
@@ -1184,24 +973,6 @@ export async function retryEvaluation(db, job, error) {
     return;
   }
 
-  /**
-   * A failure that cannot come out differently is not retried.
-   *
-   * visionEngine marks each error: a rate limit, a timeout, a network fault or
-   * a provider 5xx can succeed on another attempt, and a wrong credential, a
-   * malformed request, a response that overran the token budget, a safety
-   * block or unreadable JSON cannot. It honours that distinction inside its own
-   * retry loop; this worker never read the flag, so every hopeless failure was
-   * sent to Gemini three times and billed three times.
-   *
-   * The cost is the smaller part. Attempts are one budget of three, so a job
-   * that spent them on an answer that was never going to change has none left
-   * for the transient fault that follows — and a recoverable failure becomes
-   * permanent because an unrecoverable one used the allowance.
-   *
-   * Only an explicit false counts. An error with no flag is unclassified rather
-   * than known-permanent, and those keep the benefit of the doubt.
-   */
   if (error?.retryable === false) {
     await markEvaluationFailed(db, job, error);
     return;
@@ -1225,11 +996,6 @@ export async function retryEvaluation(db, job, error) {
   );
 }
 
-/**
- * Claims expired last-attempt work so it can no longer remain unclaimable. If
- * the evaluation was persisted before the crash, the remaining idempotent side
- * effects are completed; otherwise the job is terminally failed.
- */
 export async function reconcileExpiredEvaluationJobs(db, now = new Date()) {
   const config = runtimeConfig();
   const result = await db.collection("evaluation_jobs").findOneAndUpdate(
@@ -1278,7 +1044,6 @@ export async function reconcileExpiredEvaluationJobs(db, now = new Date()) {
   }
 }
 
-/** Terminally clears photos which could not be processed within the retention deadline. */
 export async function reconcileOverdueEvaluationJobs(db, now = new Date()) {
   const config = runtimeConfig();
   const legacyCutoff = new Date(now.getTime() - EVALUATION_DEADLINE_MS);
@@ -1351,8 +1116,6 @@ export function startEvaluationWorker(db) {
     busyStaleAfterMs: config.evaluationLeaseMs + 60000,
   });
 
-  // Set while the loop is sleeping on an empty queue, so a wake-up knows
-  // there is an idle timer worth cancelling and nothing is in flight.
   let idle = false;
   let wokenMidCycle = false;
 
@@ -1365,14 +1128,9 @@ export function startEvaluationWorker(db) {
     }, delay);
   };
 
-  // Only an idle worker's timer is worth cancelling. Re-entering tick()
-  // mid-cycle would run two cycles concurrently, so a mid-cycle wake-up just
-  // makes the next cycle start without backing off.
   const wake = () => {
     if (stopped) return;
     if (!idle) {
-      // Mid-cycle: this cycle may already have looked for jobs. Remember the
-      // wake-up so it runs again at once instead of backing off.
       wokenMidCycle = true;
       return;
     }
@@ -1428,8 +1186,6 @@ export function startEvaluationWorker(db) {
     let processedCount = 0;
     inFlight = (async () => {
       try {
-        // Each sweep repairs one record per call, so a sweep that found
-        // something runs again on the next cycle until the backlog is gone.
         if (sweepBacklog || sweeps.due()) {
           sweepBacklog = false;
           let repaired = await reconcileEvaluationOutbox(db);
@@ -1453,8 +1209,6 @@ export function startEvaluationWorker(db) {
         console.error(`Evaluation worker error (${loopErrorCode})`);
       } finally {
         monitor.cycleCompleted(loopErrorCode);
-        // Drain immediately while work exists; back off only when idle so
-        // consecutive jobs never wait for an arbitrary poll gap.
         schedule(backoff.afterCycle(processedCount > 0 || sweepBacklog || wokenMidCycle));
       }
     })();

@@ -14,7 +14,6 @@ export const ROLES = {
   BOA: "BOA",
 };
 
-/** Roles with organisation-wide reach (not scoped to a single college). */
 export const ELEVATED_ROLES = [ROLES.SUPER_ADMIN, ROLES.ADMIN];
 
 export function isElevated(role) {
@@ -41,7 +40,6 @@ export function createAccessToken(data, expiresMinutes = runtimeConfig().jwtExpi
   const config = runtimeConfig();
   const {
     sessionVersion = 0,
-    // Never allow a caller-provided JWT claim to bypass the normalized value.
     sv: _ignoredSessionVersion,
     ...claims
   } = data;
@@ -56,9 +54,6 @@ export function createAccessToken(data, expiresMinutes = runtimeConfig().jwtExpi
   });
 }
 
-/**
- * Populates req.currentUser = { email, role } or replies 401 with a {detail} body.
- */
 export async function getCurrentUser(req, res, next) {
   const header = req.headers.authorization || "";
   const [scheme, bearerToken] = header.split(" ");
@@ -124,15 +119,9 @@ export async function getCurrentUser(req, res, next) {
       role: user.role,
       referenceId: user.reference_id,
       collegeId,
-      // Absent unless someone set it for this person, which is deliberately
-      // distinct from false: absent follows the workspace default.
       ...(typeof user.can_delete_records === "boolean"
         ? { can_delete_records: user.can_delete_records }
         : {}),
-      // Carried for the same reason. canDeleteCheckout() reads this field, but
-      // it was never copied off the user document, so a per-person check-out
-      // override could be stored and would then be ignored: everyone silently
-      // fell back to the workspace default instead.
       ...(typeof user.can_delete_checkout === "boolean"
         ? { can_delete_checkout: user.can_delete_checkout }
         : {}),
@@ -147,7 +136,6 @@ export async function getCurrentUser(req, res, next) {
   }
 }
 
-/** Guard for administrative routes: SUPER_ADMIN and ADMIN both qualify. */
 export function requireSuperAdmin(req, res, next) {
   if (!isElevated(req.currentUser?.role)) {
     return res.status(403).json({ detail: "Not authorized" });
@@ -155,11 +143,6 @@ export function requireSuperAdmin(req, res, next) {
   return next();
 }
 
-/**
- * Guard for actions only the primary administrator may take. Restricting
- * ADMIN-account management to SUPER_ADMIN keeps that account un-removable, so
- * an admin cannot lock the owner out of their own system.
- */
 export function requireRootAdmin(req, res, next) {
   if (req.currentUser?.role !== ROLES.SUPER_ADMIN) {
     return res.status(403).json({ detail: "Only the super admin can manage administrator accounts" });
@@ -167,11 +150,6 @@ export function requireRootAdmin(req, res, next) {
   return next();
 }
 
-/**
- * Compatibility helper for legacy records that may use MongoDB ObjectIds.
- * Documents are written with string UUID `_id`s, but older rows may use real
- * ObjectIds - so we match on both forms, exactly like the `$or` queries did.
- */
 export function idMatch(idStr) {
   const variants = [idStr];
   if (ObjectId.isValid(idStr) && String(new ObjectId(idStr)) === idStr) {
@@ -180,13 +158,6 @@ export function idMatch(idStr) {
   return { $in: variants };
 }
 
-/**
- * Guard for endpoints an operator or scheduler calls without a session.
- *
- * cron-jobs.org cannot hold one, and neither can an uptime probe, so they
- * present a shared secret instead. Compared in constant time so the check
- * cannot leak the secret one byte at a time.
- */
 export function requireCronSecret(req, res, next) {
   const expected = process.env.CRON_SECRET || "";
   if (!expected) {

@@ -1,11 +1,3 @@
-/**
- * Downscales a photo in the browser before upload.
- *
- * Preserve detail up to the same resolution the server stores, while keeping
- * the upload within its byte limit.
- */
-
-/** Matches the server's MAX_DIMENSION so the backend has no further work to do. */
 import { encodeUploadJpeg, PHOTO_MAX_DIMENSION } from './photoEncoding.ts';
 
 export interface PreparedPhoto {
@@ -32,11 +24,6 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-/**
- * Returns a downscaled JPEG, or the original file when anything goes wrong.
- * Failing open matters: a browser quirk in canvas encoding must not block a
- * check-in that would otherwise succeed.
- */
 export async function preparePhoto(file: File): Promise<PreparedPhoto> {
   const fallback: PreparedPhoto = {
     file,
@@ -64,8 +51,6 @@ export async function preparePhoto(file: File): Promise<PreparedPhoto> {
 
     const blob = await encodeUploadJpeg(canvas);
 
-    // Keep the original if the re-encode came out larger, which can happen
-    // for an already small or heavily compressed source.
     if (blob.size >= file.size && scale === 1) return fallback;
 
     const prepared = new File([blob], renameToJpeg(file.name), {

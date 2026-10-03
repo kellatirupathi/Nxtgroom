@@ -2,28 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as faceRecognition from "../src/services/faceRecognition.js";
 
-/**
- * Face identification decides who an attendance record belongs to, so these
- * tests are about the one failure that matters: returning a person the
- * photograph does not show. Every path that cannot answer confidently must
- * report a reason instead of a name.
- *
- * No AWS collection exists yet. The Rekognition client is mocked at the module
- * boundary so the whole decision layer is provable now, and so the suite never
- * depends on a network call or a live credential.
- */
-
 const COLLECTION = "facultytrack-faces-test";
 
-/**
- * Installs a stub provider client and returns the service plus the commands it
- * was given.
- *
- * The real AWS command classes are used, so an input asserted here is the input
- * the SDK would actually send; only the transport is replaced. Each command
- * object carries its own constructor name, which is how the stub routes a
- * canned response.
- */
 function loadService({ responses = {}, failures = {} } = {}) {
   const sent = [];
   const nameOf = (command) => command?.constructor?.name
@@ -42,7 +22,6 @@ function loadService({ responses = {}, failures = {} } = {}) {
   return { ...faceRecognition, sent };
 }
 
-/** A match as Rekognition returns it. */
 const faceMatch = (instructorId, similarity, faceId = `face-${instructorId}-${similarity}`) => ({
   Similarity: similarity,
   Face: { FaceId: faceId, ExternalImageId: instructorId },
@@ -54,15 +33,6 @@ const goodQuality = {
 
 const imageBytes = Buffer.from("not-a-real-jpeg-only-bytes-for-the-stub");
 
-/**
- * Runs one test with these environment variables in place, then restores them.
- *
- * Deliberately async: the callbacks below await the service, and a synchronous
- * `finally` would restore the environment before the first await resolved. The
- * service would then read whatever the real process had — which is how every
- * configured-state assertion in this file first failed while the service itself
- * was correct.
- */
 async function withEnv(values, run) {
   const original = {};
   for (const [key, value] of Object.entries(values)) {
@@ -80,15 +50,6 @@ async function withEnv(values, run) {
   }
 }
 
-/**
- * The configured state: a collection, a region, and Rekognition's own
- * credentials.
- *
- * Face recognition lives in a different AWS account from SES, so it reads
- * REKOGNITION_* credentials and deliberately does not fall back to the mail
- * account's key. Setting AWS_ACCESS_KEY_ID here would therefore leave the
- * service unconfigured while looking configured.
- */
 const configured = {
   REKOGNITION_COLLECTION_ID: COLLECTION,
   AWS_REKOGNITION_REGION: "ap-south-1",
@@ -97,13 +58,10 @@ const configured = {
 };
 
 test.afterEach(() => {
-  // Leaving a stub installed would hand the next test file a fake provider.
   faceRecognition.setRekognitionClientForTests(null);
 });
 
 test("an unconfigured collection reports itself instead of throwing", async () => {
-  // Check-in must keep working before the AWS collection exists, so every
-  // entry point answers NOT_CONFIGURED rather than raising a credentials error.
   await withEnv({ ...configured, REKOGNITION_COLLECTION_ID: "" }, async () => {
     const service = await loadService();
     assert.equal(service.isFaceRecognitionConfigured(), false);
@@ -120,8 +78,6 @@ test("an unconfigured collection reports itself instead of throwing", async () =
 });
 
 test("identity comes from the instructor id, not from the face id", async () => {
-  // One instructor owns several embeddings, so a FaceId names a photograph
-  // while ExternalImageId names the person.
   await withEnv(configured, async () => {
     const service = await loadService({
       responses: { SearchFacesByImage: { FaceMatches: [faceMatch("instructor-7", 98.2)] } },
@@ -134,8 +90,6 @@ test("identity comes from the instructor id, not from the face id", async () => 
 });
 
 test("two embeddings of one person are one match, not an ambiguous pair", async () => {
-  // The accumulating-faces design means the nearest neighbours are usually the
-  // same person. Grouping by instructor is what stops that reading as a tie.
   await withEnv(configured, async () => {
     const service = await loadService({
       responses: {
@@ -151,7 +105,6 @@ test("two embeddings of one person are one match, not an ambiguous pair", async 
     const result = await service.searchFaceByImage(imageBytes);
     assert.equal(result.ok, true);
     assert.equal(result.instructorId, "instructor-7");
-    // The best of that person's own scores, and no rival person to report.
     assert.equal(result.similarity, 97.1);
     assert.equal(result.runnerUp, null);
   });
@@ -185,8 +138,6 @@ test("a score below the threshold is refused rather than offered as a guess", as
 });
 
 test("the provider is asked to apply the threshold too", async () => {
-  // Belt and braces: a candidate under the floor should not even be returned,
-  // so a future caller cannot mistake one for a suggestion.
   await withEnv({ ...configured, REKOGNITION_MATCH_THRESHOLD: "97" }, async () => {
     const service = await loadService({
       responses: { SearchFacesByImage: { FaceMatches: [faceMatch("instructor-7", 99)] } },
@@ -204,8 +155,6 @@ test("no match and no face are distinguished", async () => {
     const empty = await loadService({ responses: { SearchFacesByImage: { FaceMatches: [] } } });
     assert.equal((await empty.searchFaceByImage(imageBytes)).reason, "NO_MATCH");
 
-    // Rekognition reports an unusable image as InvalidParameterException, not
-    // as an empty result, and the two mean different things to the caller.
     const noFace = await loadService({
       failures: {
         SearchFacesByImage: Object.assign(new Error("no face"), { name: "InvalidParameterException" }),
@@ -216,8 +165,6 @@ test("no match and no face are distinguished", async () => {
 });
 
 test("a matched face with no instructor id is not a match", async () => {
-  // An externally indexed face cannot be traced to a person, so it must never
-  // resolve to one.
   await withEnv(configured, async () => {
     const service = await loadService({
       responses: {
@@ -231,8 +178,6 @@ test("a matched face with no instructor id is not a match", async () => {
 });
 
 test("a provider outage is reported, never thrown, so the check-in survives", async () => {
-  // The caller saves the record unidentified on PROVIDER_ERROR. Throwing here
-  // would lose an attendance submission to an AWS incident.
   await withEnv(configured, async () => {
     const service = await loadService({
       failures: {
@@ -263,8 +208,6 @@ test("a reference photograph needs exactly one good face", async () => {
 });
 
 test("a blurry or dark reference photograph is refused before it is indexed", async () => {
-  // This is the expensive one to get wrong: a poor reference does not fail
-  // loudly, it produces confident wrong matches until someone removes it.
   await withEnv(configured, async () => {
     const blurry = await loadService({
       responses: { DetectFaces: { FaceDetails: [{ Confidence: 99, Quality: { Sharpness: 3, Brightness: 70 } }] } },
@@ -290,14 +233,11 @@ test("indexing tags the face with the instructor id", async () => {
     const command = service.sent.find((entry) => entry.commandName === "IndexFaces");
     assert.equal(command.input.ExternalImageId, "instructor-42");
     assert.equal(command.input.CollectionId, COLLECTION);
-    // Never let the provider pick a face when a photo shows several.
     assert.equal(command.input.MaxFaces, 1);
   });
 });
 
 test("an instructor id Rekognition cannot store is refused locally", async () => {
-  // ExternalImageId permits only [a-zA-Z0-9_.\-:]. Refusing here names the
-  // instructor; refusing at the provider does not.
   await withEnv(configured, async () => {
     const service = await loadService();
     const result = await service.indexFace(imageBytes, "instructor 42/../etc");
@@ -307,8 +247,6 @@ test("an instructor id Rekognition cannot store is refused locally", async () =>
 });
 
 test("an accepted request that indexed nothing is reported as a quality refusal", async () => {
-  // QualityFilter rejection looks like success with an empty FaceRecords list.
-  // Silently returning ok would leave an instructor enrolled with no face.
   await withEnv(configured, async () => {
     const service = await loadService({ responses: { IndexFaces: { FaceRecords: [] } } });
     const result = await service.indexFace(imageBytes, "instructor-42");
@@ -327,8 +265,6 @@ test("deleting no faces is a no-op that never calls the provider", async () => {
 });
 
 test("the oldest faces are evicted once the cap is reached", async () => {
-  // Newer photographs come from the tablet in use, in the lighting that
-  // collection actually has, so they are the ones worth keeping.
   await withEnv({ ...configured, REKOGNITION_MAX_FACES_PER_INSTRUCTOR: "3" }, async () => {
     const service = await loadService();
     assert.deepEqual(service.facesToEvict(["a", "b"], { adding: 1 }), []);

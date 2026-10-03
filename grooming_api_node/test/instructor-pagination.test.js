@@ -98,8 +98,6 @@ test("instructor pages are deterministic and feedback is capped per returned ins
   assert.equal(feedbackOptions.allowDiskUse, true);
   assert.equal(feedbackAggregations, 1);
 
-  // $documentNumber only accepts a single-key sortBy; the _id tiebreaker moves
-  // to a preceding $sort, whose order $setWindowFields preserves.
   const windowStage = feedbackPipeline.find((stage) => stage.$setWindowFields);
   assert.deepEqual(windowStage.$setWindowFields.sortBy, {
     _private_paging_feedback_date: -1,

@@ -6,20 +6,15 @@ import { useToast } from './useToast';
 import type { Evaluation } from '../types';
 
 interface AuditReportModalProps {
-  /** Null while the record is still being saved. */
   attendanceId: string | null;
   instructorName: string;
-  /** Shown while saving, and again if the save itself failed. */
   saveError?: string;
-  /** Which half was just submitted. Both are assessed the same way. */
   kind?: 'checkin' | 'checkout';
-  /** Available only when checkout was saved but its photo upload failed. */
   onRetryPhoto?: () => Promise<void>;
   onClose: () => void;
 }
 
 const POLL_MS = 3000;
-/** Give up polling eventually so a stuck job cannot poll forever. */
 const POLL_TIMEOUT_MS = 3 * 60_000;
 
 interface StatusPayload {
@@ -29,7 +24,6 @@ interface StatusPayload {
   settled: boolean;
 }
 
-/** One row of the two-step progress list: pending, running, or complete. */
 function ProgressStep({ label, state }: { label: string; state: 'pending' | 'active' | 'done' }) {
   return (
     <li className="flex items-center gap-3">
@@ -92,11 +86,6 @@ function Verdict({ status }: { status: StatusPayload }) {
   );
 }
 
-/**
- * Shows the grooming audit for a check-in without leaving the Attendance
- * screen. Opens while analysis is still running and fills in as the result
- * arrives, so the operator sees progress rather than an empty dialog.
- */
 export default function AuditReportModal({
   attendanceId,
   instructorName,
@@ -105,9 +94,6 @@ export default function AuditReportModal({
   onRetryPhoto,
   onClose,
 }: AuditReportModalProps) {
-  // Both halves have their own report and their own queue, so every request
-  // names the one being waited on. Memoised so the polling effects can depend
-  // on it: a stale value here would quietly follow the wrong half.
   const kindQuery = useMemo(() => (kind === 'checkout' ? '?kind=checkout' : ''), [kind]);
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
@@ -125,12 +111,9 @@ export default function AuditReportModal({
       );
       setEvaluation(data);
     } catch {
-      // A settled record without a stored evaluation is possible after an
-      // analysis error; the verdict banner already explains that case.
     }
   }, [attendanceId, kindQuery]);
 
-  // Follow the record until it settles, then pull the full report.
   useEffect(() => {
     if (!attendanceId) return undefined;
     let disposed = false;
@@ -166,7 +149,6 @@ export default function AuditReportModal({
       disposed = true;
       clearTimeout(timer);
     };
-    // reanalysing is in the deps so a re-run restarts the poll loop.
   }, [attendanceId, kindQuery, loadEvaluation, reanalysing]);
 
   useEffect(() => {
@@ -178,14 +160,10 @@ export default function AuditReportModal({
   }, [onClose]);
 
   const handleReanalyse = async () => {
-    // The button is disabled without a record, but the guard keeps the call
-    // site honest rather than relying on the disabled attribute.
     if (!attendanceId) return;
     setReanalysing(true);
     setError('');
     try {
-      // Names the half, so re-running a check-out does not re-run the
-      // check-in and discard its report.
       await apiJson(`/api/v2/attendance/${encodeURIComponent(attendanceId)}/reanalyse${kindQuery}`, {
         method: 'POST',
         timeoutMs: kind === 'checkout' ? 150_000 : undefined,
@@ -237,13 +215,7 @@ export default function AuditReportModal({
     }
   };
 
-  // Still working while the record is saving, or while analysis runs — but
-  // not once the save has failed. A refused check-out never got as far as a
-  // photo or an analysis, so showing both steps spinning under the refusal
-  // said work was happening that had already stopped.
   const running = retryingPhoto || (!saveError && (!attendanceId || (!status?.settled && !timedOut)));
-  // Nothing to re-run when there is no record: the request was refused before
-  // one existed.
   const failedToSave = Boolean(saveError) && !attendanceId;
 
   return (
@@ -256,15 +228,11 @@ export default function AuditReportModal({
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-md bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/60 px-5 py-4">
           <div className="min-w-0">
-            {/* A refused submission produced no report, so naming one is a
-                heading that contradicts the message beneath it. */}
             <h2 id="audit-report-title" className="text-lg font-extrabold text-slate-800">
               {failedToSave
                 ? `${kind === 'checkout' ? 'Check-out' : 'Check-in'} not recorded`
                 : 'Detailed Appearance Report'}
             </h2>
-            {/* Names which half this report covers, since both now produce
-                one and the dialog looks identical otherwise. */}
             <p className="mt-0.5 truncate text-sm text-slate-500">
               {instructorName} · {kind === 'checkout' ? 'Check-out' : 'Check-in'}
             </p>

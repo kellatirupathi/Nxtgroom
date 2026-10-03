@@ -4,13 +4,6 @@ import { checkpointSet, improvementTips, maleCombinedSet, SECTION_KEYS } from ".
 import { buildFemaleAttirePrompt, buildMaleReportPrompt, buildSystemPrompt } from "../src/prompts.js";
 import { applyBlazer, BLAZER_INSTRUCTIONS, blazerWorn } from "../src/services/blazer.js";
 
-/**
- * The optional blazer or suit: shown in the report only when one is worn, for
- * men and women. When worn, the shirt and belt rows it covers pass and the
- * remarks say why; a t-shirt or polo under it still fails the shirt type.
- * Without one, nothing in the report changes.
- */
-
 function rowsFor(gender, attire, status = "PASS") {
   const sections = checkpointSet(gender, attire);
   return Object.fromEntries(SECTION_KEYS.map((key) => [key, sections[key].map((item) => ({
@@ -49,7 +42,6 @@ test("a man's blazer passes the shirt and belt rows, adds the row, and leaves ev
     assert.match(row.reason, /^Not assessed: /);
   }
   assert.match(find(rows, "M_BELT").reason, /covers the waist and the belt/);
-  // Trousers, shoes, the ID card, grooming and Attire Type are still judged.
   for (const code of ["M_ATTIRE_TYPE", "M_TROUSERS_TYPE", "M_TROUSERS_FIT_CONDITION", "ID_PRESENT", "M_FACIAL_HAIR", "M_FOOTWEAR_TYPE"]) {
     assert.equal(find(rows, code).status, "FAIL", code);
   }
@@ -62,7 +54,6 @@ test("a man's blazer passes the shirt and belt rows, adds the row, and leaves ev
     reason: "Optional. A blazer or suit is worn, so the shirt and belt checkpoints are passed.",
   });
   assert.equal(result.remark, "Wearing a blazer or suit over the shirt; the shirt and belt checks are passed.");
-  // A belt the close-up had marked as not shown carries no "show your waist" advice.
   assert.ok(!improvementTips(rows).some((tip) => /belt|tuck/i.test(tip)));
 });
 
@@ -83,7 +74,6 @@ test("a woman's blazer over shirt and trousers is a suit: Attire Type and the to
   assert.deepEqual(result.passed.sort(), ["W_FORMAL_ATTIRE_TYPE", "W_FORMAL_TOP", "W_FORMAL_TOP_FIT_CONDITION"]);
   assert.match(find(rows, "W_FORMAL_ATTIRE_TYPE").reason, /accepted as a formal suit/);
   assert.equal(find(rows, "W_FORMAL_TOP").observation, "Wearing a blazer or suit over the top.");
-  // Her trousers and the rest are still judged.
   for (const code of ["W_FORMAL_BOTTOM_TYPE", "W_FORMAL_BOTTOM_FIT_CONDITION", "W_FORMAL_PRESENTATION", "W_HAIR_NEATNESS"]) {
     assert.equal(find(rows, code).status, "FAIL", code);
   }
@@ -102,7 +92,6 @@ test("over a kurta, kurti, saree or abaya the blazer is only recorded", () => {
     const before = rows.attire_check.map((row) => row.code);
     const result = applyBlazer(rows, { gender, attireType: attire, answer: worn("OTHER") });
     assert.deepEqual(result.passed, [], attire);
-    // The row closes the attire section.
     assert.deepEqual(rows.attire_check.map((row) => row.code), [...before, gender === "MALE" ? "M_BLAZER" : "W_BLAZER"], attire);
     assert.ok(SECTION_KEYS.flatMap((key) => rows[key]).filter((row) => row.code !== "M_BLAZER" && row.code !== "W_BLAZER").every((row) => row.status === "FAIL"), attire);
     assert.equal(result.remark, "Wearing a blazer or suit.");
@@ -123,13 +112,10 @@ test("every report request asks about a blazer, in any colour; no checkpoint lis
   const women = checkpointSet("FEMALE", "FORMAL").attire_check.find((row) => row.code === "W_FORMAL_ATTIRE_TYPE").rule;
   assert.match(women, /^Shirt and trousers are not permitted for women/);
   assert.match(women, /The one exception is a blazer or suit jacket worn over them, which makes an accepted suit: then PASS\./);
-  // The Blazer / Suit row is added only when worn; it is in no checkpoint list.
   for (const sections of [checkpointSet("MALE", "FORMAL"), checkpointSet("FEMALE", "FORMAL"), maleCombinedSet()]) {
     assert.ok(!codes(sections).some((code) => /BLAZER/.test(code)));
   }
 });
-
-// -- Through the whole evaluation ---------------------------------------------------
 
 function stubGemini(responses) {
   const GEMINI_ENV = ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES", "GEMINI_EXPLICIT_CACHE"];
@@ -191,7 +177,6 @@ test("a man in a suit is compliant though the model failed the belt and tuck it 
     assert.equal(result.attire_check.find((row) => row.code === "M_BELT").status, "PASS");
     assert.equal(result.attire_check.at(-1).code, "M_BLAZER");
     assert.match(result.ai_summary, /^Wearing a blazer or suit over the shirt; the shirt and belt checks are passed\. Belt and tuck/);
-    // The request asked for it, for men in one request with the close-up.
     const schema = stub.bodies[0].generationConfig.responseJsonSchema;
     assert.ok(schema.required.includes("blazer"));
     assert.deepEqual(schema.properties.blazer.required, ["worn", "under", "observation"]);

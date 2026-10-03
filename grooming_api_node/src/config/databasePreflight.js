@@ -11,44 +11,14 @@ export const EVALUATION_IDENTITY_INDEX = {
   options: { unique: true, name: "attendance_id_1_kind_1" },
 };
 
-/**
- * How far back the audit reads evaluations.
- *
- * Evaluations are the one collection that grows without limit — two rows per
- * check-in, kept forever — and the audit used to read all of them to answer two
- * questions. At five thousand check-ins a day that passes what a 512MB
- * container can hold within about seven months, and the audit is the thing that
- * is supposed to tell you when something is wrong.
- *
- * Ninety days is chosen because the audit reports rather than repairs: a
- * finding ignored for a quarter was not going to be acted on in the fourth
- * month. The narrowing is real and worth stating — corruption older than the
- * window stops being reported, even though it is still there.
- */
 export const EVALUATION_AUDIT_WINDOW_DAYS = 90;
 
-/**
- * Lets the audit find recent evaluations without reading the old ones.
- *
- * Without this the date filter still works, but MongoDB reads every row to
- * decide which ones match: memory is bounded and the scan is not, so the
- * nightly job keeps getting slower as the collection grows. Sorted on the same
- * field the filter uses, so the query starts at the cutoff and walks forward.
- */
 export const EVALUATION_PROCESSED_AT_INDEX = {
   collection: "evaluations",
   key: { processed_at: -1 },
   options: { name: "processed_at_-1" },
 };
 
-/**
- * One attendance record per instructor per local day.
- *
- * Unidentified records carry instructor_id: null and must remain outside this
- * rule, otherwise the second unidentified person anywhere in the workspace on
- * the same day collides with the first. Startup migrates the old day-only filter
- * before verifying this required shape.
- */
 export const DAILY_ATTENDANCE_INDEX = {
   collection: "attendance",
   key: { instructor_id: 1, attendance_day: 1 },
@@ -62,17 +32,8 @@ export const DAILY_ATTENDANCE_INDEX = {
   },
 };
 
-/** The filter this index uses today, and which the migration replaces. */
 export const LEGACY_DAILY_ATTENDANCE_FILTER = { attendance_day: { $type: "string" } };
 
-/**
- * The filter photo-first check-in needs, and the target of the migration.
- *
- * Requiring a string instructor_id takes unidentified records outside the unique
- * index, so several can exist for one day. Identical to DAILY_ATTENDANCE_INDEX,
- * which is the required shape; kept as its own name because the migration reads
- * as moving from the legacy filter to this one.
- */
 export const WIDENED_DAILY_ATTENDANCE_INDEX = {
   ...DAILY_ATTENDANCE_INDEX,
   key: { ...DAILY_ATTENDANCE_INDEX.key },
@@ -103,10 +64,6 @@ export const REQUIRED_DATABASE_INDEXES = [
   {
     collection: "instructors",
     key: { employee_id: 1 },
-    // Partial, because instructors synced from BigQuery have no employee id.
-    // A plain unique index treats every missing value as null and collides on
-    // the second such row, which failed the roster import after one record.
-    // Uniqueness is still enforced for everyone who does have an id.
     options: {
       unique: true,
       name: "employee_id_string_unique",
@@ -125,8 +82,6 @@ export const REQUIRED_DATABASE_INDEXES = [
   {
     collection: "instructors",
     key: { instructor_user_id: 1 },
-    // The roster sync upserts on this key, so it must be indexed and unique
-    // for rows that carry one.
     options: {
       unique: true,
       name: "instructor_user_id_unique",
@@ -332,19 +287,6 @@ async function listIndexes(collection) {
   }
 }
 
-/**
- * Replaces the original one-evaluation-per-attendance index.
- *
- * Check-out analysis added a second evaluation document identified by `kind`,
- * but production databases still carry the unique `{ attendance_id: 1 }`
- * index. Creating the compound index before dropping the legacy one preserves
- * uniqueness throughout the migration. Every historical document is a
- * check-in, so missing kinds can be backfilled without guessing.
- *
- * This runs before workers start and is intentionally narrow: when the known
- * legacy unique index is absent, it makes no changes and leaves the general
- * database preflight responsible for reporting any other index state.
- */
 export async function migrateLegacyEvaluationIdentityIndex(db) {
   const collection = db.collection("evaluations");
   const indexes = await listIndexes(collection);
@@ -376,7 +318,6 @@ export async function migrateLegacyEvaluationIdentityIndex(db) {
       await collection.dropIndex(legacy.name);
       dropped.push(legacy.name);
     } catch (error) {
-      // A concurrent startup may have completed the same idempotent migration.
       if (error?.code !== 27 && error?.codeName !== "IndexNotFound") throw error;
     }
   }
@@ -388,14 +329,6 @@ export async function migrateLegacyEvaluationIdentityIndex(db) {
   };
 }
 
-/**
- * Replaces the global "one open attendance" constraint with daily identity.
- *
- * Historical rows are deliberately not backfilled: production already has
- * legitimate repeated attendance records on some older dates. Restricting the
- * new unique index to rows carrying `attendance_day` protects every new
- * check-in without rewriting or deleting history.
- */
 export async function migrateLegacyActiveAttendanceIndex(db) {
   const collection = db.collection("attendance");
   const indexes = await listIndexes(collection);
@@ -431,20 +364,6 @@ export async function migrateLegacyActiveAttendanceIndex(db) {
   return { migrated: true, created: !targetExists, dropped };
 }
 
-/**
- * Replaces the day-only uniqueness filter with one that also requires a string
- * instructor_id.
- *
- * Photo-first check-in records an unrecognised person with instructor_id: null.
- * Under the old filter every such record in one day collided, so the second
- * unrecognised check-in was rejected as a duplicate and the attendance was lost
- * — the precise case the unidentified queue exists to catch.
- *
- * The replacement is created before the legacy index is dropped, so there is no
- * window in which two real check-ins could be written for the same instructor on
- * the same day. Startup runs this migration before index verification because
- * FACE_ONLY attendance cannot safely operate with the legacy filter.
- */
 export async function migrateLegacyDailyAttendanceIndex(db) {
   const collection = db.collection("attendance");
   const indexes = await listIndexes(collection);
@@ -462,9 +381,6 @@ export async function migrateLegacyDailyAttendanceIndex(db) {
     && indexOptionsMatch(index, WIDENED_DAILY_ATTENDANCE_INDEX.options)
   ));
   if (!targetExists) {
-    // A different name, because the legacy index still holds the canonical one
-    // and two indexes cannot share it. The replacement keeps this name for good:
-    // see the note after the drop below.
     await collection.createIndex(WIDENED_DAILY_ATTENDANCE_INDEX.key, {
       ...WIDENED_DAILY_ATTENDANCE_INDEX.options,
       name: `${WIDENED_DAILY_ATTENDANCE_INDEX.options.name}_migrating`,
@@ -481,10 +397,6 @@ export async function migrateLegacyDailyAttendanceIndex(db) {
     }
   }
 
-  // Keep the replacement under its temporary name. Creating the same index
-  // again under the canonical name is rejected as an equivalent index by newer
-  // MongoDB versions, while dropping it first would briefly remove uniqueness.
-  // Verification compares keys and behavior rather than cosmetic names.
   return { migrated: true, created: !targetExists, dropped };
 }
 
@@ -566,15 +478,8 @@ async function loadPreflightRows(db, now = new Date()) {
     ).toArray(),
     db.collection("attendance").find(
       { check_out_time: null },
-      // status is read so an unidentified check-in can be told apart from a
-      // record whose instructor reference is genuinely broken. Both have no
-      // usable instructor_id; only one of them is a fault.
       { projection: { _id: 1, instructor_id: 1, attendance_day: 1, check_in_time: 1, status: 1 } }
     ).toArray(),
-    // Bounded, unlike the collections above it. Those are capped by headcount
-    // or by how many sessions are genuinely still open; this one grows with
-    // every check-in and is never pruned, so reading all of it is what put the
-    // audit on a deadline. See EVALUATION_AUDIT_WINDOW_DAYS.
     db.collection("evaluations").find(
       { processed_at: { $gte: evaluationAuditCutoff(now) } },
       { projection: { _id: 1, attendance_id: 1, kind: 1 } }
@@ -582,7 +487,6 @@ async function loadPreflightRows(db, now = new Date()) {
   ]);
 }
 
-/** The oldest evaluation the audit will read, relative to a given moment. */
 export function evaluationAuditCutoff(now = new Date()) {
   const reference = now instanceof Date && Number.isFinite(now.getTime())
     ? now
@@ -592,9 +496,6 @@ export function evaluationAuditCutoff(now = new Date()) {
 
 export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
   const [[users, boas, colleges, instructors, activeAttendances, evaluations], indexes] = await Promise.all([
-    // now is threaded through so the evaluation window is measured from the
-    // same moment the rest of the audit uses, rather than from whenever this
-    // particular query happened to run.
     loadPreflightRows(db, now),
     verifyDatabaseIndexes(db),
   ]);
@@ -706,9 +607,6 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
     ));
   }
 
-  // Only instructors that carry an employee id are checked. The BigQuery
-  // roster has no such column, so requiring one would flag every synced
-  // instructor and refuse to start.
   const invalidInstructorEmployeeIds = instructors.filter(
     (instructor) => instructor.employee_id !== null
       && instructor.employee_id !== undefined
@@ -736,12 +634,6 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
   }
 
   const activeInstructors = instructors.filter(isActive);
-  // An address that is present must be usable, but a missing one is not a
-  // startup problem. Roughly half the BigQuery roster has no email, and
-  // requiring one from all 599 blocked the server from booting at all. The
-  // check-in route already refuses an instructor without a valid address and
-  // says so, which is where that failure belongs: at the point of use, not as
-  // a condition for the API to run.
   const invalidInstructors = activeInstructors.filter((instructor) => {
     const email = instructor.email;
     if (email === null || email === undefined || email === "") return false;
@@ -758,10 +650,6 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
     ));
   }
 
-  // Same reasoning for the college: synced instructors arrive unassigned and
-  // are assigned later, so an absent college is expected. A college that is
-  // set but points at a missing or archived record is still a real fault,
-  // because attendance is scoped by it.
   const instructorsWithInvalidCollege = activeInstructors.filter((instructor) => {
     if (instructor.college_id === null || instructor.college_id === undefined || instructor.college_id === "") {
       return false;
@@ -778,21 +666,6 @@ export async function auditDatabasePreflight(db, { now = new Date() } = {}) {
     ));
   }
 
-  /**
-   * An open attendance whose instructor reference cannot be resolved.
-   *
-   * A photo-first check-in nobody could be recognised from is written with
-   * instructor_id: null and status "unidentified", deliberately: the record is
-   * the evidence somebody turned up, and an administrator names them later from
-   * the unidentified queue. Those rows are not damage, and treating them as
-   * damage stopped the API booting at all — every deployment carrying
-   * photo-first check-in refused to start as soon as one unrecognised person
-   * had been photographed.
-   *
-   * Anything else with no usable instructor_id is still a genuine fault: a
-   * reference that was corrupted, blanked or written with the wrong type, which
-   * nothing in the product creates on purpose.
-   */
   const attendanceWithoutInstructor = activeAttendances.filter((row) => (
     referenceKey(row.instructor_id) == null
     && !(row.status === "unidentified" && row.instructor_id === null)

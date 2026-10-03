@@ -20,13 +20,6 @@ import {
   saveEvaluation,
 } from "../src/stores/evaluationStore.js";
 
-/**
- * evaluations and report_delivery_runs move to DynamoDB next: neither takes
- * part in a MongoDB transaction, so each can switch on its own. These run
- * both stores against dynalite (an in-process DynamoDB) and compare them
- * with the MongoDB half.
- */
-
 const PREFIX = "test-";
 const EVALUATIONS = `${PREFIX}evaluations`;
 const RUNS = `${PREFIX}report_delivery_runs`;
@@ -77,16 +70,12 @@ after(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
-/** A MongoDB handle that fails the test if anything touches it. */
 const untouchableMongo = {
   collection() {
     throw new Error("MongoDB was used while the store was switched to DynamoDB only");
   },
 };
 
-// --------------------------------------------------------------- evaluations
-
-/** Enough of MongoDB's evaluations behaviour to stand in for it. */
 function memoryEvaluations() {
   const documents = [];
   const matches = (document, filter) => Object.entries(filter).every(([field, condition]) => (
@@ -120,8 +109,6 @@ function memoryEvaluations() {
           }
         },
         find() {
-          // A shallow copy: structuredClone would turn an ObjectId into a
-          // plain object, which the real driver never returns.
           return (async function* all() {
             for (const document of documents) yield { ...document };
           }());
@@ -154,7 +141,6 @@ async function evaluationScenario(db) {
   await saveEvaluation(db, "a2", "checkin", report("checkin"), first);
   seen.a1CheckinId = (await getEvaluation(db, "a1", "checkin"))._id;
 
-  // Re-analysis replaces the report but keeps its identity and creation time.
   await saveEvaluation(db, "a1", "checkin", report("checkin", { remarks: "re-run", failing: ["G1", "G2"] }), later);
   const rerun = await getEvaluation(db, "a1", "checkin");
   seen.rerunKeptId = rerun._id === seen.a1CheckinId;
@@ -221,7 +207,6 @@ test("writing evaluations to both databases keeps them identical", async () => {
 test("copy gives legacy evaluations a kind and a string attendance id", async () => {
   const mongo = memoryEvaluations();
   const legacyAttendance = new ObjectId();
-  // Stored before check-out analysis existed: no kind, ObjectId reference.
   mongo.documents.push({ _id: "old", attendance_id: legacyAttendance, ai_summary: "legacy" });
   mongo.documents.push({ _id: "new", attendance_id: "a9", kind: "checkout", ai_summary: "current" });
   const options = { store: "evaluations", tableName: EVALUATIONS };
@@ -237,8 +222,6 @@ test("copy gives legacy evaluations a kind and a string attendance id", async ()
   setRoute("dynamo", "dynamo");
   assert.equal((await getEvaluation(untouchableMongo, legacyAttendance.toHexString(), "checkin")).ai_summary, "legacy");
 });
-
-// ------------------------------------------------------------ delivery runs
 
 test("a delivery run counts outcomes and completes only when all are in", async () => {
   setRoute("dynamo", "dynamo");
@@ -292,7 +275,6 @@ test("the reminder cron keeps its run on DynamoDB while everything else stays on
         return {
           async updateOne({ _id }, update) {
             mailJobs.push(_id);
-            // Delivered the moment it is queued.
             await recordRunTerminal(db, update.$setOnInsert.run_id, "sent", new Date());
           },
         };

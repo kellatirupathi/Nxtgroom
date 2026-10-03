@@ -3,23 +3,6 @@ import { test } from "node:test";
 import { checkpointSet, improvementTips, SECTION_KEYS } from "../src/checkpoints.js";
 import { buildSystemPrompt, PROMPT_VERSION } from "../src/prompts.js";
 
-/**
- * The appearance rules changed on 25 Sep 2026, at NxtWave's request:
- *
- *  - Men: hair must be set back or up with the whole forehead clear. Any hair
- *    resting on the forehead fails, however neat; messy hair fails.
- *  - Women: a sleeve must reach at least halfway from the shoulder to the
- *    elbow, on a kurti, a saree blouse and a western top alike. Shorter fails;
- *    half sleeves at or below that point now PASS on a kurti, where they used
- *    to fail.
- *  - Women: palazzo pants or straight trousers only. Leggings, jeggings and any
- *    skin-tight bottom fail; so do churidar and gathered patiala/dhoti salwar.
- *
- * Each is pinned twice - in the checkpoint the report is scored against, and in
- * the prompt the model actually receives - because a rule that changed in one
- * place and not the other is a model told two different things.
- */
-
 const find = (gender, attire, code) => {
   const sections = checkpointSet(gender, attire);
   for (const key of SECTION_KEYS) {
@@ -44,8 +27,6 @@ test("men: any hair on the forehead fails, and the forehead must be clear", () =
 });
 
 test("men: curls at the hairline are not on the forehead, and shaped curly hair is not messy", () => {
-  // Midhun, 3 Oct: curly hair set up and back, forehead clear to the
-  // eyebrows, failed as "strands obscuring the upper part of the eyebrows".
   const position = find("MALE", "FORMAL", "M_HAIR_POSITION").rule;
   assert.match(position, /Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead: FAIL only hair that lies over the forehead skin or the eyebrows\./);
   const neatness = find("MALE", "FORMAL", "M_HAIR_NEATNESS").rule;
@@ -54,7 +35,6 @@ test("men: curls at the hairline are not on the forehead, and shaped curly hair 
   const prompt = buildSystemPrompt("MALE", "FORMAL");
   assert.match(prompt, /Curls or waves whose front edge\nsits at the hairline, and hair at the temples, are not on the forehead\./);
   assert.match(prompt, /natural curls or waves that are shaped and\nunder control are not messy/);
-  // Women's hair rules are not touched.
   assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /Curls or waves/);
 });
 
@@ -68,7 +48,6 @@ test("women: sleeves must reach halfway to the elbow on every outfit", () => {
     assert.match(rule, /at least halfway from the shoulder to the elbow/i, `${code} lacks the halfway rule`);
     assert.match(rule, /cap sleeve/i, `${code} must fail cap sleeves`);
   }
-  // Sleeveless saree blouses still fail outright.
   assert.match(find("FEMALE", "SAREE", "W_SAREE_BLOUSE").rule, /SLEEVELESS BLOUSE IS NOT PERMITTED/);
 });
 
@@ -78,7 +57,6 @@ test("women: a half sleeve on a kurti now passes, where it used to fail", () => 
   assert.doesNotMatch(rule, /half sleeves, cap sleeves and sleeveless are all a FAIL/i);
   assert.doesNotMatch(rule, /requires full or three-quarter length/i);
 
-  // And the prompt no longer contradicts it.
   const prompt = buildSystemPrompt("FEMALE", "KURTI_WITH_DUPATTA");
   assert.doesNotMatch(prompt, /short, half, cap or sleeveless sleeves is a FAIL/);
   assert.match(prompt, /Sleeves must reach at least halfway from the shoulder to the elbow/);
@@ -89,7 +67,6 @@ test("women: palazzo passes; leggings, jeggings, churidar and gathered salwar fa
   assert.match(bottom, /^Palazzo pants or straight formal trousers/);
   assert.match(bottom, /FAIL leggings, jeggings and any skin-tight bottom/);
   assert.match(bottom, /FAIL churidar and patiala, dhoti or heavily gathered salwar/);
-  // Churidar is no longer listed among what passes.
   assert.doesNotMatch(bottom, /Palazzo, churidar or straight/);
 
   const formal = find("FEMALE", "FORMAL", "W_FORMAL_BOTTOM_TYPE").rule;
@@ -120,6 +97,5 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  // 2026-10-03.4: the optional blazer or suit, for men and women.
   assert.equal(PROMPT_VERSION, "2026-10-03.4");
 });

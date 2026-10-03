@@ -17,14 +17,12 @@ import BrandedLoader from './BrandedLoader';
 import { useToast } from './useToast';
 
 interface DailyReportPageProps {
-  /** DD-MM-YYYY, from the link. */
   date: string;
   token: string;
 }
 
 type Kind = 'checkin' | 'checkout';
 
-/** How often an open page reads the day again. */
 const REFRESH_MS = 60_000;
 
 interface PhotoTarget {
@@ -52,10 +50,6 @@ const STATUS_STYLE: Partial<Record<DayStatus, string>> = {
   non_compliant: 'border-rose-200 bg-rose-50 text-rose-700',
 };
 
-/**
- * The Status cell: the check-in's result, as the email's Status column reads
- * it - green when compliant, red when not, grey while it is not yet known.
- */
 function StatusPill({ status }: { status: DayStatus }) {
   return (
     <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-bold ${STATUS_STYLE[status] || 'border-slate-200 bg-slate-50 text-slate-600'}`}>
@@ -64,7 +58,6 @@ function StatusPill({ status }: { status: DayStatus }) {
   );
 }
 
-/** The two photograph icons: check-in, then check-out. */
 function PhotoIcons({ row, onOpen }: { row: DayRow; onOpen: (target: PhotoTarget) => void }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -94,7 +87,6 @@ function PhotoIcons({ row, onOpen }: { row: DayRow; onOpen: (target: PhotoTarget
   );
 }
 
-/** The two report icons: check-in report, then check-out report. */
 function ReportIcons({ row }: { row: DayRow }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -126,7 +118,6 @@ function ReportIcons({ row }: { row: DayRow }) {
   );
 }
 
-/** One photograph, fetched as a short-lived link when its icon is pressed. */
 function PhotoModal({ date, token, target, onClose }: { date: string; token: string; target: PhotoTarget; onClose: () => void }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
@@ -176,13 +167,6 @@ function PhotoModal({ date, token, target, onClose }: { date: string; token: str
   );
 }
 
-/**
- * The full-day report page: "See all reports" in a daily report email, and
- * the report link on Settings → Reports. The whole day, 12:00 AM to
- * midnight, kept current while open - so the 1:00 PM email's link shows the
- * evening too. Feedback is the check-in's. The UUID in the link is the only
- * credential, and the server refuses it once it expires.
- */
 export default function DailyReportPage({ date, token }: DailyReportPageProps) {
   const [report, setReport] = useState<DayReportResponse | null>(null);
   const [error, setError] = useState('');
@@ -193,9 +177,6 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
   const [status, setStatus] = useState<DayStatus | ''>('');
   const toast = useToast();
 
-  // Read on open and every minute after, while the page is on screen, so a
-  // day still in progress fills in: check-outs and finished analyses appear
-  // without a reload. A failed refresh keeps the table it already has.
   useEffect(() => {
     let disposed = false;
     let loaded = false;
@@ -249,7 +230,6 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
   const filtered = Boolean(search.trim() || institute || status);
   const empty = count ? 'No instructors match these filters.' : `No check-ins on ${report.date_label}.`;
 
-  /** Downloads the rows on screen, filters applied. */
   const exportCsv = () => {
     saveCsvFile(dayReportFileName(report.date_label), dayReportCsv(rows)).catch((exportError) => {
       toast.error('Could not export the report', {
@@ -278,8 +258,6 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
           </p>
         </section>
 
-        {/* Search, institute and check-in status, and the export of what they
-            leave on screen. */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="relative min-w-0 flex-1 basis-full sm:basis-auto sm:flex-none">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
@@ -312,7 +290,6 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
           </button>
         </div>
 
-        {/* Phones: one card per instructor, since nine columns do not fit. */}
         <ul className="flex flex-col gap-3 md:hidden">
           {rows.length === 0 ? (
             <li className="rounded-md border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">{empty}</li>

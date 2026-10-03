@@ -3,12 +3,6 @@ import { test } from "node:test";
 import express from "express";
 import { instructorRouter } from "../src/routes/instructorRoutes.js";
 
-/**
- * The import routes as mounted: who may call them, how big a batch may be,
- * and how a refusal reaches the browser. The row rules themselves are proved
- * in instructor-import.test.js.
- */
-
 const unconfigured = {
   REKOGNITION_COLLECTION_ID: "",
   REKOGNITION_ACCESS_KEY_ID: "",

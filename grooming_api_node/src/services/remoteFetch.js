@@ -3,16 +3,6 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 
-/**
- * Downloads a file from a link someone pasted into a spreadsheet.
- *
- * The instructor import fetches photographs and Google Sheets from addresses
- * the server did not choose, so the fetch refuses anything that resolves to
- * this machine or the private network behind it. The check runs inside the
- * socket's own DNS lookup rather than before the request, so a hostname cannot
- * pass the check on one lookup and connect somewhere private on the next.
- */
-
 const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_REDIRECTS = 5;
@@ -32,12 +22,6 @@ function ipv4Parts(address) {
     : null;
 }
 
-/**
- * Whether an address belongs to this host or a network that is not the public
- * internet: loopback, private ranges, link-local (which includes the cloud
- * metadata service at 169.254.169.254), carrier-grade NAT, multicast and the
- * reserved blocks. IPv4 addresses mapped into IPv6 are judged as IPv4.
- */
 export function isPrivateAddress(address) {
   const value = String(address || "").trim().toLowerCase();
   const mapped = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
@@ -66,14 +50,9 @@ export function isPrivateAddress(address) {
       || value.startsWith("ff");
   }
 
-  // Not an address at all: refuse rather than guess.
   return true;
 }
 
-/**
- * A DNS lookup with every private answer removed. Used as the socket's lookup,
- * so the address that was checked is the address that is connected to.
- */
 export function createPublicOnlyLookup(resolve = dns.lookup) {
   return (hostname, options, callback) => {
     resolve(hostname, { ...options, all: true }, (error, addresses) => {
@@ -90,10 +69,6 @@ export function createPublicOnlyLookup(resolve = dns.lookup) {
 
 const publicOnlyLookup = createPublicOnlyLookup();
 
-/**
- * Parses and checks one link. Only plain http(s) on the standard ports, with
- * no user name or password in it; a literal IP address must be public.
- */
 export function parsePublicUrl(value) {
   let url;
   try {
@@ -177,12 +152,6 @@ function requestOnce(url, { timeoutMs, maxBytes }) {
   });
 }
 
-/**
- * Downloads one public link, following redirects and re-checking each hop.
- *
- * `allowHost` narrows which hosts may be reached at all, so the sheet import
- * can insist on Google while a photograph may come from anywhere public.
- */
 export async function fetchPublicUrl(link, {
   maxBytes = DEFAULT_MAX_BYTES,
   timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -201,12 +170,6 @@ export async function fetchPublicUrl(link, {
   throw new RemoteFetchError("The link redirected too many times");
 }
 
-/**
- * The direct-download form of a share link, for the hosts people commonly
- * paste. A Google Drive "view" page is HTML, not the photograph, and Dropbox
- * serves a preview page unless asked for the file. Anything else is returned
- * unchanged.
- */
 export function toDirectFileUrl(link) {
   const text = String(link || "").trim();
   let url;
@@ -227,10 +190,6 @@ export function toDirectFileUrl(link) {
   return text;
 }
 
-/**
- * The CSV export of a Google Sheets link, keeping the tab it pointed at.
- * Returns null for a link that is not a Google Sheet.
- */
 export function toSheetCsvUrl(link) {
   let url;
   try {
@@ -240,7 +199,6 @@ export function toSheetCsvUrl(link) {
   }
   if (url.hostname !== "docs.google.com") return null;
 
-  // "Publish to web" links: /spreadsheets/d/e/<key>/pub?...
   const published = url.pathname.match(/^\/spreadsheets\/d\/e\/([A-Za-z0-9_-]+)/);
   if (published) {
     const csv = new URL(`https://docs.google.com/spreadsheets/d/e/${published[1]}/pub`);
@@ -259,7 +217,6 @@ export function toSheetCsvUrl(link) {
   return csv.toString();
 }
 
-/** Google's own hosts, which a sheet export redirects between. */
 export function isGoogleHost(hostname) {
   const host = String(hostname || "").toLowerCase();
   return host === "docs.google.com"

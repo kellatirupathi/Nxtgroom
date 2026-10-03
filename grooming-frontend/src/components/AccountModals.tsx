@@ -22,7 +22,6 @@ interface ProfileModalProps {
 interface ChangePasswordModalProps {
   onClose: () => void;
   onPasswordChanged: () => void;
-  /** Opens the email-a-reset-link flow for users who forgot their password. */
   onForgotPassword: () => void;
 }
 
@@ -118,8 +117,6 @@ export function ChangePasswordModal({ onClose, onPasswordChanged, onForgotPasswo
         method: 'POST',
         body: { current_password: currentPassword, new_password: newPassword },
       });
-      // The server bumps session_version, so every existing token — including
-      // this one — is now invalid. Sign out rather than leave a dead session.
       onPasswordChanged();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
@@ -190,8 +187,6 @@ export function ChangePasswordModal({ onClose, onPasswordChanged, onForgotPasswo
         <p className="text-xs text-slate-500">
           Changing your password signs you out of all devices, including this one.
         </p>
-        {/* An escape hatch for someone who is signed in on a remembered
-            session but no longer knows the current password. */}
         <button
           type="button"
           onClick={onForgotPassword}

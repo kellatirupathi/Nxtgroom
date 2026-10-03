@@ -9,8 +9,6 @@ import type { College } from '../types';
 const COLLEGES_PATH = '/api/v2/colleges';
 
 export default function CollegeManagement() {
-  // Seed from the last known response so the table paints immediately on
-  // revisit; the live fetch below corrects it a moment later.
   const cachedColleges = readStale<College[]>(COLLEGES_PATH);
   const [colleges, setColleges] = useState<College[]>(
     Array.isArray(cachedColleges) ? cachedColleges : [],
@@ -26,8 +24,6 @@ export default function CollegeManagement() {
   const toast = useToast();
 
   const fetchColleges = useCallback(async () => {
-    // Only show the loading state when there is nothing to display; with
-    // cached rows on screen a spinner would be a step backwards.
     if (!hasRowsRef.current) setLoading(true);
     try {
       const data = await apiFetchCached<College[]>(COLLEGES_PATH);
@@ -58,8 +54,6 @@ export default function CollegeManagement() {
     setShowModal(true);
   };
 
-  // Update local state from the saved values rather than refetching the
-  // list, so the table never blanks out between edits.
   const handleSaved = (saved: College, wasEdit: boolean) => {
     if (wasEdit) {
       setColleges((current) => current.map((college) => (
@@ -78,7 +72,6 @@ export default function CollegeManagement() {
     try {
       await apiFetch(`${COLLEGES_PATH}/${encodeURIComponent(college._id)}`, { method: 'DELETE' });
       invalidateCache(COLLEGES_PATH);
-      // Remove the row locally once the server confirms; no refetch needed.
       setColleges((current) => current.filter((item) => String(item._id) !== String(college._id)));
       toast.success('Institute deleted', { detail: college.name });
       setConfirmTarget(null);
@@ -94,11 +87,6 @@ export default function CollegeManagement() {
     }
   };
 
-  /**
-   * Imports the institute list from BigQuery and assigns synced instructors to
-   * theirs. Both happen server-side; the list is reloaded afterwards rather
-   * than patched, because linking changes instructors as well.
-   */
   const handleSync = async () => {
     setSyncing(true);
     setError('');
@@ -130,8 +118,6 @@ export default function CollegeManagement() {
           <p className="text-sm text-slate-500 mt-1">Manage partner institutes and campuses.</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Sync sits before Add: importing is the usual action, and adding
-              one by hand is the exception. */}
           <button
             type="button"
             onClick={handleSync}
@@ -161,8 +147,6 @@ export default function CollegeManagement() {
                   <td className="p-4 text-xs font-mono text-slate-400 hidden lg:table-cell">{college._id}</td>
                   <td className="p-4 font-bold text-slate-800">
                     {college.name}
-                    {/* On a phone the location sits under the name rather than
-                        in a column that squeezed the name onto three lines. */}
                     {college.location && <span className="mt-0.5 block text-xs font-medium text-slate-500 sm:hidden">{college.location}</span>}
                   </td>
                   <td className="p-4 text-sm font-medium text-slate-600 hidden sm:table-cell">{college.location}</td>

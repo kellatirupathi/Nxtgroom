@@ -9,7 +9,6 @@ import {
 } from "../src/services/passwordResetService.js";
 import { appUrl } from "../src/config/env.js";
 
-/** In-memory stand-in for the one collection this service touches. */
 function fakeDb() {
   let rows = [];
   return {

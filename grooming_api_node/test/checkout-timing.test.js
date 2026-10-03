@@ -7,22 +7,10 @@ import {
   describeCheckoutTiming,
 } from "../src/services/checkoutTiming.js";
 
-/**
- * When a check-out is allowed.
- *
- * Every case here is a boundary, because that is where a clock rule goes wrong
- * and where the consequence is somebody being told they cannot leave. Times are
- * written as IST instants — the zone the colleges run on — since the rule is
- * about local noon, not UTC noon.
- */
-
 const zone = "Asia/Kolkata";
-/** 11:55 IST on 11 September 2026 is 06:25 UTC: IST is UTC+5:30. */
 const ist = (hour, minute = 0) => new Date(Date.UTC(2026, 8, 11, hour - 5, minute - 30));
 
 test("a morning check-in waits for noon, however late in the morning it was", () => {
-  // 11:55 is the case that motivated the rule: five minutes later is noon, and
-  // noon is the boundary the college works to.
   for (const [hour, minute] of [[7, 0], [9, 30], [11, 55]]) {
     const timing = checkoutTiming(ist(hour, minute), { now: ist(11, 59), timeZone: zone });
     assert.equal(timing.state, CHECKOUT_TIMING.TOO_EARLY, `${hour}:${minute} should wait`);
@@ -37,7 +25,6 @@ test("a morning check-in may close exactly at noon", () => {
 });
 
 test("11:55 can close at 12:00, five minutes later", () => {
-  // Deliberate: the morning rule is a boundary, not a minimum duration.
   const atNoon = checkoutTiming(ist(11, 55), { now: ist(12, 0), timeZone: zone });
   assert.equal(atNoon.state, CHECKOUT_TIMING.ALLOWED);
 
@@ -46,8 +33,6 @@ test("11:55 can close at 12:00, five minutes later", () => {
 });
 
 test("an afternoon check-in waits five minutes, not for the next noon", () => {
-  // Waiting for noon would mean waiting until tomorrow, which is not a rule
-  // anybody could follow.
   assert.equal(AFTERNOON_MINIMUM_MS, 5 * 60_000);
   const checkedIn = ist(14, 0);
   assert.equal(
@@ -65,8 +50,6 @@ test("an afternoon check-in waits five minutes, not for the next noon", () => {
 });
 
 test("a check-in exactly at noon takes the afternoon rule", () => {
-  // Noon is not before noon, so there is nothing left to wait for but the
-  // minimum gap.
   const timing = checkoutTiming(ist(12, 0), { now: ist(12, 1), timeZone: zone });
   assert.equal(timing.rule, "afternoon_waits_five_minutes");
   assert.equal(timing.state, CHECKOUT_TIMING.TOO_EARLY);
@@ -85,7 +68,6 @@ test("the opening instant is reported, so the screen can name a time", () => {
 });
 
 test("an allowed check-out still reports which rule applied", () => {
-  // So a caller can explain the decision rather than only that it passed.
   const timing = checkoutTiming(ist(9, 0), { now: ist(17, 0), timeZone: zone });
   assert.equal(timing.state, CHECKOUT_TIMING.ALLOWED);
   assert.equal(timing.rule, "morning_waits_for_noon");
@@ -93,15 +75,12 @@ test("an allowed check-out still reports which rule applied", () => {
 });
 
 test("minutes remaining is never zero while the answer is still too early", () => {
-  // Rounded up: "0 minutes from now" alongside a refusal reads as a bug.
   const timing = checkoutTiming(ist(14, 0), { now: new Date(ist(14, 5).getTime() - 1_000), timeZone: zone });
   assert.equal(timing.state, CHECKOUT_TIMING.TOO_EARLY);
   assert.ok(timing.minutes_remaining >= 1);
 });
 
 test("an unusable check-in time allows the check-out rather than stranding anybody", () => {
-  // A data fault is not the instructor's, and refusing would leave them unable
-  // to close their day at all.
   for (const value of [null, undefined, "", "not a date"]) {
     const timing = checkoutTiming(value, { now: ist(14, 0), timeZone: zone });
     assert.equal(timing.state, CHECKOUT_TIMING.ALLOWED);
@@ -110,8 +89,6 @@ test("an unusable check-in time allows the check-out rather than stranding anybo
 });
 
 test("noon is local noon, not the server's", () => {
-  // 08:00 UTC is 13:30 IST, so in IST this is an afternoon check-in even though
-  // a UTC reading of the same instant would call it morning.
   const timing = checkoutTiming(new Date(Date.UTC(2026, 8, 11, 8, 0)), {
     now: new Date(Date.UTC(2026, 8, 11, 8, 5)),
     timeZone: zone,

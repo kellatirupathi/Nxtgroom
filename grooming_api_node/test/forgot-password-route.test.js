@@ -5,18 +5,6 @@ import { authRouter } from "../src/routes/authRoutes.js";
 import { openSecret } from "../src/services/secretBox.js";
 import { hashResetToken } from "../src/services/passwordResetService.js";
 
-/**
- * Exercises the endpoint over HTTP rather than the service beneath it.
- *
- * password-reset.test.js covered issueResetToken thoroughly and passed the
- * whole time the route was answering 500: the handler referenced a constant
- * declared inside a different handler's closure, which is a runtime error that
- * no import check and no service-level test can see. Self-service password
- * reset was therefore broken in production with a green suite. These tests go
- * through the router so that failure mode is observable.
- */
-
-/** In-memory stand-in for the collections this route touches. */
 function fakeDb() {
   const store = new Map([
     ["users", []],
@@ -112,7 +100,6 @@ test("an unknown address gets the same answer and queues nothing", async () => {
 
   assert.equal(known.status, 200);
   assert.equal(blank.status, 200);
-  // Identical bodies, or the endpoint enumerates which addresses hold accounts.
   assert.deepEqual(known.body, blank.body);
   assert.equal(db.rows("mail_jobs").length, 0);
 });
@@ -144,8 +131,6 @@ test("the queued job carries a sealed token, never the raw one", async () => {
   assert.equal(job.payload.token, undefined, "the raw token must not sit in the queue");
   assert.ok(job.payload.token_sealed, "the job needs a sealed token to send the email");
 
-  // The sealed value must open to a token that matches the stored hash, or the
-  // link in the email would not be redeemable.
   const opened = openSecret(job.payload.token_sealed);
   assert.equal(hashResetToken(opened), db.rows("password_resets")[0].token_hash);
   assert.notEqual(job.payload.token_sealed, opened);

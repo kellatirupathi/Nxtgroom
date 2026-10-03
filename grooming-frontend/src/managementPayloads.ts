@@ -11,7 +11,6 @@ export interface BuildBoaPayloadOptions {
   editing?: boolean;
 }
 
-/** Omits a blank password on edit so an unchanged credential is never overwritten. */
 export function buildBoaPayload(
   formData: BoaFormData,
   { editing = false }: BuildBoaPayloadOptions = {},

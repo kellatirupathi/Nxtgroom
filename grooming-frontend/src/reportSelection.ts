@@ -2,22 +2,12 @@ import type { AttendanceRecord, Evaluation } from './types';
 
 export type ReportHalf = 'checkin' | 'checkout';
 
-/**
- * Identifies the evaluation by both attendance record and report half.
- * A single unkeyed value can briefly make a newly selected check-out render
- * the previous check-in's report while the check-out request is in flight.
- */
 export interface EvaluationSnapshot {
   attendanceId: string;
   half: ReportHalf;
   evaluation: Evaluation | null;
 }
 
-/**
- * One report panel's request state. Keeping one entry per half lets a user
- * switch back to a report that has already rendered without replacing it with
- * another full-screen loading state while the live copy is revalidated.
- */
 export interface ReportPanelState extends EvaluationSnapshot {
   loading: boolean;
   error: string;
@@ -36,11 +26,6 @@ export function reportPanelStateForHalf(
   return state?.attendanceId === attendanceId && state.half === half ? state : null;
 }
 
-/**
- * Marks a genuinely new record/half as loading. A matching cached panel is
- * deliberately returned unchanged so a background revalidation cannot blank
- * a report that is already on screen.
- */
 export function beginReportLoad(
   states: ReportPanelStates,
   attendanceId: string,

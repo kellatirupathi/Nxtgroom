@@ -15,17 +15,6 @@ function getClient() {
   return client;
 }
 
-/**
- * Verifies a Google ID token and returns the verified email.
- *
- * Every check here is load-bearing: the library validates the signature,
- * expiry, and issuer, and `audience` pins the token to this application so a
- * token minted for a different Google client cannot be replayed against us.
- * `email_verified` blocks accounts where the address was never confirmed.
- *
- * Returns { email } on success or { error } with a safe, non-enumerating
- * message on failure.
- */
 export async function verifyGoogleIdToken(idToken) {
   const clientId = googleClientId();
   if (!clientId) return { error: "Google sign-in is not configured" };

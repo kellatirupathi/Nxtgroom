@@ -10,9 +10,7 @@ export interface LivenessState {
   deadline: number | null;
 }
 
-/** Several consecutive frames distinguish a real action from pose jitter. */
 export const LIVENESS_CONFIRMATIONS = 3;
-/** A short window makes a matching prerecorded movement much less useful. */
 export const LIVENESS_CHALLENGE_MS = 10_000;
 
 export function randomChallengeSide(): ChallengeSide {
@@ -39,12 +37,6 @@ function confirmed(state: LivenessState, matches: boolean): number {
   return matches ? state.confirmations + 1 : 0;
 }
 
-/**
- * Verifies a movement that a printed or displayed still photograph cannot do:
- * start with both hands down, raise a randomly selected hand, then lower it.
- * The coordinates are relative body keypoints, so moving or tilting the whole
- * phone/photo cannot satisfy the challenge.
- */
 export function advanceLiveness(
   state: LivenessState,
   reading: FrameReading,

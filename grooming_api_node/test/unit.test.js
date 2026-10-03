@@ -133,7 +133,6 @@ test("production configuration accepts an exact secure contract", () => {
   assert.equal(compact.geminiExplicitCache, true);
   assert.equal(compact.geminiCacheTtlSeconds, 3600);
   assert.equal(compact.appTimeZone, "Asia/Kolkata");
-  // Signed in for a year unless told otherwise, not logged out every day.
   assert.equal(compact.jwtExpiresMinutes, 525600);
 });
 
@@ -280,18 +279,12 @@ test("AI instructions request concise evidence instead of hidden reasoning", () 
 test("gender edits accept only male or female, in any casing", () => {
   assert.equal(instructorGenderSchema.parse({ gender: "male" }).gender, "MALE");
   assert.equal(instructorGenderSchema.parse({ gender: " Female " }).gender, "FEMALE");
-  // The AI selects reference photos from this value, so anything it cannot map
-  // to a rule set has to be refused rather than stored and silently ignored.
   for (const rejected of ["", "OTHER", "M", "unknown", null]) {
     assert.throws(() => instructorGenderSchema.parse({ gender: rejected }));
   }
 });
 
 test("every HTTP method the API routes use is allowed through CORS", async () => {
-  // A route the browser cannot preflight is invisible from the frontend: the
-  // request fails before it reaches Express, so route-level tests still pass
-  // while the feature is broken in production. This compares the allowlist
-  // against the verbs the routers actually register.
   const routers = await Promise.all([
     import("../src/routes/instructorRoutes.js"),
     import("../src/routes/attendanceRoutes.js"),
@@ -314,9 +307,6 @@ test("every HTTP method the API routes use is allowed through CORS", async () =>
 });
 
 test("emailed links cannot be built from a localhost origin in production", () => {
-  // https://localhost is a legitimate CORS entry — the mobile shell uses it —
-  // but as a link it sends the recipient to their own machine, so the report
-  // is unreachable and nothing in the system notices.
   const withOrigins = (origins) => {
     process.env.NODE_ENV = "production";
     process.env.APP_URL = origins.split(",")[0];
@@ -346,7 +336,6 @@ test("emailed links cannot be built from a localhost origin in production", () =
     }
   };
 
-  // The mobile shell's origin alongside the real site is fine: the site wins.
   assert.equal(withOrigins("https://nxtgroom-xi.vercel.app,https://localhost"), null);
   assert.equal(appUrl(), "https://nxtgroom-xi.vercel.app");
 

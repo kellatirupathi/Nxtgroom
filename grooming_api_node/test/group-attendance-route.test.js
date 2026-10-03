@@ -2,21 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 
-/**
- * The attendance endpoint that photographs several people at once.
- *
- * It is a second route rather than a change to the first, and the most
- * important property here is exactly that: the single-person flow is what
- * attendance normally runs on, and it must not have acquired a group's
- * concerns. That is asserted mechanically below rather than left to review.
- *
- * The rest are the failures this shape can have quietly. A photograph stored
- * for a record that was never written. A group frame uploaded under no record,
- * which the orphan reconciler would delete an hour later with nothing logged.
- * Six people analysed against one image and receiving six identical reports.
- * And one person's bad luck taking the other five people's attendance with it.
- */
-
 const SOURCE = new URL("../src/routes/attendanceRoutes.js", import.meta.url);
 
 async function routeSource(path) {
@@ -29,8 +14,6 @@ async function routeSource(path) {
 }
 
 test("/auto/group is registered before any parameterised route", async () => {
-  // Express matches in registration order, so a literal path declared after
-  // "/:attendanceId/..." is read as an attendance id and never runs.
   const source = await readFile(SOURCE, "utf8");
   const posts = [...source.matchAll(/attendanceRouter\.post\(\s*"([^"]+)"/g)].map((match) => match[1]);
 
@@ -44,9 +27,6 @@ test("/auto/group is registered before any parameterised route", async () => {
 });
 
 test("the single-person route knows nothing about groups", async () => {
-  // The whole point of adding a route rather than a mode. If a group concern
-  // ever leaks into this handler, the flow every college currently depends on
-  // has been changed by a feature none of them asked for yet.
   const single = await routeSource("/auto");
   for (const symbol of [
     "identifyPeopleInPhoto",
@@ -61,14 +41,10 @@ test("the single-person route knows nothing about groups", async () => {
       `${symbol} has leaked into the single-person route`,
     );
   }
-  // And it still does its own thing: one search, one instructor.
   assert.ok(single.includes("searchFaceByImage("), "the single route still searches for one face");
 });
 
 test("each person is analysed on their own crop, never on the group photograph", async () => {
-  // Six people sharing one image would receive six identical grooming reports
-  // describing whoever the model happened to look at, which is worse than no
-  // report at all because it reads as a real assessment.
   const group = await routeSource("/auto/group");
 
   assert.ok(
@@ -79,7 +55,6 @@ test("each person is analysed on their own crop, never on the group photograph",
     !group.includes("body: groupImage.buffer"),
     "the group frame must never be uploaded as somebody's attendance photo",
   );
-  // The queued job carries the key that was just written for this person.
   assert.ok(
     group.includes("photoKey: evaluationPayload.photo_key"),
     "check-in analysis must run against the crop the record points at",
@@ -87,9 +62,6 @@ test("each person is analysed on their own crop, never on the group photograph",
 });
 
 test("the group photograph itself is never stored", async () => {
-  // R2's orphan reconciler lists attendance/ and removes any key no record
-  // points at. A group frame stored beside the crops would be reaped an hour
-  // later, so it is not stored at all rather than stored and silently lost.
   const group = await routeSource("/auto/group");
   const uploads = [...group.matchAll(/uploadPhoto\(\{/g)];
   assert.equal(uploads.length, 1, "there should be exactly one upload helper, used per person");
@@ -105,8 +77,6 @@ test("an outcome that records nothing stores no photograph", async () => {
 });
 
 test("one person's failure does not take everybody else's attendance with it", async () => {
-  // Five people should not lose their check-in because a sixth stood too far
-  // back, so the turns are settled rather than awaited together.
   const group = await routeSource("/auto/group");
   assert.ok(group.includes("Promise.allSettled"), "one rejection must not reject the batch");
   assert.ok(
@@ -116,8 +86,6 @@ test("one person's failure does not take everybody else's attendance with it", a
 });
 
 test("people are processed in bounded batches rather than all at once", async () => {
-  // Each turn holds a crop, an upload and a MongoDB transaction, on a container
-  // with 512MB and a fifth of a CPU.
   const group = await routeSource("/auto/group");
   assert.ok(
     group.includes("config.groupCropConcurrency"),
@@ -132,14 +100,12 @@ test("the group route carries its own rate limit and concurrency gate", async ()
 
   assert.ok(handlerStart.includes("groupCheckInLimiter"), "a group request is several check-ins");
   assert.ok(handlerStart.includes("checkInConcurrencyGate"), "it decodes images like any other");
-  // Tighter than the single-person limiter, because each request costs more.
   const limit = /const groupCheckInLimiter = rateLimit\(\{[\s\S]*?limit: (\d+)/.exec(source);
   assert.ok(limit, "the group limiter must exist");
   assert.ok(Number(limit[1]) <= 100, "the group limiter must not be looser than the single one");
 });
 
 test("the check-out guard is the same one the single route uses", async () => {
-  // Two photographs a moment apart must not both close one session.
   const group = await routeSource("/auto/group");
   assert.ok(
     group.includes("check_out_time: null"),
@@ -152,12 +118,6 @@ test("the check-out guard is the same one the single route uses", async () => {
 });
 
 test("a passer-by in the background is not recorded as an unidentified check-in", async () => {
-  // The single-person screen refuses to fire when it sees more than one person,
-  // so a colleague crossing the corridor behind the subject never reaches the
-  // server. A group photograph is the whole frame, so they do — and recording
-  // them would fill the unidentified queue with people who were not checking
-  // in. Someone who genuinely stood too far back is told to stand closer and
-  // photographed again a second later.
   const group = await routeSource("/auto/group");
   const refusal = group.indexOf("GROUP_OUTCOMES.TOO_SMALL");
   const lookup = group.indexOf("activeInstructorFilter(req.currentUser, person.instructorId)");
@@ -171,9 +131,6 @@ test("a passer-by in the background is not recorded as an unidentified check-in"
 });
 
 test("the tablet hold suppresses unknown-only repeats and never blocks recognised group members", async () => {
-  // A frame where everybody matched cannot create duplicates — each of them is
-  // answered from their own day's record — so it must not be blocked by the
-  // hold, only start it.
   const group = await routeSource("/auto/group");
   const guard = /const hasUnrecognisedFaces = identified\.people\.some\(\(person\) => \(([\s\S]*?)\)\);/.exec(group);
   assert.ok(guard, "the hold must be decided from the outcomes");
@@ -185,9 +142,6 @@ test("the tablet hold suppresses unknown-only repeats and never blocks recognise
 });
 
 test("every person's line carries a time, so the tablet can show one next to their name", async () => {
-  // Six names with no times is a list; six names with times is attendance.
-  // The moment this photograph recorded is on every recorded line, and the
-  // day's check-in on every line about somebody whose day had already begun.
   const group = await routeSource("/auto/group");
 
   const defaults = /const answer = \(person, fields\) => \(\{[\s\S]*?recorded_at: null,\s*check_in_time: null,[\s\S]*?\.\.\.fields,/;
@@ -196,23 +150,17 @@ test("every person's line carries a time, so the tablet can show one next to the
   const recorded = [...group.matchAll(/recorded_at: now,/g)];
   assert.equal(recorded.length, 2, "only recognised check-in and check-out record a time");
 
-  // Somebody told they already checked in is told when.
   assert.ok(group.includes("check_in_time: today?.check_in_time || null"), "too-early and already-done must carry the day's check-in");
   assert.ok(group.includes("check_in_time: today.check_in_time || null"), "a duplicate check-out must too");
-  // And a check-out shows the check-in it closed, not itself twice.
   assert.ok(group.includes("check_in_time: attendance.check_in_time || null"));
 });
 
 test("somebody who already checked in is told when, even when the race was lost inside the transaction", async () => {
-  // Two crops of one person, or the single-person tablet a second earlier:
-  // the day's record appears between this turn's lookup and its transaction.
-  // "Already checked in today" with no time next to it reads like a fault.
   const group = await routeSource("/auto/group");
   const fallback = group.indexOf('committed.outcome === "already_checked_in_today"');
   assert.ok(fallback >= 0, "the lost-race branch must look the day's record up");
   const lookup = group.indexOf("projection: { _id: 1, check_in_time: 1 }", fallback);
   assert.ok(lookup > fallback, "and read its time");
   assert.ok(group.includes("check_in_time: existing?.check_in_time || null"));
-  // Cosmetic, so it must never turn a clear answer into a failure.
   assert.ok(group.slice(fallback, lookup).includes("try {"), "the lookup must be guarded");
 });

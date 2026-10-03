@@ -96,7 +96,6 @@ function parseCalendarDate(value) {
   return { year, month, day };
 }
 
-/** Returns the UTC boundaries of one calendar day in an IANA time zone. */
 export function dateBoundsInTimeZone(dateValue, timeZone, now = new Date()) {
   if (dateValue !== undefined && typeof dateValue !== "string") {
     throw new RangeError("date must be provided only once in YYYY-MM-DD format");
@@ -122,17 +121,6 @@ export function dateBoundsInTimeZone(dateValue, timeZone, now = new Date()) {
   };
 }
 
-/**
- * Bounds covering whole local days from `from` to `to`, both inclusive.
- *
- * Built from calendar dates rather than timestamps because a day means a day
- * where the instructor is, not a 24-hour window from whenever the request was
- * made: a check-in at 00:30 in Asia/Kolkata belongs to that date, not the one
- * before it in UTC.
- *
- * Either end may be omitted to leave that side open, which is what "all time"
- * and open-ended ranges use.
- */
 export function dateRangeBoundsInTimeZone(from, to, timeZone) {
   for (const [name, value] of [["from", from], ["to", to]]) {
     if (value !== undefined && typeof value !== "string") {
@@ -146,8 +134,6 @@ export function dateRangeBoundsInTimeZone(from, to, timeZone) {
 
   let end = null;
   if (to !== undefined) {
-    // The day after `to` at local midnight, so the final day is included in
-    // full rather than truncated at 00:00.
     const parsed = parseCalendarDate(to);
     const dayAfter = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + 1));
     end = localMidnightUtc({
@@ -179,7 +165,6 @@ function parseCanonicalPageInteger(value, name, { minimum, maximum, fallback }) 
   return parsed;
 }
 
-/** Strict offset pagination for array-returning endpoints. */
 export function parsePagination(
   query,
   { defaultLimit, maxLimit, maxOffset = 1_000_000 }

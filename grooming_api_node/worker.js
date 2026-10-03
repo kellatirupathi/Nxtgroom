@@ -26,10 +26,6 @@ async function startWorkers() {
     if (stopping) return;
     stopping = true;
     console.log(`Received ${signal}; stopping workers.`);
-    // A worker's stop() awaits the job in flight, which can be a full Gemini
-    // budget away from finishing. Without this the orchestrator's grace period
-    // expires and the process is killed mid-evaluation instead of leaving the
-    // job for another worker to lease cleanly.
     const forceExit = setTimeout(() => {
       console.error("Graceful shutdown timed out.");
       process.exit(1);
@@ -39,8 +35,6 @@ async function startWorkers() {
     await closeMongoConnection();
     clearTimeout(forceExit);
   };
-  // Matches the API process. Without these a rejected promise leaves the
-  // workers alive but wedged, with nothing to tell the platform to restart it.
   const fatalShutdown = (error) => {
     process.exitCode = 1;
     console.error(`Fatal worker error: ${error?.name || "Error"}`);

@@ -2,15 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { saveInstructorRoster } from "../src/services/instructorSync.js";
 
-/**
- * The sync must never remove anything. An instructor who has left the BigQuery
- * roster still has attendance history in FacultyTrack, and deleting the row
- * would orphan those records. A sync adds what is new, updates what changed,
- * and leaves everything else alone.
- *
- * These tests inspect the operations handed to bulkWrite rather than a real
- * database, so a destructive operation fails here before it can ever run.
- */
 function recordingDb() {
   const batches = [];
   return {
@@ -55,8 +46,6 @@ test("instructors missing from BigQuery are untouched, not removed", async () =>
   const db = recordingDb();
   await saveInstructorRoster(db, roster);
 
-  // Every write is keyed to an id present in this run, so a person who has
-  // left the roster is never matched by any filter and simply survives.
   const targeted = db.operations().map((op) => op.updateOne.filter.instructor_user_id);
   assert.deepEqual(targeted, ["U-1"]);
   assert.equal(
@@ -82,8 +71,6 @@ test("fields FacultyTrack owns are set only when the record is created", async (
   await saveInstructorRoster(db, roster);
   const [{ updateOne }] = db.operations();
 
-  // A re-sync must not reset a college assignment or resurrect a soft-deleted
-  // instructor, so these live in $setOnInsert rather than $set.
   for (const field of ["college_id", "gender", "deleted_at", "created_at"]) {
     assert.ok(field in updateOne.update.$setOnInsert, `${field} belongs in $setOnInsert`);
     assert.equal(field in updateOne.update.$set, false, `${field} must not be overwritten on re-sync`);
@@ -92,9 +79,6 @@ test("fields FacultyTrack owns are set only when the record is created", async (
 
 test("a missing email never overwrites one entered by hand", async () => {
   const db = recordingDb();
-  // Roughly half the roster has no address in the demo table. Writing that
-  // null would erase an email an administrator added so the check-in report
-  // could actually be delivered.
   await saveInstructorRoster(db, [{ ...roster[0], email: null }]);
   const [{ updateOne }] = db.operations();
 
@@ -116,7 +100,6 @@ test("an email the warehouse does supply is written", async () => {
 test("an empty roster performs no writes at all", async () => {
   const db = recordingDb();
   const result = await saveInstructorRoster(db, []);
-  // A failed or empty fetch must not touch the collection.
   assert.deepEqual(db.operations(), []);
   assert.deepEqual(result, { upserted: 0, modified: 0 });
 });

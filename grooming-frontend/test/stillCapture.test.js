@@ -15,20 +15,6 @@ import { applyTransform, drawTransform, expectedScale, orientedSize } from '../s
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-/**
- * The capture, end to end, against a simulated camera.
- *
- * A fake canvas renders a synthetic scene through whatever the capture draws -
- * the video, or the still through its transform - so the real capturePhoto
- * runs every step: the video frame, the reference, the still, both rotations,
- * the alignment, and the final crop. The final crop's transform is then mapped
- * back into the scene and compared with the region the camera approved.
- *
- * The fallbacks are tested as carefully as the success. Each one is a way a
- * tablet in the field could behave, and each must end with today's video
- * frame rather than an error or a wrong photograph.
- */
-
 function random(seed) {
   let state = seed >>> 0;
   return () => {
@@ -70,11 +56,6 @@ function invert([a, b, c, d, e, f]) {
 const VIDEO = { videoWidth: 1920, videoHeight: 1080 };
 const SINGLE = { x: 348, y: 22, width: 1224, height: 1037 };
 
-/**
- * A simulated browser. `still` describes the camera's still photographs:
- * the raw size it delivers, which way up it hands them over, and how its
- * field of view relates to the video (`truth`, in the oriented still).
- */
 function fakeBrowser({
   scene,
   stillScene = scene,
@@ -118,7 +99,6 @@ function fakeBrowser({
         const sub = 5;
         let value;
         if (draw.args.length === 8) {
-          // drawImage(video, sx, sy, sw, sh, dx, dy, dw, dh)
           const [sx, sy, sw, sh, dx, dy, dw, dh] = draw.args;
           value = (px, py) => scene(sx + ((px - dx) * sw) / dw, sy + ((py - dy) * sh) / dh);
         } else {
@@ -184,7 +164,6 @@ function centred(stillOriented, relative = 1) {
   };
 }
 
-/** Maps the returned photograph's crop back into the scene. */
 async function photographedRegion(browser, photo, still) {
   const { canvas: id } = JSON.parse(await photo.blob.text());
   const canvas = browser.canvases[id];
@@ -224,7 +203,6 @@ test('without a still camera the photograph is exactly the video frame it always
   assert.equal(photo.source, 'video');
   assert.equal(photo.width, 1224);
   assert.equal(photo.height, 1037);
-  // The first canvas is the video frame, drawn from the approved region.
   const [frame] = browser.canvases;
   assert.deepEqual(frame.draws[0].args, [348, 22, 1224, 1037, 0, 0, 1224, 1037]);
   assert.equal(JSON.parse(await photo.blob.text()).canvas, frame.id);
@@ -267,8 +245,6 @@ test('a group photograph keeps up to 3072', async () => {
 });
 
 test('a still handed over sideways is turned the right way up', async () => {
-  // A portrait still for a landscape video: the camera ignored the device's
-  // orientation. Either quarter turn could be right; the alignment decides.
   for (const rotation of [90, 270]) {
     const raw = { width: 3000, height: 4000 };
     const still = { raw, rotation, truth: centred(orientedSize(raw, rotation)) };
@@ -315,7 +291,6 @@ test('a camera whose stills keep failing stops being asked, until it is reopened
   assert.equal((await capture(liveTrack())).source, 'video');
   assert.equal(browser.calls.takePhoto.length, asked, 'a disabled camera must not be asked again');
 
-  // Reopened - a new track - it gets a fresh chance.
   await capture(liveTrack('camera-2'));
   assert.equal(browser.calls.takePhoto.length, asked + 1);
 });
@@ -334,7 +309,6 @@ test('a still that never arrives is abandoned for the video frame', async () => 
 });
 
 test('a camera whose stills are no bigger than its video never takes one', async () => {
-  // A desktop webcam, typically: the wait would buy nothing.
   const raw = { width: 1920, height: 1080 };
   const still = { raw, rotation: 0, truth: centred(raw) };
   const browser = fakeBrowser({
@@ -398,8 +372,6 @@ test('both cameras take their photograph through the still capture, at their own
   const group = read('src/components/GroupCameraCapture.tsx');
   assert.match(group, /capturePhoto\(\{/);
   assert.match(group, /maxDimension: GROUP_UPLOAD_MAX_DIMENSION/);
-  // The regions they keep are unchanged: the outline for one person, the
-  // whole visible preview for a group.
   assert.match(single, /bodyGuideSourceRect\(/);
   assert.match(group, /coverSourceRect\(/);
 });

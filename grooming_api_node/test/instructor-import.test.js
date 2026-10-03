@@ -13,13 +13,6 @@ import {
 } from "../src/services/instructorImport.js";
 import { RemoteFetchError } from "../src/services/remoteFetch.js";
 
-/**
- * The instructor import: every row is either added whole, photograph
- * included, or reported with reasons an admin can act on. The rules are
- * proved against an in-memory roster, with the photograph download, the face
- * check and the create step injected.
- */
-
 const COLLEGES = [
   { _id: "c-hyd", name: "Aurora Institute", location: "Hyderabad" },
   { _id: "c-blr-1", name: "City College", location: "Bengaluru" },
@@ -106,7 +99,6 @@ test("gender accepts M, F, Male, Female, Man and Woman in any case and nothing e
 test("an institute is found by id, or by a name that is unique", () => {
   assert.equal(matchCollege("c-blr-2", COLLEGES).college._id, "c-blr-2");
   assert.equal(matchCollege("AURORA INSTITUTE", COLLEGES).college._id, "c-hyd");
-  // Case, spacing and punctuation never decide a match.
   assert.equal(matchCollege("aurora-institute.", COLLEGES).college._id, "c-hyd");
   assert.equal(
     matchCollege("hyderabad - kondapur campus", [{ _id: "k", name: "Hyderabad – Kondapur Campus" }]).college._id,
@@ -251,15 +243,12 @@ test("a row whose email or employee ID exists updates that instructor", async ()
     goodRow({ row: 4, email: "new@example.com", employee_id: "EMP-7" }),
   ], await deps());
 
-  // Matched by email; no photo on file yet, so the sheet's is enrolled.
   assert.equal(results[0].ok, true);
   assert.equal(results[0].action, "update");
   assert.deepEqual(results[0].existing, { id: "i-asha", name: "Asha R" });
   assert.equal(results[0].photo, "enrol");
   assert.match(results[0].thumbnail, /^data:image/);
 
-  // Matched by employee ID; they already have a photo, which is kept, so no
-  // photo link is needed and none is fetched.
   assert.equal(results[1].ok, true);
   assert.equal(results[1].action, "update");
   assert.deepEqual(results[1].existing, { id: "i-ravi", name: "Ravi K" });
@@ -278,8 +267,6 @@ test("blank cells for an existing instructor are filled from their record", asyn
       phone_no: "9000000000", face_ids: ["f1"],
     }],
   });
-  // Only the Employee ID and a new phone number: everything else is on record,
-  // including a synced role the import would not accept from a sheet.
   const [result] = await previewImportRows(db, [{
     row: 2, employee_id: "EMP-1", phone_no: "9876543210",
   }], await deps());
@@ -307,7 +294,6 @@ test("a sheet repeating the role on record is accepted even if it is not a stand
   const [kept] = await previewImportRows(db, [goodRow({ role: "trainee", photo_url: "" })], await deps());
   assert.equal(kept.ok, true, JSON.stringify(kept.errors));
   assert.equal(kept.value.role, "Trainee");
-  // A different unknown role is still refused.
   const [other] = await previewImportRows(db, [goodRow({ role: "Teacher", photo_url: "" })], await deps());
   assert.match(other.errors[0], /Role "Teacher" must be/);
 });
@@ -447,7 +433,6 @@ test("commit creates the instructor and enrols the checked photograph", async ()
   assert.equal(created[0].instructor_role, "INSTRUCTOR");
   assert.equal(enrolled[0].id, "new-1");
   assert.equal(enrolled[0].options.mode, "add");
-  // Quality was checked once already, so enrolment is told not to pay again.
   assert.deepEqual(enrolled[0].options.checkedQuality, { sharpness: 80, brightness: 70, confidence: 99 });
 });
 
@@ -503,7 +488,6 @@ test("commit leaves the photo of an instructor who already has one", async () =>
   const outcomes = await commitImportRows(db, [goodRow({ phone_no: "" })], await deps({
     fetcher: async () => { fetched += 1; throw new Error("should not fetch"); },
     updateInstructor: async (_db, _id, fields) => {
-      // A blank optional cell is not sent, so the phone on record stays.
       assert.equal("phone_no" in fields, false);
       return { outcome: "updated" };
     },

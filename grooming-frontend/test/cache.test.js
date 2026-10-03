@@ -1,10 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-/**
- * sessionStorage does not exist in Node, and api.ts reads it at call time, so a
- * minimal stand-in must be installed before the module is imported.
- */
 function installSessionStorage() {
   const store = new Map();
   globalThis.sessionStorage = {
@@ -14,7 +10,6 @@ function installSessionStorage() {
     get length() { return store.size; },
     key: (index) => [...store.keys()][index] ?? null,
   };
-  // Object.keys(sessionStorage) is how dropPersisted() enumerates entries.
   return store;
 }
 
@@ -38,8 +33,6 @@ test('invalidating a prefix removes the cached value', () => {
 
 test('a stale in-memory entry is still returned for first paint', async () => {
   clearRequestCache();
-  // A zero lifetime expires immediately, but the value must survive for the
-  // instant-render path; only apiFetchCached() treats it as too old to reuse.
   primeCache('/api/v2/instructors', [{ _id: 'i1' }], 0);
   await new Promise((resolve) => setTimeout(resolve, 5));
   const cached = readStale('/api/v2/instructors');

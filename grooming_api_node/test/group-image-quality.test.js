@@ -7,17 +7,6 @@ import * as faceRecognition from "../src/services/faceRecognition.js";
 import { cropRegion, identifyPeopleInPhoto } from "../src/services/groupRecognition.js";
 import { groupCaptureGate } from "../src/routes/attendanceRoutes.js";
 
-/**
- * Group photographs at higher resolution, processed once.
- *
- * A group spends its pixels on several people, so the group path keeps its
- * photograph at up to 3072 on the long side where a single photograph stops at
- * 2048. It pays for that by never re-encoding the whole frame: the upload is
- * decoded once to pixels and every crop is cut from them. These tests pin both
- * halves - the resolution is really kept, and nothing is decoded twice - and
- * the memory gate that bounds how many such frames are held at once.
- */
-
 const CONFIGURED = {
   REKOGNITION_COLLECTION_ID: "facultytrack-faces-test",
   AWS_REKOGNITION_REGION: "ap-south-1",
@@ -44,7 +33,6 @@ async function withEnv(values, run) {
   }
 }
 
-/** A textured photograph, so crops of different places differ. */
 async function photo(width, height, { channels = 3 } = {}) {
   const pixels = Buffer.alloc(width * height * channels);
   for (let y = 0; y < height; y += 1) {
@@ -69,7 +57,6 @@ test("a group photograph is kept at up to 3072, where a single one stops at 2048
   assert.equal(large.channels, 3);
   assert.equal(large.data.length, large.width * large.height * 3, "pixels, not an encoded image");
 
-  // Nothing is enlarged: a small photograph stays its own size.
   const small = await normalizeGroupImage(await photo(1654, 1080));
   assert.equal(small.width, 1654);
   assert.equal(small.height, 1080);
@@ -97,16 +84,12 @@ test("a crop is cut from pixels at full resolution and encoded once", async () =
   assert.equal(meta.format, "jpeg");
   assert.equal(meta.channels, 3);
 
-  // A rectangle running off the edge is trimmed rather than refused.
   const edge = await cropRegion(pixels, { left: 3000, top: 1900, width: 500, height: 500 });
   assert.equal(edge.width, 72);
   assert.equal(edge.height, 107);
 });
 
 test("faces are measured against the pixels kept, not a caller's dimensions", async () => {
-  // 0.03 of 3072 is 92px - searchable. The same box at 2048 would be 61px,
-  // below the floor. Measuring against the real pixels is what lets the extra
-  // resolution reach the people at the back.
   await withEnv(CONFIGURED, async () => {
     const sent = [];
     faceRecognition.setRekognitionClientForTests({
@@ -127,7 +110,6 @@ test("faces are measured against the pixels kept, not a caller's dimensions", as
     });
 
     const pixels = await normalizeGroupImage(await photo(3072, 2007));
-    // Deliberately wrong dimensions from the caller: they must be ignored.
     const result = await identifyPeopleInPhoto(pixels, { width: 2048, height: 1338 });
 
     assert.equal(result.ok, true);
@@ -142,8 +124,6 @@ test("faces are measured against the pixels kept, not a caller's dimensions", as
 });
 
 test("a detection image over Rekognition's size limit is sent smaller, never refused", async () => {
-  // Pure noise barely compresses: a 3072-square frame of it is far over 5MB as
-  // a JPEG. The boxes come back as ratios, so they still fit the full pixels.
   await withEnv(CONFIGURED, async () => {
     const sent = [];
     faceRecognition.setRekognitionClientForTests({
@@ -187,7 +167,6 @@ test("the group route decodes with the group decoder, and the single route is un
   assert.ok(!single.includes("groupCaptureGate"));
 });
 
-/** Just enough of an Express response for a gate. */
 function fakeResponse() {
   const listeners = new Map();
   return {
@@ -214,7 +193,6 @@ test("no more than two group photographs are held at once, and each slot is rele
     assert.equal(responses[2].headers["Retry-After"], "5");
     assert.match(responses[2].body.detail, /retry/i);
 
-    // A finished request frees its slot, and only once however it ends.
     responses[0].emit("finish");
     responses[0].emit("close");
     const next = fakeResponse();
@@ -228,10 +206,6 @@ test("no more than two group photographs are held at once, and each slot is rele
 import { normalizeInstructorImage } from "../src/imageProcessor.js";
 
 test("a full-resolution photograph is re-saved faithfully, with the fast encoder", async () => {
-  // Photographs arrive as 2048-pixel stills now. mozjpeg took ~1s of CPU per
-  // one - five seconds at the tablet on a fifth of a CPU - and kept less of the
-  // picture than the standard encoder does. This pins both halves of why it
-  // was replaced: the encoder, and that fidelity did not go down with it.
   const source = await readFile(new URL("../src/imageProcessor.js", import.meta.url), "utf8");
   assert.ok(!source.includes("mozjpeg: true"), "the slow encoder is back in the photo path");
 

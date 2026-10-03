@@ -11,19 +11,6 @@ test("photographed checkout is queued for the worker rather than analysed in the
   assert.ok(start >= 0 && end > start, "checkout route must remain identifiable");
 
   const checkoutRoute = source.slice(start, end);
-  /**
-   * Check-out is analysed by the worker, exactly as check-in is.
-   *
-   * It ran inline until the tablet became a kiosk. The reason it ran inline was
-   * sound — its email must not race ahead of its report — but holding the
-   * connection open for a vision call blocks the next person standing at the
-   * camera. The worker now stores the report and only then queues the email, so
-   * the ordering is preserved somewhere better suited to it.
-   *
-   * What is asserted here is that the route no longer emails a photographed
-   * check-out at all: if it did, that email could describe a report that does
-   * not exist yet.
-   */
   assert.ok(
     checkoutRoute.includes("enqueueEvaluation(db"),
     "a photographed checkout must be queued for the worker"
@@ -38,35 +25,20 @@ test("photographed checkout is queued for the worker rather than analysed in the
     "checkout must not hold the request open for a vision call"
   );
   assert.ok(
-    // The only email the route still sends is for a check-out with no photo,
-    // which has no report to wait for.
     checkoutRoute.includes("recipient && !req.file"),
     "only a photoless checkout may be emailed from the route"
   );
   assert.ok(
-    // The id is resolved before this call rather than read straight from the
-    // body: a face-only college sends no instructor_id and the photograph
-    // decides whose session is being closed.
     checkoutRoute.includes("attendanceOnLocalDay(instructorId, checkOutTime)"),
     "checkout must use today's attendance rather than an older open record"
   );
   assert.ok(
-    // storeAttendancePhoto is the shared helper both halves now use to put an
-    // attendance photograph in R2; the literal uploadPhoto call moved inside it.
     checkoutRoute.indexOf("checkoutAvailability(candidate") < checkoutRoute.indexOf("storeAttendancePhoto("),
     "a duplicate checkout must be refused before its photo is stored"
   );
 });
 
 test("face identification decodes the photo before the record is known, and only then", async () => {
-  // The ordering the previous assertion protected cannot hold for a face-only
-  // college: there is no record to check until the face has been matched, so
-  // the photograph is decoded first. That is a real cost of photo-first
-  // check-out — an already-closed session is discovered after the decode rather
-  // than before — and it is recorded here rather than left to be rediscovered.
-  //
-  // What still holds is that nothing is *stored* or analysed until the record
-  // has been found and accepted, and that the decode happens once.
   const source = await readFile(new URL("../src/routes/attendanceRoutes.js", import.meta.url), "utf8");
   const routeName = source.indexOf('"/check-out"');
   const start = source.lastIndexOf("attendanceRouter.post(", routeName);
@@ -84,10 +56,6 @@ test("face identification decodes the photo before the record is known, and only
   assert.ok(availabilityAt > searchAt, "the record is found from the match, so it is checked after it");
   assert.ok(storeAt > availabilityAt, "nothing is stored until the record has been accepted");
 
-  // Matched as a pattern rather than an exact string: this file is checked out
-  // with CRLF endings on Windows and LF on the CI runner, so a literal \n here
-  // passed in CI and failed for every developer on Windows - a red suite that
-  // said nothing about the code.
   assert.match(
     checkoutRoute,
     /normalizedCheckoutImage\r?\n\s*\|\| await normalizeInstructorImage/,

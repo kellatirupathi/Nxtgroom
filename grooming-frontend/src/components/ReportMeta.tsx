@@ -1,13 +1,6 @@
 import { CreditCard, Eye, Footprints, Hand, Shirt, Sparkles, User } from 'lucide-react';
 import type { Evaluation, Visibility, WeeklyRotation } from '../types';
 
-/**
- * Whether the photograph itself supported the assessment.
- *
- * Kept after human review was removed because it says something different: the
- * verdict stands either way, but a poor photo is worth retaking so the next
- * one is assessable.
- */
 export function ReportFlags({ evaluation }: { evaluation: Evaluation }) {
   const retake = evaluation.image_quality === 'RETAKE_RECOMMENDED';
   return (
@@ -48,13 +41,6 @@ function visibilityStyle(value: Visibility) {
   return 'border-slate-200 bg-slate-50 text-slate-400';
 }
 
-/**
- * What the camera actually captured.
- *
- * This is visibility metadata, not a score. It exists so an N/A row can be
- * traced to a part of the body the photograph did not show, rather than
- * reading as a checkpoint the system failed to run.
- */
 export function VisibleRegions({ regions }: { regions?: Evaluation['visible_regions'] }) {
   if (!regions) return null;
   return (
@@ -88,17 +74,9 @@ const ROTATION_LABEL: Record<WeeklyRotation['status'], { text: string; className
   FAIL: { text: 'Not met', className: 'text-rose-700' },
   IN_PROGRESS: { text: 'In progress', className: 'text-indigo-600' },
   INSUFFICIENT_DATA: { text: 'Insufficient data', className: 'text-slate-500' },
-  // An abaya week: the saree/kurti rotation does not apply to it.
   NOT_APPLICABLE: { text: 'Not applicable (abaya)', className: 'text-slate-500' },
 };
 
-/**
- * The weekly saree and kurti split.
- *
- * Rendered only when the backend supplies it, which it does for women alone —
- * a man in formal wear every day is complying exactly, and showing him a
- * rotation he cannot satisfy would invent a violation.
- */
 export function WeeklyRotationCard({ rotation }: { rotation?: WeeklyRotation | null }) {
   if (!rotation) return null;
   const label = ROTATION_LABEL[rotation.status];

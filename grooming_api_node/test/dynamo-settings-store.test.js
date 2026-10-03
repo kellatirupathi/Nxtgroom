@@ -31,13 +31,6 @@ import {
 } from "../src/services/reportRecipients.js";
 import { getNotificationSettings, saveNotificationSettings } from "../src/services/notificationSettings.js";
 
-/**
- * app_settings is the first collection to move to DynamoDB. These run the
- * store against a real DynamoDB implementation (dynalite, in process) and
- * check that it behaves exactly as the MongoDB half does, in every mode of
- * the DB_WRITE_TO / DB_READ_FROM switches.
- */
-
 const PREFIX = "test-";
 const TABLE = `${PREFIX}app_settings`;
 const ROUTE_KEYS = [
@@ -62,7 +55,6 @@ function setRoute(writeTo, readFrom) {
   process.env.DB_READ_FROM = readFrom;
 }
 
-/** Enough of MongoDB's app_settings behaviour to stand in for it. */
 function memoryMongo() {
   const documents = new Map();
   const clone = (value) => structuredClone(value);
@@ -100,7 +92,6 @@ function memoryMongo() {
   };
 }
 
-/** A MongoDB handle that fails the test if anything touches it. */
 const untouchableMongo = {
   collection() {
     throw new Error("MongoDB was used while the store was switched to DynamoDB only");
@@ -123,7 +114,6 @@ before(async () => {
 beforeEach(async () => {
   setDynamoDocumentClient(client);
   setRoute("mongo", "mongo");
-  // Each test starts from an empty table.
   const { Items = [] } = await client.send(new ScanCommand({ TableName: TABLE }));
   for (const { _id } of Items) await client.send(new DeleteCommand({ TableName: TABLE, Key: { _id } }));
 });
@@ -137,8 +127,6 @@ after(async () => {
   rawClient.destroy();
   await new Promise((resolve) => server.close(resolve));
 });
-
-// ---------------------------------------------------------------- switches
 
 test("with nothing set, every store stays on MongoDB", () => {
   delete process.env.DB_WRITE_TO;
@@ -186,8 +174,6 @@ test("DynamoDB credentials are required once a store uses it, unless an endpoint
   }
 });
 
-// ------------------------------------------------------------ translation
-
 test("dates, nested values and legacy ObjectIds survive the round trip", () => {
   const at = new Date("2026-09-29T03:30:00.000Z");
   const id = new ObjectId();
@@ -202,12 +188,6 @@ test("dates, nested values and legacy ObjectIds survive the round trip", () => {
   assert.equal(back.day, "2026-09-29", "a plain date string stays a string");
 });
 
-// ------------------------------------------------ same behaviour, both halves
-
-/**
- * One sequence of store calls. Returns what was read along the way, so the
- * MongoDB and DynamoDB runs can be compared result for result.
- */
 async function settingsScenario(db) {
   const first = new Date("2026-09-29T03:30:00.000Z");
   const second = new Date("2026-09-29T04:00:00.000Z");
@@ -248,7 +228,6 @@ test("the DynamoDB half gives the same results as the MongoDB half", async () =>
   const fromDynamo = await settingsScenario(untouchableMongo);
   assert.deepEqual(fromDynamo, fromMongo);
 
-  // And the results are the intended ones, not merely equal.
   assert.equal(fromMongo.missing, null);
   assert.equal(fromMongo.saved.default_mode, "SELECTOR");
   assert.deepEqual(fromMongo.saved.college_modes, { b: "SELECTOR" }, "a map is replaced, not merged");
@@ -273,8 +252,6 @@ test("settings services work end to end with MongoDB switched off", async () => 
   const saved = await saveNotificationSettings(untouchableMongo, { checkin_email_enabled: false }, "admin@x.com");
   assert.deepEqual(await getNotificationSettings(untouchableMongo), saved);
 });
-
-// -------------------------------------------------------------- dual write
 
 test("writing to both keeps the two databases identical, and reads stay on MongoDB", async () => {
   setRoute("both", "mongo");
@@ -305,8 +282,6 @@ test("once reads move to DynamoDB, a DynamoDB write failure fails the request", 
     /down/
   );
 });
-
-// ------------------------------------------------------- copy and compare
 
 test("copy fills DynamoDB from MongoDB and compare finds any difference", async () => {
   const mongo = memoryMongo();

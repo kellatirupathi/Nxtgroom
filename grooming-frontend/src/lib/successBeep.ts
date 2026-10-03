@@ -1,20 +1,3 @@
-/**
- * The beep a tablet gives when a check-in or check-out is recorded.
- *
- * Attendance terminals confirm with one short tone, so somebody walking away
- * knows they were recorded without reading the screen. This is that tone:
- * a single clean beep of under a fifth of a second, made by the browser, so
- * there is no sound file to download and nothing to wait for.
- *
- * A sine at 1.8 kHz carries well from a tablet speaker without the harshness
- * of a terminal's piezo buzzer; the short fade in and out keeps it from
- * clicking.
- *
- * Browsers start sound only after the page has been touched, so the first tap
- * anywhere (Start full screen, or anything else) unlocks it: see
- * armBeepUnlock. Until then the beep is silent rather than an error.
- */
-
 export const BEEP_FREQUENCY_HZ = 1_800;
 export const BEEP_DURATION_S = 0.18;
 export const BEEP_VOLUME = 0.5;
@@ -31,7 +14,6 @@ interface ToneNode {
   connect(destination: unknown): unknown;
 }
 
-/** The parts of an AudioContext the beep uses, so tests can supply their own. */
 export interface BeepContext {
   state: string;
   currentTime: number;
@@ -65,7 +47,6 @@ function browserContext(): BeepContext | null {
 let shared: BeepContext | null = null;
 let factory: ContextFactory = browserContext;
 
-/** For tests: swap where the audio context comes from, and forget the current one. */
 export function setBeepContextFactory(next: ContextFactory | null): void {
   factory = next || browserContext;
   shared = null;
@@ -76,16 +57,11 @@ function context(): BeepContext | null {
   return shared;
 }
 
-/** Wakes the audio context. Must run inside a tap for a browser to allow it. */
 export function unlockBeep(): void {
   const audio = context();
   if (audio?.state === 'suspended') audio.resume().catch(() => {});
 }
 
-/**
- * Unlocks the beep on the next touch, click or key press anywhere on the
- * page. Returns the clean-up for an effect.
- */
 export function armBeepUnlock(target: Pick<Window, 'addEventListener' | 'removeEventListener'> | null =
   typeof window === 'undefined' ? null : window): () => void {
   if (!target) return () => {};
@@ -100,7 +76,6 @@ export function armBeepUnlock(target: Pick<Window, 'addEventListener' | 'removeE
   };
 }
 
-/** One short beep. Never throws: a tablet with no sound just stays quiet. */
 export function playSuccessBeep(): void {
   try {
     const audio = context();
@@ -121,11 +96,9 @@ export function playSuccessBeep(): void {
     tone.start(start);
     tone.stop(end + 0.02);
   } catch {
-    // No audio output, or the context was closed: the screen still confirms.
   }
 }
 
-/** Whether an outcome recorded a check-in or a check-out, which is when to beep. */
 export function beepsFor(action: string | null | undefined, recorded: boolean | null | undefined): boolean {
   return Boolean(recorded) && (action === 'CHECK_IN' || action === 'CHECK_OUT');
 }

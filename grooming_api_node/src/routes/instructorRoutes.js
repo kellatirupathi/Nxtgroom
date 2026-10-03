@@ -31,8 +31,6 @@ import { RemoteFetchError } from "../services/remoteFetch.js";
 
 export const instructorRouter = Router();
 
-// Matches the attendance upload limits: one file, 8 MB, and the same three
-// formats the normalizer and the magic-byte check accept.
 const referencePhotoUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 1, fields: 4 },
@@ -46,13 +44,6 @@ const referencePhotoUpload = multer({
 });
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
 
-/**
- * Matches an open check-in belonging to today.
- *
- * A check-out that never happens leaves the record open forever, so matching
- * any open record made one forgotten check-out permanent — the instructor
- * could never be edited or removed again.
- */
 function openCheckInTodayFilter(instructorId) {
   const { start, end } = dateBoundsInTimeZone(undefined, runtimeConfig().appTimeZone);
   return {
@@ -77,13 +68,7 @@ function feedbackStatus(status) {
   if (status === "pending") return "PENDING";
   if (status === "error") return "ERROR";
   if (status === "unassessed") return "UNASSESSED";
-  // No instructor was identified, so this day belongs to nobody's history yet.
-  // Reported as itself rather than falling through to UNKNOWN, which would
-  // read as a record whose status could not be understood.
   if (status === "unidentified") return "UNIDENTIFIED";
-  // Records evaluated before the review flag was removed still carry this
-  // status. They were compliant results that had been flagged, so that is
-  // what they report now; the stored value is left untouched.
   if (status === "review_required" || status === "needs_review") return "COMPLIANT";
   if (status === "non_compliant" || status === "fail") return "FLAGGED";
   if (status === "compliant" || status === "done") return "COMPLIANT";
@@ -130,9 +115,6 @@ export async function loadRecentInstructorFeedbacks(db, instructorIds) {
       },
     },
     { $match: { [normalizedDateField]: { $ne: null } } },
-    // $documentNumber requires a single-key sortBy, so the _id tiebreaker is
-    // applied here instead; $setWindowFields preserves this incoming order
-    // for rows that share a date.
     { $sort: { [normalizedIdField]: 1, [normalizedDateField]: -1, _id: -1 } },
     {
       $setWindowFields: {
@@ -159,9 +141,6 @@ export async function createInstructorGuarded(
       { session }
     );
     if (!college) return { outcome: "college_not_found" };
-    // Only an id that was given can collide. Querying with a missing one sent
-    // { employee_id: null }, which matched every synced instructor without an
-    // id and refused the new one as a duplicate.
     if (input.employee_id && await db.collection("instructors").findOne(
       { employee_id: input.employee_id },
       { session }
@@ -201,13 +180,6 @@ export async function updateInstructorGuarded(
     );
     if (!existing) return { outcome: "not_found" };
 
-    // Only a college reassignment conflicts with an open check-in: the
-    // attendance record snapshots the college, and moving someone mid-session
-    // would leave that record scoped to a college they are no longer at.
-    // Everything else — name, email, phone, gender, role — is harmless, and
-    // refusing those too meant a forgotten check-out made the whole profile
-    // uneditable. The window is today only, for the same reason: a record left
-    // open yesterday is a missed check-out, not a session in progress.
     const movingCollege = String(existing.college_id) !== String(input.college_id);
     if (movingCollege) {
       const activeAttendance = await db.collection("attendance").findOne(
@@ -262,10 +234,6 @@ export async function deleteInstructorGuarded(
     );
     if (!existing) return { outcome: "not_found" };
 
-    // Removing somebody mid-session conflicts whatever the reason, so this
-    // refuses on any open check-in — but only one belonging to today, since a
-    // record left open yesterday is a missed check-out rather than a session
-    // in progress, and would otherwise make the instructor undeletable.
     const activeAttendance = await db.collection("attendance").findOne(
       openCheckInTodayFilter(existing._id),
       { session }
@@ -312,14 +280,6 @@ instructorRouter.post(
   })
 );
 
-/**
- * The instructor import, in three steps the Instructors page drives.
- *
- * The browser parses the file, so these take rows rather than an upload: a
- * sheet link is fetched here only because Google does not let the browser
- * read it directly. Rows travel in small batches, so a long sheet shows
- * progress and no single request waits on hundreds of photo downloads.
- */
 instructorRouter.post(
   "/import/sheet",
   requireSuperAdmin,
@@ -335,14 +295,11 @@ instructorRouter.post(
   })
 );
 
-/** Checks a batch and writes nothing. */
 instructorRouter.post(
   "/import/preview",
   requireSuperAdmin,
   validate(instructorImportRowsSchema(MAX_PREVIEW_ROWS)),
   asyncRoute(async (req, res) => {
-    // A photograph that cannot be enrolled is refused one by one otherwise,
-    // after every row has been checked; saying so up front saves the wait.
     if (!isFaceRecognitionConfigured()) {
       return res.status(503).json({ detail: FACE_REASON_MESSAGES.NOT_CONFIGURED });
     }
@@ -351,7 +308,6 @@ instructorRouter.post(
   })
 );
 
-/** Checks a batch again and applies every row that still passes: new instructors are created, existing ones updated. */
 instructorRouter.post(
   "/import",
   requireSuperAdmin,
@@ -374,10 +330,6 @@ instructorRouter.get(
     const db = req.app.locals.db;
     let pagination;
     let includeFeedback = true;
-    // Opt-in, because it is not free. Each link is a local HMAC signature at
-    // roughly 1.3ms, which is nothing for one row and most of a second across a
-    // 600-instructor roster — and every screen that lists instructors would pay
-    // it whether or not it shows a photograph. Only the enrolment screen asks.
     let includePhotoUrl = false;
     try {
       pagination = parsePagination(req.query, {
@@ -407,9 +359,6 @@ instructorRouter.get(
       .limit(pagination.limit)
       .toArray();
     const instructorIds = instructors.map((row) => String(row._id));
-    // The attendance and management screens use only roster/profile fields.
-    // Avoid a windowed scan over attendance for every page unless a legacy
-    // caller explicitly needs the embedded history.
     const attendances = includeFeedback
       ? await loadRecentInstructorFeedbacks(db, instructorIds)
       : [];
@@ -420,17 +369,6 @@ instructorRouter.get(
       grouped.set(String(attendance.instructor_id), rows);
     }
 
-    /**
-     * Reference thumbnails, signed only for the callers that asked.
-     *
-     * The bucket is private, so a link is minted per response and expires. They
-     * are signed together rather than one request per row: the enrolment screen
-     * shows a whole college at once, and a request each would be a round trip
-     * per instructor for a column of small pictures.
-     *
-     * Elevated roles only, matching the contact details below. A BOA sees who
-     * is enrolled; the photograph itself is biometric reference data.
-     */
     const photoUrls = new Map();
     if (includePhotoUrl && isElevated(req.currentUser.role)) {
       const withPhotos = instructors.filter((row) => row.reference_photo_key);
@@ -446,27 +384,15 @@ instructorRouter.get(
       for (const key of Object.keys(serialized)) {
         if (key.startsWith("_private_")) delete serialized[key];
       }
-      // Whether an address exists is not the address itself, and the two were
-      // being conflated: a BOA cannot see the email, so the attendance screen
-      // reported "No email on record" for instructors who have one. Sent for
-      // everybody so the interface can tell absence apart from permission.
       serialized.has_email = Boolean(instructor.email);
-      // How many reference faces are enrolled, not which ones. The list needs
-      // the count to mark an instructor recognition cannot identify; the FaceIds
-      // themselves are biometric identifiers with no use in the browser, so they
-      // are replaced by the count rather than sent alongside it.
       serialized.face_count = Array.isArray(instructor.face_ids)
         ? instructor.face_ids.filter(Boolean).length
         : 0;
       delete serialized.face_ids;
       delete serialized.reference_photo_key;
-      // The link, never the key: a key is a durable handle to a private object,
-      // while this expires on its own.
       if (includePhotoUrl) {
         serialized.reference_photo_url = photoUrls.get(String(instructor._id)) || null;
       }
-      // Contact details are visible to both elevated roles; a BOA still only
-      // sees the instructors at their own college, without contact details.
       if (!isElevated(req.currentUser.role)) {
         delete serialized.email;
         delete serialized.phone_no;
@@ -526,16 +452,6 @@ instructorRouter.put(
   })
 );
 
-/**
- * Sets gender alone for an elevated user, or for a BOA's own college.
- *
- * The AI is given the instructor's gender so it compares against the right
- * reference photos; synced instructors have none, so they are currently
- * judged against both men's and women's examples. The full update route
- * cannot fix that — it requires a college and email the roster never
- * supplied — so this narrow route exists to make the field settable from the
- * table without touching anything else on the record.
- */
 instructorRouter.patch(
   "/:instructorId/gender",
   validate(instructorGenderSchema),
@@ -555,13 +471,6 @@ instructorRouter.patch(
   })
 );
 
-/**
- * Replaces or adds one instructor's reference face.
- *
- * mode=add keeps the faces already enrolled; mode=replace discards them. The
- * checks, storage and indexing order live in enrollReferencePhoto, which the
- * instructor import uses as well.
- */
 instructorRouter.post(
   "/:instructorId/face",
   requireSuperAdmin,
@@ -609,16 +518,11 @@ instructorRouter.post(
       face_count: faceIds.length,
       retired_faces: retiredFaceIds.length,
       quality,
-      // The link to what was just stored, so the row that triggered this can
-      // show the new photograph straight away. Without it the enrolment list
-      // knew the upload had succeeded but had nothing to display until the
-      // whole roster was fetched again.
       photo_url: await getPhotoUrl(photoKey),
     });
   })
 );
 
-/** A short-lived link to the current reference photo, for the admin screen. */
 instructorRouter.get(
   "/:instructorId/face",
   requireSuperAdmin,
@@ -635,8 +539,6 @@ instructorRouter.get(
       has_reference: faceIds.length > 0,
       face_count: faceIds.length,
       face_indexed_at: instructor.face_indexed_at || null,
-      // Null rather than absent when storage is unavailable, so the screen can
-      // say "photo unavailable" instead of "no photo enrolled".
       photo_url: instructor.reference_photo_key
         ? await getPhotoUrl(instructor.reference_photo_key)
         : null,
@@ -644,14 +546,6 @@ instructorRouter.get(
   })
 );
 
-/**
- * Removes an instructor's enrolled faces.
- *
- * Used when a reference turns out to be the wrong person, and when an
- * instructor leaves: the soft delete keeps their attendance history, but there
- * is no reason to keep biometric data in a collection searched on every
- * check-in. Automatic attendance then refuses captures until a reference is enrolled.
- */
 instructorRouter.delete(
   "/:instructorId/face",
   requireSuperAdmin,
@@ -668,8 +562,6 @@ instructorRouter.delete(
     if (faceIds.length && isFaceRecognitionConfigured()) {
       const removed = await deleteFaces(faceIds);
       if (!removed.ok) {
-        // Clearing the record while the collection still held the faces would
-        // leave them searchable with no way to find them again.
         return res.status(503).json({ detail: removed.message, reason: removed.reason });
       }
     }

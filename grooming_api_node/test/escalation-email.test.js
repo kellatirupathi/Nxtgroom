@@ -2,11 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildEscalationEmail } from "../src/services/emailService.js";
 
-/**
- * The URGENT email reporting partners get, worded by the rule that sent it:
- * check-in days in a row. One queued before the change keeps its own words.
- */
-
 const base = {
   name: "Himanshu",
   count: 3,

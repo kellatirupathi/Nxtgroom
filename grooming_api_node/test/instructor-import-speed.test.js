@@ -9,12 +9,6 @@ import {
   previewImportRows,
 } from "../src/services/instructorImport.js";
 
-/**
- * What makes a large import fast without making it unsafe: work runs in
- * parallel up to shared limits, rows for one institute still go in turn, and
- * a photograph checked by the preview is not downloaded or checked again.
- */
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("a limiter never runs more than its maximum at once, and runs everything", async () => {
@@ -48,7 +42,6 @@ test("tasks for one key run in turn, tasks for different keys at once", async ()
     lock("college-b", task("b1", 1)),
     lock(null, task("none", 1)),
   ]);
-  // a2 waits for a1; b1 and the keyless task do not wait for anything.
   assert.ok(log.indexOf("start a2") > log.indexOf("end a1"));
   assert.ok(log.indexOf("start b1") < log.indexOf("end a1"));
   assert.ok(log.indexOf("start none") < log.indexOf("end a1"));
@@ -138,7 +131,6 @@ test("rows are written in parallel, except rows for the same institute", async (
   const deps = {
     photoCache: null,
     faceConfigured: true,
-    // Existing instructors with photos, so no downloads are involved.
     updateInstructor: async (_db, _id, fields) => {
       active += 1;
       perCollege[fields.college_id] += 1;

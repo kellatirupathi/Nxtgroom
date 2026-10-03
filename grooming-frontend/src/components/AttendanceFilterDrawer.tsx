@@ -28,23 +28,11 @@ interface AttendanceFilterDrawerProps {
   escalation: EscalationFilter;
   onEscalationChange: (value: EscalationFilter) => void;
   onClearAll: () => void;
-  /** Rows the current filters leave, so the button says what closing will show. */
   matchCount: number;
 }
 
 const FIELD = 'h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20';
 
-/**
- * The Daily Records filters, in a panel down the right-hand side.
- *
- * Every filter applies the moment it changes - the table behind the panel is
- * the preview - so there is no Apply step to forget. The footer button closes
- * the panel and says how many records the filters leave.
- *
- * Closed by the backdrop, the X, the footer button or Escape. Not by a
- * document-wide outside click: the date filter's menu is portalled to the body,
- * so a click in it is "outside" this panel, and choosing a date would close it.
- */
 export default function AttendanceFilterDrawer({
   open,
   onClose,

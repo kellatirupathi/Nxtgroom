@@ -26,13 +26,10 @@ function formatDateTime(value) {
 
 function displayStatus(status) {
   const normalized = String(status || "").toLowerCase();
-  // review_required is still read, never written: records evaluated before the
-  // review flag was removed keep it, and their emails must not read "pending".
   if (["compliant", "done", "review_required", "needs_review"].includes(normalized)) {
     return "COMPLIANT";
   }
   if (["non_compliant", "non-compliant", "fail"].includes(normalized)) return "NON-COMPLIANT";
-  // Neither a pass nor a failure: the photograph did not show enough to judge.
   if (normalized === "unassessed") return "NOT ASSESSED";
   if (["error", "analysis_error"].includes(normalized)) return "ANALYSIS UNAVAILABLE";
   return "AI ANALYSIS PENDING";
@@ -157,8 +154,6 @@ function getSesConfig() {
   };
 }
 
-// Cache per region: a cached client built for a previous region would keep
-// sending to that region after the configured region changes.
 function getSesClient(config) {
   if (!sesClient || sesClient.__region !== config.region) {
     sesClient = new SESClient({
@@ -225,10 +220,6 @@ function roleLabel(role) {
   return ROLE_LABELS[role] || "user";
 }
 
-/**
- * Invitation for an account created without a password. The link is the only
- * way in, so it is stated plainly along with when it stops working.
- */
 export function buildAccountInviteEmail({ name, role, appUrl, token, expiresInDays = 7 }) {
   const person = name || "there";
   const link = `${appUrl}/reset-password?token=${encodeURIComponent(token)}`;
@@ -260,11 +251,6 @@ export function buildAccountInviteEmail({ name, role, appUrl, token, expiresInDa
   };
 }
 
-/**
- * Sent when an administrator sets the password themselves. The password is
- * deliberately not included: it was chosen by someone else, and email is not
- * a safe channel for it.
- */
 export function buildAccountCreatedEmail({ name, email, role, appUrl }) {
   const person = name || "there";
   const signIn = `${appUrl}/`;
@@ -296,7 +282,6 @@ export function buildAccountCreatedEmail({ name, email, role, appUrl }) {
   };
 }
 
-/** Self-service reset. Short-lived because it is triggered by an anonymous request. */
 export function buildPasswordResetEmail({ name, appUrl, token, expiresInMinutes = 60 }) {
   const person = name || "there";
   const link = `${appUrl}/reset-password?token=${encodeURIComponent(token)}`;
@@ -361,7 +346,6 @@ const ATTIRE_LABELS = {
   KURTA_PAJAMA: "Kurta with payjama",
 };
 
-/** Weekly summary with a link to the instructor's own report page. */
 export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
   const person = name || "there";
   const range = `${dayLabel(summary.week_start)} to ${dayLabel(summary.week_end)}`;
@@ -390,10 +374,6 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
       `Here is your appearance summary for ${range}.`,
       "",
       `Days present: ${summary.present_days} of 6`,
-      // No "needs review" figure: summariseWeek does not produce one. It was
-      // interpolated anyway, so every weekly summary told its reader "Needs
-      // review: undefined". The status it counted was removed from evaluation
-      // and only the label survived.
       `Compliant: ${summary.compliant_days} | Non-compliant: ${summary.non_compliant_days}`,
       `Attire: formal ${summary.formal_days}, saree ${summary.saree_days}, kurti ${summary.kurti_days}`,
       ...(summary.missed_checkouts ? [`Missed check-outs: ${summary.missed_checkouts}`] : []),
@@ -431,7 +411,6 @@ export function buildWeeklyReportEmail({ name, summary, reportUrl }) {
   };
 }
 
-/** Sent as soon as an analysis finishes badly, to the instructor and the RPs. */
 export function buildGroomingAlertEmail({
   name,
   status,
@@ -446,9 +425,6 @@ export function buildGroomingAlertEmail({
   if (status === "compliant") {
     return buildCompliantReportEmail({ person, eventLabel, summary, dateLabel, reportUrl, forReviewer, kind });
   }
-  // Alerts only fire on a failure now that manual review is gone, but the
-  // wording still handles the other case rather than asserting a status that
-  // an older queued job might not have.
   const heading = status === "non_compliant"
     ? "did not meet the appearance standards"
     : "needs attention";
@@ -488,15 +464,6 @@ export function buildGroomingAlertEmail({
   };
 }
 
-/**
- * A result that met the standards, for reporting partners.
- *
- * Partners used to hear only about failures, which told them nothing about
- * the instructors who were getting it right. Same shape as the alert - the
- * name and date in the subject, the summary, the link - so the two read as a
- * pair, marked Compliant in the subject and green in the body so it is never
- * mistaken for one.
- */
 function buildCompliantReportEmail({ person, eventLabel, summary, dateLabel, reportUrl, forReviewer, kind }) {
   const eventTitle = kind === "checkout" ? "Check-out" : "Check-in";
   const subject = forReviewer
@@ -552,21 +519,9 @@ function clockTime(value) {
   }).format(parsed);
 }
 
-/**
- * Sent to reporting partners when one instructor has failed the appearance
- * standards three or more times in a Monday-to-Sunday week, and again at each
- * further failure that week.
- *
- * Every occurrence is listed with its own summary and report link, so a
- * partner can see the whole week at once rather than piecing it together from
- * separate alerts. The count in the subject is the week's total, which is why
- * a fourth failure sends a new message rather than repeating the third.
- */
 export function buildEscalationEmail({ name, count, weekStart, weekEnd, occurrences = [], streak = false }) {
   const person = name || "Instructor";
   const range = `${shortDay(weekStart)} to ${shortDay(weekEnd)}`;
-  // A streak escalation counts days in a row; one queued before the change
-  // still counts results, and keeps its wording.
   const subject = streak
     ? `URGENT action needed: Check-in appearance report - ${person} non-compliant ${count} days in a row (${range})`
     : `URGENT action needed: Check-in appearance report - ${person} non-compliant ${count} times this week (${range})`;
@@ -632,7 +587,6 @@ export function buildEscalationEmail({ name, count, weekStart, weekEnd, occurren
   };
 }
 
-/** Friendly nudge when a check-in or check-out was missed. */
 export function buildAttendanceReminderEmail({ name, kind, dateLabel }) {
   const person = name || "there";
   const missedCheckout = kind === "checkout";
@@ -668,17 +622,6 @@ export function buildAttendanceReminderEmail({ name, kind, dateLabel }) {
   };
 }
 
-/**
- * The daily report: a short line with the link to the full page, then one
- * table row per instructor.
- *
- * Kept compact on purpose. Gmail hides everything past about 100 KB of HTML
- * behind "View entire message", so the cell styling lives once in the head
- * rather than on every cell, and failures are sorted to the top by the report
- * itself so they are what a clipped email still shows. The link at the top
- * always opens the whole table.
- */
-/** The check-in's verdict as the daily report's Status column reads it. */
 function dailyStatusLabel(status) {
   return status === "non_compliant" ? "Non-compliant" : status === "compliant" ? "Compliant" : "-";
 }

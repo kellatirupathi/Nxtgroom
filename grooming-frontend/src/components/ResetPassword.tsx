@@ -8,7 +8,6 @@ const MIN_LENGTH = 12;
 
 interface ResetPasswordProps {
   token: string;
-  /** Returns to the sign-in screen and clears the token from the URL. */
   onDone: () => void;
 }
 
@@ -25,8 +24,6 @@ export default function ResetPassword({ token, onDone }: ResetPasswordProps) {
   const [done, setDone] = useState(false);
   const toast = useToast();
 
-  // Check the link before showing the form, so an expired link says so
-  // instead of failing only after the user has typed a password twice.
   useEffect(() => {
     let disposed = false;
     apiFetch<{ valid: boolean; email: string; kind: 'invite' | 'reset' }>(

@@ -5,21 +5,11 @@ import { apiFetch } from '../api';
 interface AttendancePhotoCircleProps {
   attendanceId: string;
   kind: 'checkin' | 'checkout';
-  /** Absent when no photo was stored for this half of the record. */
   hasPhoto: boolean;
   label: string;
   onOpen: () => void;
 }
 
-/**
- * The stored photo, shown where the avatar used to be.
- *
- * The record already has a picture of the person taken that day, so a generic
- * silhouette in its place was a placeholder standing in front of the real
- * thing. The bucket is private, so the URL is minted per view and expires;
- * fetching it here rather than embedding it in the list keeps signed links out
- * of any payload that might be cached.
- */
 export default function AttendancePhotoCircle({
   attendanceId,
   kind,
@@ -71,8 +61,6 @@ export default function AttendancePhotoCircle({
     >
       {url ? (
         <>
-          {/* object-top: a check-in photo is full-body, and centring it crops
-              the face, which is the part worth seeing at this size. */}
           <img src={url} alt="" className="h-full w-full object-cover object-top" />
           <span className="absolute inset-0 flex items-center justify-center bg-slate-900/0 text-white opacity-0 transition-all group-hover:bg-slate-900/40 group-hover:opacity-100">
             <Expand size={22} aria-hidden="true" />

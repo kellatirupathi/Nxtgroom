@@ -26,30 +26,11 @@ import { coverSourceRect } from '../lib/cameraGeometry';
 import { openCameraStream } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 
-/**
- * A viewfinder for photographing several people at once.
- *
- * Deliberately a separate component from CameraCapture rather than a mode on
- * it. That one is the camera every college's attendance currently runs
- * through, and the differences here are not a flag or two: the frame is
- * measured by a different gate, saved without the standing outline's crop, and
- * described to the people in front of it in different words. Threading all of
- * that through the working component as branches would put the group's
- * behaviour inside the single person's code path, which is the one place it
- * must never be.
- *
- * The cost is honest duplication — the stream plumbing below is the same
- * plumbing, and a fix to one will need making in the other. That is the price
- * of leaving the working screen untouched, and it is the right way round while
- * this is new.
- */
-
 interface GroupCameraCaptureProps {
   facing: 'user' | 'environment';
   onCapture: (file: File) => void | Promise<void>;
 }
 
-/** Failure modes worth telling apart: the fix differs for each. */
 function describeCameraError(error: unknown): string {
   const name = (error as { name?: string })?.name;
   if (name === 'NotAllowedError' || name === 'SecurityError') {
@@ -75,18 +56,8 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
   const [reading, setReading] = useState<GroupReading>(INITIAL_GROUP_STATE.reading);
   const [steadyFrames, setSteadyFrames] = useState(0);
   const [manualOffered, setManualOffered] = useState(false);
-  /**
-   * A box per face, from the raw reading rather than the stabilised one.
-   *
-   * The verdict is held steady so the guidance does not flicker; the boxes are
-   * not, because a box lagging the face it belongs to is worse than a box that
-   * is briefly wrong, and nothing depends on them.
-   */
   const [faceBoxes, setFaceBoxes] = useState<FaceBox[]>([]);
 
-  // All read by the inspection loop on every tick, so they are refs: as state
-  // they would be captured stale by the running timer and the camera would fire
-  // during its own cooldown.
   const cooldownUntilRef = useRef(0);
   const firingRef = useRef(false);
   const verdictRef = useRef<GroupVerdict>('NO_PEOPLE');
@@ -94,13 +65,9 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
   const unusableRef = useRef(0);
   const manualOfferedRef = useRef(false);
   const shootRef = useRef<(options?: { viaAuto?: boolean }) => Promise<void>>(async () => {});
-  /** What each chip said last; see stabilizeBoxLabels. */
   const labelMemoryRef = useRef<LabelMemory>({});
-  /** What this camera's still photographs can do; see stillCapture. */
   const stillStateRef = useRef(createStillCaptureState());
-  /** True while the camera is being opened, so a wake-up does not open it twice. */
   const openingRef = useRef(false);
-  /** Bumped to reopen the camera after the screen was hidden. */
   const [streamGeneration, setStreamGeneration] = useState(0);
 
   const stop = useCallback(() => {
@@ -122,10 +89,6 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
       }
       openingRef.current = true;
       try {
-        // The preview only needs 1080p; the photograph itself is taken as a
-        // full-resolution still where the device allows - see stillCapture.
-        // Retried while the camera is busy, because the one-person screen may
-        // have let go of it only a moment ago - see openCameraStream.
         const stream = await openCameraStream({
           video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
@@ -154,7 +117,6 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
     };
   }, [facing, stop, streamGeneration]);
 
-  /** Watches the live frame for a group standing still and facing this way. */
   useEffect(() => {
     if (error) return undefined;
     let disposed = false;
@@ -169,13 +131,11 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
     let stableState: StableGroupState = INITIAL_GROUP_STATE;
 
     const inspect = async () => {
-      // As on the one-person camera: say it is starting until it has.
       if (!fullBodyDetectorSettled()) {
         setReading((current) => ({ ...current, guidance: DETECTOR_STARTING_GUIDANCE }));
       }
       const detector = await loadFullBodyDetector();
       clearTimeout(detectorGraceTimer);
-      // As on the one-person camera: this preview's exact shape, prepared first.
       const preview = viewportRef.current;
       if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
       const tick = async () => {
@@ -195,11 +155,6 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
         const stable = stableState.reading;
         setReading(stable);
         verdictRef.current = stable.verdict;
-        // Positions follow the live reading; the chips do not. A chip built
-        // from a threshold would flip on every tick as an ankle score wandered
-        // across it, so a label must be seen three times before it changes.
-        // And once the group is ready no chip is shown at all: an instruction
-        // under a face the countdown is running for is a contradiction.
         const labelled = stabilizeBoxLabels(labelMemoryRef.current, next.boxes ?? []);
         labelMemoryRef.current = labelled.memory;
         setFaceBoxes(stable.verdict === 'GROUP_READY' ? withoutLabels(labelled.boxes) : labelled.boxes);
@@ -235,8 +190,6 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
     };
   }, [error, facing]);
 
-  // A held stream keeps the camera indicator on and blocks other apps. Coming
-  // back, the camera is opened again - unless an opening is already under way.
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') {
@@ -260,25 +213,12 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
     setCapturing(true);
     try {
       const viewport = viewportRef.current;
-      /**
-       * The whole visible preview, not the standing outline.
-       *
-       * The single-person camera crops to a tall narrow guide, which is right
-       * for one person filling it and would cut the people at both ends off a
-       * group. Everybody who was in the picture has to be in the photograph, or
-       * they are photographed and never recorded.
-       */
       const crop = coverSourceRect(
         video.videoWidth,
         video.videoHeight,
         viewport?.clientWidth || video.videoWidth,
         viewport?.clientHeight || video.videoHeight,
       );
-      // Taken from the camera's full-resolution still where the device can,
-      // at up to 3072 on the long side: a group spends its pixels on several
-      // faces. The video frame otherwise. Unmirrored either way, or text on a
-      // lanyard reads backwards. Quality a notch under the single camera's,
-      // because this photograph is several times larger to upload.
       const photo = await capturePhoto({
         video,
         track: streamRef.current?.getVideoTracks()[0] ?? null,
@@ -287,8 +227,6 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
         quality: 0.9,
         state: stillStateRef.current,
       });
-      // The shutter stays locked until the whole group has been identified,
-      // recorded and answered for, so a slow request cannot fire a second frame.
       await onCapture(new File([photo.blob], `group-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     } catch {
       setError('The photo could not be captured. Try again.');
@@ -333,16 +271,8 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
               style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
             />
 
-            {/* A box on every face the camera has found: green on a face it
-                could identify, amber on one turned away, and a chip under
-                anyone with something to fix. This is what makes "2 people are
-                not fully in frame" usable: the message says how many and the
-                chips say which. */}
             {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
-            {/* A border rather than a standing outline: the whole frame is the
-                photograph here, so what it shows is the edge of what will be
-                kept. Green once the group is ready to be photographed. */}
             {!starting && (
               <div
                 aria-hidden="true"

@@ -15,34 +15,12 @@ import {
 import { localDateKey } from "./instructorReports.js";
 import { failedCheckpointRows } from "../stores/evaluationStore.js";
 
-/**
- * The administrators' Dashboard: today's attendance and grooming results, the
- * recent trend, and where attention is needed.
- *
- * Everything is derived from the records the rest of the application already
- * writes. Nothing here is stored, and no count is kept anywhere that could
- * drift from Daily Records: a status is read the same way the Daily Records
- * badge reads it, and an escalation is counted by the same function that sends
- * reporting partners the URGENT email.
- *
- * The work is split so the arithmetic can be tested without a database:
- * loadDashboard runs the queries, buildDashboard turns their rows into the
- * response.
- */
-
-/** Working days shown on the trend chart. The page offers 7, 14 and 30. */
 export const TREND_WORKING_DAYS = 30;
-/** Rows in the most-failed checkpoints list. */
 export const FAILED_CHECKPOINT_LIMIT = 8;
 
 const COMPLIANT_STATUSES = new Set(["compliant", "done", "needs_review", "review_required"]);
 const NON_COMPLIANT_STATUSES = new Set(["non_compliant", "fail"]);
 
-/**
- * One check-in's result, read exactly as the Daily Records badge reads it
- * (normalizeAttendanceStatus in the frontend), so the Dashboard and the table
- * can never count the same record differently.
- */
 export function dashboardStatus(status) {
   const value = String(status || "").toLowerCase();
   if (COMPLIANT_STATUSES.has(value)) return "compliant";
@@ -63,10 +41,6 @@ function isSundayKey(dayKey) {
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay() === 0;
 }
 
-/**
- * The last `count` working days ending with `todayKey`, oldest first.
- * The working week is Monday to Saturday, as in the weekly report.
- */
 export function workingDayKeys(todayKey, count) {
   const keys = [];
   for (let offset = 0; keys.length < count && offset < count * 2 + 7; offset += 1) {
@@ -76,14 +50,12 @@ export function workingDayKeys(todayKey, count) {
   return keys;
 }
 
-/** The working day before `todayKey`: Saturday for a Monday. */
 export function previousWorkingDayKey(todayKey) {
   let key = addDaysToKey(todayKey, -1);
   while (isSundayKey(key)) key = addDaysToKey(key, -1);
   return key;
 }
 
-/** Who a checkpoint applies to, from the code the checkpoint tables give it. */
 export function checkpointAudience(code) {
   const value = String(code || "");
   if (value.startsWith("M_")) return "Men";
@@ -114,11 +86,6 @@ function mostFrequent(values) {
   return best?.value ?? null;
 }
 
-/**
- * Mon–Sat days from `fromKey` to `toKey`, both inclusive. A range that holds
- * no working day at all - a single Sunday someone chose - counts as the one
- * day it is, so its check-ins are still measured against the roster.
- */
 export function countWorkingDays(fromKey, toKey) {
   if (!fromKey || !toKey || fromKey > toKey) return 0;
   let count = 0;
@@ -130,15 +97,6 @@ export function countWorkingDays(fromKey, toKey) {
   return count || (calendarDays ? 1 : 0);
 }
 
-/**
- * One row per active institute for the Institutes table.
- *
- * `present` counts instructor-days: one per instructor per day they checked
- * in, which the one-record-per-day rule makes the same as their identified
- * check-ins. `expected` is the roster times the working days in the range, so
- * over one day the column reads "present / instructors" as it always has, and
- * over a week it reads instructor-days against the days that were possible.
- */
 export function buildInstituteRows({
   colleges = [],
   roster = [],
@@ -184,15 +142,6 @@ export function buildInstituteRows({
   });
 }
 
-/**
- * Turns the loaded rows into the Dashboard response.
- *
- * `weekRecords` covers this Monday-to-today plus the previous working day, so
- * today's figures, the week's escalations and yesterday's missed check-outs
- * all come from one read. `trendRows` are per-day totals already grouped by the
- * database. `failedRows` are the FAIL checkpoint rows of this week's
- * evaluations, one per failed checkpoint.
- */
 export function buildDashboard({
   now,
   timeZone,
@@ -215,7 +164,6 @@ export function buildDashboard({
   const today = records.filter((record) => record._day === todayKey);
   const todayIdentified = today.filter(identified);
 
-  // ---- Today ---------------------------------------------------------------
   const presentIds = new Set(
     todayIdentified
       .map((record) => String(record.instructor_id))
@@ -233,7 +181,6 @@ export function buildDashboard({
     (record) => record._day === previousDay && identified(record) && !record.check_out_time
   ).length;
 
-  // ---- Trend ---------------------------------------------------------------
   const trendByDay = new Map(trendRows.map((row) => [String(row._id), row]));
   const totalInstructors = roster.length;
   const trend = workingDayKeys(todayKey, TREND_WORKING_DAYS).map((day) => {
@@ -255,14 +202,12 @@ export function buildDashboard({
     ? percent(Number(lastWeekRow.compliant) || 0, (Number(lastWeekRow.compliant) || 0) + (Number(lastWeekRow.non_compliant) || 0))
     : null;
 
-  // ---- Failed checkpoints, this week ----------------------------------------
   const weekRecordsById = new Map(
     records.filter((record) => record._day >= weekStart).map((record) => [String(record._id), record])
   );
   const countedFailures = failedRows.filter((row) => {
     const record = weekRecordsById.get(String(row.attendance_id));
     if (!record) return false;
-    // A check-out result counts only while the check-out it describes exists.
     if (row.kind === "checkout") return Boolean(record.check_out_time) && !record.checkout_deleting_at;
     return true;
   });
@@ -277,7 +222,6 @@ export function buildDashboard({
     .slice(0, FAILED_CHECKPOINT_LIMIT)
     .map((row) => ({ ...row, audience: checkpointAudience(row.code) }));
 
-  // ---- Escalations, this week ------------------------------------------------
   const weekByInstructor = new Map();
   for (const record of weekRecordsById.values()) {
     if (!identified(record)) continue;
@@ -293,7 +237,6 @@ export function buildDashboard({
   }
   const escalations = [];
   for (const [instructorId, group] of weekByInstructor) {
-    // Days in a row with a non-compliant check-in, the rule the email uses.
     const count = longestFailedStreak(group, weekStartKey(group[0].attendance_day)).length;
     if (count < ESCALATION_THRESHOLD) continue;
     const latest = group.reduce((a, b) => (new Date(a.check_in_time || 0) > new Date(b.check_in_time || 0) ? a : b));
@@ -353,14 +296,6 @@ const ACTIVE = { $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }]
 
 export class DashboardCollegeNotFound extends Error {}
 
-/**
- * Runs the Dashboard's queries and builds the response.
- *
- * Every attendance read filters on `date`, which is indexed on its own and
- * behind college_id, rather than on attendance_day, which is indexed only
- * behind instructor_id. Tombstoned records (deleting_at) are excluded
- * everywhere, since they are already on their way out of Daily Records.
- */
 export async function loadDashboard(db, { collegeId = null, now = new Date() } = {}) {
   const timeZone = runtimeConfig().appTimeZone;
   const todayKey = localDateKey(now, timeZone);
@@ -378,9 +313,6 @@ export async function loadDashboard(db, { collegeId = null, now = new Date() } =
   const recordsFrom = previousDay < weekStart ? previousDay : weekStart;
   const recordBounds = dateRangeBoundsInTimeZone(recordsFrom, todayKey, timeZone);
   const trendDays = workingDayKeys(todayKey, TREND_WORKING_DAYS);
-  // The oldest trend day, or a week before today when the comparison day is
-  // further back than that (it never is with 30 working days, but the bound
-  // should not depend on it).
   const trendFrom = [trendDays[0], addDaysToKey(todayKey, -7)].sort()[0];
   const trendBounds = dateRangeBoundsInTimeZone(trendFrom, todayKey, timeZone);
 
@@ -489,12 +421,6 @@ function validDayKey(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-/**
- * Normalises the Institutes table's date range. Either end may be empty, which
- * leaves that side open ("All time" sends both empty). The end is capped at
- * today: a day that has not happened has no attendance to count, and counting
- * it as a working day would drag every institute's figure down.
- */
 export function normalizeInstituteRange({ from = "", to = "" } = {}, todayKey) {
   for (const [name, value] of [["from", from], ["to", to]]) {
     if (typeof value !== "string" || (value !== "" && !validDayKey(value))) {
@@ -507,14 +433,6 @@ export function normalizeInstituteRange({ from = "", to = "" } = {}, todayKey) {
   return { from, to: end };
 }
 
-/**
- * The Institutes table for any date range, counted by the database.
- *
- * Grouped in one aggregation rather than read record by record, because "All
- * time" covers every attendance record ever written. An identified record is a
- * check-in, counted as compliant or non-compliant by the same statuses
- * dashboardStatus reads. Historical unnamed arrivals do not count as attendance.
- */
 export async function loadInstituteStats(db, { from = "", to = "", now = new Date() } = {}) {
   const timeZone = runtimeConfig().appTimeZone;
   const todayKey = localDateKey(now, timeZone);
@@ -566,7 +484,6 @@ export async function loadInstituteStats(db, { from = "", to = "", now = new Dat
     ]).toArray(),
   ]);
 
-  // "All time" starts at the first recorded day rather than an invented date.
   const firstRecorded = groups.map((row) => row.first_day).filter(Boolean).sort()[0] || range.to;
   const start = range.from || (firstRecorded < range.to ? firstRecorded : range.to);
   const workingDays = countWorkingDays(start, range.to);
@@ -586,12 +503,6 @@ export async function loadInstituteStats(db, { from = "", to = "", now = new Dat
   };
 }
 
-/**
- * The page refreshes itself every 30 seconds for every administrator who has
- * it open, so a response is shared for a few seconds rather than recomputed
- * per request. Short enough that a new check-in still shows within one
- * refresh.
- */
 const CACHE_MS = 10_000;
 const cache = new Map();
 
@@ -602,12 +513,10 @@ export function clearDashboardCache() {
 
 const rangeCache = new Map();
 
-/** Same short sharing as the Dashboard, keyed by the requested range. */
 export async function cachedInstituteStats(db, { from = "", to = "", now = new Date() } = {}) {
   const key = `${from}|${to}`;
   const hit = rangeCache.get(key);
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.promise;
-  // Validated before anything is cached, so a bad range is never stored.
   normalizeInstituteRange({ from, to }, localDateKey(now, runtimeConfig().appTimeZone));
   if (rangeCache.size > 50) rangeCache.clear();
   const promise = loadInstituteStats(db, { from, to, now });
@@ -624,7 +533,6 @@ export async function cachedDashboard(db, { collegeId = null, now = new Date() }
   if (hit && now.getTime() - hit.at < CACHE_MS) return hit.promise;
   const promise = loadDashboard(db, { collegeId, now });
   cache.set(key, { at: now.getTime(), promise });
-  // A failed load is not kept, so the next refresh tries again.
   promise.catch(() => {
     if (cache.get(key)?.promise === promise) cache.delete(key);
   });

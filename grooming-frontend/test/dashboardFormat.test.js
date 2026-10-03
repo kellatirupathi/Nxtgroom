@@ -10,8 +10,6 @@ import {
 } from '../src/dashboardFormat.ts';
 
 test('day keys format as the calendar date they name, in any viewer time zone', () => {
-  // A key parsed as local midnight moves back a day west of UTC; these are
-  // read as UTC calendar dates so 29 September stays 29 September.
   assert.match(shortDayLabel('2026-09-29'), /29 Sep/);
   assert.match(shortDayLabel('2026-09-14'), /14 Sep/);
   assert.equal(weekdayLabel('2026-09-22'), 'Tuesday');

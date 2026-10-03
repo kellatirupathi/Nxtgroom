@@ -14,7 +14,6 @@ interface GoogleCredentialResponse {
   credential?: string;
 }
 
-/** Minimal surface of the Google Identity Services global we rely on. */
 interface GoogleIdentityServices {
   accounts: {
     id: {
@@ -38,7 +37,6 @@ declare global {
 
 let scriptPromise: Promise<void> | null = null;
 
-/** Loads the Google Identity script once, shared across mounts. */
 function loadGoogleScript(): Promise<void> {
   if (scriptPromise) return scriptPromise;
   scriptPromise = new Promise<void>((resolve, reject) => {
@@ -77,19 +75,11 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  // Keep the latest callbacks reachable from Google's callback without
-  // re-initialising the button on every parent render.
   const handlersRef = useRef({ onLogin, onError });
   handlersRef.current = { onLogin, onError };
 
-  // The server decides whether Google sign-in is available, so the button
-  // never renders against a missing or stale client id.
   useEffect(() => {
     let disposed = false;
-    // Google refuses to serve its sign-in script inside a WebView, so the
-    // button can never work in the Android app. Reporting that as an error on
-    // every launch made a working app look broken; the field is simply not
-    // offered there, and email sign-in is unaffected.
     if (isNativeApp()) {
       setConfig({ enabled: false, client_id: null });
       return () => { disposed = true; };
@@ -117,9 +107,6 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
       }
       setBusy(true);
       try {
-        // On phones the Google prompt takes over the tab, and returning can
-        // drop a connection opened while the page was hidden. The credential
-        // is still valid, so retry rather than making the user start over.
         let data: LoginResponse | undefined;
         let lastError: unknown;
         for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -132,8 +119,6 @@ export default function GoogleSignInButton({ onLogin, onError, disabled }: Googl
             break;
           } catch (attemptError) {
             lastError = attemptError;
-            // A rejected account or expired credential will fail identically
-            // every time; only retry transport-level failures.
             const status = (attemptError as { status?: number })?.status;
             if (status !== undefined) throw attemptError;
             if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));

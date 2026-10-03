@@ -9,8 +9,6 @@ import { ToastProvider } from './components/Toast';
 const container = document.getElementById('root');
 if (!container) throw new Error('Root container #root was not found in the document.');
 
-// Applied before first paint so the app never flashes an unpadded frame
-// under the status bar.
 markNativeShell();
 
 createRoot(container).render(

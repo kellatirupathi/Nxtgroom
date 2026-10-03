@@ -3,18 +3,6 @@ import { test } from "node:test";
 import { createDynamoClient } from "../src/config/dynamo.js";
 import { ensureDynamoTables } from "../src/stores/dynamoTables.js";
 
-/**
- * Two problems met while creating the first table on the server:
- *
- * - With the DynamoDB keys missing, the client fell back to the SDK's default
- *   credentials, i.e. the SES sender's AWS_ACCESS_KEY_ID, and the failure read
- *   as AccessDenied for the mail user.
- * - Point-in-time recovery was switched on immediately after CreateTable,
- *   AWS answered ContinuousBackupsUnavailableException, and running the
- *   command again skipped the table because it already existed, leaving it
- *   without backups.
- */
-
 test("a missing DynamoDB key is refused instead of falling back to the SES key", () => {
   const base = { region: "ap-south-1", endpoint: "", tablePrefix: "facultytrack-" };
   assert.throws(
@@ -30,7 +18,6 @@ test("a missing DynamoDB key is refused instead of falling back to the SES key",
   createDynamoClient({ ...base, endpoint: "http://localhost:8001", accessKeyId: "", secretAccessKey: "" }).destroy();
 });
 
-/** Answers DescribeTable as "exists" and fails backups `unavailable` times first. */
 function fakeAws({ exists = true, unavailable = 0, backupError = null } = {}) {
   const calls = [];
   let backupAttempts = 0;

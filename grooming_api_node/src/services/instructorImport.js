@@ -13,34 +13,14 @@ import {
   toSheetCsvUrl,
 } from "./remoteFetch.js";
 
-/**
- * Adding instructors in bulk from a CSV file or a Google Sheet.
- *
- * The browser reads the file and sends the rows here in small batches, twice:
- * once to be checked (preview) and once, for the rows that passed, to be
- * added (commit). Every rule is applied on both passes, since the roster can
- * change between them. A row is either added whole, photograph included, or
- * reported with the reasons it was not; nothing half-valid reaches the roster.
- */
-
-/** The roles the Instructors form offers, in its upper-case stored form. */
 export const IMPORT_ROLES = ["INSTRUCTOR", "CENTRAL_INSTRUCTOR", "CENTRAL_TEAM", "MENTOR", "OTHER"];
 
-/** "CENTRAL_TEAM" as "Central Team", for messages. */
 function roleWords(role) {
   return role.toLowerCase().split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ");
 }
 
 const ROLE_CHOICES = `${IMPORT_ROLES.slice(0, -1).map(roleWords).join(", ")} or ${roleWords(IMPORT_ROLES.at(-1))}`;
 
-/**
- * What separates two values typed into one cell, per field.
- *
- * A cell sometimes holds two emails or two phone numbers; the first is the
- * one used. The separators differ by field because a comma is part of a name
- * ("Nair, Anjali") or an institute, and a slash is part of every link, so
- * those are only split where they cannot belong to a single value.
- */
 const MULTI_VALUE_SEPARATORS = {
   name: /[\n;|]/,
   email: /[\s,;/|]+/,
@@ -52,7 +32,6 @@ const MULTI_VALUE_SEPARATORS = {
   photo_url: /[\s,;|]+/,
 };
 
-/** The first of several values in one cell, or the whole cell when there is one. */
 export function firstValue(field, value) {
   const whole = text(value);
   const separator = MULTI_VALUE_SEPARATORS[field];
@@ -60,24 +39,11 @@ export function firstValue(field, value) {
   return whole.split(separator).map((part) => part.trim()).find(Boolean) ?? "";
 }
 
-/** Rows per preview request: each may download and check a photograph. */
 export const MAX_PREVIEW_ROWS = 50;
-/** Rows per commit request: each also stores and indexes a photograph. */
 export const MAX_COMMIT_ROWS = 25;
-/** Photographs fetched and checked at once within one request. */
 const PHOTO_CONCURRENCY = 12;
-/** Rows written at once within one request; one institute's rows still go in turn. */
 const COMMIT_CONCURRENCY = 6;
 
-/**
- * Runs at most `max` of the given tasks at once, across every caller.
- *
- * The browser sends several batches in parallel, so a per-request limit
- * alone would multiply. These are shared by all import requests in the
- * process: downloads bound memory and CPU for resizing, face calls keep
- * Rekognition under its per-second quota (the SDK retries a throttled call,
- * but only a few times).
- */
 export function createLimiter(max) {
   let active = 0;
   const queue = [];
@@ -103,12 +69,6 @@ const positiveInt = (value, fallback) => {
 const downloadSlots = createLimiter(positiveInt(process.env.IMPORT_DOWNLOAD_CONCURRENCY, 12));
 const faceSlots = createLimiter(positiveInt(process.env.IMPORT_FACE_CONCURRENCY, 8));
 
-/**
- * Runs tasks for the same key one after another, and tasks for different
- * keys at once. Rows are written in parallel, but creating or moving an
- * instructor takes a transaction on their institute's record, and two at
- * once on the same institute would only conflict and retry.
- */
 export function createKeyedLock() {
   const tails = new Map();
   return async (key, task) => {
@@ -130,14 +90,6 @@ export function createKeyedLock() {
 
 const collegeLock = createKeyedLock();
 
-/**
- * Photographs already downloaded and checked, by link, so the import does
- * not fetch and face-check again what the preview just did. Only a photo
- * that passed is kept; it is dropped once used, after half an hour, or when
- * the memory budget (IMPORT_PHOTO_CACHE_MB, 200 MB by default, about 600
- * resized photographs) needs the room, oldest first. A photo not found here
- * is simply fetched again, so eviction only costs time.
- */
 export class PhotoCache {
   constructor({ maxBytes = positiveInt(process.env.IMPORT_PHOTO_CACHE_MB, 200) * 1024 * 1024, ttlMs = 30 * 60_000, now = Date.now } = {}) {
     this.maxBytes = maxBytes;
@@ -194,29 +146,15 @@ function text(value) {
   return value == null ? "" : String(value).trim();
 }
 
-/**
- * A value reduced to lower-case letters and digits, so case, spacing and
- * punctuation never decide a match: "Hyderabad – Kondapur Campus" and
- * "hyderabad-kondapur campus" are the same institute.
- */
 function comparable(value) {
   return text(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
-/**
- * One of IMPORT_ROLES from however a sheet spells it: "Central Instructor",
- * "central-instructor", "CENTRAL_INSTRUCTOR" and "Central Team." all match.
- * Anything else is null.
- */
 export function normalizeImportRole(value) {
   const key = comparable(value);
   return IMPORT_ROLES.find((role) => comparable(role) === key) ?? null;
 }
 
-/**
- * MALE or FEMALE from M, Male, Man, F, Female or Woman in any case;
- * anything else is null.
- */
 export function normalizeImportGender(value) {
   const key = comparable(value);
   if (["m", "male", "man"].includes(key)) return "MALE";
@@ -224,12 +162,6 @@ export function normalizeImportGender(value) {
   return null;
 }
 
-/**
- * The institute a row names, by its id or by its name ignoring case and
- * spacing. Two institutes can share a name in different cities, and guessing
- * between them would put someone on the wrong campus, so that is an error
- * that asks for the id instead.
- */
 export function matchCollege(value, colleges) {
   const wanted = text(value);
   if (!wanted) return { error: "Institute is missing" };
@@ -243,7 +175,6 @@ export function matchCollege(value, colleges) {
   return { error: `Institute "${wanted}" was not found` };
 }
 
-/** Why a photo link cannot be used, or null when it can. */
 export function photoLinkError(photoUrl) {
   if (!photoUrl) return "Photo link is missing";
   try {
@@ -254,21 +185,6 @@ export function photoLinkError(photoUrl) {
   }
 }
 
-/**
- * Checks one row's fields and returns them in stored form.
- *
- * Errors are sentences an admin can act on, naming the value that was wrong,
- * and every problem in the row is reported at once rather than one per try.
- *
- * `keptRole` is the role on the instructor's record, accepted as it is
- * whether the sheet left it blank or repeated it.
- *
- * `requirePhoto: false` leaves the photo link out of the errors and returns
- * its problem as `photoError` instead, for the import, which only needs a
- * photo when the instructor it creates or updates has none. `keys` carries
- * the email and Employee ID even for a row that failed, so an existing
- * instructor can still be matched.
- */
 export function validateImportFields(raw, colleges, { requirePhoto = true, keptRole = "" } = {}) {
   const errors = [];
   const cell = (field) => firstValue(field, raw?.[field]);
@@ -288,21 +204,14 @@ export function validateImportFields(raw, colleges, { requirePhoto = true, keptR
   else if (!gender) errors.push(`Gender "${genderText}" must be Male or Female`);
 
   const roleText = cell("role");
-  // The role already on record is taken as it is, even one the import would
-  // not accept as a new role, such as a synced "Trainee".
   const role = normalizeImportRole(roleText)
     ?? (keptRole && comparable(roleText) === comparable(keptRole) ? keptRole : null);
   if (!roleText) errors.push("Role is missing");
   else if (!role) errors.push(`Role "${roleText}" must be ${ROLE_CHOICES}`);
 
-  // Required. For an instructor already in the roster a blank cell has been
-  // filled from their record before this point, so only a new instructor,
-  // or one with no institute on record either, is refused for it.
   const institute = matchCollege(cell("institute"), colleges);
   if (institute.error) errors.push(institute.error);
 
-  // Required here although optional on a synced record: an imported
-  // instructor is added by hand, as through the add form, which requires it.
   const employeeId = cell("employee_id");
   if (!employeeId) errors.push("Employee ID is missing");
   else if (employeeId.length > 50) errors.push("Employee ID is longer than 50 characters");
@@ -330,7 +239,6 @@ export function validateImportFields(raw, colleges, { requirePhoto = true, keptR
       email,
       employee_id: employeeId,
       role,
-      // What the tables display, as the add form sends it.
       instructor_role: role,
       gender,
       college_id: String(institute.college._id),
@@ -341,11 +249,6 @@ export function validateImportFields(raw, colleges, { requirePhoto = true, keptR
   };
 }
 
-/**
- * The instructors already holding any of the emails or Employee IDs given,
- * grouped by each. Removed instructors are included: their Employee ID is
- * still reserved by the unique index, so a row using it must be told.
- */
 export async function findMatchingInstructors(db, keys) {
   const emails = [...new Set(keys.map((key) => key.email).filter(Boolean))];
   const employeeIds = [...new Set(keys.map((key) => key.employee_id).filter(Boolean))];
@@ -371,15 +274,6 @@ export async function findMatchingInstructors(db, keys) {
   return found;
 }
 
-/**
- * The existing instructor a row updates, if any, or why it cannot.
- *
- * A row matching someone by email or by Employee ID updates that person
- * rather than being refused. What cannot be settled automatically is
- * flagged: the email and the Employee ID belonging to two different people,
- * an email shared by several instructors, and an Employee ID still reserved
- * by someone who was removed.
- */
 export function matchExisting(keys, found) {
   const isActive = (row) => !row.deleted_at;
   const byEmail = (found.byEmail.get(keys.email) || []).filter(isActive);
@@ -410,13 +304,6 @@ export function matchExisting(keys, found) {
   };
 }
 
-/**
- * Downloads, checks and normalizes the photograph a row links to.
- *
- * Throws an Error whose message is the reason shown against the row. A link
- * that opens a web page instead of an image is the usual mistake - a Drive
- * file not shared publicly returns the sign-in page - so it is named as such.
- */
 export async function loadImportPhoto(link, { fetcher = fetchPublicUrl } = {}) {
   let response;
   try {
@@ -437,7 +324,6 @@ export async function loadImportPhoto(link, { fetcher = fetchPublicUrl } = {}) {
   }
 }
 
-/** A small square preview, sent back so the admin can see whose face it is. */
 export async function photoThumbnail(buffer) {
   const small = await sharp(buffer)
     .resize(96, 96, { fit: "cover", position: "attention" })
@@ -446,10 +332,6 @@ export async function photoThumbnail(buffer) {
   return `data:image/jpeg;base64,${small.toString("base64")}`;
 }
 
-/**
- * Fetches and checks one row's photograph, including the face check when
- * recognition is configured. Returns { normalized, quality } or { error }.
- */
 async function checkPhoto(link, deps) {
   let normalized;
   try {
@@ -482,12 +364,8 @@ function resolveDeps(deps = {}) {
     fetcher: deps.fetcher || fetchPublicUrl,
     checkQuality: deps.checkQuality || checkFaceQuality,
     faceConfigured: deps.faceConfigured ?? isFaceRecognitionConfigured(),
-    // Passed in by the route, which owns the guarded create; importing it
-    // from there would make the two modules import each other.
     createInstructor: deps.createInstructor,
     updateInstructor: deps.updateInstructor,
-    // The shared cache only with the real downloader: a test that injects
-    // its own must not be answered from another test's photographs.
     photoCache: deps.photoCache !== undefined ? deps.photoCache : (deps.fetcher ? null : sharedPhotoCache),
     enrollPhoto: deps.enrollPhoto || enrollReferencePhoto,
   };
@@ -499,7 +377,6 @@ async function loadColleges(db) {
     .toArray();
 }
 
-/** The email and Employee ID a sheet row gives, used to find who it is. */
 export function importKeys(raw) {
   return {
     email: firstValue("email", raw?.email).toLowerCase(),
@@ -507,7 +384,6 @@ export function importKeys(raw) {
   };
 }
 
-/** Where each import field lives on an instructor's record. */
 const RECORD_VALUES = {
   name: (record) => record.name,
   email: (record) => record.email,
@@ -518,12 +394,6 @@ const RECORD_VALUES = {
   phone_no: (record) => record.phone_no,
 };
 
-/**
- * A row for an instructor already in the roster, with every blank cell
- * filled from their record. The sheet adds what the record lacks and
- * replaces what it changes; what it leaves blank, or has no column for,
- * stays as it is. `filled` names the fields taken from the record.
- */
 export function fillFromRecord(raw, record) {
   const merged = { ...raw };
   const filled = [];
@@ -537,22 +407,8 @@ export function fillFromRecord(raw, record) {
   return { merged, filled };
 }
 
-/**
- * Field checks, then the match against the roster and repeats within this
- * batch, then the photograph for whatever is still valid and needs one.
- * Returns one result per row in the order given; `row` is the sheet row
- * number the browser sent.
- *
- * A photograph is needed for a new instructor, and for an existing one who
- * has none enrolled yet. Someone who already has a reference photo keeps it:
- * adding the same sheet's photo again on every re-import would only fill the
- * face collection with copies.
- */
 async function checkRows(db, rows, deps) {
   const colleges = await loadColleges(db);
-  // Who each row is comes first, from its email or Employee ID, so that an
-  // instructor already in the roster can have blank cells filled from their
-  // record before the row is judged.
   const found = await findMatchingInstructors(db, rows.map(importKeys));
   const checked = rows.map((raw) => {
     const match = matchExisting(importKeys(raw), found);
@@ -575,8 +431,6 @@ async function checkRows(db, rows, deps) {
     const { match } = item;
     if (match.error) errors.push(match.error);
     if (item.value) {
-      // The browser already removes repeats across the whole file; this only
-      // guards a batch sent without that.
       if (seenEmails.has(item.value.email)) errors.push(`Email ${item.value.email} appears more than once`);
       if (seenIds.has(item.value.employee_id)) errors.push(`Employee ID ${item.value.employee_id} appears more than once`);
       seenEmails.add(item.value.email);
@@ -611,12 +465,6 @@ async function checkRows(db, rows, deps) {
   return results;
 }
 
-/**
- * Checks a batch without writing anything. A passing row comes back in stored
- * form, saying whether it creates an instructor or updates an existing one
- * and whether its photo will be enrolled, with a thumbnail when it will. A
- * failing row comes back with its reasons.
- */
 export async function previewImportRows(db, rows, deps = {}) {
   const resolved = resolveDeps(deps);
   const results = await checkRows(db, rows, resolved);
@@ -627,7 +475,6 @@ export async function previewImportRows(db, rows, deps = {}) {
       ok: true,
       action: result.existing ? "update" : "create",
       existing: result.existing ? { id: result.existing.id, name: result.existing.name } : null,
-      // Fields left blank in the sheet and kept from the instructor's record.
       filled: result.filled,
       photo: result.needsPhoto ? "enrol" : "keep",
       value: { ...result.value, institute: result.collegeName },
@@ -644,27 +491,12 @@ const UPDATE_REFUSALS = {
   college_not_found: "The institute was removed while importing",
 };
 
-/**
- * Checks a batch again and applies every row that still passes: a new instructor is created, an existing one updated with the
- * sheet's values. A blank optional cell such as Phone leaves the value on
- * record as it is.
- *
- * A photograph that is needed is fetched and checked before anything is
- * written, so a bad photo changes nobody; one the preview already checked is
- * taken from the photo cache instead. Storing and indexing it happen after,
- * since a face is indexed against the instructor's id; if that step fails the
- * instructor is kept and the row says so, the same as the add form, and the
- * photo can be added from Edit. Rows are written several at a time, except
- * that rows for the same institute go in turn, since each takes a
- * transaction on the institute's record.
- */
 export async function commitImportRows(db, rows, deps = {}) {
   const resolved = resolveDeps(deps);
   const results = await checkRows(db, rows, resolved);
   return mapWithConcurrency(results, COMMIT_CONCURRENCY, (result) => applyRow(db, result, resolved));
 }
 
-/** Writes one checked row and enrols its photograph; returns its outcome. */
 async function applyRow(db, result, resolved) {
   if (!result.value) return { row: result.row, ok: false, errors: result.errors };
   const { photo_url: photoUrl, ...fields } = result.value;
@@ -714,16 +546,10 @@ async function applyRow(db, result, resolved) {
   } else {
     outcome.warning = `${verb}, but the photo was not enrolled: face recognition is not configured`;
   }
-  // Used now; keeping it would only hold memory another import could use.
   if (photoUrl) resolved.photoCache?.delete(photoUrl);
   return outcome;
 }
 
-/**
- * Downloads a Google Sheet as CSV text. The sheet must be shared as "anyone
- * with the link can view"; otherwise Google answers with its sign-in page,
- * which is reported as exactly that.
- */
 export async function fetchSheetCsv(link, { fetcher = fetchPublicUrl } = {}) {
   const csvUrl = toSheetCsvUrl(link);
   if (!csvUrl) throw new RemoteFetchError("Paste a Google Sheets link (docs.google.com/spreadsheets/...)");

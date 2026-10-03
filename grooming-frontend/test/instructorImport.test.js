@@ -57,7 +57,6 @@ test('a cell with two values keeps the first, per field', () => {
   assert.equal(firstValue('gender', 'F / Female'), 'F');
   assert.equal(firstValue('role', 'Central Team, Mentor'), 'Central Team');
   assert.equal(firstValue('employee_id', 'E1 E2'), 'E1');
-  // A comma belongs to a name, and a slash to a link.
   assert.equal(firstValue('name', 'Nair, Anjali'), 'Nair, Anjali');
   assert.equal(firstValue('photo_url', 'https://x.com/a/b.jpg'), 'https://x.com/a/b.jpg');
   assert.equal(firstValue('photo_url', 'https://x.com/a.jpg https://x.com/b.jpg'), 'https://x.com/a.jpg');
@@ -97,7 +96,6 @@ test('columns are read in whatever order the sheet has them', () => {
 test('a sheet without a required column says which ones', () => {
   const table = readImportTable(parseCsv('Name,Email,Phone\nAsha,a@x.com,1\n'));
   assert.deepEqual(table.missingColumns, ['Gender', 'Role', 'Institute', 'Employee ID', 'Photo Link']);
-  // Still importable: the email finds anyone already in the roster.
   assert.equal(table.hasIdentifier, true);
 });
 
@@ -142,7 +140,6 @@ test('the first row for an email or employee ID is kept and later ones flagged',
     { row: 3, name: 'Asha again', email: 'asha@X.com', errors: ['Same email as row 2'] },
     { row: 4, name: 'Ravi', email: 'ravi@x.com', errors: ['Same Employee ID as row 2'] },
   ]);
-  // The sheet's values travel with a flagged row, so it can be corrected.
   assert.equal(flagged[0].raw.employee_id, 'E2');
 });
 

@@ -7,19 +7,9 @@ import type { IdentificationSettings } from '../types';
 
 const IDENTIFICATION_PATH = '/api/v2/settings/identification';
 
-/**
- * How many instructors at each college can be recognised from their photograph.
- *
- * A list rather than a set of controls: recognition is how every college
- * identifies an instructor, so there is nothing to choose here. What matters is
- * how far each campus has got with collecting reference photographs, which is
- * worked through a college at a time — open one to enrol the instructors who
- * still have none.
- */
 export default function IdentificationSettingsSection() {
   const [settings, setSettings] = useState<IdentificationSettings | null>(null);
   const [loading, setLoading] = useState(true);
-  /** The college whose instructors are being enrolled, or null for the table. */
   const [openCollege, setOpenCollege] = useState<{ id: string; name: string } | null>(null);
   const [search, setSearch] = useState('');
   const toast = useToast();
@@ -65,8 +55,6 @@ export default function IdentificationSettingsSection() {
         collegeId={openCollege.id}
         collegeName={openCollege.name}
         onBack={() => setOpenCollege(null)}
-        // Reloaded rather than patched: the percentage, the low-enrolment flag
-        // and the warning above the table are all derived server-side.
         onEnrolmentChanged={() => { void load(); }}
       />
     );
@@ -81,8 +69,6 @@ export default function IdentificationSettingsSection() {
 
   return (
     <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
-      {/* Search only. The heading repeated the tab that led here, and the
-          default-mode control has gone with the mode column below it. */}
       <div className="p-3 border-b border-slate-100">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
@@ -97,17 +83,10 @@ export default function IdentificationSettingsSection() {
         </div>
       </div>
 
-      {/* Three columns fit a phone without scrolling once the mode buttons are
-          gone, so the table drops the minimum width that used to force it. */}
       <div className="overflow-x-auto overscroll-x-contain">
         <table className="w-full text-left border-collapse table-fixed">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              {/* Fixed widths so a long college name truncates on one line
-                  rather than wrapping and making its row twice the height of
-                  every other. */}
-              {/* Narrower type and padding on a phone, where "Instructors"
-                  ran into "Photos" at the desktop size. */}
               <th className="px-2 py-2.5 w-[48%] text-[10px] tracking-wide sm:px-3 sm:w-[56%] sm:text-xs sm:tracking-wider">College</th>
               <th className="px-2 py-2.5 w-[26%] text-[10px] tracking-wide sm:px-3 sm:w-[22%] sm:text-xs sm:tracking-wider">Instructors</th>
               <th className="px-2 py-2.5 w-[26%] text-[10px] tracking-wide sm:px-3 sm:w-[22%] sm:text-xs sm:tracking-wider">Photos</th>
@@ -117,18 +96,12 @@ export default function IdentificationSettingsSection() {
             {visibleColleges.length === 0 ? (
               <tr>
                 <td colSpan={3} className="p-6 text-center text-slate-400 font-medium">
-                  {/* "Nothing matched" and "nothing exists" look identical to
-                      somebody who has just typed, and only one of them means
-                      the search should be cleared. */}
                   {settings.colleges.length === 0
                     ? 'No colleges yet.'
                     : `No colleges match “${search.trim()}”.`}
                 </td>
               </tr>
             ) : (
-              // The whole row opens the college, not just its name: the name is
-              // a small target, and every cell in the row is about the same
-              // college.
               visibleColleges.map((college) => (
                 <tr
                   key={college.college_id}
@@ -138,9 +111,6 @@ export default function IdentificationSettingsSection() {
                   })}
                   className="hover:bg-slate-50 transition-colors cursor-pointer"
                 >
-                  {/* One line, ellipsis on overflow, full name in the tooltip —
-                      the same treatment every other table in the app gives a
-                      name column. */}
                   <td className="px-3 py-2.5 font-bold text-slate-800 truncate" title={college.college_name || ''}>
                     {college.college_name || '--'}
                   </td>

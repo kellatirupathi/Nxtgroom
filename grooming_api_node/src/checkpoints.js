@@ -1,30 +1,5 @@
 import { createHash } from "node:crypto";
 
-/**
- * The fixed checkpoint sets every evaluation must return.
- *
- * The model used to invent both the names and the count, so two photos of the
- * same person produced different reports and nothing was comparable. These
- * tables are the contract: the prompt is generated from them and the response
- * is validated against them, so a missing row is a rejected response rather
- * than a judgement the model was allowed to make.
- *
- * Codes are stable and internal. Only the name reaches the report.
- *
- * A checkpoint marked `informational` is reported but never scored. It exists
- * because some things are worth recording and are not rules — a watch is
- * optional, so failing someone for wearing one, or for not, would be inventing
- * a standard nobody set.
- */
-
-/**
- * One row, for everyone.
- *
- * The card is either being worn or it is not. Chest height, lanyard colour,
- * readability and wear were each their own row, and a check-in photo rarely
- * resolves any of them — they mostly produced N/A, or a confident guess about
- * a card too small to read.
- */
 export const ID_CARD_CHECKS = [
   {
     code: "ID_PRESENT",
@@ -33,13 +8,6 @@ export const ID_CARD_CHECKS = [
   },
 ];
 
-/**
- * Hair rules, shared wording across both dress codes.
- *
- * Hair across the face is the failure that matters and the one the reports
- * kept missing, so it is its own row rather than folded into neatness. Colour
- * is not judged at all.
- */
 export const MEN_GROOMING_CHECKS = [
   { code: "M_HAIR_NEATNESS", name: "Hair Neatness", rule: "Hair is clean-looking, combed, controlled and deliberately maintained, set neatly on top of the head. Classic side parts, tapers, short back-and-sides and crew cuts are acceptable. FAIL messy, uncombed, dishevelled, shaggy, uncontrolled or visibly over-spiked hair. Natural curly or wavy hair is not messy in itself: judge whether it is combed or shaped and kept under control, and FAIL it on the same terms when it is not. Look at the crown, the sides and the front hairline, where unset hair shows first, and say in the observation which of them you judged. Do not judge hair colour or infer whether hair products were used." },
   { code: "M_HAIR_POSITION", name: "Hair Position / Away From Face", rule: "Hair is set back or up on top of the head, and the whole forehead is clear of it. Look at the front hairline: FAIL when any fringe, strands or locks rest on, hang over or cover any part of the forehead, the eyebrows or the eyes - even when that hair is otherwise tidy or deliberately styled forward. A forehead visible from the hairline down to the eyebrows is the evidence for a PASS. Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead: FAIL only hair that lies over the forehead skin or the eyebrows. Say in the observation where the front of the hair sits relative to the forehead." },
@@ -59,10 +27,6 @@ export const MEN_ATTIRE_CHECKS = [
   { code: "M_BELT", name: "Belt", rule: "A simple formal belt in good condition, coordinated with the shoes, is required. PASS only when a compliant belt is visibly worn. FAIL when no belt is worn, when the belt is clearly casual, flashy, damaged or mismatched, or when the submitted photograph does not show the waist/belt area well enough to verify this required check; state that the belt is not shown and recommend a clearer full-body photograph. Do not return N/A merely because the waist is cropped, distant, blurred or occluded." },
 ];
 
-/**
- * Caps and hats. Religious head coverings are not headwear in this sense and
- * always pass: a prayer cap, a turban or patka, a hijab or head scarf.
- */
 const HEADWEAR_RULE = "No cap or hat is worn on the head. FAIL a baseball cap, sports or snapback cap, beanie or woollen cap, sun hat, fedora or any other hat, a hoodie's hood worn up, and a bandana worn as headwear. Religious head coverings are not headwear and PASS: a prayer cap (topi or kufi), a turban or patka, and a hijab or head scarf. PASS when the head is uncovered or covered only by such a religious covering, and say in the observation what is on the head. Use N/A only when the head is not visible.";
 
 export const MEN_ACCESSORIES_CHECKS = [
@@ -83,14 +47,6 @@ export const MEN_FOOTWEAR_CHECKS = [
   { code: "M_FOOTWEAR_CONDITION", name: "Footwear Condition", rule: "Covers cleanliness, polish, visible damage and worn-out state together." },
 ];
 
-/**
- * A long kurta with payjama or trousers, the men's alternative to a formal
- * shirt and trousers, with or without a prayer cap.
- *
- * Its own family, like the women's: the shirt, tuck and belt rows have no
- * meaning over a kurta, and the hair and beard are not assessed for it (see
- * KURTA_SKIPPED_GROOMING). Jeans are not permitted with it.
- */
 export const MEN_KURTA_ATTIRE_CHECKS = [
   { code: "M_KURTA_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a long kurta is the visible outfit: a tunic reaching at least to the knee, worn with payjama or trousers, with or without a prayer cap. Plain, solid or subtle designs pass. FAIL a t-shirt or other casual top, and FAIL any kurta outfit worn with jeans or denim. Do not apply the formal shirt-and-trousers standards to a kurta." },
   { code: "M_KURTA_BOTTOM", name: "Bottom Wear", rule: "Payjama - straight or loose cotton trousers - or formal trousers pass. FAIL jeans and denim of any colour, including black jeans, and FAIL joggers, track pants, cargo pants and shorts. Read the fabric and cut from the hip to the ankle and say what you saw." },
@@ -103,7 +59,6 @@ export const MEN_KURTA_ATTIRE_CHECKS = [
   },
 ];
 
-/** Grooming rows not assessed for a man in a kurta: his hair and beard are left to him. */
 export const KURTA_SKIPPED_GROOMING = Object.freeze([
   "M_HAIR_NEATNESS",
   "M_HAIR_POSITION",
@@ -112,15 +67,8 @@ export const KURTA_SKIPPED_GROOMING = Object.freeze([
   "M_MOUSTACHE",
 ]);
 
-/** Accessory rows not assessed for a man in a kurta: his cap is part of the outfit. */
 export const KURTA_SKIPPED_ACCESSORIES = Object.freeze(["M_HEADWEAR"]);
 
-/**
- * An abaya, with or without a head scarf (hijab).
- *
- * Its own family, judged on how it is worn and kept. The hair checks do not
- * apply to it (see ABAYA_SKIPPED_GROOMING), with or without the scarf.
- */
 export const ABAYA_ATTIRE_CHECKS = [
   { code: "W_ABAYA_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms an abaya is the visible outfit: a loose outer robe covering the body from the shoulders to the ankles, with or without a head scarf (hijab). Plain, solid or subtle designs pass. FAIL loud, conspicuous or strongly distracting prints, and heavy party-style embellishment." },
   { code: "W_ABAYA_FIT_LENGTH", name: "Abaya Fit & Length", rule: "The abaya falls loosely from the shoulders and reaches the ankles. FAIL an abaya that is tight or body-hugging, or that ends above the middle of the calf. Read the hem at the ankles and the fall of the cloth at the hips and say what you saw." },
@@ -133,10 +81,8 @@ export const ABAYA_ATTIRE_CHECKS = [
   },
 ];
 
-/** Grooming rows not assessed for a woman in an abaya: her hair is not judged. */
 export const ABAYA_SKIPPED_GROOMING = Object.freeze(["W_HAIR_NEATNESS", "W_HAIR_POSITION", "W_HAIR_ACCESSORIES"]);
 
-/** The men's attire families one report request chooses between. */
 export const MALE_ATTIRE_TYPES = Object.freeze(["FORMAL", "KURTA_PAJAMA"]);
 
 export const WOMEN_GROOMING_CHECKS = [
@@ -147,13 +93,6 @@ export const WOMEN_GROOMING_CHECKS = [
   { code: "W_NAILS", name: "Nails", rule: "Nails must look trimmed, clean and understated. FAIL clearly long nails or clearly bright, dark, glittery or decorated nail styling. N/A whenever the hands and nails are not clearly visible, which is most photographs." },
 ];
 
-/**
- * Saree checkpoints.
- *
- * Split so that how the saree is worn is judged separately from what it is
- * made of — an immaculate fabric draped badly is a different finding from a
- * creased one draped well, and one row could not say both.
- */
 export const SAREE_ATTIRE_CHECKS = [
   { code: "W_SAREE_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a professional saree is the visible garment. Plain, solid or subtle designs pass. FAIL loud, conspicuous or strongly distracting prints and patterns." },
   { code: "W_SAREE_WEARING", name: "Saree Wearing / Drape", rule: "The saree is properly and professionally draped: secure at the waist and shoulder, sitting where it should, not slipping or loosely thrown on. FAIL a saree that is visibly worn incorrectly or carelessly." },
@@ -189,20 +128,6 @@ export const KURTI_ATTIRE_CHECKS = [
   },
 ];
 
-/**
- * Western formal-wear checkpoints for women.
- *
- * This is intentionally its own rule family. Reusing the men's rows would
- * incorrectly introduce men's belt, shirt and trouser requirements into a
- * woman's report, while routing FORMAL through the kurti rows would judge the
- * wrong garment altogether.
- *
- * Shirt and trousers are not permitted for women, so Attire Type always fails
- * here (resolveWomenFormalAttire in visionEngine.js holds it to that) unless a
- * blazer or suit jacket is worn over them, which makes a suit (blazer.js). The
- * family is still identified, and its other rows still judged, so the report
- * says what was worn rather than leaving the attire unassessed.
- */
 export const WOMEN_FORMAL_ATTIRE_CHECKS = [
   { code: "W_FORMAL_ATTIRE_TYPE", name: "Attire Type", rule: "Shirt and trousers are not permitted for women: the accepted attire is a saree, a kurti with dupatta, or an abaya. This row is always FAIL for a shirt or blouse worn with trousers, however formal, neat and well fitted the outfit is. The one exception is a blazer or suit jacket worn over them, which makes an accepted suit: then PASS. Say in the observation what she is wearing, top and bottom, and give as the reason that shirt and trousers are not permitted for women." },
   { code: "W_FORMAL_TOP", name: "Formal Top", rule: "The top must be a professional shirt or blouse with appropriate workplace coverage. Sleeves must reach at least halfway from the shoulder to the elbow: FAIL a sleeveless top, a cap sleeve or any sleeve ending above the middle of the upper arm, and say where the hem ends. FAIL clearly casual tops, loud novelty designs, sheer fabric, exposed straps or an obviously inappropriate neckline." },
@@ -235,7 +160,6 @@ export const WOMEN_FOOTWEAR_CHECKS = [
   { code: "W_FOOTWEAR_CONDITION", name: "Footwear Condition", rule: "Covers cleanliness, upkeep and visible damage together." },
 ];
 
-/** The order the report renders sections in, for every variant. */
 export const SECTION_KEYS = [
   "general_idcard_check",
   "grooming_check",
@@ -244,17 +168,6 @@ export const SECTION_KEYS = [
   "footwear_check",
 ];
 
-/**
- * The complete checkpoint set for one instructor.
- *
- * The attire rows are chosen from what the photograph shows, never from
- * gender: a woman in formal trousers is a real case the weekly rotation needs
- * to see, and inferring the garment from the person would hide it.
- *
- * Returns null when gender is unknown. There is deliberately no combined set —
- * sending both dress codes is what produced reports judging a man against
- * saree standards.
- */
 export function checkpointSet(gender, attireType) {
   if (gender === "MALE") {
     if (attireType === "KURTA_PAJAMA") {
@@ -297,12 +210,6 @@ export function checkpointSet(gender, attireType) {
   return null;
 }
 
-/**
- * Every row a man's single report request asks for: both attire families, and
- * the beard rows the kurta family skips. The reply names which family the
- * photograph shows, and checkpointSet("MALE", thatFamily) picks the rows that
- * belong to it, so the other family's answers are never reported.
- */
 export function maleCombinedSet() {
   return {
     general_idcard_check: ID_CARD_CHECKS,
@@ -313,16 +220,6 @@ export function maleCombinedSet() {
   };
 }
 
-/**
- * A fingerprint of the checkpoint tables in this file.
- *
- * PROMPT_VERSION is a hand-edited constant in another module, so a reworded
- * rule here could ship without it moving. Two stored evaluations then carried
- * the same prompt_version while having been judged against different
- * standards, which is the one thing recording a version was meant to rule
- * out. This is derived from the tables themselves, so it cannot drift from
- * the rules it describes.
- */
 export const CHECKPOINT_VERSION = createHash("sha256")
   .update(JSON.stringify({
     id_card: ID_CARD_CHECKS,
@@ -342,21 +239,12 @@ export const CHECKPOINT_VERSION = createHash("sha256")
   .digest("hex")
   .slice(0, 12);
 
-/** Codes that are recorded but never scored. */
 export const INFORMATIONAL_CODES = new Set(
   [...MEN_ACCESSORIES_CHECKS, ...WOMEN_ACCESSORIES_CHECKS, ...MEN_KURTA_ATTIRE_CHECKS, ...ABAYA_ATTIRE_CHECKS]
     .filter((item) => item.informational)
     .map((item) => item.code)
 );
 
-/**
- * Fix suggestions, keyed by checkpoint.
- *
- * Derived from the failing rows rather than asked of the model, so the advice
- * cannot drift between reports or contradict the checkpoint it belongs to.
- * Only FAIL produces a tip: a passing or unassessable checkpoint has nothing
- * to correct, and an informational one has no rule to have broken.
- */
 export const IMPROVEMENT_TIPS = {
   ID_PRESENT: "Wear your instructor ID card.",
   M_HAIR_NEATNESS: "Comb your hair neatly before the session.",
@@ -417,28 +305,11 @@ export const IMPROVEMENT_TIPS = {
   W_FOOTWEAR_CONDITION: "Wear clean, well-maintained footwear.",
 };
 
-/**
- * Advice for a checkpoint failed because the photograph did not evidence it.
- *
- * The men's tuck and belt checks fail when the submitted photograph cannot
- * show them, which is a fact about the picture rather than about the clothes.
- * The ordinary tip then told the instructor to wear a belt while the reason on
- * the same report said the belt was not visible: the report contradicted its
- * own advice, and somebody already wearing one was told to put one on. Both
- * codes share one sentence so a report missing the whole waist asks for the
- * retake once instead of twice.
- */
 export const UNVERIFIED_IMPROVEMENT_TIPS = {
   M_SHIRT_COLLAR_TUCK: "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
   M_BELT: "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
 };
 
-/**
- * The tips for one evaluation, in report order.
- *
- * Reads the failing checkpoints rather than the section they sit in, so a tip
- * can never appear for a PASS, an N/A, or a checkpoint that carries no rule.
- */
 export function improvementTips(sections) {
   const tips = [];
   for (const key of SECTION_KEYS) {

@@ -6,13 +6,11 @@ export interface Toast {
   id: number;
   kind: ToastKind;
   title: string;
-  /** Optional second line explaining what to do about it. */
   detail?: string;
 }
 
 export interface ToastOptions {
   detail?: string;
-  /** Override the default lifetime; 0 keeps it until dismissed. */
   durationMs?: number;
 }
 

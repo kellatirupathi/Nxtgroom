@@ -1,20 +1,5 @@
 import type { Keypoint } from './fullBodyDetector.ts';
 
-/**
- * Where the waist, the trousers and the shoes are in the photograph, sent
- * with it so the report can look at each close up in the same request
- * (grooming_api_node/src/services/detailCheck.js).
- *
- * The camera already finds the person's shoulders, hips, knees and ankles to
- * decide when to take the picture, in the same frame the photograph is cut
- * from (bodyGuideSourceRect and readFrame crop the same region), so these
- * boxes need no further work and no request. Each is [ymin, xmin, ymax, xmax]
- * on a 0-1000 scale of that frame, the format the server and the model use.
- *
- * Generous on purpose: the server widens them again, and a box that cuts off
- * a buckle is worse than one that includes a little arm.
- */
-
 export type RegionBox = [number, number, number, number];
 
 export interface BodyRegions {
@@ -24,12 +9,10 @@ export interface BodyRegions {
   feet?: RegionBox;
 }
 
-/** What the camera knows about a photograph beyond its pixels. */
 export interface CaptureDetails {
   bodyRegions?: BodyRegions | null;
 }
 
-/** The form field the attendance routes read the regions from. */
 export const BODY_REGIONS_FIELD = 'body_regions';
 
 const MIN_SCORE = 0.35;
@@ -67,9 +50,6 @@ export function bodyRegionsFromKeypoints(
   const halfWidth = Math.max(Math.abs(leftShoulder.x - rightShoulder.x), Math.abs(leftHip.x - rightHip.x)) / 2;
 
   const regions: BodyRegions = {};
-  // The head, for the hair, beard and moustache: from above the hair to the
-  // collar, a little wider than the ears. Measured from the eyes to the
-  // shoulders, which the camera finds whichever way the head is turned.
   const leftEye = find('left_eye');
   const rightEye = find('right_eye');
   const nose = find('nose');
@@ -82,9 +62,6 @@ export function bodyRegionsFromKeypoints(
     const halfFace = Math.max(leftEar && rightEar ? Math.abs(leftEar.x - rightEar.x) * 0.8 : 0, drop * 0.75);
     regions.head = toBox(eyeY - 0.95 * drop, faceX - halfFace, shoulderY + 0.05 * drop, faceX + halfFace, frameWidth, frameHeight);
   }
-  // The waistband sits a little above the hip joints the model finds: from
-  // just under the lowest shirt buttons to the top of the thighs, hip to hip
-  // with the hands that often rest there.
   regions.waist = toBox(
     hipY - 0.45 * torso,
     hipX - halfWidth - 0.35 * torso,
@@ -109,7 +86,6 @@ export function bodyRegionsFromKeypoints(
       frameWidth,
       frameHeight,
     );
-    // The shoe reaches below and in front of the ankle joint.
     regions.feet = toBox(
       ankleY - 0.25 * torso,
       Math.min(leftAnkle.x, rightAnkle.x) - 0.35 * torso,

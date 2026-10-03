@@ -14,19 +14,9 @@ import {
 import { buildFemaleAttirePrompt, buildMaleReportPrompt, buildSystemPrompt } from "../src/prompts.js";
 import { weeklyRotation } from "../src/services/instructorReports.js";
 
-/**
- * The two attire families added from the team's review: an abaya for women,
- * with or without a head scarf, whose hair is not judged; and a long kurta with
- * payjama for men, with or without a prayer cap, whose beard is not judged and
- * who may not wear jeans. Nothing that existed before is removed.
- */
-
 const codes = (sections) => SECTION_KEYS.flatMap((key) => sections[key].map((item) => item.code));
 
-// -- The checkpoints ---------------------------------------------------------------
-
 test("every family that existed before keeps every one of its checkpoints", () => {
-  // Each gained only the Headwear row.
   assert.equal(codes(checkpointSet("MALE", "FORMAL")).length, 21);
   assert.equal(codes(checkpointSet("MALE")).length, 21, "no family named is still formal");
   assert.equal(codes(checkpointSet("FEMALE", "SAREE")).length, 20);
@@ -56,7 +46,6 @@ test("a kurta keeps ID, accessories and footwear, and drops hair, beard, headwea
   const attire = checkpointSet("MALE", "KURTA_PAJAMA").attire_check;
   const bottom = attire.find((item) => item.code === "M_KURTA_BOTTOM");
   assert.match(bottom.rule, /FAIL jeans and denim of any colour, including black jeans/);
-  // Not judged like formal wear: no pressing, no shirt standards.
   const condition = attire.find((item) => item.code === "M_KURTA_CONDITION");
   assert.match(condition.rule, /FAIL only visible stains, tears or fraying\. Do not judge pressing or creases/);
   assert.match(attire.find((item) => item.code === "M_KURTA_ATTIRE_TYPE").rule, /Do not apply the formal shirt-and-trousers standards to a kurta/);
@@ -104,8 +93,6 @@ test("the beard and moustache rules gain their allowances without losing their s
   assert.match(moustache, /FAIL a moustache whose hair grows down over the lip line/);
 });
 
-// -- The prompts ---------------------------------------------------------------------
-
 test("the women's classification can name an abaya, and her report then asks no hair rows", () => {
   const classification = buildFemaleAttirePrompt();
   assert.match(classification, /- ABAYA: an abaya is being worn/);
@@ -129,8 +116,6 @@ test("the men's report prompt chooses the family; the formal prompt is still the
   assert.doesNotMatch(formal, /M_KURTA/);
 });
 
-// -- The weekly rotation --------------------------------------------------------------
-
 test("an abaya week is not scored against the saree/kurti rotation", () => {
   const week = { gender: "FEMALE", sareeDays: 2, kurtiDays: 2, unknownDays: 0, weekComplete: true };
   assert.equal(weeklyRotation(week).status, "FAIL", "unchanged without an abaya day");
@@ -140,8 +125,6 @@ test("an abaya week is not scored against the saree/kurti rotation", () => {
   assert.equal(weeklyRotation({ ...week, sareeDays: 3, kurtiDays: 3 }).status, "PASS");
   assert.equal(weeklyRotation({ ...week, gender: "MALE", abayaDays: 0 }), null);
 });
-
-// -- The engine ------------------------------------------------------------------------
 
 function stubGemini(responses) {
   const GEMINI_ENV = ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES", "GEMINI_EXPLICIT_CACHE"];
@@ -192,7 +175,6 @@ async function photo() {
 }
 
 test("a man in a kurta is reported on the kurta's rows, without the beard, from one request", async () => {
-  // The combined reply: the formal rows N/A, the kurta's judged.
   const kurtaCodes = new Set(codes(checkpointSet("MALE", "KURTA_PAJAMA")));
   const stub = stubGemini([reply(maleCombinedSet(), { attire_type: "KURTA_PAJAMA" }, (code) => (kurtaCodes.has(code) ? "PASS" : "N/A"))]);
   try {
@@ -276,8 +258,6 @@ test("a woman in an abaya is classified, then reported without any hair row", as
   }
 });
 
-// -- Headwear ---------------------------------------------------------------------
-
 test("caps and hats fail for everyone except the kurta family; religious coverings pass", () => {
   for (const [gender, attire, code] of [
     ["MALE", "FORMAL", "M_HEADWEAR"],
@@ -294,21 +274,15 @@ test("caps and hats fail for everyone except the kurta family; religious coverin
     assert.equal(IMPROVEMENT_TIPS[code], "Remove the cap or hat before checking in.");
     assert.match(buildSystemPrompt(gender, attire), new RegExp(`code: ${code}`));
   }
-  // The kurta family keeps its prayer cap as an optional, recorded row.
   const kurta = checkpointSet("MALE", "KURTA_PAJAMA");
   assert.equal(kurta.accessories_check.find((item) => item.code === "M_HEADWEAR"), undefined);
   assert.ok(kurta.attire_check.find((item) => item.code === "M_PRAYER_CAP"));
 });
 
-// -- A short, close-cropped beard -------------------------------------------------
-
 test("a short, close-cropped beard of even length passes without shaved edge lines", async () => {
-  // A reviewed report failed exactly this: a short even beard, called
-  // "somewhat overgrown with undefined cheek lines and neckline".
   const beard = checkpointSet("MALE", "FORMAL").grooming_check.find((item) => item.code === "M_FACIAL_HAIR").rule;
   assert.match(beard, /a short close-cropped beard of even length/);
   assert.match(beard, /passes even when its cheek line and neckline follow the natural growth rather than a shaved edge: do not fail it for an undefined edge, and do not call it overgrown because it covers the jaw and chin/);
-  // The standard for a longer beard, and for an untrimmed one, is kept.
   assert.match(beard, /A beard longer than that is groomed only when its outer edges are defined/);
   assert.match(beard, /FAIL an untrimmed or grown-out beard - long, bushy or full enough to stand away from the face/);
   assert.doesNotMatch(beard, /a short one with ragged edges fails/);

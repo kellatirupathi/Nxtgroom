@@ -27,7 +27,6 @@ function memoryStorage() {
 test('full screen is supported through the standard or the webkit flag only', () => {
   assert.equal(browserFullscreenSupported({ fullscreenEnabled: true }), true);
   assert.equal(browserFullscreenSupported({ webkitFullscreenEnabled: true }), true);
-  // iPhone Safari: neither flag.
   assert.equal(browserFullscreenSupported({}), false);
   assert.equal(browserFullscreenSupported(null), false);
 });
@@ -83,7 +82,6 @@ test('leaving only calls the browser when it is actually full screen', async () 
   await leaveBrowserFullscreen({ webkitFullscreenElement: {}, webkitExitFullscreen: () => { exits += 1; } });
   assert.equal(exits, 2);
 
-  // Esc got there first: the browser rejects, and that is not an error here.
   await leaveBrowserFullscreen({ fullscreenElement: {}, exitFullscreen: async () => { throw new TypeError('Document not active'); } });
 });
 
@@ -107,7 +105,6 @@ test('the start card shows in a browser that has not declined and is not already
   assert.equal(offerFullscreenOnOpen({ native: false, declined: false, alreadyFullscreen: false }), true);
   assert.equal(offerFullscreenOnOpen({ native: false, declined: true, alreadyFullscreen: false }), false);
   assert.equal(offerFullscreenOnOpen({ native: false, declined: false, alreadyFullscreen: true }), false);
-  // The Android app has no address bar: it opens on the camera as before.
   assert.equal(offerFullscreenOnOpen({ native: true, declined: false, alreadyFullscreen: false }), false);
 });
 
@@ -125,12 +122,8 @@ test('the attendance screen offers full screen, closes it behind a question, and
   ]) {
     assert.ok(screen.includes(text), `missing ${text}`);
   }
-  // Over the whole window, above the bottom bar's sheet (z-46) and below every
-  // dialog (z-60 and up), so a confirmation or a toast still shows on top.
   assert.match(screen, /'fixed inset-0 z-\[55\] overflow-hidden bg-black/);
-  // Out of full screen the element keeps the classes it always had.
   assert.match(screen, /: 'relative w-full h-full overflow-hidden rounded-md bg-black'\}/);
-  // One element restyled, not two trees: the camera must not restart.
   assert.equal(screen.match(/<KioskAttendance onExit=\{onExit\} facing=\{facing\} onFlip=\{flipCamera\} \/>/g).length, 1);
   assert.equal(screen.match(/<GroupScreen facing=\{facing\} \/>/g).length, 1);
 });
@@ -140,7 +133,6 @@ test('the full-screen switch lives in its own hook and leaves full screen when t
   assert.match(hook, /FULLSCREEN_CHANGE_EVENTS\.forEach\(\(name\) => document\.addEventListener\(name, onChange\)\)/);
   assert.match(hook, /if \(!now\) setActive\(false\)/);
   assert.match(hook, /useEffect\(\(\) => \(\) => \{\s*void leaveBrowserFullscreen\(\);\s*\}, \[\]\)/);
-  // The app's web view is never asked; only its menus are hidden.
   assert.match(hook, /const supported = !native && !preferAppFullscreen\(\) && browserFullscreenSupported\(\)/);
 });
 

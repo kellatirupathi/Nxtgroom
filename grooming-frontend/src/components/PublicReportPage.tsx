@@ -12,10 +12,6 @@ interface PublicReportPageProps {
   token: string;
   kind: 'day' | 'week';
   date: string;
-  /**
-   * Which half a day link is for. Required: defaulting this is what made an
-   * emailed check-out link render the check-in report.
-   */
   half: 'checkin' | 'checkout';
 }
 
@@ -33,7 +29,6 @@ interface DayResponse {
     has_checkout_photo?: boolean;
   };
   evaluation: Evaluation | null;
-  /** Counted from the week, and supplied for women only. */
   weekly_rotation?: WeeklyRotation | null;
 }
 
@@ -121,14 +116,6 @@ function Stat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-/**
- * The page an instructor opens from a report email.
- *
- * Unauthenticated: the recipient has no FacultyTrack account, and the token in
- * the URL is the credential. It shows one fixed period — the one the email was
- * about — with no controls for browsing to another week, so a link cannot be
- * walked backwards through someone's history.
- */
 export default function PublicReportPage({ token, kind, date, half }: PublicReportPageProps) {
   const [day, setDay] = useState<DayResponse | null>(null);
   const [week, setWeek] = useState<WeekResponse | null>(null);
@@ -140,7 +127,6 @@ export default function PublicReportPage({ token, kind, date, half }: PublicRepo
     let disposed = false;
     setLoading(true);
     setError('');
-    // A day link names its half; a weekly one has none.
     const path = kind === 'day'
       ? `/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(date)}/${half === 'checkout' ? 'check-out' : 'check-in'}`
       : `/api/v2/reports/${encodeURIComponent(token)}/week/${encodeURIComponent(date)}`;
@@ -358,8 +344,6 @@ export default function PublicReportPage({ token, kind, date, half }: PublicRepo
 
         {photoDate && (
           <PhotoViewer
-            // The token in the path is the credential here, so no bearer token
-            // is sent: the recipient has no account to authenticate with.
             path={`/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(photoDate)}/photo/${half === 'checkout' ? 'checkout' : 'checkin'}`}
             auth={false}
             kind="checkin"

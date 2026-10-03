@@ -73,9 +73,6 @@ test("legacy default administrator is adopted and password-rotated once", async 
 });
 
 test("a deploy never replaces a password that already exists", async () => {
-  // The password an administrator is actually using lives in the database.
-  // Rotating it whenever a version string changed meant an ordinary redeploy
-  // could lock them out with nothing on screen to explain why.
   process.env.ADMIN_EMAIL = "production-admin@example.com";
   process.env.ADMIN_PASSWORD = "new-safe-test-password-123";
   process.env.ADMIN_PASSWORD_VERSION = "production-v2";
@@ -93,15 +90,11 @@ test("a deploy never replaces a password that already exists", async () => {
   assert.equal(await verifyPassword("old-safe-test-password-123", db.users[0].password_hash), true,
     "the stored password must survive the deploy");
   assert.equal(await verifyPassword("new-safe-test-password-123", db.users[0].password_hash), false);
-  // Nobody is signed out, because nothing about their credentials changed.
   assert.equal(db.users[0].session_version, 4);
-  // The version is still recorded, so the account says what it was created with.
   assert.equal(db.users[0].password_version, "production-v2");
 });
 
 test("an explicit reset overwrites the password and signs everyone out", async () => {
-  // The recovery path when a password is genuinely lost. Deliberately its own
-  // flag, so it cannot happen as a side effect of a configuration change.
   process.env.ADMIN_EMAIL = "production-admin@example.com";
   process.env.ADMIN_PASSWORD = "new-safe-test-password-123";
   process.env.ADMIN_PASSWORD_VERSION = "production-v2";
@@ -122,9 +115,6 @@ test("an explicit reset overwrites the password and signs everyone out", async (
 });
 
 test("only a literal true resets; a stray value leaves the password alone", async () => {
-  // "1", "yes" and an empty string are the shapes a flag like this gets typed
-  // in by mistake, and each of them overwriting a live password would be the
-  // same outage again.
   for (const value of ["1", "yes", "TRUE", "", " true "]) {
     process.env.ADMIN_EMAIL = "production-admin@example.com";
     process.env.ADMIN_PASSWORD = "new-safe-test-password-123";

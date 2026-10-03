@@ -15,9 +15,6 @@ test('rejects empty, unsupported, and oversized photos', () => {
 });
 
 test('a large phone photo passes source validation so it can be downscaled', () => {
-  // The bug this covers: an 11 MB 12MP capture was rejected at selection,
-  // before the browser shrank it to roughly 400 KB. Real users could not
-  // check in at all from a modern phone.
   const phonePhoto = { type: 'image/jpeg', size: 11 * 1024 * 1024 };
   assert.equal(validateSourcePhoto(phonePhoto), '', 'must reach the downscaler');
   assert.match(validatePhoto(phonePhoto), /8 MB/, 'still refused if never shrunk');
@@ -25,7 +22,6 @@ test('a large phone photo passes source validation so it can be downscaled', () 
 
 test('source validation accepts HEIC and unknown camera types', () => {
   assert.equal(validateSourcePhoto({ type: 'image/heic', size: 4 * 1024 * 1024 }), '');
-  // Some Android pickers report no type at all for a camera capture.
   assert.equal(validateSourcePhoto({ type: '', size: 2 * 1024 * 1024 }), '');
 });
 

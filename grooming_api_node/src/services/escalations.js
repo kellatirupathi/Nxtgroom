@@ -5,23 +5,6 @@ import {
   weekStartKey,
 } from "./evaluationWorker.js";
 
-/**
- * Which instructors are in escalation, for the rows of a Daily Records page.
- *
- * An instructor is escalated for a Monday-to-Sunday week once their check-in
- * was non-compliant three or more times in a row in it, absent days skipped and
- * a compliant check-in ending the run - the same rule, from
- * the same function, that sends reporting partners the URGENT email, so the
- * table and the inbox can never disagree about who is escalated.
- *
- * The count covers the whole week whatever range the page is showing. A page
- * filtered to today still knows about Monday's and Tuesday's failures, which
- * is the only way "escalated" can mean anything on a single-day view.
- *
- * One query for the page: every instructor on it, across every week its rows
- * touch. Returns a map keyed `${instructorId}|${weekStart}`, holding only the
- * escalated pairs.
- */
 export async function weeklyEscalations(db, rows, scope = {}) {
   const weeksByInstructor = new Map();
   for (const row of rows || []) {
@@ -70,7 +53,6 @@ export async function weeklyEscalations(db, rows, scope = {}) {
     escalated.set(key, {
       week_start: weekStart,
       week_end: addDaysToKey(weekStart, 6),
-      // Days in a row, and which: the label says "3 days in a row".
       count: streak.length,
       streak: true,
       days: streak.map((record) => record.attendance_day),
@@ -79,7 +61,6 @@ export async function weeklyEscalations(db, rows, scope = {}) {
   return escalated;
 }
 
-/** The escalation for one row, or null. */
 export function escalationFor(escalations, row) {
   if (!row?.instructor_id || !row.attendance_day) return null;
   return escalations.get(`${row.instructor_id}|${weekStartKey(row.attendance_day)}`) || null;

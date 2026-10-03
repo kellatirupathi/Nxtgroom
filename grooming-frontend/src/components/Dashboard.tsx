@@ -35,12 +35,9 @@ import type {
 } from '../types';
 
 interface DashboardProps {
-  /** Moves to another screen, such as Daily Records. */
   onNavigate: (tab: string) => void;
 }
 
-// Chart colours. Checked for colour-blind separation between neighbours; every
-// mark is also labelled, so colour never carries meaning on its own.
 const COLOR_ATTENDANCE = '#4f46e5';
 const COLOR_COMPLIANCE = '#0891b2';
 const TEXT_MUTED = '#94a3b8';
@@ -59,7 +56,6 @@ const STATUS_META: Record<DashboardStatusKey, { label: string; color: string; ba
 const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
 const TREND_RANGES = [7, 14, 30] as const;
 
-/** Tracks an element's rendered width so a chart can draw at its real size. */
 function useElementWidth<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [width, setWidth] = useState(0);
@@ -80,7 +76,6 @@ function useElementWidth<T extends HTMLElement>() {
 }
 
 function ChartTooltip({ x, y, width, children }: { x: number; y: number; width: number; children: ReactNode }) {
-  // Kept inside the chart: centred on the point, clamped to the chart's edges.
   const half = 90;
   const left = Math.max(half, Math.min(width - half, x));
   return (
@@ -162,7 +157,6 @@ function TrendChart({ trend }: { trend: DashboardTrendDay[] }) {
     { key: 'compliance_percent' as const, label: 'Compliant', color: COLOR_COMPLIANCE },
   ];
 
-  /** A line broken wherever a day has no value, rather than drawn through it. */
   const linePath = (key: 'present_percent' | 'compliance_percent') => {
     let path = '';
     let drawing = false;
@@ -401,7 +395,6 @@ function Escalations({ data, onViewAll }: { data: DashboardData; onViewAll: () =
           Escalated this week
           {rows.length > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{rows.length}</span>}
         </h3>
-        {/* Every escalated day of this week or any other, with photos and reports. */}
         <TileLink tone="rose" onClick={onViewAll}>View all</TileLink>
       </div>
       <p className="text-xs text-slate-500">Non-compliant at check-in on 3 or more days in a row since {weekdayLabel(data.week_start)}. Reporting partners are emailed on each day the run continues.</p>
@@ -455,12 +448,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [reloadVersion, setReloadVersion] = useState(0);
   const hasData = useRef(false);
 
-  /**
-   * Keeps the page current while it is on screen: a refresh every 30 seconds,
-   * paused while the tab is hidden and caught up the moment it is shown again.
-   * The previous figures stay visible during a refresh, so the page never
-   * blanks while it updates.
-   */
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;

@@ -9,7 +9,6 @@ import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import type { AdminUser, Boa, College, Role } from '../types';
 
-/** Creation response: `invited` means a set-password link was emailed. */
 interface CreatedUser {
   id: string;
   invited?: boolean;
@@ -19,7 +18,6 @@ interface CreatedUser {
 const ADMINS_PATH = '/api/v2/admins';
 const BOAS_PATH = '/api/v2/boas';
 
-/** One row of the combined table; `kind` decides which endpoints apply. */
 interface UserRow {
   id: string;
   kind: 'admin' | 'boa';
@@ -77,7 +75,6 @@ interface UserManagementProps {
 
 export default function UserManagement({ currentRole, currentEmail }: UserManagementProps) {
   const isSuper = currentRole === 'SUPER_ADMIN';
-  // Seed from the previous response so the table is on screen immediately.
   const cachedBoas = readStale<Boa[]>(BOAS_PATH);
   const cachedAdmins = readStale<AdminUser[]>(ADMINS_PATH);
   const cachedColleges = readStale<College[]>('/api/v2/colleges');
@@ -101,10 +98,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const fetchAll = async () => {
-    // Keep existing rows visible while revalidating; only blank on a cold load.
     if (boas.length === 0 && admins.length === 0) setLoading(true);
     try {
-      // Only the super admin may list administrators; an admin still sees BOAs.
       const [boaData, collegeData, adminData] = await Promise.all([
         apiFetchCached<Boa[]>(BOAS_PATH),
         apiFetchCached<College[]>('/api/v2/colleges'),
@@ -158,7 +153,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       createdAt: boa.created_at,
       isSuperAdmin: false,
     }));
-    // Administrators first: they are fewer and more privileged.
     return [...adminRows, ...boaRows];
   }, [admins, boas, collegeNames]);
 
@@ -194,11 +188,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
     event.preventDefault();
     setSubmitting(true);
     setError('');
-    // Set on create so the confirmation can say whether an invitation went out.
     let delivery: CreatedUser | null = null;
     try {
-      // Apply the change to local state from the server's response instead of
-      // refetching every list, so the table updates without a loading blank.
       if (form.role === 'ADMIN') {
         const body: Record<string, unknown> = { name: form.name, email: form.email };
         if (form.password) body.password = form.password;
@@ -210,8 +201,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
               : admin
           )));
         } else {
-          // body already carries password only when one was typed; spreading
-          // form.password here again would send "" and defeat the invite path.
           const created = await apiJson<CreatedUser>(ADMINS_PATH, { method: 'POST', body });
           delivery = created;
           setAdmins((current) => [
@@ -263,8 +252,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       if (editing) {
         toast.success('User updated', { detail: form.email });
       } else if (delivery && delivery.emailed === false) {
-        // The account exists but the email did not go out, so say so rather
-        // than let an administrator assume the person was contacted.
         toast.warning('User created, but the email could not be sent', {
           detail: delivery.invited
             ? `Use "Set new password" to give ${form.email} access.`
@@ -321,7 +308,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       const base = row.kind === 'admin' ? ADMINS_PATH : BOAS_PATH;
       await apiFetch(`${base}/${encodeURIComponent(row.id)}`, { method: 'DELETE' });
       invalidateCache(base);
-      // Drop the row locally once the server confirms; no refetch needed.
       if (row.kind === 'admin') {
         setAdmins((current) => current.filter((admin) => String(admin._id) !== row.id));
       } else {
@@ -342,8 +328,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   };
 
   const actionsFor = (row: UserRow): RowAction[] => {
-    // Administrator accounts are managed by the super admin alone, and the
-    // super admin row itself can never be deleted.
     const manageable = row.kind === 'boa' || isSuper;
     const isSelf = row.email === currentEmail;
     return [
@@ -360,8 +344,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
           setError('');
         },
       },
-      // Only BOA accounts have anything to configure: administrators can
-      // always delete, which the modal would only be able to state, not change.
       ...(row.kind === 'boa' ? [{
         key: 'permissions',
         label: 'Permissions',
@@ -409,8 +391,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       {error && !showForm && !passwordFor && (
         <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>
       )}
-      {/* Phones: a card per account, with the email and institute the
-          table hides at this width. Tablets and desktops keep the table. */}
       <div className="md:hidden">
         {loading ? (
           <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">Loading users…</p>
@@ -554,9 +534,6 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
                 <label htmlFor="user-password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
                   {editing ? 'New password (optional)' : 'Password (optional)'}
                 </label>
-                {/* Blank on create is a deliberate choice, not an omission: the
-                    server emails an invitation link instead of storing a
-                    password the account holder never picked. */}
                 <PasswordInput id="user-password" minLength={12} maxLength={128} autoComplete="new-password" className={inputClass} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
                 <p className="mt-1 text-xs text-slate-400">
                   {editing

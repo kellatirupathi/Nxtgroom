@@ -25,7 +25,6 @@ interface InstructorForm {
 }
 
 export default function InstructorManagement() {
-  // Paint from the last known lists, then revalidate in the background.
   const cachedInstructors = readStale<Instructor[]>(INSTRUCTORS_PATH);
   const cachedColleges = readStale<College[]>('/api/v2/colleges');
   const [instructors, setInstructors] = useState<Instructor[]>(
@@ -42,10 +41,6 @@ export default function InstructorManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [confirmTarget, setConfirmTarget] = useState<Instructor | null>(null);
-  /**
-   * Create mode holds the chosen reference photo until the instructor exists,
-   * because a face can only be enrolled against a record that has an id.
-   */
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [showImport, setShowImport] = useState(false);
   const toast = useToast();
@@ -54,8 +49,6 @@ export default function InstructorManagement() {
     name: '',
     employee_id: '',
     role: '',
-    // Blank, not MALE: the photo check compares against gendered standards,
-    // so a default would quietly grade someone against the wrong ones.
     gender: '',
     college_id: '',
     email: '',
@@ -63,9 +56,6 @@ export default function InstructorManagement() {
   });
 
   const fetchData = useCallback(async ({ signal }: { signal?: AbortSignal } = {}) => {
-    // Initial state already shows the loader when no cached roster exists.
-    // During background revalidation keep visible rows mounted; replacing
-    // them with a second full-page loader caused the reload flash.
     try {
       const [instructorData, collegeData] = await Promise.all([
         apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, {
@@ -76,8 +66,6 @@ export default function InstructorManagement() {
         apiFetchCached<College[]>('/api/v2/colleges', { signal }),
       ]);
       if (signal?.aborted) return;
-      // Pagination assembles the list across requests, so store the finished
-      // array under the base path for the next visit to paint from.
       if (Array.isArray(instructorData)) primeCache(INSTRUCTORS_PATH, instructorData);
       setInstructors(Array.isArray(instructorData) ? instructorData : []);
       setColleges(Array.isArray(collegeData) ? collegeData : []);
@@ -101,10 +89,6 @@ export default function InstructorManagement() {
       setError('Please select an institute.');
       return;
     }
-    // Required only when adding by hand. The warehouse sync creates instructors
-    // with no photograph to offer, and the ~600 already on file are enrolled as
-    // the admin works through them, so the rule belongs to this form rather
-    // than to the record.
     if (!isEditMode && !pendingPhoto) {
       setError('Add a reference photo. It is what identifies this instructor at check-in.');
       return;
@@ -113,12 +97,8 @@ export default function InstructorManagement() {
     setSaving(true);
     try {
       const path = isEditMode ? `/api/v2/instructors/${encodeURIComponent(editingId as string)}` : '/api/v2/instructors';
-      // Patch local state from the response instead of refetching the whole
-      // list, so the table updates in place with no loading blank.
       const saved = await apiJson<{ id?: string }>(path, {
         method: isEditMode ? 'PUT' : 'POST',
-        // instructor_role is what the tables display, so it is sent alongside
-        // role; otherwise an edit would save but appear to change nothing.
         body: { ...formData, instructor_role: formData.role },
       });
       invalidateCache(INSTRUCTORS_PATH);
@@ -131,16 +111,10 @@ export default function InstructorManagement() {
       } else if (saved?.id) {
         setInstructors((current) => [
           ...current,
-          // face_count starts at zero so the row is marked as needing a photo
-          // until enrollment below actually succeeds.
           { _id: saved.id as string, ...formData, daily_feedbacks: [], face_count: 0 },
         ]);
       }
 
-      // Enrolled after the record exists, since a face is indexed against the
-      // instructor's id. A failure here is reported without discarding the
-      // instructor that was just created: the photo can be added from the edit
-      // dialog, whereas rolling the creation back would lose the typed details.
       let enrolled = true;
       if (!isEditMode && saved?.id && pendingPhoto) {
         try {
@@ -177,14 +151,12 @@ export default function InstructorManagement() {
   };
 
   const handleDelete = async (id: string) => {
-    // Read the name before the row leaves state so the toast can name it.
     const removedName = instructors.find((ins) => String(ins._id) === String(id))?.name;
     try {
       await apiFetch(`/api/v2/instructors/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
       invalidateCache(INSTRUCTORS_PATH);
-      // Drop the row locally once the server confirms; no refetch needed.
       setInstructors((current) => current.filter((ins) => String(ins._id) !== String(id)));
       toast.success('Instructor deleted', { detail: removedName });
       setConfirmTarget(null);
@@ -199,8 +171,6 @@ export default function InstructorManagement() {
     setIsEditMode(false);
     setEditingId(null);
     setFormData({ name: '', employee_id: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
-    // Cleared on every open: a file left from a previous dialog would be
-    // enrolled against whichever instructor is created next.
     setPendingPhoto(null);
     setError('');
     setShowModal(true);
@@ -215,8 +185,6 @@ export default function InstructorManagement() {
       name: ins.name,
       employee_id: ins.employee_id || '',
       role: ins.instructor_role || ins.role || '',
-      // An instructor with no gender recorded opens blank, so saving the form
-      // asks for one instead of quietly recording them as male.
       gender: ins.gender ? String(ins.gender).toUpperCase() : '',
       college_id: ins.college_id,
       email: ins.email || '',
@@ -232,11 +200,6 @@ export default function InstructorManagement() {
     setPendingPhoto(null);
   };
 
-  /**
-   * The standard roles, then any other role in the roster or on the instructor
-   * being edited, so an unusual value is never silently replaced by the first
-   * option when the form opens.
-   */
   const roleOptions = useMemo(
     () => instructorRoleOptions(
       instructors.map((instructor) => instructor.instructor_role || instructor.role),
@@ -245,16 +208,6 @@ export default function InstructorManagement() {
     [instructors, formData.role],
   );
 
-  // Search covers the synced columns too, since employee_id is often absent
-  // on roster rows and the user id is what identifies them.
-  /**
-   * The institute to show for one instructor.
-   *
-   * Synced instructors carry institute_name from the warehouse; one added by
-   * hand carries only the college it was assigned to. The edit dialog resolved
-   * that id and the table did not, so the same instructor showed an institute
-   * in one place and a dash in the other.
-   */
   const instituteFor = (ins: Instructor): string =>
     ins.institute_name
     || colleges.find((college) => String(college._id) === String(ins.college_id))?.name
@@ -285,8 +238,6 @@ export default function InstructorManagement() {
           </h2>
         </div>
         <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
-          {/* On a phone the search has the first row to itself and the two
-              buttons share the second, rather than Import wrapping alone. */}
           <div className="relative basis-full sm:basis-auto sm:flex-none">
             <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input 
@@ -318,8 +269,6 @@ export default function InstructorManagement() {
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      {/* Phones: a card per instructor, since the table's columns do not fit.
-          Tablets and desktops keep the table. */}
       <div className="md:hidden">
         {loading ? (
           <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">Loading instructors...</p>
@@ -390,13 +339,7 @@ export default function InstructorManagement() {
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
                 <th className="p-4">Instructor Name</th>
                 <th className="p-4">Role</th>
-                {/* The AI compares against gendered reference photos, so an
-                    unset value degrades the report. It is edited here rather
-                    than in the dialog because the dialog requires a college
-                    and email that synced instructors do not have. */}
                 <th className="p-4">Gender</th>
-                {/* Institute replaces College: they name the same thing, and
-                    the roster is authoritative for it. */}
                 <th className="p-4 hidden lg:table-cell">Institute</th>
                 <th className="p-4 hidden lg:table-cell">Category</th>
                 <th className="p-4 hidden xl:table-cell">Email</th>
@@ -418,9 +361,6 @@ export default function InstructorManagement() {
                     <td className="p-4 font-bold text-slate-800">
                       <span className="flex items-center gap-1.5">
                         {ins.name}
-                        {/* Recognition needs an enrolled face. Without one this
-                            instructor cannot check in automatically, which
-                            is worth seeing from the list. */}
                         {!ins.face_count && (
                           <span title="No reference photo: this instructor will not be recognised automatically">
                             <CircleAlert size={14} className="text-amber-500 shrink-0" aria-label="No reference photo" />
@@ -507,14 +447,7 @@ export default function InstructorManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
-                  {/* The four standard roles, plus any other role already in
-                      the roster: the synced data uses CENTRAL_INSTRUCTOR and
-                      INSTRUCTOR, and a fixed list that missed a role would
-                      silently change it when a synced instructor was edited. */}
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
-                    {/* An empty value must match an option, or the browser
-                        shows the first role while the form still holds "",
-                        which the server then rejects. */}
                     <option value="" disabled>Select a role...</option>
                     {roleOptions.map((role: string) => (
                       <option key={role} value={role}>{role}</option>
@@ -576,8 +509,6 @@ export default function InstructorManagement() {
           colleges={colleges}
           onClose={() => setShowImport(false)}
           onImported={(added) => {
-            // The roster changed on the server; fetch it again rather than
-            // guess the new rows, which carry ids and photo counts from there.
             invalidateCache(INSTRUCTORS_PATH);
             void fetchData();
             toast.success(added === 1 ? 'Imported 1 instructor' : `Imported ${added} instructors`);

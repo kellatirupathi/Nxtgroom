@@ -4,15 +4,6 @@ import { readFile } from "node:fs/promises";
 import { escalationFor, weeklyEscalations } from "../src/services/escalations.js";
 import { failedDayStreaks, longestFailedStreak } from "../src/services/evaluationWorker.js";
 
-/**
- * The Escalation column on Daily Records.
- *
- * Whether somebody is escalated depends on their whole Monday-to-Sunday week,
- * but a Daily Records page shows only the range it is filtered to. So the
- * server counts the whole week for every instructor on the page, and these
- * tests hold it to that - and to the same counting the URGENT email uses.
- */
-
 function matches(doc, filter = {}) {
   for (const [key, condition] of Object.entries(filter)) {
     const value = doc[key];
@@ -91,12 +82,10 @@ test("only check-ins in a row count: not results, or a run broken by a pass; abs
   const week = (...days) => days.map(([day, extra], index) => row(`r${index}`, "i1", day, extra));
   const escalatedFor = async (rows) => (await weeklyEscalations(memoryDb(rows), rows)).size > 0;
   const fail = { status: "non_compliant" };
-  // Three results on two days: Monday's check-in and check-out, Tuesday's check-in.
   assert.equal(await escalatedFor(week(
     ["2026-09-21", { ...fail, checkout_compliance_status: "NON_COMPLIANT" }],
     ["2026-09-22", fail],
   )), false);
-  // Absent on Tuesday and Thursday: the days they came are still in a row.
   assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-25", fail])), true, "absences between");
   assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-22", {}], ["2026-09-23", fail], ["2026-09-24", fail])), false, "a pass between");
   assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-24", fail])), true, "an absence between");
@@ -115,7 +104,6 @@ test("the runs of a week are found in order, and the longest is the escalation",
     row("d", "i1", "2026-09-24", fail),
     row("e", "i1", "2026-09-25", fail),
     row("f", "i1", "2026-09-26", fail),
-    // Deleted records never count.
     row("g", "i1", "2026-09-27", { ...fail, deleting_at: "2026-09-27T10:00:00Z" }),
   ];
   assert.deepEqual(failedDayStreaks(rows, "2026-09-21").map((run) => run.map((record) => record._id)), [["a", "b"], ["d", "e", "f"]]);

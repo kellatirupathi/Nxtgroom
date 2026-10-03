@@ -8,14 +8,6 @@ import {
   createWakeSignal,
 } from "../src/services/workerPacing.js";
 
-/**
- * The workers used to poll every two seconds whether or not there was work:
- * about nine database operations a second per server, all day. An idle worker
- * now backs off to 15 s and runs its recovery sweeps once a minute, and a job
- * queued in the same process wakes its worker straight away, so the quiet
- * hours stop costing queries without making anyone wait for an email.
- */
-
 test("an idle worker backs off to the ceiling and returns to zero when work appears", () => {
   const backoff = createIdleBackoff({ minMs: 2000, maxMs: 15000 });
   assert.deepEqual(
@@ -69,7 +61,6 @@ test("a failing wake-up listener cannot break the code that queued the job", () 
   assert.equal(woken, 1, "a stopped listener is not called");
 });
 
-/** Records every claim attempt; the queue itself is always empty. */
 function claimCountingDb(extra = {}) {
   const claims = { mail_jobs: 0, notification_jobs: 0 };
   const collection = (name) => ({
@@ -100,8 +91,6 @@ test("queuing an email wakes the idle mail worker instead of waiting for the nex
   const worker = startMailWorker(db);
   try {
     await waitFor(() => claims.mail_jobs > 0, 1000, "the first poll never ran");
-    // Let the first cycle finish and the worker go to sleep for its idle
-    // delay (at least one second).
     await new Promise((resolve) => setTimeout(resolve, 50));
     const beforeEnqueue = claims.mail_jobs;
     await enqueueMailJob(db, {
@@ -157,8 +146,6 @@ test("an email queued while the worker is mid-cycle is claimed without waiting f
     collection: () => ({
       async findOneAndUpdate() {
         claims += 1;
-        // Hold the first cycle's claims open, so the email below is queued
-        // after the worker has already looked for jobs in this cycle.
         if (claims <= 2) await new Promise((resolve) => held.push(resolve));
         return null;
       },
@@ -177,7 +164,6 @@ test("an email queued while the worker is mid-cycle is claimed without waiting f
       payload: {},
     });
     for (const release of held) release();
-    // Without the mid-cycle wake-up the worker would sleep at least a second.
     await waitFor(
       () => claims > 2,
       500,

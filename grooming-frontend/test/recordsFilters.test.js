@@ -69,7 +69,6 @@ test('nothing saved, or anything unreadable, starts on today with nothing narrow
   assert.equal(loaded.search, '');
   assert.equal(loaded.college.length, 200);
 
-  // A custom period without valid dates is not kept.
   const badCustom = memoryStorage();
   badCustom.setItem(RECORDS_FILTERS_KEY, JSON.stringify({ preset: 'custom', range: { from: 'yesterday', to: TODAY } }));
   assert.deepEqual(loadRecordsFilters(badCustom, TODAY).range, defaultRecordsFilters(TODAY).range);
@@ -95,8 +94,6 @@ test('Daily Records starts from the saved filters, saves every change, and offer
   }
   assert.match(table, /saveRecordsFilters\(\{[\s\S]*?\}, \[preset, range, search, collegeFilter, roleFilter, statusFilter, escalationFilter\]\);/);
 
-  // Shown only when something is narrowed, right after Filters, and it clears
-  // the filters and the search together.
   assert.match(table, /\{\(activeFilterCount > 0 \|\| search\) && \(/);
   assert.match(table, /clearAllFilters\(\);\s*setSearch\(''\);/);
   assert.match(table, /aria-label="Clear filters"/);

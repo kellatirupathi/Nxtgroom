@@ -2,7 +2,6 @@ import { Lightbulb } from 'lucide-react';
 import { improvementTipsFor, isUnassessed, REPORT_COLUMNS, reportTables } from '../reportLayout';
 import type { CheckItem, Evaluation } from '../types';
 
-/** Kept beside REPORT_COLUMNS so a column can never lose its width. */
 const COLUMN_WIDTHS = ['w-[23%]', 'w-[10%]', 'w-[31%]', 'w-[36%]'];
 
 interface ReportRow {
@@ -40,9 +39,6 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
   return (
     <section className="mb-6" aria-labelledby={anchor}>
       <h4 id={anchor} className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 border-b border-slate-100 pb-2">{title}</h4>
-      {/* Phones: each checkpoint stacked - name and result, then what was
-          seen and why - since four columns do not fit and the reason column
-          ended up off-screen. Wider screens keep the table. */}
       <ul className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white shadow-sm md:hidden">
         {rows.map((item) => (
           <li key={item.key} className="p-3.5">
@@ -80,14 +76,6 @@ export function ReportSection({ title, items }: { title: string; items?: CheckIt
   );
 }
 
-/**
- * What the instructor should change.
- *
- * The list is derived from the failing checkpoints by the backend, so the
- * report page and the emails cannot advise different things. Only FAIL
- * produces a tip: a passing checkpoint needs no action, and an N/A means the
- * camera could not see it, which is not something the instructor did.
- */
 export function ImprovementTips({ evaluation }: { evaluation: Evaluation }) {
   const tips = improvementTipsFor(evaluation);
 
@@ -110,15 +98,7 @@ export function ImprovementTips({ evaluation }: { evaluation: Evaluation }) {
   );
 }
 
-/**
- * The five checkpoint tables that make up an appearance audit. Shared by the
- * public report page, the authenticated detail view and the post-check-in
- * modal, so the same evaluation cannot appear differently in different parts
- * of FacultyTrack.
- */
 export default function GroomingReport({ evaluation }: { evaluation: Evaluation }) {
-  // An evaluation with no dress code applied has nothing to tabulate. Five
-  // empty tables would imply the checks ran and found nothing.
   if (isUnassessed(evaluation)) {
     return (
       <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm font-medium text-amber-800">

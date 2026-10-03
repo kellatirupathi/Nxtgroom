@@ -72,8 +72,6 @@ import { rateLimit } from "express-rate-limit";
 
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
 
-// A sync queries BigQuery and writes thousands of rows, so it must not be
-// possible to start many at once by clicking repeatedly.
 const instructorSyncLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   limit: 5,
@@ -84,14 +82,6 @@ const instructorSyncLimiter = rateLimit({
 
 export const adminRouter = Router();
 
-/**
- * Tells a newly created administrator or BOA how to get in: an invitation
- * link when no password was set, otherwise a notice that one already exists.
- *
- * Never throws. The account is already committed by the time this runs, so a
- * mail failure must not turn a successful creation into an error; the caller
- * reports delivery through the `invited` / `emailed` flags instead.
- */
 async function sendAccountSetupEmail(db, { email, name, role, hasPassword }) {
   try {
     if (hasPassword) {
@@ -176,14 +166,9 @@ export async function listActiveBoasWithAccounts(db) {
   );
   return rows
     .filter((row) => emailByReference.has(String(row._id)))
-    // Records migrated from the previous cluster have no email on the BOA
-    // document, only on the linked account, so the table showed "--". The
-    // account is the authoritative address, so fall back to it.
     .map((row) => {
       if (row.email) return row;
       const accountEmail = emailByReference.get(String(row._id));
-      // Leave the shape untouched when neither source has an address, rather
-      // than introducing an explicit null the callers never had to handle.
       return accountEmail ? { ...row, email: accountEmail } : row;
     });
 }
@@ -433,8 +418,6 @@ adminRouter.post(
   requireSuperAdmin,
   validate(boaSchema),
   asyncRoute(async (req, res) => {
-    // No password means the BOA is invited to choose their own; the account is
-    // stored without a hash, which verifyPassword() already refuses to match.
     const hasPassword = Boolean(req.validatedBody.password);
     const passwordHash = hasPassword
       ? await getPasswordHash(req.validatedBody.password)
@@ -550,8 +533,6 @@ adminRouter.post(
       if (duplicateErrorResponse(error, res, "A college with this name and location already exists")) return;
       throw error;
     }
-    // The Institutes page caches its figures for a few seconds; without this
-    // an institute added from that page would not appear on it straight away.
     clearDashboardCache();
     return res.status(201).json({ message: "College created successfully", id: college._id });
   })
@@ -560,8 +541,6 @@ adminRouter.post(
 adminRouter.get(
   "/colleges",
   asyncRoute(async (req, res) => {
-    // Administrators are not tied to a college, so scoping them by collegeId
-    // returned nothing and every table rendered "Unknown college".
     const scope = isElevated(req.currentUser.role)
       ? {}
       : { _id: idMatch(req.currentUser.collegeId) };
@@ -639,11 +618,6 @@ adminRouter.put(
   })
 );
 
-/**
- * Imports the institute list from BigQuery and assigns synced instructors to
- * theirs by name. The roster names an instructor's institute but carries no
- * id, so without this every synced instructor stays unassigned.
- */
 adminRouter.post(
   "/settings/institute-sync",
   requireSuperAdmin,
@@ -662,10 +636,6 @@ adminRouter.post(
   })
 );
 
-/**
- * Reporting Partners: addresses copied on grooming alerts alongside the
- * instructor, so a failed audit reaches someone accountable.
- */
 adminRouter.get(
   "/settings/rp-recipients",
   requireSuperAdmin,
@@ -709,17 +679,11 @@ adminRouter.delete(
   })
 );
 
-/**
- * Current roster plus the outcome of the last sync, so the Settings screen can
- * render the table and the "last synced" line in one request.
- */
 adminRouter.get(
   "/settings/instructor-sync",
   requireSuperAdmin,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
-    // Only rows that came from BigQuery: manually created instructors are
-    // managed on the Instructors page, not by this screen.
     const syncedFilter = activeFilter({ source: "bigquery" });
     const [state, records, total] = await Promise.all([
       readSyncState(db),
@@ -751,10 +715,6 @@ adminRouter.get(
   })
 );
 
-/**
- * Triggers a sync. Long-running by nature, so it is rate limited and refuses
- * to start when credentials are absent rather than failing halfway.
- */
 adminRouter.post(
   "/settings/instructor-sync",
   requireSuperAdmin,
@@ -774,14 +734,6 @@ adminRouter.post(
     return res.json(result);
   })
 );
-
-/* ---------------------------------------------------------------------------
- * Administrator accounts
- *
- * Only SUPER_ADMIN may reach these routes. ADMIN accounts hold organisation-
- * wide power everywhere else, but cannot create or remove each other, so the
- * owner can never be locked out of their own system.
- * ------------------------------------------------------------------------- */
 
 function serializeUser(user) {
   return {
@@ -819,8 +771,6 @@ adminRouter.post(
       return res.status(400).json({ detail: "Email already registered" });
     }
 
-    // A blank password creates a pending account that can only be opened via
-    // the emailed invitation link.
     const hasPassword = Boolean(password);
     const now = new Date();
     const user = createDocument({
@@ -875,11 +825,8 @@ adminRouter.put(
     if (password) {
       update.password_hash = await getPasswordHash(password);
       update.password_changed_at = new Date();
-      // Force re-authentication everywhere when a credential changes.
       inc.session_version = 1;
     }
-    // Changing the sign-in address must also invalidate existing tokens,
-    // whose `sub` claim still carries the old address.
     if (email !== target.email) inc.session_version = 1;
 
     await db.collection("users").updateOne(
@@ -938,7 +885,6 @@ adminRouter.delete(
   })
 );
 
-/** Lets an elevated user set a BOA's password without knowing the old one. */
 adminRouter.post(
   "/boas/:id/password",
   requireSuperAdmin,
@@ -968,16 +914,6 @@ adminRouter.post(
   })
 );
 
-/**
- * Which colleges identify an instructor from their check-in photograph.
- *
- * Returned with each college's enrolment, because the mode and the readiness to
- * use it are one decision: a college set to FACE_ONLY with few enrolled faces
- * cannot record automatic attendance until reference faces are enrolled.
- * The low_enrolment flag is advisory — it is reported so the choice is informed,
- * and never applied, since overriding an administrator's setting automatically
- * would be the more surprising behaviour.
- */
 adminRouter.get(
   "/settings/identification",
   requireSuperAdmin,
@@ -1036,13 +972,6 @@ adminRouter.put(
   })
 );
 
-/**
- * One user's capabilities, and where each one comes from.
- *
- * The source matters to whoever is looking: a toggle that is on because the
- * workspace default is on behaves differently from one somebody chose for this
- * person, and the difference is invisible unless it is said.
- */
 adminRouter.get(
   "/users/:userId/permissions",
   requireSuperAdmin,
@@ -1065,8 +994,6 @@ adminRouter.put(
   requireSuperAdmin,
   asyncRoute(async (req, res) => {
     const value = req.body?.can_delete_records;
-    // null clears the override so the person follows the workspace default
-    // again, which is different from choosing false for them.
     if (value !== null && typeof value !== "boolean") {
       return res.status(422).json({
         detail: "can_delete_records must be true, false, or null to follow the workspace default",
@@ -1093,17 +1020,6 @@ adminRouter.put(
   })
 );
 
-/**
- * Which halves reporting partners are copied on.
- *
- * Separate from the address list because they answer a different question:
- * who receives reports, and which reports they receive.
- */
-/**
- * The daily report: its switch, its send times and its own recipients, who
- * are not the reporting partners. Times travel as 24-hour "HH:MM"; the
- * screen shows them in 12-hour form.
- */
 adminRouter.get(
   "/settings/daily-report",
   requireSuperAdmin,
@@ -1122,11 +1038,6 @@ adminRouter.put(
   })
 );
 
-/**
- * The Reports tab: one row per day of a month up to today, with the day's
- * check-ins, check-outs, those not yet checked out, and the link to its full
- * report - the same link that day's emails carry.
- */
 adminRouter.get(
   "/settings/daily-report/days",
   requireSuperAdmin,

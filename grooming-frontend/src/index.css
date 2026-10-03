@@ -4,23 +4,12 @@
 @tailwind utilities;
 
 :root {
-  /* The bottom bar's own height, excluding the safe-area inset it also pads
-     for. The bar is a row of the layout, so it claims this space rather than
-     being painted over the page — nothing has to reserve it. The variable
-     remains because the overflow sheet opens directly above the bar and has
-     to clear exactly this much.
-
-     Sized from the screen width, like a native bar: comfortable on a 360px
-     phone, larger on a tablet, never cramped or oversized. */
   --bottom-nav-height: clamp(3.75rem, 3.25rem + 2.2vw, 4.5rem);
   --bottom-nav-icon: clamp(24px, 20px + 1vw, 30px);
   --bottom-nav-label: clamp(12px, 10.5px + 0.4vw, 14px);
 
-  /* The system bars' insets. env() where the browser reports them. */
   --inset-top: env(safe-area-inset-top, 0px);
   --inset-bottom: env(safe-area-inset-bottom, 0px);
-  /* How much of the screen top the document itself pads. Only the app pads
-     it (below); a browser draws its own bar there. */
   --shell-offset-top: 0px;
 }
 
@@ -30,7 +19,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Indeterminate progress sweep used by the startup loader. */
 @keyframes loader-sweep {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(320%); }
@@ -40,8 +28,6 @@ body {
   animation: loader-sweep 1.2s ease-in-out infinite;
 }
 
-/* Respect a system-level request for reduced motion: the looping pulse and
-   sweep are decorative, and for some users continuous motion causes nausea. */
 @media (prefers-reduced-motion: reduce) {
   .loader-sweep,
   .loader-ring,
@@ -58,25 +44,7 @@ body {
   border-radius: 1rem;
 }
 
-/* ---------------------------------------------------------------------------
-   Android app only. Scoped to .native, which is set at startup solely inside
-   the Capacitor shell, so nothing here reaches the website.
-
-   These are the differences between a page and an app. In a browser the
-   address bar, text selection and rubber-band scroll are expected furniture;
-   inside an app they read as bugs — a long-press that selects a heading, or a
-   list that bounces past its own background, is something no native screen
-   does.
-   --------------------------------------------------------------------------- */
 .native {
-  /* The status bar and gesture bar overlap the webview once the viewport is
-     drawn edge to edge, so the app owns the inset rather than the OS.
-     Capacitor also writes the insets as variables, for WebViews whose env()
-     does not report them; the larger of the two wins.
-
-     The shell is sized to what is left below this padding. It used to be a
-     full screen tall on top of it, which pushed the bottom bar down by the
-     status bar's height - its labels ended up under the gesture bar. */
   --inset-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
   --inset-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
   --shell-offset-top: var(--inset-top);
@@ -85,9 +53,6 @@ body {
 }
 
 .native body {
-  /* Selection handles and the grey flash on tap are the clearest tells that a
-     screen is a web page. Inputs are exempted below: text there is meant to be
-     selected and corrected. */
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -102,16 +67,12 @@ body {
   user-select: text;
 }
 
-/* Scroll containers keep momentum but stop chaining to the document, so a
-   list that reaches its end does not drag the whole screen with it. */
 .native .overflow-auto,
 .native .overflow-y-auto {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Touch has no hover state: a tap that leaves a button looking hovered reads
-   as stuck. Pressed feedback replaces it. */
 .native button:active:not(:disabled),
 .native a:active {
   transform: scale(0.98);

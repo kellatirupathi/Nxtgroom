@@ -10,13 +10,6 @@ export function normalizeAttendanceStatus(status: unknown): AttendanceStatus {
       return 'non_compliant';
     case 'unassessed':
       return 'unassessed';
-    // Nobody was identified, so there is no verdict and nothing is running.
-    // Falling through to the default would have read as "analysis pending",
-    // which never resolves, and canOpenRecord would then hide the photograph
-    // from the person who just took it.
-    // Records evaluated before the review flag was removed still carry these.
-    // They were compliant results that had been flagged, so that is how they
-    // read now. The stored value itself is left untouched.
     case 'needs_review':
     case 'review_required':
       return 'compliant';
@@ -32,14 +25,6 @@ export function hasEvaluation(status: unknown): boolean {
   return normalized === 'compliant' || normalized === 'non_compliant';
 }
 
-/**
- * Whether the detail page is worth opening.
- *
- * Wider than hasEvaluation on purpose. An unassessed record has no checkpoint
- * tables, but it still has the photograph, the times, the location and the
- * reason nothing was assessed — which is exactly what someone clicks the row
- * to find out. Only a check-in still being analysed has nothing to show yet.
- */
 export function canOpenRecord(status: unknown): boolean {
   return normalizeAttendanceStatus(status) !== 'pending';
 }
@@ -57,13 +42,6 @@ export function formatCoordinates(coordinates: unknown): string {
   return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 }
 
-/**
- * A link that opens the stored coordinates on a map, or null when there are no
- * usable coordinates.
- *
- * OpenStreetMap, matching the embedded map on the record page: no API key, and
- * the same place opens whichever screen the link came from.
- */
 export function mapUrlForCoordinates(coordinates: unknown): string | null {
   if (!coordinates) return null;
   const [latitude, longitude] = String(coordinates).split(',').map((value) => Number(value.trim()));

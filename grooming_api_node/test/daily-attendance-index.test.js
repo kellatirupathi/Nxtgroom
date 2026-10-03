@@ -7,21 +7,6 @@ import {
   WIDENED_DAILY_ATTENDANCE_INDEX,
 } from "../src/config/databasePreflight.js";
 
-/**
- * The uniqueness rule for one attendance record per instructor per local day,
- * and the migration that widens its partial filter.
- *
- * This is the change most able to lose data silently. Photo-first check-in
- * records an unrecognised person with instructor_id: null, and under the old
- * day-only filter every such record in one day collided on
- * {instructor_id: null, attendance_day: "..."}. The second unrecognised check-in
- * was rejected as a duplicate key and the attendance simply never existed — the
- * exact case the unidentified queue is for. Nothing in the application would
- * report it, because a duplicate check-in is a legitimate outcome the route
- * already handles as a 409.
- */
-
-/** A minimal index collection stub: records what was created and dropped. */
 function fakeCollection(initialIndexes) {
   const indexes = [...initialIndexes];
   const created = [];
@@ -78,8 +63,6 @@ test("the API requires the widened daily attendance index", () => {
 });
 
 test("the migration target requires a string instructor_id, not only a day", () => {
-  // Without this an unidentified record, which has no instructor, falls inside
-  // the unique index and collides with the next one.
   const filter = WIDENED_DAILY_ATTENDANCE_INDEX.options.partialFilterExpression;
   assert.deepEqual(filter.instructor_id, { $type: "string" });
   assert.deepEqual(filter.attendance_day, { $type: "string" });
@@ -87,9 +70,6 @@ test("the migration target requires a string instructor_id, not only a day", () 
 });
 
 test("unidentified records fall outside the widened rule, real ones inside it", () => {
-  // A partial index only covers documents its filter matches, so this is the
-  // property that decides whether a second unrecognised check-in survives once
-  // the migration has been applied.
   const filter = WIDENED_DAILY_ATTENDANCE_INDEX.options.partialFilterExpression;
   const covered = (record) => (
     typeof record.instructor_id === "string" && typeof record.attendance_day === "string"
@@ -98,7 +78,6 @@ test("unidentified records fall outside the widened rule, real ones inside it", 
 
   const day = "2026-09-11";
   assert.equal(covered({ instructor_id: "abc", attendance_day: day }), true);
-  // Two of these on one day must both be storable.
   assert.equal(covered({ instructor_id: null, attendance_day: day }), false);
   assert.equal(covered({ attendance_day: day }), false);
 });
@@ -120,8 +99,6 @@ test("migrating replaces the legacy filter without recreating an equivalent inde
   assert.equal(result.created, true);
   assert.deepEqual(result.dropped, ["one_attendance_per_day"]);
 
-  // Ends with one widened replacement. Keeping its migration name avoids
-  // recreating an equivalent index, which newer MongoDB versions reject.
   const remaining = collection.indexes.filter((index) => (
     index.name === `${WIDENED_DAILY_ATTENDANCE_INDEX.options.name}_migrating`
   ));
@@ -134,8 +111,6 @@ test("migrating replaces the legacy filter without recreating an equivalent inde
 });
 
 test("the replacement is created before the legacy index is dropped", async () => {
-  // Dropping first would open a window in which two real check-ins could be
-  // written for the same instructor on the same day.
   const collection = fakeCollection([legacyIndex]);
   const order = [];
   const createIndex = collection.createIndex.bind(collection);
@@ -184,8 +159,6 @@ test("migrating twice leaves the same single index", async () => {
 });
 
 test("an unrelated attendance index is left alone", async () => {
-  // Only the day-only unique filter on this exact key is the migration's
-  // business; dropping anything else would remove an index nothing replaces.
   const unrelated = {
     name: "instructor_id_1_check_in_time_-1",
     key: { instructor_id: 1, check_in_time: -1 },

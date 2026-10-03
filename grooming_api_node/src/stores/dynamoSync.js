@@ -1,13 +1,6 @@
 import { BatchWriteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 import { dynamoTableDefinition } from "./dynamoTables.js";
 
-/**
- * One-off copy of a MongoDB collection into its DynamoDB table, and the
- * comparison that proves the two agree while writes go to both.
- *
- * MongoDB is only ever read here. The copy overwrites DynamoDB items with the
- * MongoDB version, which is the source of truth until reads move.
- */
 const BATCH_SIZE = 25;
 const MAX_BATCH_ATTEMPTS = 8;
 const REPORT_LIMIT = 50;
@@ -51,7 +44,6 @@ async function scanAll(client, tableName) {
   return items;
 }
 
-/** Stable JSON: object keys sorted, so field order never counts as a difference. */
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") {

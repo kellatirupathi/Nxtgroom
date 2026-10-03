@@ -30,10 +30,6 @@ function preflightDb(rows = {}, initialIndexes = {}) {
     rows,
     collection(name) {
       return {
-        // The filter is recorded rather than applied. Applying it would mean
-        // reimplementing MongoDB's query language in the stub; recording it
-        // lets a test assert what the audit asked for, which is the part that
-        // can silently regress.
         find(filter) {
           queries.push({ collection: name, filter });
           return { toArray: async () => rows[name] || [] };
@@ -397,21 +393,6 @@ test("active attendance requires an active instructor and accepts string/ObjectI
   assert.equal(db.createCalls.length, 0);
 });
 
-/**
- * An unrecognised check-in is a record the product writes on purpose.
- *
- * Photo-first check-in stores somebody it could not identify with
- * instructor_id: null and status "unidentified", so the evidence that they
- * turned up survives until an administrator names them. Read as damage, that
- * shape stopped the API booting: the preflight blocks startup on any finding,
- * so one unrecognised person anywhere in the database took the whole service
- * down and every redeploy failed the same way.
- *
- * The distinction is narrow on purpose. Only the exact shape the check-in path
- * writes is accepted; a missing, blanked or wrongly typed reference on any
- * other record is still a fault nothing creates deliberately, and is still
- * reported.
- */
 test("an unidentified check-in is not a broken instructor reference", async () => {
   const db = preflightDb({
     users: [{ _id: "user-1", email: "admin@example.com" }],
@@ -425,13 +406,9 @@ test("an unidentified check-in is not a broken instructor reference", async () =
       },
     ],
     attendance: [
-      // Written by the kiosk when Rekognition matched nobody.
       { _id: "attendance-unidentified", instructor_id: null, status: "unidentified" },
-      // Several in one day is normal: each is a different person nobody named.
       { _id: "attendance-unidentified-2", instructor_id: null, status: "unidentified" },
-      // Genuinely broken, and still reported: no status explains the missing id.
       { _id: "attendance-null-id", instructor_id: null },
-      // Also broken: the right status cannot excuse a corrupted reference type.
       { _id: "attendance-bad-type", instructor_id: 42, status: "unidentified" },
       { _id: "attendance-blank-id", instructor_id: "   ", status: "pending" },
     ],
@@ -449,14 +426,6 @@ test("an unidentified check-in is not a broken instructor reference", async () =
   );
 });
 
-/**
- * The case that took production down, start to finish.
- *
- * Nothing else was wrong with the database: one person stood in front of a
- * tablet, was not recognised, and the API would not start again until the
- * record was removed by hand. A preflight that blocks on this is worse than no
- * preflight, because it converts ordinary use into an outage.
- */
 test("a database whose only oddity is an unidentified check-in still starts", async () => {
   const db = preflightDb({
     users: [{ _id: "user-1", email: "admin@example.com" }],
@@ -483,20 +452,6 @@ test("a database whose only oddity is an unidentified check-in still starts", as
   assert.equal(report.findings.length, 0);
 });
 
-/**
- * The audit reads a window of evaluations, not the whole collection.
- *
- * Evaluations are the only collection here that grows without limit — two rows
- * per check-in, never pruned — and reading all of them put the audit on a
- * deadline: at five thousand check-ins a day it outgrows a 512MB container in
- * about seven months, and the audit is the thing meant to tell you when
- * something is wrong.
- *
- * The stub does not apply filters, so this asserts what was asked for rather
- * than what came back. That is the part that can regress silently: drop the
- * filter and every existing fixture still passes, because they hand back their
- * rows regardless.
- */
 test("evaluations are audited over a bounded window, measured from the audit's own clock", async () => {
   const now = new Date("2026-09-15T00:00:00.000Z");
   const db = preflightDb({
@@ -513,9 +468,6 @@ test("evaluations are audited over a bounded window, measured from the audit's o
     "evaluations must be read from the cutoff, not from the beginning",
   );
 
-  // The other collections stay unbounded on purpose: instructors is capped by
-  // headcount and open attendance by sessions genuinely still open, so neither
-  // grows with time the way evaluations does.
   const attendanceQuery = db.queries.find((query) => query.collection === "attendance");
   assert.deepEqual(
     attendanceQuery.filter,
@@ -533,10 +485,6 @@ test("the evaluation window is ninety days behind the moment it is measured from
 });
 
 test("a missing or unusable clock still produces a cutoff rather than an invalid date", () => {
-  // loadPreflightRows defaults its own clock, but auditDatabasePreflight is
-  // exported and a caller can pass anything. An Invalid Date here would make
-  // the filter match nothing, so the audit would quietly report a clean
-  // database while reading none of it.
   for (const bad of [undefined, null, "yesterday", new Date("nonsense"), 0]) {
     const cutoff = evaluationAuditCutoff(bad);
     assert.ok(cutoff instanceof Date, `${String(bad)} must still yield a Date`);

@@ -28,16 +28,8 @@ const {
 const { runDueDailyReports } = await import("../src/services/dailyReportScheduler.js");
 const { buildDailyReportEmail } = await import("../src/services/emailService.js");
 
-/**
- * The daily report: settings, which period each send covers, who is in it,
- * the email, sending exactly once, and the public link.
- */
-
-// 30 Sep 2026 in Asia/Kolkata (UTC+5:30): local midnight is 29 Sep 18:30 UTC.
 const MIDNIGHT = Date.UTC(2026, 8, 29, 18, 30);
 const ist = (hour, minute = 0, dayOffset = 0) => new Date(MIDNIGHT + ((dayOffset * 24 + hour) * 60 + minute) * 60_000);
-
-// -- A small in-memory MongoDB -------------------------------------------------
 
 const valueOf = (value) => (value instanceof Date ? value.getTime() : value);
 const same = (left, right) => String(valueOf(left)) === String(valueOf(right));
@@ -84,7 +76,6 @@ function applyUpdate(doc, update, inserting) {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-/** Just enough of the aggregation language for the day counts. */
 function evaluate(expression, doc) {
   if (typeof expression === "string" && expression.startsWith("$")) return doc[expression.slice(1)];
   if (!expression || typeof expression !== "object") return expression;
@@ -181,8 +172,6 @@ function memoryDb(seed = {}) {
   };
 }
 
-// -- Fixtures --------------------------------------------------------------------
-
 const instructors = [
   { _id: "i-ravi", name: "Ravi Teja", report_token: "tokRaviTokRaviTokRavi1" },
   { _id: "i-asha", name: "Asha P", report_token: "tokAshaTokAshaTokAsha1" },
@@ -213,7 +202,6 @@ const attendance = [
     check_out_photo_key: "photos/ravi-out.jpg",
   }),
   session("a-asha", "i-asha", "Asha P", ist(9, 5), { status: "compliant" }),
-  // No college on the record: the instructor's is used.
   session("a-kiran", "i-kiran", "Kiran", ist(12, 59), { college_id: null }),
   session("a-late", "i-meena", "Meena", ist(13, 30)),
   session("a-both", "i-anil", "Anil", ist(14, 0), {
@@ -237,7 +225,6 @@ const evaluations = [
   { attendance_id: "a-asha", overall_status: "COMPLIANT", improvement_tips: [] },
   { attendance_id: "a-both", kind: "checkin", overall_status: "COMPLIANT" },
   {
-    // Stored before tips were kept on the evaluation: derived from the rows.
     attendance_id: "a-both",
     kind: "checkout",
     overall_status: "NON_COMPLIANT",
@@ -252,8 +239,6 @@ const colleges = [
 const fixtureDb = () => memoryDb({ attendance, instructors, evaluations, colleges });
 const morningRun = { _id: "daily-report:2026-09-30:13:00", date: "2026-09-30", slot: "13:00", window_from: ist(0), window_to: ist(13) };
 const eveningRun = { _id: "daily-report:2026-09-30:18:30", date: "2026-09-30", slot: "18:30", window_from: ist(13), window_to: ist(18, 30) };
-
-// -- Times ---------------------------------------------------------------------
 
 test("send times read in 12-hour form", () => {
   assert.equal(slotLabel("13:00"), "1:00 PM");
@@ -278,8 +263,6 @@ test("send times must be valid, distinct and few", () => {
   assert.equal(normaliseTimes("13:00").ok, false);
 });
 
-// -- Which reports are due, and what each covers ---------------------------------
-
 const schedule = (extra = {}) => ({ enabled: true, times: ["13:00", "18:30"], schedule_changed_at: ist(9, 0, -1), ...extra });
 
 test("each report covers the time since the previous one, the first from midnight", () => {
@@ -293,20 +276,16 @@ test("each report covers the time since the previous one, the first from midnigh
 });
 
 test("a time already past when saved starts tomorrow, and the morning is not lost", () => {
-  // Turned on at 2 PM: no 1 PM report today, and the 6:30 PM report covers the whole day.
   const due = dueDailyReports(schedule({ schedule_changed_at: ist(14, 0) }), ist(19, 0));
   assert.deepEqual(due.map((entry) => [entry.slot, entry.from.toISOString()]), [["18:30", ist(0).toISOString()]]);
   assert.deepEqual(dueDailyReports(schedule({ enabled: false }), ist(19, 0)), []);
   assert.deepEqual(dueDailyReports(schedule({ times: [] }), ist(19, 0)), []);
 });
 
-// -- The report ------------------------------------------------------------------
-
 test("the morning report lists that period's check-ins, non-compliant first", async () => {
   const report = await buildDailyReport(fixtureDb(), morningRun);
   assert.equal(report.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
   assert.equal(report.windowLabel, "12:00 AM to 01:00 PM");
-  // Kiran's check-in is still being analysed: only a finished verdict is reported.
   assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Asha P"]);
   const [ravi, asha] = report.rows;
   assert.equal(ravi.checkIn, "09:11 AM");
@@ -345,21 +324,17 @@ test("unidentified, deleted and other days' records are left out", async () => {
 test("the evening report covers the afternoon, check-outs included, judged on the check-in", async () => {
   const report = await buildDailyReport(fixtureDb(), eveningRun);
   const byName = Object.fromEntries(report.rows.map((row) => [row.name, row]));
-  // Meena's check-in is still being analysed, so she is left out.
   assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Anil"]);
   assert.equal(byName["Ravi Teja"].checkIn, "09:11 AM");
   assert.equal(byName["Ravi Teja"].checkOut, "06:05 PM");
-  // Listed for his check-out, but the status and feedback are his check-in's.
   assert.equal(byName["Ravi Teja"].status, "non_compliant");
   assert.deepEqual(byName["Ravi Teja"].points, ["Button the collar properly and tuck the shirt in. Wear your instructor ID card."]);
   assert.match(byName["Ravi Teja"].reportUrl, /\/check-in$/);
-  // Anil's check-out failed, but only the check-in is reported.
   assert.equal(byName.Anil.status, "compliant");
   assert.deepEqual(byName.Anil.points, ["No improvements needed"]);
 });
 
 test("the email gives every instructor a report link, creating a missing one", async () => {
-  // Kiran has no report link yet; his check-in is finished here so he is listed.
   const db = memoryDb({
     attendance: attendance.map((row) => (row._id === "a-kiran" ? { ...row, status: "compliant" } : row)),
     instructors,
@@ -368,13 +343,10 @@ test("the email gives every instructor a report link, creating a missing one", a
   });
   const report = await buildDailyReportForEmail(db, { ...morningRun, _id: "email-test-run" });
   const kiran = report.rows.find((row) => row.name === "Kiran");
-  // No institute on Kiran's check-in: his own is named.
   assert.equal(kiran.institute, "Training Institute Bengaluru");
   assert.match(kiran.reportUrl, /^https:\/\/nxtgroom-xi\.vercel\.app\/reports\/[A-Za-z0-9_-]{20,}\/day\/2026-09-30\/check-in$/);
   assert.ok(db.docs("instructors").find((row) => row._id === "i-kiran").report_token, "the token is stored");
 });
-
-// -- The email -------------------------------------------------------------------
 
 test("the email is the table, with a link to the whole report at the top", async () => {
   const report = await buildDailyReport(fixtureDb(), morningRun);
@@ -382,9 +354,7 @@ test("the email is the table, with a link to the whole report at the top", async
   const email = buildDailyReportEmail({ ...report, pageUrl });
   assert.equal(email.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
   assert.match(email.html, /<th>Instructor Name<\/th><th>Institute Name<\/th><th>Check-in Time<\/th><th>Check-out Time<\/th><th>Status<\/th><th>Feedback<\/th><th>Report<\/th>/);
-  // The institute sits between the name and the check-in time.
   assert.ok(email.html.includes('<tr><td>Ravi Teja</td><td>NIAT Hyderabad</td><td class="t">09:11 AM</td>'));
-  // The status sits between the check-out time and the feedback, red or green.
   assert.ok(email.html.includes('<td class="t">-</td><td class="t" style="color:#b91c1c;font-weight:700">Non-compliant</td><td>Button the collar properly'));
   assert.ok(email.html.includes('<td class="t" style="color:#15803d;font-weight:700">Compliant</td><td>No improvements needed</td>'));
   assert.ok(!email.html.includes("Analysis in progress"), "pending check-ins are not in the email");
@@ -410,8 +380,6 @@ test("names are escaped, and an empty period still sends a clear email", () => {
   assert.match(empty.html, /0 instructors/);
 });
 
-// -- Settings ----------------------------------------------------------------------
-
 test("the switch, the times and the recipients are saved, and the recipients are their own list", async () => {
   const db = memoryDb({ app_settings: [{ _id: "rp_recipients", emails: ["rp@nxtwave.co.in"] }] });
   assert.deepEqual(await getDailyReportSettings(db), { enabled: false, times: [], emails: [], schedule_changed_at: null });
@@ -433,12 +401,9 @@ test("the switch, the times and the recipients are saved, and the recipients are
     "the reporting partners are untouched"
   );
 
-  // Adding a recipient is not a schedule change.
   assert.equal((await getDailyReportSettings(db)).schedule_changed_at.getTime(), changedAt.getTime());
   assert.deepEqual(await removeDailyReportRecipient(db, "head@nxtwave.co.in"), { ok: true, emails: [] });
 });
-
-// -- Sending exactly once ------------------------------------------------------------
 
 function schedulerDb() {
   return memoryDb({
@@ -462,7 +427,6 @@ test("a due report is queued once per recipient, and never twice", async () => {
   assert.equal(run.window_from.getTime(), ist(0).getTime());
   assert.equal(run.window_to.getTime(), ist(13).getTime());
   assert.equal(run.queued, 2);
-  // The day's full page exists before the first email that links to it.
   const day = db.docs("report_delivery_runs").find((doc) => doc._id === "daily-report-day:2026-09-30");
   assert.equal(day.type, "daily_report_day");
   assert.match(day.link_token, UUID, "a random UUID");
@@ -472,11 +436,9 @@ test("a due report is queued once per recipient, and never twice", async () => {
   assert.deepEqual(jobs.map((job) => job.to_email).sort(), ["head@nxtwave.co.in", "ops@nxtwave.co.in"]);
   assert.ok(jobs.every((job) => job.type === "daily_report" && job.run_id === run._id && job.payload.run_id === run._id));
 
-  // Another tick, or another server with its own memory: nothing new.
   assert.deepEqual(await runDueDailyReports(db, ist(13, 1)), []);
   assert.equal(db.docs("mail_jobs").length, 2);
 
-  // The evening adds only the evening.
   assert.deepEqual(await runDueDailyReports(db, ist(18, 30)), ["daily-report:2026-09-30:18:30"]);
   assert.equal(db.docs("mail_jobs").length, 4);
   const evening = db.docs("report_delivery_runs").find((doc) => doc._id.endsWith("18:30"));
@@ -494,7 +456,7 @@ test("a server that stopped half way finishes the run without duplicating emails
   const run = db.docs("report_delivery_runs").find((doc) => doc.type === "daily_report");
   const day = () => db.docs("report_delivery_runs").find((doc) => doc.type === "daily_report_day");
   const token = day().link_token;
-  delete run.jobs_queued_at; // As if it crashed before marking the run queued.
+  delete run.jobs_queued_at;
   assert.deepEqual(await runDueDailyReports(db, ist(13, 5)), ["daily-report:2026-09-30:13:00"]);
   assert.equal(db.docs("mail_jobs").length, 2, "the same two job ids");
   assert.equal(day().link_token, token, "the link does not change");
@@ -509,8 +471,6 @@ test("nothing is sent while switched off or with nobody to send to", async () =>
   assert.deepEqual(await runDueDailyReports(nobody, ist(19, 0)), []);
   assert.equal(nobody.docs("mail_jobs").length, 0);
 });
-
-// -- The public link ---------------------------------------------------------------
 
 test("one link per day opens that day only, and only for 30 days after it", async () => {
   const db = schedulerDb();
@@ -527,14 +487,12 @@ test("one link per day opens that day only, and only for 30 days after it", asyn
   assert.ok(await findDailyReportDay(db, "30-09-2026", token, ist(23, 0, 30)), "still open on day 30");
   assert.equal(await findDailyReportDay(db, "30-09-2026", token, ist(0, 1, 31)), null, "expired after 30 days");
 
-  // Opened again after it expired: a new link, and the old one stays closed.
   const renewed = await ensureDailyReportDay(db, "2026-09-30", ist(9, 0, 40));
   assert.notEqual(renewed.link_token, token);
   assert.match(renewed.link_token, UUID);
   assert.ok(await findDailyReportDay(db, "30-09-2026", renewed.link_token, ist(10, 0, 40)));
   assert.equal(await findDailyReportDay(db, "30-09-2026", token, ist(10, 0, 40)), null);
 
-  // A past day opened later from the settings screen gets 30 days from then.
   const late = await ensureDailyReportDay(db, "2026-08-01", ist(10, 0));
   assert.equal(late.expires_at.getTime(), ist(10, 0).getTime() + 30 * 24 * 60 * 60 * 1000);
 });
@@ -588,24 +546,18 @@ test("the Reports tab counts each day and links its report", async () => {
   assert.deepEqual(days.slice(0, 5).map((day) => day.date), ["2026-09-30", "2026-09-29", "2026-09-28", "2026-09-27", "2026-09-26"]);
   const byDate = Object.fromEntries(days.map((day) => [day.date, day]));
 
-  // 30 Sep: five identified check-ins (the unidentified and deleted ones are
-  // not counted), two of them checked out.
   assert.deepEqual(
     { ...byDate["2026-09-30"], report_url: undefined },
     { date: "2026-09-30", date_label: "30/09/2026", checkins: 5, checkouts: 2, not_checked_out: 3, report_url: undefined }
   );
   assert.match(byDate["2026-09-30"].report_url, /^https:\/\/nxtgroom-xi\.vercel\.app\/daily-report\/30-09-2026\/[0-9a-f-]{36}$/);
-  // 28 Sep: a check-out being deleted does not count as a check-out.
   assert.equal(byDate["2026-09-28"].checkins, 2);
   assert.equal(byDate["2026-09-28"].checkouts, 1);
   assert.equal(byDate["2026-09-28"].not_checked_out, 1);
-  // 11:30 PM on the 27th belongs to the 27th, in India time.
   assert.equal(byDate["2026-09-27"].checkins, 1);
-  // A day nobody checked in has no report.
   assert.equal(byDate["2026-09-26"].checkins, 0);
   assert.equal(byDate["2026-09-26"].report_url, null);
 
-  // Each day's link is that day's own, and the page lists what the row counts.
   const again = await dailyReportDays(db, "2026-09", ist(20, 5));
   assert.equal(again[0].report_url, days[0].report_url, "the same link on every refresh");
   assert.notEqual(byDate["2026-09-28"].report_url, byDate["2026-09-30"].report_url);
@@ -625,8 +577,6 @@ test("the page's photos are that day's listed sessions only", async () => {
   assert.equal(await dailyReportPhotoKey(db, "2026-10-01", "a-ravi", "checkin"), null, "another day's link");
   assert.equal(await dailyReportPhotoKey(db, "2026-09-30", "../etc", "checkin"), null);
 });
-
-// -- Wiring --------------------------------------------------------------------------
 
 test("the settings, the public page, the mail worker and the scheduler are wired in", async () => {
   const admin = await readFile(new URL("../src/routes/adminRoutes.js", import.meta.url), "utf8");

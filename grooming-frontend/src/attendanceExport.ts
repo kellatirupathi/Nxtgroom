@@ -9,15 +9,6 @@ import {
 import { formatCoordinates } from './status.ts';
 import type { AttendanceRecord } from './types.ts';
 
-/**
- * The Daily Records table as a spreadsheet.
- *
- * Exactly the rows on screen, in the words on screen: every value goes through
- * the formatter its column uses, so the file and the table cannot disagree
- * about a time zone, a session that crossed midnight, or what a status means.
- * The photo and report columns are left out - they are buttons, not data.
- */
-
 const ATTIRE_LABELS: Record<string, string> = {
   FORMAL: 'Formal',
   SAREE: 'Saree',
@@ -35,20 +26,11 @@ const COLUMNS: ReadonlyArray<[string, (record: AttendanceRecord) => unknown]> = 
   ['Check-Out', (record) => checkoutDateTimeLabel(record.check_in_time, record.check_out_time, record.checkout_status)],
   ['Coordinates', (record) => (record.location_coordinates ? formatCoordinates(record.location_coordinates) : '')],
   ['Status', (record) => statusLabel(record.status)],
-  // The dated sentence, not the table's "this week", which a file opened next
-  // month would get wrong.
   ['Escalation', (record) => escalationLabel(record.escalation)?.title ?? ''],
   ['Attire', (record) => (record.attire_type ? ATTIRE_LABELS[record.attire_type] || '' : '')],
   ['Remark', (record) => record.remarks],
 ];
 
-/**
- * One CSV cell.
- *
- * A value a spreadsheet would read as a formula is prefixed with a quote.
- * Names and remarks are typed by people, and a remark beginning with "=" or
- * "@" would otherwise run as a formula on whoever opens the file.
- */
 export function csvCell(value: unknown): string {
   let text = value == null ? '' : String(value);
   if (text === '--') text = '';
@@ -62,7 +44,6 @@ export function attendanceCsv(records: AttendanceRecord[]): string {
   return [header, ...rows].join('\r\n');
 }
 
-/** Names the file after the dates it covers, so two exports never look alike. */
 export function attendanceExportFileName(range: DateRange): string {
   const from = range.from || 'all';
   const to = range.to || from;
@@ -76,25 +57,11 @@ interface CapacitorBridge {
   nativePromise?: (plugin: string, method: string, options: Record<string, unknown>) => Promise<unknown>;
 }
 
-/**
- * The Android app's bridge, when the page is running inside the app.
- *
- * The app injects `window.Capacitor` into the page; the website never has it.
- */
 export function androidAppBridge(scope: { Capacitor?: CapacitorBridge } = globalThis as never): CapacitorBridge | null {
   const bridge = scope.Capacitor;
   return bridge?.getPlatform?.() === 'android' && typeof bridge.nativePromise === 'function' ? bridge : null;
 }
 
-/**
- * Hands a CSV file to the browser, or to the Android app.
- *
- * The byte-order mark is what makes Excel read the file as UTF-8, without which
- * a name in Telugu or Hindi opens as mojibake.
- *
- * In the app a blob link does nothing - its WebView has no download manager -
- * so the app saves the file itself, to Downloads, and says so.
- */
 export function saveCsvFile(fileName: string, csv: string): Promise<void> {
   const content = `\uFEFF${csv}`;
   const app = androidAppBridge();
@@ -109,8 +76,6 @@ export function saveCsvFile(fileName: string, csv: string): Promise<void> {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  // Revoked on the next tick: revoking synchronously cancels the download in
-  // some browsers before it has started.
   setTimeout(() => URL.revokeObjectURL(url), 0);
   return Promise.resolve();
 }

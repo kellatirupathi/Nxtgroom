@@ -7,15 +7,6 @@ import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { useToast } from './useToast';
 import type { Instructor } from '../types';
 
-/**
- * The roster, with a signed link to each reference photograph.
- *
- * include_photo_url is asked for only here. Signing is a local HMAC at roughly
- * 1.3ms per link, which is nothing for one row and most of a second across a
- * 600-instructor roster, so every other screen that lists instructors keeps the
- * cheaper response. Its own path, so it also gets its own cache entry rather
- * than overwriting the attendance screen's copy with a heavier one.
- */
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false&include_photo_url=true';
 
 type EnrolmentFilter = 'all' | 'needs_photo' | 'enrolled';
@@ -24,32 +15,15 @@ interface CollegeEnrolmentListProps {
   collegeId: string;
   collegeName: string;
   onBack: () => void;
-  /** Lets the college table refresh its counts once photos have been added. */
   onEnrolmentChanged: () => void;
 }
 
-/**
- * One college's instructors, for working through reference photos.
- *
- * Enrolment is the slowest part of switching a college to face recognition, and
- * doing it from the instructor list means hunting for the right people among
- * every college's roster. Here the list is already the campus an administrator
- * is looking at.
- *
- * Unenrolled instructors sort first and stay first while the filter is on
- * "needs photo", so the work to do rises to the top and the list visibly
- * shortens as it is done.
- */
 export default function CollegeEnrolmentList({
   collegeId,
   collegeName,
   onBack,
   onEnrolmentChanged,
 }: CollegeEnrolmentListProps) {
-  // Painted from the last response before the network is asked anything. The
-  // roster changes rarely and the list is long, so re-fetching before showing
-  // anything meant an empty table on every visit for data that was already
-  // known. The request still runs underneath and replaces this.
   const [instructors, setInstructors] = useState<Instructor[]>(() => {
     const cached = readStale<Instructor[]>(INSTRUCTORS_PATH);
     return Array.isArray(cached) ? cached : [];
@@ -57,13 +31,8 @@ export default function CollegeEnrolmentList({
   const [loading, setLoading] = useState(() => readStale<Instructor[]>(INSTRUCTORS_PATH) === undefined);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  // Everybody, by default. Opening on "needs photo" answered the question an
-  // administrator asks while enrolling a campus, but it hid the rest of the
-  // college from anyone who came to look someone up, and a filtered list is not
-  // obviously a filtered list at a glance.
   const [filter, setFilter] = useState<EnrolmentFilter>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
-  /** Whose reference photo is open, or null. */
   const [photoFor, setPhotoFor] = useState<Instructor | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState('');
@@ -72,9 +41,6 @@ export default function CollegeEnrolmentList({
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      // The roster endpoint does not filter by college, so the list is fetched
-      // whole and narrowed here. It is the same request the instructor screen
-      // makes, so it is usually already cached.
       const roster = await apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, {
         pageSize: 1_000,
         cacheMs: 15_000,
@@ -82,25 +48,13 @@ export default function CollegeEnrolmentList({
       });
       if (signal?.aborted) return;
       setInstructors(Array.isArray(roster) ? roster : []);
-      // Kept whole, so the next visit paints immediately. apiFetchAllPages
-      // caches each page under its own path; this stores the assembled list.
       if (Array.isArray(roster)) primeCache(INSTRUCTORS_PATH, roster, 60_000);
       setError('');
     } catch (requestError) {
       if (signal?.aborted) return;
       if ((requestError as { status?: number })?.status === 401) return;
-      // A cancelled request is not a failure worth showing.
-      //
-      // Cached GETs share one in-flight promise between callers, and effects run
-      // twice in development. The first mount's cleanup aborts the request the
-      // second mount is also awaiting, so the rejection arrives while this
-      // call's own signal is still live and the guard above misses it. The
-      // screen then showed "The request timed out or was cancelled" over an
-      // empty table, for a list that had simply never been fetched.
       const message = requestError instanceof Error ? requestError.message : String(requestError);
       if (/timed out or was cancelled/i.test(message)) {
-        // Retry once without a signal: the shared promise that failed has been
-        // cleared, so this fetches cleanly rather than leaving the table empty.
         try {
           const retried = await apiFetchAllPages<Instructor>(INSTRUCTORS_PATH, { pageSize: 1_000 });
           if (signal?.aborted) return;
@@ -141,8 +95,6 @@ export default function CollegeEnrolmentList({
         return [row.name, row.email, row.instructor_role, row.role]
           .some((value) => String(value ?? '').toLowerCase().includes(term));
       })
-      // Unenrolled first: the work to do belongs at the top. Within each group,
-      // alphabetical, so a name can still be found by scanning.
       .sort((left, right) => {
         const leftEnrolled = (left.face_count ?? 0) > 0 ? 1 : 0;
         const rightEnrolled = (right.face_count ?? 0) > 0 ? 1 : 0;
@@ -160,7 +112,6 @@ export default function CollegeEnrolmentList({
         setError(sourceProblem);
         return;
       }
-      // preparePhoto returns the downscaled file alongside its dimensions.
       const { file: prepared } = await preparePhoto(file);
       const problem = validatePhoto(prepared);
       if (problem) {
@@ -170,17 +121,12 @@ export default function CollegeEnrolmentList({
 
       const form = new FormData();
       form.append('photo', prepared, prepared.name || 'reference.jpg');
-      // Always add: an administrator working through a college is enrolling
-      // people for the first time, and replacing would silently discard a face
-      // somebody had already corrected.
       form.append('mode', 'add');
       const result = await apiFetch<{ face_count?: number; photo_url?: string | null }>(
         `/api/v2/instructors/${encodeURIComponent(instructor._id)}/face`,
         { method: 'POST', body: form, timeoutMs: 60_000 },
       );
 
-      // Both the paged entries and the assembled copy, or a reload would paint
-      // the pre-upload roster back over the row that was just enrolled.
       invalidateCache('/api/v2/instructors');
       setInstructors((current) => current.map((row) => (
         row._id === instructor._id
@@ -199,14 +145,6 @@ export default function CollegeEnrolmentList({
     }
   };
 
-  /**
-   * Fetches the reference photo when one is opened.
-   *
-   * Not PhotoViewer: that component reads `url` from its endpoint, while the
-   * face endpoint returns `photo_url` alongside the enrolment counts. Rather
-   * than change a committed route's response shape for one caller, the link is
-   * fetched here — the bucket is private, so it is minted per view and expires.
-   */
   useEffect(() => {
     if (!photoFor) return undefined;
     const controller = new AbortController();
@@ -247,10 +185,6 @@ export default function CollegeEnrolmentList({
   return (
     <div className="bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden">
       <div className="p-3 border-b border-slate-100">
-        {/* Back link, college and count on one line, with the filters beside
-            them. The sentence that used to sit here said what the filter
-            buttons already say — each carries its own count — and the total is
-            the one figure they did not give. */}
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
@@ -274,8 +208,6 @@ export default function CollegeEnrolmentList({
           </div>
         </div>
 
-        {/* Its own row, full width: a search box sharing a line with four other
-            controls was the first thing to be squeezed on a narrow screen. */}
         <div className="relative mt-2">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
           <input
@@ -295,22 +227,10 @@ export default function CollegeEnrolmentList({
         )}
       </div>
 
-      {/* No horizontal scroll. Every column is sized as a share of the table,
-          so the four of them always add up to the width available and a long
-          name is cut rather than allowed to widen the table. */}
       <div>
-        {/* table-fixed is what makes truncation possible at all: in an
-            auto-layout table a cell's overflow is ignored and the column grows
-            to fit its longest value, which is how one 33-character name pushed
-            this table wider than its container and put a scrollbar under it. */}
         <table className="w-full text-left border-collapse table-fixed">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              {/* Shares of the table rather than fixed pixels, so the columns
-                  fit whatever width they are given instead of overflowing it.
-                  The name is the widest because it is the thing being looked
-                  up, but it is bounded: past its share it is cut with an
-                  ellipsis, with the full name on hover and in the title. */}
               <th className="px-3 py-2.5 w-[38%]">Instructor</th>
               <th className="px-3 py-2.5 w-[28%]">Role</th>
               <th className="px-3 py-2.5 w-[12%]">Photo</th>
@@ -345,12 +265,6 @@ export default function CollegeEnrolmentList({
                     </td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {enrolled ? (
-                        // The photograph itself, not an icon standing for one.
-                        // Whether the right face is enrolled is the question this
-                        // column exists to answer, and a green icon answers only
-                        // whether something was uploaded. Clicking still opens it
-                        // full size, since a 40px thumbnail settles the obvious
-                        // cases and not the doubtful ones.
                         <IconTooltip label="View reference photo">
                           <button
                             type="button"
@@ -365,9 +279,6 @@ export default function CollegeEnrolmentList({
                                 loading="lazy"
                                 decoding="async"
                                 className="w-full h-full object-cover"
-                                // A link that expired between the response and
-                                // the scroll leaves a broken image; fall back to
-                                // the icon the column used to show.
                                 onError={(event) => { event.currentTarget.style.display = 'none'; }}
                               />
                             ) : (
@@ -376,9 +287,6 @@ export default function CollegeEnrolmentList({
                           </button>
                         </IconTooltip>
                       ) : (
-                        // Not a button, and the one icon here that cannot be
-                        // clicked to find out what it means — so the label
-                        // matters more, not less.
                         <IconTooltip label="No reference photo — cannot be recognised">
                           <span
                             aria-label="No reference photo"
@@ -401,13 +309,6 @@ export default function CollegeEnrolmentList({
                           if (file) void upload(instructor, file);
                         }}
                       />
-                      {/* The icon carries a word now. Two icons that differ
-                          only in their glyph asked somebody to learn which was
-                          which; the label says it outright, and it changes with
-                          the state because the two actions are not the same —
-                          a first reference is what makes somebody recognisable,
-                          while a second only improves a face that already
-                          works. No tooltip: it would repeat the visible text. */}
                       <button
                         type="button"
                         onClick={() => fileInputs.current[instructor._id]?.click()}
@@ -443,8 +344,6 @@ export default function CollegeEnrolmentList({
           aria-label={`Reference photo for ${photoFor.name}`}
           onClick={() => setPhotoFor(null)}
         >
-          {/* Clicking the backdrop closes; clicking the photo itself must not,
-              or examining it dismisses the thing being examined. */}
           <div
             className="bg-white rounded-md shadow-xl max-w-lg w-full overflow-hidden"
             onClick={(event) => event.stopPropagation()}

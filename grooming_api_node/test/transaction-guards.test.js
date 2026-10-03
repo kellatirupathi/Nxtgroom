@@ -207,9 +207,6 @@ test("instructor creation guards its active college assignment transaction", asy
 });
 
 test("guarded instructor creation without an employee id does not collide with others lacking one", async () => {
-  // Synced instructors have no employee id. Looking one up by a missing id
-  // sends { employee_id: null }, which matches them all, so the check must be
-  // skipped rather than run with nothing to compare.
   const session = { id: "create-no-id-session" };
   let employeeLookups = 0;
   let inserted = null;
@@ -320,15 +317,10 @@ test("guarded instructor deletion writes the instructor in the shared transactio
 });
 
 test("an ordinary profile edit is not blocked by an open check-in", async () => {
-  // Only a college reassignment conflicts with an open session. Refusing name,
-  // email, gender and role edits too meant one forgotten check-out made the
-  // whole profile permanently uneditable.
   let attendanceQueried = false;
   const db = {
     collection(name) {
       if (name === "instructors") return {
-        // The duplicate-employee-id lookup excludes the row being edited, so
-        // it must not match the instructor itself.
         findOne: async (filter) => (filter?._id?.$ne
           ? null
           : { _id: "i1", college_id: "c1", employee_id: "E1" }),
@@ -354,8 +346,6 @@ test("an ordinary profile edit is not blocked by an open check-in", async () => 
   assert.equal(sameCollege.outcome, "updated");
   assert.equal(attendanceQueried, false, "an open check-in is irrelevant to a name change");
 
-  // Moving them to another institute still refuses: the attendance record
-  // snapshots the college, and the session is still running.
   const moved = await updateInstructorGuarded(
     db,
     "i1",

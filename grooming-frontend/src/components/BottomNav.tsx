@@ -21,10 +21,6 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
-/**
- * Primary destinations shown in the bar. Anything beyond these lives in the
- * "More" sheet so the bar never scrolls or crowds on small screens.
- */
 const PRIMARY_ITEMS: NavItem[] = [
   { tab: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, adminOnly: true },
   { tab: 'overview', label: 'Attendance', icon: LayoutGrid },
@@ -76,7 +72,6 @@ export default function BottomNav({
   const primary = visible(PRIMARY_ITEMS);
   const overflow = visible(OVERFLOW_ITEMS);
 
-  // Escape closes the sheet, matching the sidebar's account menu behaviour.
   useEffect(() => {
     if (!isSheetOpen) return undefined;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -105,8 +100,6 @@ export default function BottomNav({
       isActive ? 'text-indigo-700' : 'text-slate-500 active:text-slate-800'
     }`;
 
-  // The pill behind the active icon: how an Android app marks where you are.
-  // Sized from the screen width, as the bar itself is.
   const indicatorClass = (isActive: boolean) =>
     `flex h-8 w-[clamp(3.5rem,2.75rem+3vw,4.75rem)] items-center justify-center rounded-full transition-colors group-focus-visible:ring-2 group-focus-visible:ring-indigo-500 ${
       isActive ? 'bg-indigo-100' : ''
@@ -122,8 +115,6 @@ export default function BottomNav({
           <button
             type="button"
             aria-label="Close menu"
-            // Stops at the bar, like the sheet: the bar stays lit and tappable
-            // while the sheet is open, and Profile closes it again.
             className="fixed inset-x-0 top-0 bottom-[calc(var(--bottom-nav-height)+var(--inset-bottom)+1px)] bg-slate-900/40 z-[45] lg:hidden"
             onClick={() => setIsSheetOpen(false)}
           />
@@ -131,9 +122,6 @@ export default function BottomNav({
             ref={sheetRef}
             role="menu"
             aria-label="More navigation options"
-            /* Rests on the bar's top edge - the bar's height, its 1px border
-               and the gesture-bar inset below it - so it rises out of the bar
-               instead of covering it. */
             className="fixed inset-x-0 bottom-[calc(var(--bottom-nav-height)+var(--inset-bottom)+1px)] z-[46] lg:hidden bg-white border-t border-slate-200 rounded-t-2xl pb-1 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]"
           >
             <div aria-hidden="true" className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-slate-300" />
@@ -203,8 +191,6 @@ export default function BottomNav({
         aria-label="Primary"
         className="shrink-0 lg:hidden bg-white border-t border-slate-200 pb-[var(--inset-bottom)] shadow-[0_-4px_16px_rgba(15,23,42,0.08)]"
       >
-        {/* Evenly spread, and centred on a tablet rather than stretched to
-            its edges. */}
         <div className="mx-auto flex w-full max-w-2xl items-stretch px-1">
           {primary.map((item) => {
             const Icon = item.icon;

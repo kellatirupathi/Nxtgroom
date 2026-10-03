@@ -22,12 +22,6 @@ import {
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 
-/**
- * The daily report on the website: Settings → Reports (the days, their
- * links and the daily report email settings) and each day's public report
- * page with its filters and export.
- */
-
 test('send times are edited in 12-hour form and stored in 24-hour form', () => {
   assert.deepEqual(toTwelveHour('13:00'), { hour: 1, minute: 0, period: 'PM' });
   assert.deepEqual(toTwelveHour('00:30'), { hour: 12, minute: 30, period: 'AM' });
@@ -85,32 +79,26 @@ test('the full-day page has the asked-for columns, two photo icons and two repor
   assert.match(page, /\/api\/v2\/reports\/daily\/\$\{encodeURIComponent\(date\)\}\/\$\{encodeURIComponent\(token\)\}`/);
   const headers = [...page.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
   assert.deepEqual(headers, ['Date', 'Instructor Name', 'Institute', 'Check-in Time', 'Check-out Time', 'Status', 'Feedback', 'Images', 'Reports']);
-  // Status is the check-in's result alone, one label, in the table and on a phone's card.
   assert.ok(page.includes('<td className="p-3"><StatusPill status={row.status} /></td>'));
   assert.ok(page.includes('<dd className="mt-1"><StatusPill status={row.status} /></dd>'));
   for (const gone of ['HalfStatuses', 'checkout_status', '>Check-in</dt>', '>Check-out</dt>']) {
     assert.ok(!page.includes(gone), gone);
   }
-  // Search, institute and status filters, and an export of what they leave.
   assert.match(page, /const rows = filterDayRows\(report\.rows, \{ search, institute, status \}\);/);
   assert.match(page, /aria-label="Search instructor name"/);
   assert.match(page, /<option value="">All institutes<\/option>/);
   assert.match(page, /<option value="">All statuses<\/option>/);
   assert.match(page, /saveCsvFile\(dayReportFileName\(report\.date_label\), dayReportCsv\(rows\)\)/);
   assert.match(page, /Export CSV/);
-  // Images: a check-in and a check-out photo icon, each opening the photo.
   assert.match(page, /title="Check-in photo"[\s\S]*onOpen\(\{ row, kind: 'checkin' \}\)/);
   assert.match(page, /title="Check-out photo"[\s\S]*onOpen\(\{ row, kind: 'checkout' \}\)/);
   assert.match(page, /\/photo\/\$\{encodeURIComponent\(target\.row\.attendance_id\)\}\/\$\{target\.kind\}/);
-  // Reports: a check-in and a check-out report icon, opening in a new tab.
   assert.match(page, /href=\{row\.checkin_report_url\}[\s\S]*?title="Check-in report"/);
   assert.match(page, /href=\{row\.checkout_report_url\}[\s\S]*?title="Check-out report"/);
   assert.equal((page.match(/target="_blank"\s*rel="noopener noreferrer"/g) || []).length, 2);
   assert.match(page, /Full day, \{report\.window_label\}/);
-  // Feedback is the check-in's, one line, as the server sends it.
-  assert.match(read('src/lib/dayReport.ts'), /\/\*\* The check-in's feedback\. \*\/\n  feedback: string;/);
+  assert.match(read('src/lib/dayReport.ts'), /\n  feedback: string;/);
   assert.match(page, /<td className="p-3 text-slate-600">\{row\.feedback\}<\/td>/);
-  // Kept current while open.
   assert.match(page, /const REFRESH_MS = 60_000;/);
   assert.match(page, /setInterval\(\(\) => \{\n\s*if \(document\.visibilityState === 'visible'\) void load\(\);\n\s*\}, REFRESH_MS\);/);
 });
@@ -124,7 +112,6 @@ test('the daily report settings live in the Reports tab, with their own recipien
   assert.match(settings, /const PATH = '\/api\/v2\/settings\/daily-report';/);
   assert.match(settings, /const RECIPIENTS_PATH = `\$\{PATH\}\/recipients`;/);
   assert.ok(!settings.includes('rp-recipients'), 'never the reporting partners list');
-  // A switch, 12-hour times with AM/PM, several of them, saved together.
   assert.match(settings, /<Toggle\s+id="daily_report_enabled"/);
   assert.match(settings, /const HOURS = Array\.from\(\{ length: 12 \}, \(_, index\) => index \+ 1\);/);
   assert.match(settings, /<option value="AM">AM<\/option>\s*<option value="PM">PM<\/option>/);
@@ -159,7 +146,6 @@ test('Settings has a Reports tab listing each day with its counts and report lin
   assert.match(tab, /navigator\.clipboard\.writeText\(url\)/);
   assert.match(tab, /const REFRESH_MS = 60_000;/, 'the counts stay current');
   assert.match(tab, /max=\{latestMonth\}/, 'no future months');
-  // Each day can be exported, from the same data its page shows.
   assert.match(tab, /const path = day\.report_url \? dayReportApiPath\(day\.report_url\) : null;/);
   assert.match(tab, /saveCsvFile\(dayReportFileName\(report\.date_label\), dayReportCsv\(report\.rows\)\)/);
 });

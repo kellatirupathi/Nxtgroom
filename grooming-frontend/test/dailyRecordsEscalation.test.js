@@ -12,15 +12,6 @@ import { attendanceCsv } from '../src/attendanceExport.ts';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-/**
- * The Escalation column on Daily Records.
- *
- * The server says who is escalated - three or more non-compliant results in a
- * Monday-to-Sunday week, counted the same way as the URGENT email. These tests
- * hold the page to showing it: in one line, on every row of that week, through
- * the filter, and in the export.
- */
-
 const WEEK = { week_start: '2026-09-21', week_end: '2026-09-27', count: 3 };
 
 test('weeks start on Monday, as they do on the server', () => {
@@ -57,8 +48,6 @@ const rows = [
 ];
 
 test('a refresh that brings the escalation marks the earlier rows of that week', () => {
-  // The table refreshes by fetching only changed rows: Friday's row arrives
-  // escalated, Monday's was fetched on Monday and is not fetched again.
   const spread = spreadEscalation(rows);
   const byId = Object.fromEntries(spread.map((row) => [row._id, row]));
   assert.deepEqual(byId.mon.escalation, WEEK, "Monday's row joins Friday's escalation");
@@ -101,8 +90,6 @@ test('the table shows the column after Status, and the panel filters on it', () 
   const headers = [...columns.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
   assert.equal(headers.length, 13);
   assert.equal(headers[headers.indexOf('Status') + 1], 'Escalation');
-  // Every header comes from that list, and the empty-table row spans all of
-  // them plus the checkbox column when there is one.
   assert.match(table, /\{RECORD_COLUMNS\.map\(\(column, index\) => \(/);
   assert.match(table, /colSpan=\{RECORD_COLUMNS\.length \+ \(canBulkDelete \? 1 : 0\)\}/);
   assert.match(table, /<EscalationTag escalation=\{record\.escalation\} today=\{today\} \/>/);

@@ -3,26 +3,15 @@ import { ImageOff, Loader2, X } from 'lucide-react';
 import { apiFetch } from '../api';
 
 interface PhotoViewerProps {
-  /** Omit when `path` is supplied directly. */
   attendanceId?: string;
   kind: 'checkin' | 'checkout';
-  /** Explicit endpoint, used by the public report page. */
   path?: string;
-  /** False for the public page, whose token in the path is the credential. */
   auth?: boolean;
-  /** Shown in the header so it is clear whose photo this is. */
   title: string;
   subtitle?: string;
   onClose: () => void;
 }
 
-/**
- * Displays a stored attendance photo.
- *
- * The bucket is private, so the URL is minted per view and expires. It is
- * fetched when the dialog opens rather than embedded in the table, which
- * keeps signed links out of any list payload that might be cached or logged.
- */
 export default function PhotoViewer({ attendanceId, kind, path, auth = true, title, subtitle, onClose }: PhotoViewerProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState('');

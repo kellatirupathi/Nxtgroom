@@ -1,21 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
-/**
- * DynamoDB connection and the per-store switches that move data off MongoDB
- * one collection at a time. See docs/DYNAMODB_MIGRATION_PLAN.md.
- *
- * Each store answers two questions, set in the environment:
- *
- *   DB_WRITE_TO   mongo | both | dynamo   where writes go
- *   DB_READ_FROM  mongo | dynamo          where reads come from
- *
- * with an optional per-store override, e.g. DB_READ_FROM_APP_SETTINGS. The
- * default is MongoDB for everything, so an unset environment behaves exactly
- * as before this module existed.
- */
-
-/** Collections that have a DynamoDB implementation. Grows as stores move. */
 export const DYNAMO_STORES = Object.freeze(["app_settings", "report_delivery_runs", "evaluations"]);
 
 const WRITE_TARGETS = ["mongo", "both", "dynamo"];
@@ -32,13 +17,6 @@ function routeSetting(name, store, allowed) {
   return value;
 }
 
-/**
- * Where one store reads and writes.
- *
- * Reads must come from a database that is written: reading DynamoDB while it
- * receives no writes would serve stale data, and writing only DynamoDB while
- * reading MongoDB would lose every write from the user's point of view.
- */
 export function dataRoute(store) {
   if (!DYNAMO_STORES.includes(store)) return { writeTo: "mongo", readFrom: "mongo" };
   const writeTo = routeSetting("DB_WRITE_TO", store, WRITE_TARGETS);
@@ -60,22 +38,13 @@ export function usesDynamo(store) {
 export function dynamoConfig() {
   return {
     region: (process.env.DYNAMODB_REGION || "").trim(),
-    // Only for DynamoDB Local or a test double. Unset on a real server.
     endpoint: (process.env.DYNAMODB_ENDPOINT || "").trim(),
     tablePrefix: (process.env.DYNAMODB_TABLE_PREFIX ?? "facultytrack-").trim(),
-    // Deliberately no fallback to AWS_ACCESS_KEY_ID. That key belongs to the
-    // SES sender; reusing it would fail as AccessDenied, which reads like a
-    // broken policy rather than a missing setting.
     accessKeyId: (process.env.DYNAMODB_ACCESS_KEY_ID || "").trim(),
     secretAccessKey: (process.env.DYNAMODB_SECRET_ACCESS_KEY || "").trim(),
   };
 }
 
-/**
- * Configuration problems, empty when DynamoDB is unused or fully configured.
- * Checked at startup in every environment: a mistyped switch should stop the
- * server, not quietly fall back to MongoDB.
- */
 export function dynamoConfigurationErrors() {
   const errors = [];
   let needed = false;
@@ -104,18 +73,11 @@ export function dynamoTableName(store) {
 
 let documentClient = null;
 
-/**
- * Credentials are always passed explicitly. Left out, the AWS SDK would look
- * for AWS_ACCESS_KEY_ID, which on the server is the SES sender's key: a
- * missing DynamoDB key then surfaced as AccessDenied for the mail user, as
- * though the policy were wrong. That is refused here with the actual cause.
- */
 export function createDynamoClient(config = dynamoConfig()) {
   let credentials;
   if (config.accessKeyId && config.secretAccessKey) {
     credentials = { accessKeyId: config.accessKeyId, secretAccessKey: config.secretAccessKey };
   } else if (config.endpoint) {
-    // DynamoDB Local accepts any credentials; they only have to be present.
     credentials = { accessKeyId: "local", secretAccessKey: "local" };
   } else {
     throw new Error(
@@ -131,7 +93,6 @@ export function createDynamoClient(config = dynamoConfig()) {
   });
 }
 
-/** The shared document client, created on first use. */
 export function getDynamoDocumentClient() {
   if (!documentClient) {
     documentClient = DynamoDBDocumentClient.from(createDynamoClient(), {
@@ -141,7 +102,6 @@ export function getDynamoDocumentClient() {
   return documentClient;
 }
 
-/** For tests and scripts that bring their own client. null resets it. */
 export function setDynamoDocumentClient(client) {
   documentClient = client;
 }

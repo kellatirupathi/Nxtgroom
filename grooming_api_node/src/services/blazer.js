@@ -1,20 +1,5 @@
 import { z } from "zod";
 
-/**
- * A blazer or suit jacket worn over the top: an optional checkpoint that
- * appears in the report only when one is worn.
- *
- * A blazer covers most of the shirt and the waist, so the shirt and belt
- * checkpoints were failing people in suits for what the jacket hid - a belt
- * "not shown", a tuck that could not be seen. The report request now also
- * asks whether a blazer is worn and what shows under it; when one is, the
- * rows it covers are settled as passed, a "Blazer / Suit" row is added, and
- * the remarks say so. Without a blazer nothing here changes the report.
- *
- * A t-shirt or polo clearly visible under the blazer still fails the shirt
- * (or top) type: the jacket covers a casual top, it does not make it formal.
- */
-
 export const BLAZER_UNDER = Object.freeze(["FORMAL_SHIRT", "T_SHIRT_OR_POLO", "OTHER", "NOT_VISIBLE", "NONE"]);
 
 export const BlazerAnswer = z.object({
@@ -34,7 +19,6 @@ export const BLAZER_JSON_SCHEMA = Object.freeze({
   required: ["worn", "under", "observation"],
 });
 
-/** Added to every report request, for men and women alike. */
 export const BLAZER_INSTRUCTIONS = `### BLAZER OR SUIT (blazer)
 Report in blazer whether a blazer or a suit jacket is worn over the top - any colour or pattern, buttoned or open, by a man or a woman. A cardigan, sweater, hoodie, waistcoat, shawl or casual jacket is not a blazer.
 - worn: true only when a blazer or suit jacket is clearly being worn; otherwise false.
@@ -45,7 +29,6 @@ A blazer is optional and never a failure. When one is worn it covers the shirt a
 const SHIRT_OBSERVATION = "Wearing a blazer or suit over the shirt.";
 const TOP_OBSERVATION = "Wearing a blazer or suit over the top.";
 
-/** A man's formal rows a blazer covers, and why each is passed. */
 const MEN_COVERED = Object.freeze({
   M_SHIRT_TYPE: "Not assessed: a blazer or suit is worn over the shirt.",
   M_SHIRT_FIT: "Not assessed: a blazer or suit is worn over the shirt.",
@@ -54,13 +37,11 @@ const MEN_COVERED = Object.freeze({
   M_BELT: "Not assessed: the blazer covers the waist and the belt.",
 });
 
-/** A woman's formal rows a blazer covers. */
 const WOMEN_COVERED = Object.freeze({
   W_FORMAL_TOP: "Not assessed: a blazer or suit is worn over the top.",
   W_FORMAL_TOP_FIT_CONDITION: "Not assessed: a blazer or suit is worn over the top.",
 });
 
-/** The row that names the kind of top, which a casual top under the blazer still fails. */
 const TOP_TYPE_CODES = Object.freeze({ MALE: "M_SHIRT_TYPE", FEMALE: "W_FORMAL_TOP" });
 
 export const BLAZER_ROW_NAME = "Blazer / Suit";
@@ -74,22 +55,11 @@ function findRow(rows, code) {
   return null;
 }
 
-/** Whether the reply says a blazer or suit jacket is worn. Lenient: anything unreadable is "no". */
 export function blazerWorn(answer) {
   const parsed = BlazerAnswer.safeParse(answer);
   return parsed.success && parsed.data.worn === true;
 }
 
-/**
- * Settles the rows a worn blazer covers and adds the Blazer / Suit row, in
- * place. Returns null when no blazer is worn (the rows are untouched), or
- * what it did: the codes it passed and failed, and the sentence the remarks
- * open with.
- *
- * Applies to the formal families, the ones with shirt and belt rows; over a
- * kurta, a kurti, a saree or an abaya the blazer is only recorded. A woman's
- * shirt and trousers under a blazer are a suit, which is accepted.
- */
 export function applyBlazer(rows, { gender, attireType, answer }) {
   const parsed = BlazerAnswer.safeParse(answer);
   if (!parsed.success || !parsed.data.worn) return null;
@@ -127,7 +97,6 @@ export function applyBlazer(rows, { gender, attireType, answer }) {
       }
       pass(row, female ? TOP_OBSERVATION : SHIRT_OBSERVATION, reason);
     }
-    // A woman's shirt or blouse and trousers under a blazer make a suit.
     const attire = female ? findRow(rows, "W_FORMAL_ATTIRE_TYPE") : null;
     if (attire && !casualUnder) {
       pass(attire, seen.slice(0, 1000), "A blazer or suit is worn over the shirt or blouse and trousers: accepted as a formal suit.");

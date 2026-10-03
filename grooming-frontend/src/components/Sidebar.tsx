@@ -54,7 +54,6 @@ export default function Sidebar({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  // Close the profile menu on outside click or Escape so it never traps focus.
   useEffect(() => {
     if (!isMenuOpen) return undefined;
     const handlePointerDown = (event: MouseEvent) => {

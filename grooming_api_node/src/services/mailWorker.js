@@ -15,8 +15,6 @@ import { openSecret } from "./secretBox.js";
 import { completeDeliveryRunIfDone, getDeliveryRun, recordDeliveryOutcome } from "../stores/deliveryRunStore.js";
 
 const WORKER_ID = randomUUID();
-// Lets a queued email go out at once rather than on the next idle poll. See
-// workerPacing.js.
 const mailQueued = createWakeSignal();
 const SUPPORTED_TYPES = new Set([
   "password_reset",
@@ -27,12 +25,6 @@ const SUPPORTED_TYPES = new Set([
   "daily_report",
 ]);
 
-/**
- * Mail jobs are durable and can be delivered after APP_URL changes. Replace
- * only the origin of an existing report link, retaining its token, date and
- * report half, so no queued check-in/check-out email can leak a development
- * localhost origin into production.
- */
 export function canonicalReportUrl(reportUrl) {
   if (!reportUrl) return reportUrl;
   const canonicalOrigin = appUrl();
@@ -54,10 +46,6 @@ function deliveryPayload(job) {
   };
 }
 
-/**
- * An escalation carries one report link per occurrence, each given the same
- * origin correction a single report link gets.
- */
 function escalationPayload(job) {
   const payload = job.payload || {};
   return {
@@ -120,23 +108,12 @@ async function claimMail(db) {
   return result?.value || result;
 }
 
-/**
- * Restores a sealed reset token for the one message that needs it.
- *
- * `token` is still honoured so a job queued before sealing shipped is not
- * stranded in the retry loop by an upgrade.
- */
 function passwordResetPayload(payload) {
   if (!payload?.token_sealed) return payload;
   const { token_sealed: sealed, ...rest } = payload;
   return { ...rest, token: openSecret(sealed) };
 }
 
-/**
- * A daily report job carries only its run. The table is built when the email
- * goes out, so it shows the analysis as it stands then rather than when the
- * job was queued, and no copy of a thousand-row table waits in the queue.
- */
 async function deliverDailyReport(db, job) {
   const runId = job.run_id || job.payload?.run_id;
   const run = runId ? await getDeliveryRun(db, runId) : null;
@@ -144,7 +121,6 @@ async function deliverDailyReport(db, job) {
     throw Object.assign(new Error("Daily report run not found"), { code: "DAILY_REPORT_RUN_MISSING" });
   }
   const report = await buildDailyReportForEmail(db, run);
-  // "See all reports" opens the whole day, not just this email's period.
   const day = await ensureDailyReportDay(db, run.date);
   return sendDailyReportEmail(job.to_email, { ...report, pageUrl: dailyReportDayUrl(day) });
 }
@@ -258,8 +234,6 @@ export function startMailWorker(db) {
     minMs: Math.max(1000, config.evaluationPollMs),
     maxMs: config.workerIdleMaxPollMs,
   });
-  // Set while sleeping on an empty queue: only then is there a timer worth
-  // cancelling, and re-entering tick() mid-cycle would run two at once.
   let idle = false;
   let wokenMidCycle = false;
   const schedule = (delay) => {
@@ -273,8 +247,6 @@ export function startMailWorker(db) {
   const wake = () => {
     if (stopped) return;
     if (!idle) {
-      // Mid-cycle: this cycle may already have looked for jobs. Remember the
-      // wake-up so it runs again at once instead of backing off.
       wokenMidCycle = true;
       return;
     }

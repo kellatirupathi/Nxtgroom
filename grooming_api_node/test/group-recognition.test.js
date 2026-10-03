@@ -4,23 +4,6 @@ import sharp from "sharp";
 import * as faceRecognition from "../src/services/faceRecognition.js";
 import { GROUP_OUTCOMES, identifyPeopleInPhoto } from "../src/services/groupRecognition.js";
 
-/**
- * Identifying several people from one photograph.
- *
- * The single-person route asks Rekognition one question. That API answers about
- * the largest face it can see and ignores every other one, so the interesting
- * claim here is mechanical rather than clever: each face must be cut out and
- * asked about separately, or five of six people are silently dropped.
- *
- * The stub records every command the SDK would have sent, so "one search per
- * person, each about a different picture" is checked against the actual bytes
- * rather than against a count.
- *
- * sharp is real. The crops are the crops that would be uploaded and analysed,
- * which is the only way a rectangle that sharp refuses shows up in a test
- * rather than at a tablet.
- */
-
 const CONFIGURED = {
   REKOGNITION_COLLECTION_ID: "facultytrack-faces-test",
   AWS_REKOGNITION_REGION: "ap-south-1",
@@ -50,15 +33,6 @@ async function withEnv(values, run) {
   }
 }
 
-/**
- * A real photograph, so every crop is really taken.
- *
- * Textured rather than flat, and deliberately so: five crops of a uniform grey
- * rectangle encode to identical bytes however far apart they were taken from,
- * which would let "each person was cropped separately" pass against code that
- * cropped nothing at all. The gradient makes every region of the frame
- * distinguishable from every other.
- */
 async function groupPhoto() {
   const pixels = Buffer.allocUnsafe(WIDTH * HEIGHT * 3);
   for (let y = 0; y < HEIGHT; y += 1) {
@@ -74,7 +48,6 @@ async function groupPhoto() {
     .toBuffer();
 }
 
-/** One detected face, as Rekognition reports it. */
 const detected = (left, top, width = 0.07, height = 0.09, confidence = 99.5) => ({
   BoundingBox: { Left: left, Top: top, Width: width, Height: height },
   Confidence: confidence,
@@ -82,7 +55,6 @@ const detected = (left, top, width = 0.07, height = 0.09, confidence = 99.5) => 
   Pose: { Yaw: 2, Pitch: -1 },
 });
 
-/** Five people standing in a line, left to right. */
 const FIVE_IN_A_ROW = [
   detected(0.06, 0.18),
   detected(0.24, 0.18),
@@ -91,13 +63,6 @@ const FIVE_IN_A_ROW = [
   detected(0.78, 0.18),
 ];
 
-/**
- * Installs the stub and returns what it was asked.
- *
- * `search` is given the call index, so each face can be answered differently —
- * which is the whole point: a single canned reply would pass even if the code
- * searched once and copied the answer five times.
- */
 function stubRekognition({ faceDetails, search }) {
   const sent = [];
   faceRecognition.setRekognitionClientForTests({
@@ -115,7 +80,6 @@ function stubRekognition({ faceDetails, search }) {
   return sent;
 }
 
-/** A match at a believable score. */
 const matched = (instructorId, similarity = 98.5) => ({
   FaceMatches: [{
     Similarity: similarity,
@@ -147,13 +111,9 @@ test("every person in the photograph is searched for, on their own crop", async 
       "the group is detected once and only once",
     );
 
-    // The bytes must differ, or the code cropped nothing and searched the same
-    // picture five times — which would return the same person five times and
-    // look, from the counts alone, exactly like this test passing.
     const fingerprints = new Set(searches.map((entry) => entry.input.Image.Bytes.toString("base64")));
     assert.equal(fingerprints.size, 5, "each search must be about a different crop");
 
-    // Threshold and collection are the single-person route's, unchanged.
     for (const search of searches) {
       assert.equal(search.input.CollectionId, CONFIGURED.REKOGNITION_COLLECTION_ID);
       assert.equal(search.input.FaceMatchThreshold, 95);
@@ -189,8 +149,6 @@ test("the body crop analysed is not the group photograph", async () => {
       );
     }
 
-    // Different people, different crops: six identical reports is the failure
-    // this whole feature exists to avoid.
     const sizes = new Set(result.people.map((person) => person.image.buffer.toString("base64")));
     assert.equal(sizes.size, 5);
   });
@@ -198,8 +156,6 @@ test("the body crop analysed is not the group photograph", async () => {
 
 test("two faces matching one instructor are both refused, not resolved by score", async () => {
   await withEnv(CONFIGURED, async () => {
-    // A look-alike above the threshold scores like a genuine match, so the
-    // higher score is not evidence of which of the two is the real person.
     stubRekognition({
       faceDetails: [detected(0.1, 0.2), detected(0.5, 0.2), detected(0.8, 0.2)],
       search: (index) => {
@@ -225,9 +181,6 @@ test("two faces matching one instructor are both refused, not resolved by score"
 
 test("a face too small to identify is reported, not searched for", async () => {
   await withEnv(CONFIGURED, async () => {
-    // 0.02 of 1600px is 32px across — far below the floor. Searching it would
-    // either be refused by Rekognition or, worse, match somebody on a handful
-    // of blurred features.
     const sent = stubRekognition({
       faceDetails: [detected(0.10, 0.20, 0.02, 0.025), detected(0.50, 0.20)],
       search: () => matched("instructor-near"),
@@ -288,8 +241,6 @@ test("more people than the cap is refused whole, before anything is spent", asyn
 
 test("a low-confidence detection is dropped rather than searched for", async () => {
   await withEnv(CONFIGURED, async () => {
-    // A face on a poster, or a pattern on a wall. Searching it can only produce
-    // an unidentified record nobody is able to resolve.
     const sent = stubRekognition({
       faceDetails: [detected(0.2, 0.2, 0.07, 0.09, 55), detected(0.6, 0.2)],
       search: () => matched("instructor-real"),

@@ -4,9 +4,7 @@ import { AlertTriangle } from 'lucide-react';
 export interface ConfirmDialogProps {
   open: boolean;
   title: string;
-  /** Short sentence naming exactly what is about to happen. */
   message: string;
-  /** Optional extra line for consequences the user should weigh. */
   detail?: string;
   confirmLabel?: string;
   cancelLabel?: string;
@@ -16,11 +14,6 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-/**
- * In-page confirmation modal replacing window.confirm(), which renders as an
- * unstyled browser chrome bar at the top of the screen and cannot show
- * context. Focus starts on Cancel so an accidental Enter never destroys data.
- */
 export default function ConfirmDialog({
   open,
   title,

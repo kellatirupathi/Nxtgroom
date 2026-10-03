@@ -9,21 +9,6 @@ import {
 } from "./dailyReport.js";
 import { getDeliveryRun, saveDeliveryRun } from "../stores/deliveryRunStore.js";
 
-/**
- * Sends each daily report once, at its time.
- *
- * Runs inside the server rather than from an outside scheduler, because the
- * send times are chosen on the settings screen and change without anybody
- * touching cron. Checking every half minute puts a report in the inbox within
- * a minute of its time.
- *
- * Exactly once, even with a restart or two servers: the run document is keyed
- * by date and time and created only if absent, every email job id is derived
- * from the run and the recipient, and a run is marked as queued only after all
- * of its jobs exist. A server that was down at the send time sends the report
- * when it comes back, the same day.
- */
-
 const TICK_MS = 30_000;
 const FIRST_TICK_MS = 5_000;
 
@@ -35,11 +20,6 @@ function isDuplicateKey(error) {
   return error?.code === 11000;
 }
 
-/**
- * Queues every report that is due and not yet queued. Returns the run ids it
- * queued. `queuedRuns` remembers finished runs within one day, so a quiet
- * tick costs one settings read.
- */
 export async function runDueDailyReports(db, now = new Date(), { queuedRuns = new Set() } = {}) {
   const settings = await getDailyReportSettings(db);
   if (!settings.enabled || !settings.emails.length) return [];
@@ -54,7 +34,6 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
       continue;
     }
 
-    // The day's page exists before any email linking to it is queued.
     await ensureDailyReportDay(db, due.dateKey, now);
     try {
       await saveDeliveryRun(db, runId, {
@@ -75,11 +54,8 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
         },
       });
     } catch (error) {
-      // Another server created the same run in the same instant.
       if (!isDuplicateKey(error)) throw error;
     }
-    // The stored run is authoritative: its period is the one the emails use,
-    // whoever created it.
     const run = await getDeliveryRun(db, runId);
     if (!run) throw new Error(`Daily report run ${runId} could not be read back`);
 

@@ -30,12 +30,6 @@ interface EvaluateCardProps {
   instructors: Instructor[];
   fetchInstructors: () => Promise<void> | void;
   onInstructorGenderSaved: (instructorId: string, gender: string) => void;
-  /**
-   * Whether this tablet's college identifies the instructor from the check-in
-   * photograph. When it does there is no selector: the face decides who the
-   * record belongs to. Unknown faces are rejected without saving attendance.
-   * Check-out also identifies the person from their photograph in this mode.
-   */
   faceIdentification?: boolean;
 }
 
@@ -47,7 +41,6 @@ export default function EvaluateCard({
 }: EvaluateCardProps) {
   const [selectedUuid, setSelectedUuid] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  /** Where the camera found the waist, trousers and shoes in that photo, for the report. */
   const [bodyRegions, setBodyRegions] = useState<BodyRegions | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,17 +49,11 @@ export default function EvaluateCard({
   const [message, setMessage] = useState({ type: '', text: '' });
   const [fix, setFix] = useState<Fix | null>(() => getCachedFix());
   const [locationState, setLocationState] = useState<LocationStatus>('idle');
-  // Open the selfie camera first on every device; the switch remains available
-  // when a fixed kiosk setup needs the rear camera instead.
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const [preparing, setPreparing] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [missingGenderInstructor, setMissingGenderInstructor] = useState<Instructor | null>(null);
-  // Set when a duplicate daily action is refused, so the message can point at
-  // today's existing attendance record instead of only naming the conflict.
   const [activeRecordId, setActiveRecordId] = useState<string | null>(null);
-  // attendanceId is null until the record is saved, so the modal can show the
-  // saving step instead of opening empty.
   const [reportTarget, setReportTarget] = useState<
     {
       attendanceId: string | null;
@@ -78,13 +65,10 @@ export default function EvaluateCard({
   >(null);
   const toast = useToast();
 
-  // While an instructor is being chosen, so the camera's face boxes are ready
-  // the moment it opens.
   useEffect(() => {
     preloadFullBodyDetector();
   }, []);
 
-  // Lets the check-in and check-out beep play after the first tap.
   useEffect(() => armBeepUnlock(), []);
 
   const selectInstructor = (instructorId: string) => {
@@ -110,12 +94,6 @@ export default function EvaluateCard({
     if (preview) URL.revokeObjectURL(preview);
   }, [preview]);
 
-  /**
-   * Follow the device while this screen is open, rather than sampling once.
-   * The position is evidence of where the check-in happened, so a fix from a
-   * previous location must never be submitted. The permission prompt still
-   * appears only on the first visit; subscribing afterwards does not re-ask.
-   */
   useEffect(() => {
     const unsubscribe = subscribeToLocation((next, status) => {
       setFix(next);
@@ -129,7 +107,6 @@ export default function EvaluateCard({
       );
     });
 
-    // Watching costs battery, so it pauses whenever the tab is not visible.
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') pauseLocationWatch();
       else resumeLocationWatch();
@@ -150,10 +127,6 @@ export default function EvaluateCard({
   const handleCapture = async (selected: File, details?: CaptureDetails) => {
     setCameraOpen(false);
 
-    // Check the camera file loosely, then downscale, then apply the real
-    // limit. Validating the original first rejected ordinary phone photos:
-    // a 12MP capture is around 11 MB and becomes ~400 KB once resized, so the
-    // 8 MB rule was refusing images the system handles fine.
     const sourceError = validateSourcePhoto(selected);
     if (sourceError) {
       resetPhoto();
@@ -173,7 +146,6 @@ export default function EvaluateCard({
       }
       setFile(prepared.file);
       setPreview(URL.createObjectURL(prepared.file));
-      // Resizing keeps the proportions, so the camera's areas still fit.
       setBodyRegions(details?.bodyRegions ?? null);
     } catch {
       resetPhoto();
@@ -185,10 +157,6 @@ export default function EvaluateCard({
 
   const handleCheckIn = async () => {
     const photoError = validatePhoto(file);
-    // Face identification needs nothing but the photograph. Demanding a
-    // selection would reintroduce the step this mode exists to remove, and the
-    // gender check cannot run either: nobody is identified until the server has
-    // matched the face. Unknown faces are rejected without saving attendance.
     if (photoError || (!faceIdentification && !selectedUuid)) {
       setMessage({
         type: 'error',
@@ -202,26 +170,16 @@ export default function EvaluateCard({
     setMessage({ type: '', text: '' });
     setActiveRecordId(null);
 
-    // Open the dialog before the request so the saving step is visible from
-    // the moment the button is pressed, rather than after the upload finishes.
-    // In face mode the name is not known until the server answers, so the
-    // dialog opens against the photograph rather than against a person.
     const submittedName = faceIdentification
       ? 'Identifying…'
       : instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
     setReportTarget({ attendanceId: null, instructorName: submittedName, kind: 'checkin' });
 
-    // The watch keeps this current, so submitting never waits on the GPS and
-    // never sends a position from somewhere the instructor has already left.
     const currentFix = fix ?? getCachedFix();
     const coordinates = formatCoordinates(currentFix);
 
     const formData = new FormData();
-    // Omitted in face mode. The server ignores a supplied id there, but sending
-    // one anyway would leave the selector half-wired and invite somebody to put
-    // it back.
     if (!faceIdentification) formData.append('instructor_id', selectedUuid);
-    // Already downscaled when it was selected, so upload as-is.
     formData.append('file', file as File);
     if (bodyRegions) formData.append(BODY_REGIONS_FIELD, JSON.stringify(bodyRegions));
     if (coordinates) {
@@ -244,11 +202,8 @@ export default function EvaluateCard({
       }
       resetPhoto();
       setSelectedUuid('');
-      // Recorded: the request above throws on any refusal.
       playSuccessBeep();
       if (result?.attendance_id) {
-        // Hand the id over: the dialog marks saving complete and starts
-        // following the analysis.
         setReportTarget((current) => (
           current ? { ...current, attendanceId: result.attendance_id as string } : current
         ));
@@ -258,10 +213,6 @@ export default function EvaluateCard({
       void fetchInstructors();
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
-      // A duplicate check-in was refused before anything was saved, so there
-      // is nothing to save or analyse. Leaving the dialog up meant watching
-      // two spinners for work that was never started; close it and point at
-      // the check-in that is already open instead.
       if (error instanceof ApiError && error.status === 409) {
         const existingId = (error.details as { attendance_id?: string } | null)?.attendance_id;
         setReportTarget(null);
@@ -270,8 +221,6 @@ export default function EvaluateCard({
         toast.error('Already checked in', { detail: text });
         return;
       }
-      // Any other failure happened mid-save, so it is reported inside the
-      // dialog that is already open, where the user is looking.
       setReportTarget((current) => (current ? { ...current, saveError: text } : current));
       toast.error('Check-in failed', { detail: text });
     } finally {
@@ -280,9 +229,6 @@ export default function EvaluateCard({
   };
 
   const handleCheckOut = async () => {
-    // Face mode closes the session the photograph identifies, so it needs the
-    // photo and nothing else. The gender check cannot run either: nobody is
-    // identified until the server has matched the face.
     if (faceIdentification) {
       if (!file) {
         setMessage({ type: 'error', text: 'Take a photo to check out.' });
@@ -300,9 +246,6 @@ export default function EvaluateCard({
     setMessage({ type: '', text: '' });
     setActiveRecordId(null);
 
-    // The check-out photo is assessed the same way the check-in one is, so it
-    // gets the same dialog: the saving step is visible from the moment the
-    // button is pressed rather than after the upload finishes.
     const submittedName = faceIdentification
       ? 'Identifying…'
       : instructors.find((item) => item._id === selectedUuid)?.name || 'Instructor';
@@ -312,12 +255,8 @@ export default function EvaluateCard({
     }
 
     try {
-      // Multipart so an optional check-out photo rides along. Check-out still
-      // succeeds without one in a selector college; in face mode the photo is
-      // what says whose session to close, so it is required above.
       const formData = new FormData();
       if (!faceIdentification) formData.append('instructor_id', selectedUuid);
-      // Downscaled at selection time, so no further processing is needed.
       if (file) formData.append('file', file);
       if (file && bodyRegions) formData.append(BODY_REGIONS_FIELD, JSON.stringify(bodyRegions));
       const currentFix = fix ?? getCachedFix();
@@ -336,15 +275,10 @@ export default function EvaluateCard({
         photo_warning?: string | null;
       }>(
         '/api/v2/attendance/check-out',
-        // Checkout analysis is completed by this request, so allow the API's
-        // configured Gemini timeout plus transport overhead.
         { method: 'POST', body: formData, timeoutMs: 150_000 },
       );
-      // Recorded: the request above throws on any refusal.
       playSuccessBeep();
       if (hasPhoto && result?.attendance_id) {
-        // Hand the id over: the dialog marks saving complete and starts
-        // following the analysis.
         setReportTarget((current) => (
           current ? {
             ...current,
@@ -358,7 +292,6 @@ export default function EvaluateCard({
           } : current
         ));
       } else {
-        // Without a photo there is nothing to analyse, so no report follows.
         setReportTarget(null);
       }
       if (result.photo_status !== 'failed') {
@@ -374,18 +307,12 @@ export default function EvaluateCard({
         setReportTarget(null);
         setActiveRecordId(existingId ?? null);
         setMessage({ type: 'error', text });
-        // Too soon to close the day is also a 409, and it is not a failure:
-        // nothing was recorded and nothing went wrong. Titling it "Already
-        // checked out" would tell somebody who has not checked out at all that
-        // they had, which is worse than saying nothing.
         toast.error(
           details?.outcome === 'TOO_EARLY' ? 'Check-out not open yet' : 'Already checked out',
           { detail: text },
         );
         return;
       }
-      // Reported inside the dialog when one is open, so the failure appears
-      // where the user is looking.
       if (hasPhoto) {
         setReportTarget((current) => (current ? { ...current, saveError: text } : current));
       }
@@ -427,23 +354,15 @@ export default function EvaluateCard({
             <span className="hidden sm:inline">Today,</span> {formatAttendanceDate(new Date())}
           </p>
         </div>
-        {/* The instruction has to match the mode. Telling somebody to select an
-            instructor when check-in no longer has a selector contradicts the
-            line under the search box and reads as a screen that did not load. */}
         <p className="text-slate-500 text-sm mb-6 font-medium">
           {faceIdentification
             ? 'Take a photo to check in or check out. The instructor is identified from it.'
             : 'Select an instructor to check in or check out.'}
         </p>
 
-        {/* Only failures remain on the page. A success message here repeated
-            what the dialog already showed and lingered after it closed. */}
         {message.text && message.type === 'error' && (
           <div role="alert" className="mb-5 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
             <p>{message.text}</p>
-            {/* A new tab rather than in-page navigation: the instructor is
-                still selected and the photo still taken, so replacing this
-                screen would discard work the user may still want. */}
             {activeRecordId && (
               <a
                 href={pathForTab(TABS.INSTRUCTOR_DETAIL, activeRecordId)}
@@ -458,14 +377,9 @@ export default function EvaluateCard({
           </div>
         )}
 
-        {/* Gone entirely where the face decides who the record belongs to: both
-            halves of the day are identified from the photograph, so there is
-            nobody left to choose. */}
         {!faceIdentification && (
           <div className="mb-6">
             <p className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Search Instructor</p>
-            {/* A native select cannot be searched past first-letter jumping, which
-                is unusable against 599 people. */}
             <InstructorSearchSelect
               instructors={instructors}
               selectedId={selectedUuid}
@@ -480,7 +394,6 @@ export default function EvaluateCard({
             <p className="block text-xs font-bold text-slate-500 uppercase tracking-wider">
               {faceIdentification ? 'Photo' : 'Check-In Photo'}
             </p>
-            {/* Keep camera choice visible before opening the viewfinder. */}
             <button
               type="button"
               onClick={() => setFacing((current) => (current === 'user' ? 'environment' : 'user'))}
@@ -490,9 +403,6 @@ export default function EvaluateCard({
               {facing === 'user' ? 'Front camera' : 'Back camera'}
             </button>
           </div>
-          {/* The photo must be taken now, not chosen from a gallery: it is
-              evidence of appearance on this date, so an older or borrowed
-              image would defeat the point of the check-in. */}
           <button
             type="button"
             onClick={() => setCameraOpen(true)}
@@ -524,13 +434,9 @@ export default function EvaluateCard({
           </button>
         </div>
 
-        {/* Show the accuracy, not just that a location exists: a 3km IP-based
-            reading and a 5m GPS fix look identical without it. */}
         {fix && !locationStatus && (
           <p className="text-xs font-medium mb-3 flex items-center gap-1.5 text-slate-500">
             <MapPin size={12} className="text-emerald-600" aria-hidden="true" />
-            {/* "Live" is stated because the position updates as the device
-                moves; a static label would imply a one-off reading. */}
             Live location {describeAccuracy(fix) ? `(${describeAccuracy(fix)})` : ''}
             {locationState === 'locating' && <span className="text-slate-400">· refining…</span>}
           </p>
@@ -598,8 +504,6 @@ export default function EvaluateCard({
           kind={reportTarget.kind}
           onRetryPhoto={reportTarget.retryFile ? retryCheckoutPhoto : undefined}
           onClose={() => {
-            // Closing clears everything, so the page returns to a clean state
-            // rather than keeping a stale result behind the dialog.
             setReportTarget(null);
             setMessage({ type: '', text: '' });
           }}

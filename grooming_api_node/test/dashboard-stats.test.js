@@ -17,12 +17,10 @@ import {
 import { dashboardRouter } from "../src/routes/dashboardRoutes.js";
 
 const ZONE = "Asia/Kolkata";
-// Tuesday 29 September 2026, 5:20 PM in Kolkata.
 const NOW = new Date("2026-09-29T11:50:00Z");
 const TODAY = "2026-09-29";
 const MONDAY = "2026-09-28";
 
-/** A local wall-clock time on a day, as the UTC instant the database stores. */
 const at = (day, time) => new Date(`${day}T${time}:00+05:30`);
 
 const colleges = [
@@ -49,12 +47,10 @@ const record = (id, instructor, day, time, extra = {}) => ({
 });
 
 const weekRecords = [
-  // Today.
   record("t1", "i1", TODAY, "08:50", { status: "non_compliant", check_out_time: at(TODAY, "17:05") }),
   record("t2", "i2", TODAY, "08:52", { status: "compliant" }),
   record("t3", "i3", TODAY, "09:10", { status: "pending" }),
   record("t4", null, TODAY, "09:11", { college_id: "c2", status: "unidentified" }),
-  // Monday: i1 fails twice (check-in and check-out).
   record("m1", "i1", MONDAY, "08:40", {
     status: "non_compliant",
     check_out_time: at(MONDAY, "17:00"),
@@ -62,7 +58,6 @@ const weekRecords = [
   }),
   record("m2", "i4", MONDAY, "08:45"),
   record("m3", "i3", MONDAY, "08:47", { check_out_time: at(MONDAY, "17:10") }),
-  // Last Saturday: the previous working day for a Monday, but not for today.
   record("s1", "i2", "2026-09-26", "08:30"),
 ];
 
@@ -71,7 +66,6 @@ const failedRows = [
   { attendance_id: "t1", kind: "checkin", code: "M_BELT", name: "Belt" },
   { attendance_id: "m1", kind: "checkin", code: "ID_PRESENT", name: "ID Card Present" },
   { attendance_id: "m1", kind: "checkout", code: "M_SHIRT_COLLAR_TUCK", name: "Shirt Collar / Tuck" },
-  // Belongs to a record outside this week: never counted.
   { attendance_id: "s1", kind: "checkin", code: "W_DUPATTA", name: "Dupatta" },
 ];
 
@@ -111,7 +105,6 @@ test("the working week is Monday to Saturday", () => {
   assert.equal(keys.length, 8);
   assert.equal(keys.at(-1), TODAY);
   assert.ok(!keys.includes("2026-09-27"), "Sunday is never a working day");
-  // 29, 28, 26, 25, 24, 23, 22, 21: Sunday the 27th is skipped.
   assert.equal(keys[0], "2026-09-21");
   assert.equal(previousWorkingDayKey(TODAY), MONDAY);
   assert.equal(previousWorkingDayKey(MONDAY), "2026-09-26", "Monday's previous working day is Saturday");
@@ -189,8 +182,6 @@ test("a check-out failure stops counting once that check-out is deleted", () => 
 });
 
 test("escalation uses the same rule as the URGENT email: check-in days in a row", () => {
-  // Monday's check-in and check-out and today's check-in: three results, but
-  // two days, which is not an escalation.
   assert.equal(build().escalations.length, 0);
   const third = record("w1", "i1", "2026-09-30", "08:50", { status: "non_compliant" });
   const { escalations } = build({ weekRecords: [...weekRecords, third] });
@@ -204,9 +195,6 @@ test("escalation uses the same rule as the URGENT email: check-in days in a row"
 });
 
 test("each institute reports its own day, mode and enrolment", () => {
-  // Today's totals as the database groups them: Hyderabad has i1 and i2 in,
-  // one compliant and one not; Warangal has i3 in, still pending, plus one
-  // unnamed arrival.
   const [hyderabad, warangal] = buildInstituteRows({
     colleges,
     roster,
@@ -257,8 +245,6 @@ test("a range is validated, and its end is held at today", () => {
 });
 
 test("over several days, present counts instructor-days against roster times working days", () => {
-  // Monday and today: Hyderabad has i1 and i2 today and i1 on Monday;
-  // Warangal has i3 on both days, i4 on Monday and one unnamed arrival.
   const groups = [
     { _id: "c1", check_ins: 3, compliant: 1, non_compliant: 2 },
     { _id: "c2", check_ins: 3, compliant: 2, non_compliant: 0, unidentified: 1 },
@@ -268,8 +254,6 @@ test("over several days, present counts instructor-days against roster times wor
   assert.deepEqual([hyderabad.compliant, hyderabad.non_compliant], [1, 2]);
   assert.deepEqual([warangal.present, warangal.expected], [3, 4]);
 });
-
-// ---- The route ---------------------------------------------------------------
 
 function emptyDb() {
   const cursor = (rows) => ({ sort: () => cursor(rows), toArray: async () => rows });

@@ -7,14 +7,6 @@ import {
   DEFAULT_ACCESS_SETTINGS,
 } from "../src/services/accessSettings.js";
 
-/**
- * canDeleteCheckout() consults user.can_delete_checkout so one BOA can be
- * granted the lesser permission without opening it to everyone. getCurrentUser
- * never copied that field off the user document, so the branch could not be
- * reached: a value set on an account was ignored and everybody silently fell
- * back to the workspace default instead.
- */
-
 function fakeDb(user, boa = { _id: "b1", college_id: "c1" }) {
   return {
     collection(name) {
@@ -56,7 +48,6 @@ test("a per-account check-out permission reaches the permission check", async ()
 
   assert.equal(granted.can_delete_checkout, true, "the field must survive authentication");
   assert.equal(canDeleteCheckout(granted, DEFAULT_ACCESS_SETTINGS), true);
-  // The lesser permission must not imply the greater one.
   assert.equal(canDeleteAttendance(granted, DEFAULT_ACCESS_SETTINGS), false);
 });
 

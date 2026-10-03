@@ -108,7 +108,6 @@ function NotificationSettings() {
   const updateSetting = async (key: keyof NotificationSettings, value: boolean) => {
     const previous = settings;
     const next = { ...settings, [key]: value };
-    // Optimistic update keeps the switch responsive; revert if the save fails.
     setSettings(next);
     setSaving(true);
     setError('');
@@ -150,9 +149,6 @@ function NotificationSettings() {
       )}
 
       <div className="bg-white border border-slate-200 rounded-md divide-y divide-slate-100">
-        {/* gap-6 next to a 44px switch left barely 290px for a paragraph on a
-            phone. Three is enough to separate them and gives the sentence back
-            the room it needs. */}
         {TOGGLES.map((toggle) => (
           <div key={toggle.key} className="flex items-start justify-between gap-3 sm:gap-6 p-4">
             <div className="min-w-0">
@@ -183,12 +179,9 @@ function NotificationSettings() {
 
 export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports';
 
-/** Open Settings on the requested section. */
 export default function SettingsPage({ initialTab = 'notifications' }: { initialTab?: SettingsTab }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
 
-  // Chips on a phone, which swipe sideways the way an app's section chips do;
-  // the underlined tab strip from sm up, as before.
   const tabClass = (value: string) =>
     `flex items-center gap-2 whitespace-nowrap text-sm font-semibold transition-colors rounded-full border px-3.5 py-2 sm:rounded-none sm:border-0 sm:border-b-2 sm:px-4 sm:py-2.5 ${
       tab === value
@@ -203,18 +196,11 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
         <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners and daily reports.</p>
       </div>
 
-      {/* Scrolls sideways rather than compressing. Six tabs need more width
-          than a phone has, and a flex row without this squeezed every label
-          until the strip was unreadable and unhittable. overflow-x-auto keeps
-          them full size and lets the strip be swiped; the tabs themselves stop
-          shrinking so a long label cannot be crushed by a neighbour. */}
       <div
         className="-mx-4 mb-5 shrink-0 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:mb-6 sm:border-b sm:border-slate-200 sm:px-0 sm:pb-0"
         role="tablist"
         aria-label="Settings sections"
       >
-        {/* A chosen chip is brought fully into view, so the next one along
-            always peeks in from the edge. */}
         <div
           className="flex gap-2 w-max min-w-full [&>button]:shrink-0"
           onClick={(event) => (event.target as HTMLElement).closest('button')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}

@@ -7,14 +7,6 @@ import {
   KIOSK_ACTIONS,
 } from "../src/services/kioskAction.js";
 
-/**
- * What one photograph at the tablet does.
- *
- * There is no button to press and no confirmation to read afterwards, so a
- * wrong branch here is invisible: somebody walks away believing their day was
- * recorded. Every state the day can be in is pinned.
- */
-
 test("a recognised instructor with no record today checks in", () => {
   assert.equal(
     decideKioskAction({ matched: true, availability: "not_checked_in_today" }),
@@ -30,8 +22,6 @@ test("a recognised instructor with an open record checks out", () => {
 });
 
 test("too soon to close the day records nothing", () => {
-  // The timing rules live in checkoutAvailability, so this branch only has to
-  // carry the refusal through rather than restate noon and five minutes.
   assert.equal(
     decideKioskAction({ matched: true, availability: "too_early" }),
     KIOSK_ACTIONS.TOO_EARLY,
@@ -48,7 +38,6 @@ test("a day already closed records nothing", () => {
 });
 
 test("an unrecognised face records nothing", () => {
-  // Without an identity neither arrival nor departure may be recorded.
   assert.equal(
     decideKioskAction({ matched: false, availability: "not_checked_in_today" }),
     KIOSK_ACTIONS.NOT_RECOGNISED,
@@ -57,8 +46,6 @@ test("an unrecognised face records nothing", () => {
 });
 
 test("an unrecognised face is rejected whatever the day looks like", () => {
-  // Without a match there is no instructor whose day could be consulted, so no
-  // availability verdict can turn this into a check-out.
   for (const availability of ["available", "too_early", "already_checked_out_today"]) {
     assert.equal(
       decideKioskAction({ matched: false, availability }),
@@ -69,8 +56,6 @@ test("an unrecognised face is rejected whatever the day looks like", () => {
 });
 
 test("an unknown verdict never becomes a check-in", () => {
-  // A second check-in for a day that already has one is the one outcome that
-  // silently corrupts the record, so the fallback refuses instead.
   for (const availability of [undefined, null, "", "something_new"]) {
     assert.equal(
       decideKioskAction({ matched: true, availability }),
@@ -86,8 +71,6 @@ test("both recorded outcomes are reported as recorded", () => {
 });
 
 test("the popup names the person and what was recorded", () => {
-  // The only confirmation anybody gets, so a bare "done" is not enough: it has
-  // to be readable at arm's length and name who it was about.
   assert.match(describeKioskAction(KIOSK_ACTIONS.CHECK_IN, { instructorName: "Priya" }).title, /Priya checked in/);
   assert.match(describeKioskAction(KIOSK_ACTIONS.CHECK_OUT, { instructorName: "Priya" }).title, /Priya checked out/);
 });
@@ -105,14 +88,12 @@ test("too early says when check-out opens", () => {
   assert.match(withTime.title, /already checked in/i);
   assert.match(withTime.detail, /12:00 pm/);
 
-  // Falls back to a duration when no wall-clock time is available.
   const withMinutes = describeKioskAction(KIOSK_ACTIONS.TOO_EARLY, {
     instructorName: "Priya",
     minutesRemaining: 7,
   });
   assert.match(withMinutes.detail, /7 minutes/);
 
-  // And says something rather than nothing when neither is known.
   assert.ok(describeKioskAction(KIOSK_ACTIONS.TOO_EARLY, {}).detail.length > 10);
 });
 
@@ -123,8 +104,6 @@ test("one minute remaining is not pluralised", () => {
 });
 
 test("an unrecognised face is told what happened and what to do", () => {
-  // It is the one outcome where the person cannot tell from the screen whether
-  // anything was saved, so the message says both.
   const described = describeKioskAction(KIOSK_ACTIONS.NOT_RECOGNISED, {});
   assert.match(described.title, /not recognised/i);
   assert.match(described.detail, /administrator/i);
@@ -132,8 +111,6 @@ test("an unrecognised face is told what happened and what to do", () => {
 });
 
 test("nothing-recorded outcomes are toned apart from successes", () => {
-  // The tablet colours the popup from this, so a refusal must not read as a
-  // confirmation at a glance.
   assert.equal(describeKioskAction(KIOSK_ACTIONS.CHECK_IN, {}).tone, "success");
   assert.equal(describeKioskAction(KIOSK_ACTIONS.CHECK_OUT, {}).tone, "success");
   assert.equal(describeKioskAction(KIOSK_ACTIONS.TOO_EARLY, {}).tone, "info");

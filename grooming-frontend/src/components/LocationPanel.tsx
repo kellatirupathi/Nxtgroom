@@ -6,15 +6,6 @@ interface LocationPanelProps {
   accuracyMetres?: number | null;
 }
 
-/**
- * Shows where a check-in happened: the address, the raw coordinates, and a
- * map centred on them.
- *
- * The map is OpenStreetMap's embed, which needs no API key or billing account.
- * It is an iframe rather than a mapping library so the bundle gains nothing,
- * and it renders from the stored coordinates, so it keeps working without a
- * further lookup.
- */
 export default function LocationPanel({ coordinates, address, accuracyMetres }: LocationPanelProps) {
   if (!coordinates) {
     return (
@@ -29,7 +20,6 @@ export default function LocationPanel({ coordinates, address, accuracyMetres }: 
     return <p className="text-sm text-slate-400">{coordinates}</p>;
   }
 
-  // A small box around the point; the marker is what actually locates it.
   const span = 0.004;
   const bbox = [longitude - span, latitude - span / 2, longitude + span, latitude + span / 2].join('%2C');
   const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${latitude}%2C${longitude}`;
@@ -53,8 +43,6 @@ export default function LocationPanel({ coordinates, address, accuracyMetres }: 
           )}
           <p className="text-xs font-mono text-slate-500">
             {latitude.toFixed(6)}, {longitude.toFixed(6)}
-            {/* Shown next to the reading so a coarse fix is never mistaken
-                for a precise one. */}
             {accuracy && <span className="ml-2 font-sans text-slate-400">{accuracy}</span>}
           </p>
         </div>

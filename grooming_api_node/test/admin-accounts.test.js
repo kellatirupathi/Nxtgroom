@@ -20,8 +20,6 @@ test("ADMIN is elevated but BOA is not", () => {
 });
 
 test("only the super admin may manage administrator accounts", () => {
-  // An ADMIN must not be able to create or delete other administrators,
-  // otherwise it could remove the owner and lock them out permanently.
   for (const role of [ROLES.ADMIN, ROLES.BOA, undefined]) {
     const res = fakeRes();
     let advanced = false;

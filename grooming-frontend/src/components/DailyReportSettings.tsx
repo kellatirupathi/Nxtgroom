@@ -39,14 +39,6 @@ function listLabel(times: string[]): string {
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
 
-/**
- * The daily report: a switch, the times it is sent, and who receives it.
- *
- * Its recipients are a separate list from the reporting partners above, who
- * already receive every individual report. The switch and the recipients save
- * as soon as they change; the times are edited as a set and saved together,
- * so a half-finished edit never becomes the live schedule.
- */
 export default function DailyReportSettings() {
   const [data, setData] = useState<DailyReportData>({ enabled: false, times: [], emails: [] });
   const [rows, setRows] = useState<TimeRow[]>([]);

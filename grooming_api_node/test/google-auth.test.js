@@ -54,7 +54,6 @@ test("a forged token fails signature verification", async () => {
   const original = process.env.GOOGLE_CLIENT_ID;
   process.env.GOOGLE_CLIENT_ID = "123-abc.apps.googleusercontent.com";
   try {
-    // Structurally valid JWT claiming a verified admin address, unsigned by Google.
     const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url");
     const body = Buffer.from(JSON.stringify({
       email: "admin@nxtwave.com",

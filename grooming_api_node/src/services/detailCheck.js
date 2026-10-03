@@ -1,42 +1,8 @@
 import sharp from "sharp";
 import { z } from "zod";
 
-/**
- * A close-up look at the parts of a man's appearance that a full-length
- * photograph shows too small to judge reliably: the face (hair, beard and
- * moustache), the waist (tuck and belt), the trousers and the shoes. Asked in
- * the same request as the report itself, so a man's photograph still costs one
- * model call.
- *
- * The report reads the whole photograph, and the waist and the face are each
- * a strip about a twentieth of its height. Read there, the model reported "a
- * dark, simple belt" on a man wearing none, called grey sneakers formal,
- * failed neatly trimmed beards for edges it could not see, and passed hair
- * falling over a forehead. So the request now carries, beside the photograph,
- * those areas cut out at full resolution, and asks narrow questions about
- * them: is a buckle visible, is hair on the forehead, is the beard trimmed.
- *
- * Where the areas are comes from the tablet, which has already found the
- * person's eyes, shoulders, hips and ankles in the same picture to decide when
- * to take it (bodyRegionsFromKeypoints in the frontend). A photograph without
- * them - a group, an upload, an older tablet - is asked the same questions
- * about the full photograph, and the model says where it looked.
- *
- * Mostly the answers only tighten: a row the report passed fails when the
- * close-up contradicts it, and nothing the report failed is passed, since a
- * failure may rest on something the crop does not show. The exceptions are
- * the beard, the moustache and hair on the forehead, which the report failed
- * whenever it could not make out an edge or a hairline in a face a few dozen
- * pixels high: there, a real face close-up that shows a clean shave, light
- * stubble, a trimmed beard or a clear forehead is trusted over it. Hair
- * Neatness is not among them: messy hair the report saw stays failed. Every
- * row read from a close-up keeps the box it was read from, so the report can
- * show it.
- */
-
 export const DETAIL_CHECK_VERSION = "2026-10-03.3";
 
-/** The rows the close-up can overrule, and the region each is read from. */
 const ROW_REGIONS = Object.freeze({
   M_HAIR_NEATNESS: "head",
   M_HAIR_POSITION: "head",
@@ -49,7 +15,6 @@ const ROW_REGIONS = Object.freeze({
   M_FOOTWEAR_TYPE: "feet",
 });
 
-/** Rows that also show the close-up as evidence, without being overruled by it. */
 const EVIDENCE_ONLY_REGIONS = Object.freeze({
   M_HAIR_LENGTH: "head",
   M_TROUSERS_FIT_CONDITION: "legs",
@@ -67,13 +32,6 @@ export const REGIONS = Object.freeze(["head", "waist", "legs", "feet"]);
 
 const CROP_LABELS = Object.freeze({ head: "FACE", waist: "WAIST", legs: "TROUSERS", feet: "SHOES" });
 
-// ---- Boxes ------------------------------------------------------------------
-
-/**
- * The box as it will be cropped: validated, widened by a margin so the area
- * is seen in context, and clamped to the image. Null when the box is unusable,
- * including the all-zero box that means "not found".
- */
 export function paddedBox(box, { margin = 0.12, minSpan = 40 } = {}) {
   if (!Array.isArray(box) || box.length !== 4 || !box.every((value) => Number.isFinite(value))) return null;
   const [ymin, xmin, ymax, xmax] = box.map((value) => Math.max(0, Math.min(1000, value)));
@@ -88,7 +46,6 @@ export function paddedBox(box, { margin = 0.12, minSpan = 40 } = {}) {
   ];
 }
 
-/** Pixel rectangle for a 0-1000 box on an image of this size. */
 export function boxToPixels(box, width, height) {
   const left = Math.floor((box[1] / 1000) * width);
   const top = Math.floor((box[0] / 1000) * height);
@@ -102,12 +59,6 @@ export function boxToPixels(box, width, height) {
   };
 }
 
-/**
- * The tablet's areas, as sent with the photograph: an object of up to four
- * [ymin, xmin, ymax, xmax] boxes on a 0-1000 scale. Accepts the JSON text a
- * form field carries. Anything malformed is dropped rather than refused: the
- * areas improve the report, and attendance never depends on them.
- */
 export function parseBodyRegions(raw) {
   let value = raw;
   if (typeof value === "string") {
@@ -130,13 +81,9 @@ export function parseBodyRegions(raw) {
   return Object.keys(regions).length ? regions : null;
 }
 
-// ---- Crops ------------------------------------------------------------------
-
 async function cropRegion(imageBuffer, width, height, box) {
   const rect = boxToPixels(box, width, height);
   const longSide = Math.max(rect.width, rect.height);
-  // Small crops are enlarged so the model spends more than its minimum on
-  // them; large ones are capped.
   const target = Math.min(1024, Math.max(768, longSide));
   return sharp(imageBuffer)
     .extract(rect)
@@ -145,10 +92,6 @@ async function cropRegion(imageBuffer, width, height, box) {
     .toBuffer();
 }
 
-/**
- * The close-up crops for the request, and the boxes they were cut from.
- * Never throws: a photograph that cannot be cropped is asked about whole.
- */
 export async function buildCloseUps(imageBuffer, bodyRegions) {
   const regions = parseBodyRegions(bodyRegions);
   if (!regions) return { parts: [], boxes: {} };
@@ -172,7 +115,6 @@ export async function buildCloseUps(imageBuffer, bodyRegions) {
       parts.push({ type: "input_image", mimeType: "image/jpeg", data: data.toString("base64") });
       boxes[region] = box;
     } catch {
-      // That area is judged from the photograph instead.
     }
   }
   if (parts.length) {
@@ -183,8 +125,6 @@ export async function buildCloseUps(imageBuffer, bodyRegions) {
   }
   return { parts, boxes };
 }
-
-// ---- The close_up answer ----------------------------------------------------------
 
 const Box = z.array(z.number()).length(4);
 const YES_NO_UNCLEAR = ["YES", "NO", "UNCLEAR"];
@@ -255,7 +195,6 @@ export const CLOSE_UP_JSON_SCHEMA = {
   ],
 };
 
-/** Added to the men's instructions: how to answer close_up. */
 export const CLOSE_UP_INSTRUCTIONS = `## CLOSE-UP: FACE, WAIST, TROUSERS AND SHOES (close_up)
 
 Answer close_up from the close-up crops when the request includes them (labelled FACE, WAIST, TROUSERS and SHOES), and from the photograph otherwise. Answer only from what is visible; never assume an item is there because the rest of the outfit is formal. The hair, Facial Hair, Moustache, Belt, Shirt Collar / Tuck, trousers or Bottom Wear and Footwear Type rows must agree with these answers. Answer every field even when a row does not apply to the attire family you chose.
@@ -289,7 +228,6 @@ SHOES
 - footwear_assessable: false when the shoes are out of frame or hidden.
 - footwear_observation: one sentence naming the shoe type and what identified it.`;
 
-/** The close_up answer in the shape applyDetailFindings reads. */
 export function findingsFromCloseUp(closeUp) {
   return {
     face: {
@@ -320,10 +258,6 @@ export function findingsFromCloseUp(closeUp) {
   };
 }
 
-/**
- * The boxes to show as evidence: the crops the model was given where there
- * were crops, and otherwise where it says it looked.
- */
 export function evidenceBoxes(cropBoxes, closeUp) {
   const boxes = {};
   for (const region of REGIONS) {
@@ -332,8 +266,6 @@ export function evidenceBoxes(cropBoxes, closeUp) {
   }
   return boxes;
 }
-
-// ---- Applying ---------------------------------------------------------------
 
 function findRow(rows, code) {
   for (const items of Object.values(rows)) {
@@ -361,18 +293,9 @@ function passRow(row, observation, reason) {
 }
 
 function confirmRow(row, observation) {
-  // The reason on a PASS was the prompt's own boilerplate ("the visible
-  // evidence satisfies the requirement"). What the close-up saw says more.
   row.reason = `Confirmed in the close-up: ${observation}`.slice(0, 1000);
 }
 
-/**
- * Applies the close-up findings to the report rows, in place. Pure, so the
- * rules can be tested without a model. `boxes` decides which rows show a
- * close-up as evidence; `croppedRegions` names the areas the model actually
- * saw a crop of, which the beard and moustache need before a FAIL is undone.
- * Returns the codes it failed and the codes it passed.
- */
 export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions = [] } = {}) {
   const failed = [];
   const passed = [];
@@ -402,9 +325,6 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
       failRow(position, `Close-up of the face: ${seen}`, "The close-up of the face shows hair resting on the forehead.");
       failed.push("M_HAIR_POSITION");
     } else if (position?.status === "FAIL" && faceCropped && face.hair_on_forehead === "NO") {
-      // Dark curls at the hairline and the eyebrows below them run together
-      // in a face a few dozen pixels high, and the report has failed clear
-      // foreheads as "strands over the eyebrows". The real close-up decides.
       passRow(
         position,
         `Close-up of the face: ${seen}`,
@@ -459,9 +379,6 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
     const seen = sentence(waist.observation, "The front of the waistband.");
     const belt = findRow(rows, "M_BELT");
     if (belt?.status === "PASS") {
-      // A buckle or strap the close-up saw is a belt, however much of the
-      // waistband something else covers: a hanging ID card was failing belts
-      // that were plainly worn as "not shown".
       if (waist.buckle_visible || waist.belt_strap_visible) {
         confirmRow(belt, seen);
       } else if (!waist.assessable) {

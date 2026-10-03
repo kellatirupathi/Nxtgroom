@@ -11,12 +11,6 @@ import {
   toSheetCsvUrl,
 } from "../src/services/remoteFetch.js";
 
-/**
- * The import downloads photographs and sheets from links typed into a
- * spreadsheet. What must never happen is the server being pointed at itself or
- * the network behind it, so most of what is proved here is refusal.
- */
-
 test("loopback, private, link-local and metadata addresses are private", () => {
   for (const address of [
     "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.10",
@@ -68,8 +62,6 @@ test("links naming a private host outright are refused before any request", () =
 });
 
 test("a hostname that resolves only to private addresses is refused", async () => {
-  // A public-looking name pointed at 127.0.0.1 is the classic way round a
-  // check on the link's text; the socket's lookup must drop the answer.
   const lookup = createPublicOnlyLookup((_host, _options, done) => done(null, [
     { address: "127.0.0.1", family: 4 },
     { address: "169.254.169.254", family: 4 },

@@ -5,15 +5,6 @@ import { androidAppBridge, downloadAttendanceCsv } from '../src/attendanceExport
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-/**
- * The Android app: a Capacitor shell around the live site.
- *
- * The native half cannot run here, so these tests hold the two halves to the
- * names and numbers they share - the plugin the page calls, the WebView
- * version the offline page quotes, the page Capacitor shows on an error - and
- * keep the release key out of git.
- */
-
 const android = (platform = 'android', calls = []) => ({
   getPlatform: () => platform,
   nativePromise: (plugin, method, options) => {

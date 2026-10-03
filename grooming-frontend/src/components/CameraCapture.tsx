@@ -30,32 +30,12 @@ type Facing = 'user' | 'environment';
 interface CameraCaptureProps {
   facing: Facing;
   onFlip: () => void;
-  /** details carries where the waist, trousers and shoes were, for the report. */
   onCapture: (file: File, details?: CaptureDetails) => void | Promise<void>;
   onClose: () => void;
-  /**
-   * Take the photograph as soon as one whole person stands still, with no
-   * button press. The manual shutter stays available as a fallback, because the
-   * strict frame auto-capture needs is one a cramped room or a low-mounted
-   * tablet may never produce.
-   */
   autoCapture?: boolean;
-  /**
-   * Fill the parent box instead of the viewport.
-   *
-   * The kiosk screen is the camera, and it sits inside the app shell where the
-   * sidebar is the way out. Covering the viewport there hid the navigation
-   * behind a black rectangle with no obvious escape. Inline, the surrounding
-   * page stays visible and keeps doing its job, so this mode also drops the
-   * dialog semantics and the close button: nothing is being covered, and there
-   * is nothing to close.
-   *
-   * The parent must establish a positioning context and a size.
-   */
   inline?: boolean;
 }
 
-/** Failure modes worth telling apart: the fix differs for each. */
 function describeCameraError(error: unknown): string {
   const name = (error as { name?: string })?.name;
   if (name === 'NotAllowedError' || name === 'SecurityError') {
@@ -70,14 +50,6 @@ function describeCameraError(error: unknown): string {
   return 'The camera could not be started. Check permissions and try again.';
 }
 
-/**
- * A live camera viewfinder with a shutter, replacing the file picker.
- *
- * Attendance photos are evidence of appearance on a given day, so the photo
- * has to be taken now rather than chosen from a gallery. A file input cannot
- * enforce that — `capture` is only a hint, and on desktop it opens a file
- * browser — so the frame is grabbed from the camera stream directly.
- */
 export default function CameraCapture({
   facing,
   onFlip,
@@ -94,65 +66,22 @@ export default function CameraCapture({
   const [starting, setStarting] = useState(true);
   const [capturing, setCapturing] = useState(false);
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
-  // Start closed. UNAVAILABLE deliberately fails open, so using it while the
-  // model was still loading briefly enabled capture on an empty frame.
   const [verdict, setVerdict] = useState<FrameVerdict>('NO_PERSON');
   const [guidance, setGuidance] = useState<string | null>('Step into the frame');
-  /** How many consecutive readings auto-capture could fire on. */
   const [steadyFrames, setSteadyFrames] = useState(0);
-  /**
-   * Where to draw a box on the preview.
-   *
-   * Taken from the raw reading rather than the stabilised one. The verdict is
-   * held steady so the outline and the guidance do not flicker, but a box that
-   * only moved three times a second would visibly lag the face it belongs to —
-   * and unlike the verdict, a box in slightly the wrong place for one frame
-   * costs nothing.
-   */
   const [faceBoxes, setFaceBoxes] = useState<FaceBox[]>([]);
-  /** Shown once the strict frame has proved unreachable, with the instruction. */
   const [manualOffered, setManualOffered] = useState(!autoCapture);
-  /**
-   * Held in a ref rather than state because the inspection loop reads it on
-   * every tick: as state it would be captured stale by the running timer, and
-   * the camera would fire repeatedly during its own cooldown.
-   */
   const cooldownUntilRef = useRef(0);
   const firingRef = useRef(false);
-  /**
-   * The latest verdict, for the capture path.
-   *
-   * shoot is a callback the inspection loop also calls, so reading `verdict`
-   * from the closure would test whatever was current when the callback was
-   * built rather than what the camera is seeing now.
-   */
   const verdictRef = useRef<FrameVerdict>('NO_PERSON');
-  /** The latest whole-body reading's waist, trousers and shoes; null otherwise. */
   const bodyRegionsRef = useRef<BodyRegions | null>(null);
-  // The same reasoning as cooldownUntilRef: the tick reads these every 200ms,
-  // and as state they would be captured stale by the running timer.
   const steadyRef = useRef(0);
   const postureSinceRef = useRef<number | null>(null);
   const unusableRef = useRef(0);
   const manualOfferedRef = useRef(!autoCapture);
-  /**
-   * The current capture function, for the inspection loop.
-   *
-   * Listing `shoot` in the loop's dependencies would tear the loop down and
-   * rebuild it whenever the callback is rebuilt, which reloads the detector and
-   * discards a hold in progress. A ref keeps the loop reading the latest
-   * callback without restarting over it.
-   */
   const shootRef = useRef<(options?: { viaAuto?: boolean }) => Promise<void>>(async () => {});
-  /** What this camera's still photographs can do; see stillCapture. */
   const stillStateRef = useRef(createStillCaptureState());
-  /** True while the camera is being opened, so a wake-up does not open it twice. */
   const openingRef = useRef(false);
-  /**
-   * Bumped to reopen the camera. The stream is released whenever the screen is
-   * hidden, and nothing used to open it again: a tablet that slept came back to
-   * a black preview until somebody left the page and returned.
-   */
   const [streamGeneration, setStreamGeneration] = useState(0);
 
   const stop = useCallback(() => {
@@ -177,10 +106,6 @@ export default function CameraCapture({
       }
       openingRef.current = true;
       try {
-        // `ideal` rather than `exact`: a tablet with only one camera should
-        // still open it instead of failing the whole capture. Retried while
-        // the camera is busy, because the screen that last held it may have
-        // let go only a moment ago - see openCameraStream.
         const stream = await openCameraStream({
           video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
           audio: false,
@@ -209,13 +134,6 @@ export default function CameraCapture({
     };
   }, [facing, stop, streamGeneration]);
 
-  /**
-   * Watches the live frame for a whole person, head to feet.
-   *
-   * Five readings a second is enough to feel immediate without competing with
-   * the preview for the GPU. Automatic capture requires one complete, usable
-   * person inside the outline; no gesture or movement challenge is required.
-   */
   useEffect(() => {
     if (error) return undefined;
     let disposed = false;
@@ -233,14 +151,9 @@ export default function CameraCapture({
     };
 
     const inspect = async () => {
-      // Nothing watches the frame until the detector is ready, so say that
-      // rather than asking somebody to step into it. Once it has loaded, a
-      // camera opened later goes straight to the usual line.
       if (!fullBodyDetectorSettled()) setGuidance(DETECTOR_STARTING_GUIDANCE);
       const detector = await loadFullBodyDetector();
       clearTimeout(detectorGraceTimer);
-      // The exact shape this preview sends, prepared before its first reading
-      // so that reading is as quick as the rest.
       const preview = viewportRef.current;
       if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
       const tick = async () => {
@@ -263,14 +176,10 @@ export default function CameraCapture({
           ? reading.capturePosture?.guidance ?? 'Keep both arms and hands visible'
           : stableReading.guidance);
         verdictRef.current = stableReading.verdict;
-        // Only a whole-body frame's areas: a stale box would point the report
-        // at the wrong part of the photograph.
         bodyRegionsRef.current = reading.verdict === 'FULL_BODY' ? (reading.bodyRegions ?? null) : null;
         setFaceBoxes(reading.boxes ?? []);
 
         if (autoCapture) {
-          // Use the current posture, never a previous stabilised pose: raised
-          // hands must stop capture immediately, even after a good hold.
           const fireable = stableReading.verdict === 'FULL_BODY'
             && reading.verdict === 'FULL_BODY' && reading.capturePosture?.ready === true;
           const now = Date.now();
@@ -280,9 +189,6 @@ export default function CameraCapture({
           steadyRef.current = held;
           setSteadyFrames(held);
 
-          // Only frames auto-capture cannot use count towards offering the
-          // button, so a good frame resets the run and the fallback appears when
-          // the camera genuinely cannot get a usable view.
           unusableRef.current = fireable ? 0 : unusableRef.current + 1;
           if (!manualOfferedRef.current && autoCaptureFallbackDue(unusableRef.current)) {
             manualOfferedRef.current = true;
@@ -309,14 +215,8 @@ export default function CameraCapture({
       clearTimeout(detectorGraceTimer);
       clearTimeout(timer);
     };
-    // autoCapture belongs here: it changes what the loop does on every tick, so
-    // switching it should restart the loop. shoot deliberately does not, and is
-    // reached through shootRef instead.
   }, [error, facing, autoCapture]);
 
-  // Releasing the camera when the screen is hidden matters on Android, where
-  // a held stream keeps the camera indicator on and blocks other apps. Coming
-  // back, it is opened again - unless an opening is already under way.
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') {
@@ -331,13 +231,6 @@ export default function CameraCapture({
 
   const ready = shutterEnabled(verdict, 0, false);
 
-  /**
-   * Captures the current frame.
-   *
-   * `viaAuto` bypasses the manual gate rather than sharing it: the two
-   * predicates answer different questions, and auto-capture has already applied
-   * the stricter one before calling.
-   */
   const shoot = useCallback(async ({ viaAuto = false } = {}) => {
     const video = videoRef.current;
     if (!video || !video.videoWidth) return;
@@ -347,7 +240,6 @@ export default function CameraCapture({
     firingRef.current = true;
     setCapturing(true);
     try {
-      // Taken with the shutter, so they describe the frame being photographed.
       const bodyRegions = bodyRegionsRef.current;
       const viewport = viewportRef.current;
       const crop = bodyGuideSourceRect(
@@ -356,10 +248,6 @@ export default function CameraCapture({
         viewport?.clientWidth || video.videoWidth,
         viewport?.clientHeight || video.videoHeight,
       );
-      // Exactly what the preview showed - the whole camera view - taken from
-      // the camera's full-resolution still where the device can take one, and
-      // from the video frame otherwise. Unmirrored either way: a mirrored
-      // photo reverses text on a lanyard or badge. See stillCapture.
       const photo = await capturePhoto({
         video,
         track: streamRef.current?.getVideoTracks()[0] ?? null,
@@ -368,18 +256,12 @@ export default function CameraCapture({
         quality: PHOTO_JPEG_QUALITY,
         state: stillStateRef.current,
       });
-      // Keep the shutter locked until the owner has finished handling the
-      // photograph. In kiosk mode that includes identification and the
-      // attendance response, so a slow request cannot trigger a second frame.
       await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }), { bodyRegions });
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {
       setCapturing(false);
       firingRef.current = false;
-      // Counted from the end of the capture, not the start: the upload and the
-      // recognition call happen after this, and restarting the clock earlier
-      // would let the next frame fire while the first was still in flight.
       cooldownUntilRef.current = autoCapture ? Date.now() + AUTO_CAPTURE_COOLDOWN_MS : 0;
       setCooldownSeconds(autoCapture ? AUTO_CAPTURE_COOLDOWN_MS / 1000 : 0);
       setSteadyFrames(0);
@@ -388,10 +270,6 @@ export default function CameraCapture({
     }
   }, [onCapture, autoCapture]);
 
-  // Published for the inspection loop, which reaches the capture function
-  // through a ref so rebuilding the callback does not restart the detector.
-  // Declared after shoot because a const cannot be referenced above its own
-  // declaration, even from an effect body that runs later.
   useEffect(() => {
     shootRef.current = shoot;
   }, [shoot]);
@@ -403,7 +281,6 @@ export default function CameraCapture({
         : 'fixed inset-0 z-[120] bg-black flex flex-col'}
       {...(inline ? {} : { role: 'dialog', 'aria-modal': true, 'aria-label': 'Take photo' })}
     >
-      {/* Attendance owns its overlay controls; standalone photo capture keeps its toolbar. */}
       {!inline && <div
         className="flex items-center justify-between px-4 py-3 text-white"
         style={inline ? undefined : { paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
@@ -445,24 +322,8 @@ export default function CameraCapture({
               className="absolute inset-0 w-full h-full object-cover"
               style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
             />
-            {/* A box on the face the camera has found, so somebody standing in
-                front of the tablet can see they have been detected rather than
-                inferring it from an outline that has not turned green yet.
-                Drawn outside the mirroring transform above, which is why the
-                coordinates arrive already flipped. */}
             {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
-            {/* No outline to stand in: the whole camera view is the frame,
-                and the whole view is what is checked and photographed. The
-                face box above and the one line of guidance below say what
-                needs changing. */}
-
-            {/* One line, only when something needs changing. A running
-                commentary on a correct frame is noise.
-
-                Auto-capture replaces "ready" with a count, because a camera
-                about to fire by itself has to say so: being photographed with
-                no warning is worse than waiting an extra moment. */}
             <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2 px-6">
               {autoCapture && cooldownSeconds > 0 ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
@@ -486,8 +347,6 @@ export default function CameraCapture({
                 </p>
               ) : null}
 
-              {/* Shown only once the strict frame has proved unreachable, with
-                  the instruction that usually fixes it. */}
               {autoCapture && manualOffered && (
                 <p className="rounded-xl bg-amber-500/95 px-4 py-2 text-center text-xs font-semibold text-white max-w-xs" role="status">
                   Stand straight in front of the camera with your whole body in the frame,
@@ -505,21 +364,12 @@ export default function CameraCapture({
         )}
       </div>
 
-      {/* Inline the shutter overlays the picture rather than taking a band of
-          its own: the panel is already the smaller part of a page, and under
-          auto-capture the button is usually hidden, so a reserved strip would
-          be empty space most of the time. There is no home indicator to clear
-          inside a panel either, so the safe-area padding goes with it. */}
       <div
         className={inline
           ? 'pointer-events-none absolute inset-x-0 bottom-6 flex flex-col items-center gap-3'
           : 'flex flex-col items-center gap-3 py-6'}
         style={inline ? undefined : { paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
       >
-        {/* Hidden while auto-capture is working, so nobody presses a button the
-            camera is about to press for them. It appears once the strict frame
-            has proved unreachable, which is the case where the rule would
-            otherwise stand between somebody and their attendance. */}
         <button
           type="button"
           onClick={() => void shoot()}

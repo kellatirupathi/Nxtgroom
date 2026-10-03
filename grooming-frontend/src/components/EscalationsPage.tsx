@@ -49,10 +49,6 @@ function Verdict({ status }: { status: string | null }) {
   );
 }
 
-/**
- * One day's photographs and reports: check-in in indigo, check-out in rose,
- * as on Daily Records. Clicks stay here rather than opening the person.
- */
 function DayLinks({ row, onPhoto }: { row: EscalationRow; onPhoto: (target: PhotoTarget) => void }) {
   const checkinReport = rowReportPath(row, 'checkin');
   const checkoutReport = rowReportPath(row, 'checkout');
@@ -96,11 +92,6 @@ function Half({ label, time, status, remarks }: { label: string; time: string | 
   );
 }
 
-/**
- * One person's escalations in the chosen dates, opened by clicking their row:
- * each run, and each failed day of it with both halves, the remarks, the
- * photographs and the reports.
- */
 function PersonDetail({ person, range, photoOpen, onPhoto, onClose }: {
   person: EscalatedPerson;
   range: PeriodRange;
@@ -119,7 +110,6 @@ function PersonDetail({ person, range, photoOpen, onPhoto, onClose }: {
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      // Escape closes the photo first when one is open over this.
       if (event.key === 'Escape' && !photoOpen) onClose();
     };
     document.addEventListener('keydown', onKeyDown);
@@ -197,12 +187,6 @@ function PersonDetail({ person, range, photoOpen, onPhoto, onClose }: {
   );
 }
 
-/**
- * Everyone escalated to the reporting partners in the chosen dates, opened
- * from "View all" on the Dashboard and not from the menu. One row per person,
- * with each failed day's photographs and reports; clicking the row opens
- * everything about their escalation.
- */
 export default function EscalationsPage({ onBack }: { onBack: () => void }) {
   const toast = useToast();
   const today = useMemo(() => localDateValue(), []);
@@ -242,7 +226,6 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
     [report, search, college, weekday],
   );
   const people = useMemo(() => groupByPerson(rows), [rows]);
-  // The details show all of a person's days in the dates, whatever the filters hide.
   const openPerson = useMemo(
     () => (openId ? groupByPerson((report?.rows ?? []).filter((row) => row.instructor_id === openId))[0] ?? null : null),
     [openId, report],
@@ -250,7 +233,6 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
   const filtered = Boolean(search || college || weekday);
 
   const choosePeriod = (next: EscalationPeriod) => {
-    // A custom range starts from the dates on screen, to be adjusted.
     if (next === 'custom' && period !== 'custom') setCustom(range);
     setPeriod(next);
   };
@@ -270,7 +252,6 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
   };
 
   const onRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, person: EscalatedPerson) => {
-    // Keys pressed on a photo or report button inside the row stay with it.
     if (event.target !== event.currentTarget) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -304,7 +285,6 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
-      {/* Search on the left; the dates, the institute, the day and Export on the right. */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <span className="relative w-full min-w-0 sm:w-72">
           <Search size={16} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
@@ -422,7 +402,6 @@ export default function EscalationsPage({ onBack }: { onBack: () => void }) {
                         <td className="px-3 py-3">
                           <span className="block font-bold text-slate-800">{person.name}</span>
                           {person.role && <span className="block text-xs text-slate-500">{person.role}</span>}
-                          {/* On a phone the institute sits here, leaving the width to the dates. */}
                           <span className="block text-xs text-slate-500 md:hidden">{person.institute}</span>
                           <span className="mt-1 block text-xs font-semibold text-rose-700">
                             {person.days.length} failed {person.days.length === 1 ? 'check-in' : 'check-ins'}

@@ -1,8 +1,5 @@
-/** Shared domain types mirroring the API's serialized documents. */
-
 export type Role = 'SUPER_ADMIN' | 'ADMIN' | 'BOA';
 
-/** Roles with organisation-wide reach. */
 export const ELEVATED_ROLES: readonly Role[] = ['SUPER_ADMIN', 'ADMIN'];
 
 export const ALL_ROLES: readonly Role[] = ['SUPER_ADMIN', 'ADMIN', 'BOA'];
@@ -23,13 +20,7 @@ export interface AdminUser {
 export type AttendanceStatus =
   | 'compliant'
   | 'non_compliant'
-  /** Analysed, but the photograph showed nothing to judge. Neither of the above. */
   | 'unassessed'
-  /**
-   * Recorded, but face recognition could not say who it is. Nothing was
-   * analysed and nothing is queued: it waits for an administrator to attach an
-   * instructor. Distinct from pending, which means analysis is still running.
-   */
   | 'error'
   | 'pending';
 
@@ -60,7 +51,6 @@ export interface DailyFeedback {
 export interface Instructor {
   _id: string;
   uuid?: string;
-  /** Optional: instructors synced from BigQuery are keyed by instructor_user_id. */
   employee_id?: string;
   name: string;
   role: string;
@@ -68,28 +58,13 @@ export interface Instructor {
   college_id: string;
   college_name?: string | null;
   email?: string | null;
-  /**
-   * Whether an address exists. A BOA is not shown the address itself, so
-   * without this the interface cannot tell "has none" from "may not see it".
-   */
   has_email?: boolean;
   phone_no?: string | null;
   created_at?: string;
   daily_feedbacks?: DailyFeedback[];
-  /**
-   * How many reference faces are enrolled for this instructor. Zero or absent
-   * means recognition cannot identify them, so every check-in reaches the
-   * automatic recognition cannot work until a photo is added.
-   */
   face_count?: number;
   face_indexed_at?: string | null;
-  /**
-   * A time-limited link to the reference photograph, present only when the
-   * caller asked for it with include_photo_url. The bucket is private, so this
-   * expires; it is never a durable handle to the object.
-   */
   reference_photo_url?: string | null;
-  /** Fields owned by the BigQuery roster; absent on manually created rows. */
   instructor_user_id?: string | null;
   instructor_role?: string | null;
   institute_name?: string | null;
@@ -108,60 +83,37 @@ export interface AttendanceRecord {
   check_in_time?: string;
   check_out_time?: string | null;
   location_coordinates?: string | null;
-  /** Reported accuracy of the fix in metres; distinguishes GPS from an IP estimate. */
   location_accuracy_m?: number | null;
-  /** Reverse-geocoded once at check-in and stored, not looked up per view. */
   location_address?: string | null;
   location_address_full?: string | null;
-  /** Where the check-out happened, captured separately from the check-in fix. */
   check_out_coordinates?: string | null;
   check_out_location_accuracy_m?: number | null;
-  /** Its own reverse-geocoded name: the two halves can be different places. */
   check_out_location_address?: string | null;
-  /**
-   * Set to "not_checked_out" by the midnight job when a day ended with the
-   * check-in still open. Descriptive only: the record stays closeable, so a
-   * session that ran past midnight can still be closed afterwards.
-   */
   checkout_status?: string | null;
-  /** The check-out's own verdict. The fields above hold the check-in's. */
   checkout_compliance_status?: string | null;
   checkout_remarks?: string | null;
-  /** queued or processing while a job is outstanding; cleared when it ends. */
   evaluation_queue_status?: string | null;
   checkout_evaluation_queue_status?: string | null;
-  /** FORMAL | SAREE | KURTI_WITH_DUPATTA | ABAYA | KURTA_PAJAMA | UNKNOWN, set by the AI analysis. */
   attire_type?: string | null;
-  /** The instructor's public report token, for linking to their own report. */
   report_token?: string | null;
-  /** R2 object keys. Presence is what enables the view-photo buttons. */
   check_in_photo_key?: string | null;
   check_out_photo_key?: string | null;
   status?: string;
   remarks?: string | null;
-  /** The local calendar day of the session, YYYY-MM-DD. */
   attendance_day?: string;
   updated_at?: string;
-  /**
-   * Three or more non-compliant results in this row's Monday-to-Sunday week,
-   * counted by the server across the whole week, or null.
-   */
   escalation?: AttendanceEscalation | null;
 }
 
 export interface AttendanceEscalation {
   week_start: string;
   week_end: string;
-  /** Days in a row with a non-compliant check-in. */
   count: number;
-  /** Set by the days-in-a-row rule; absent on an older response. */
   streak?: boolean;
-  /** The days of the run, as YYYY-MM-DD. */
   days?: string[];
 }
 
 export interface CheckItem {
-  /** Stable identity for the checkpoint. Internal: never rendered. */
   code?: string;
   checkpoint_name: string;
   observation: string;
@@ -171,7 +123,6 @@ export interface CheckItem {
 
 export type Visibility = 'VISIBLE' | 'PARTIAL' | 'NOT_VISIBLE';
 
-/** Which parts of the body the photograph showed. Explains the N/A rows. */
 export interface VisibleRegions {
   face: Visibility;
   upper_body: Visibility;
@@ -183,14 +134,12 @@ export interface VisibleRegions {
 
 export type AttireType = 'FORMAL' | 'SAREE' | 'KURTI_WITH_DUPATTA' | 'ABAYA' | 'KURTA_PAJAMA' | 'UNKNOWN';
 
-/** Counted from the week's records, never from a single photograph. */
 export interface WeeklyRotation {
   saree_days: number;
   kurti_days: number;
   unknown_days: number;
   required_saree_days: number;
   required_kurti_days: number;
-  /** Present when the week had abaya days, which make the rotation not apply. */
   abaya_days?: number;
   status: 'IN_PROGRESS' | 'PASS' | 'FAIL' | 'INSUFFICIENT_DATA' | 'NOT_APPLICABLE';
 }
@@ -201,9 +150,7 @@ export interface Evaluation {
   image_quality?: ImageQuality;
   attire_type?: AttireType;
   visible_regions?: VisibleRegions | null;
-  /** Set when no assessment was attempted, so the report can say why. */
   unassessed_reason?: string | null;
-  /** Derived from the failing checkpoints by the backend, in report order. */
   improvement_tips?: string[];
   general_idcard_check?: CheckItem[];
   grooming_check?: CheckItem[];
@@ -216,27 +163,17 @@ export interface CurrentUser {
   email: string;
   role: Role;
   college_id: string | null;
-  /** Whether this account may delete a whole attendance record. */
   can_delete_records?: boolean;
-  /** Whether it may remove a check-out on its own, leaving the check-in. */
   can_delete_checkout?: boolean;
-  /** Workspace-wide: whether the Re-analyse control is shown on a report. */
   reanalyse_enabled?: boolean;
-  /**
-   * Whether this tablet's college identifies the instructor from the check-in
-   * photograph. Resolved server-side for the signed-in account's own college,
-   * so the capture screen shows a selector only where one still applies.
-   */
   face_identification?: boolean;
 }
 
-/** One account's capabilities, and where each answer comes from. */
 export interface UserPermissions {
   user_id?: string;
   email?: string;
   role?: Role;
   can_delete_records: boolean;
-  /** ROLE for admins, USER for a personal override, WORKSPACE for the default. */
   source: 'ROLE' | 'USER' | 'WORKSPACE';
   workspace_default: boolean;
 }
@@ -248,17 +185,14 @@ export interface AccessSettings {
 
 export type IdentificationMode = 'FACE_ONLY' | 'SELECTOR';
 
-/** One college's identification mode, with the enrolment behind it. */
 export interface CollegeIdentification {
   college_id: string;
   college_name: string | null;
   mode: IdentificationMode;
-  /** COLLEGE when set for this college, DEFAULT when following the global one. */
   source: 'COLLEGE' | 'DEFAULT';
   instructors: number;
   enrolled: number;
   enrolled_percent: number;
-  /** Advisory: face-only with too few enrolled faces. Never changes the mode. */
   low_enrolment: boolean;
 }
 
@@ -274,14 +208,11 @@ export interface NotificationSettings {
   checkout_email_enabled: boolean;
   weekly_email_enabled: boolean;
   only_when_non_compliant: boolean;
-  /** Whether the Re-analyse control is offered on a record's report. */
   reanalyse_enabled: boolean;
 }
 
-/** Options accepted by the shared fetch helpers. */
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
-  /** Set false for endpoints that must be called without a bearer token. */
   auth?: boolean;
   timeoutMs?: number;
 }
@@ -296,11 +227,9 @@ export interface LoginResponse {
 export interface PaginatedOptions extends ApiRequestOptions {
   pageSize?: number;
   maxItems?: number;
-  /** Optional per-page GET cache; also deduplicates concurrent pagination. */
   cacheMs?: number;
 }
 
-/** GET /api/v2/dashboard. SUPER_ADMIN and ADMIN only. */
 export type DashboardStatusKey = 'compliant' | 'unassessed' | 'non_compliant' | 'pending' | 'error';
 
 export interface DashboardSummary {
@@ -351,16 +280,13 @@ export interface DashboardInstitute {
   college_id: string;
   name: string;
   mode: 'FACE_ONLY' | 'SELECTOR';
-  /** Instructor-days checked in over the range; for one day, instructors present. */
   present: number;
-  /** Roster size times the working days in the range. */
   expected: number;
   instructors: number;
   present_percent: number | null;
   compliant: number;
   non_compliant: number;
   compliance_percent: number | null;
-  /** Unnamed arrivals at this institute within the range. */
   enrolled: number;
   enrolled_percent: number;
   low_enrolment: boolean;
@@ -381,7 +307,6 @@ export interface DashboardData {
   escalations: DashboardEscalation[];
 }
 
-/** GET /api/v2/dashboard/institutes?from=&to= */
 export interface DashboardInstitutesRange {
   from: string;
   to: string;

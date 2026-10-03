@@ -9,8 +9,6 @@ import {
 import { isValidRecipient, normaliseEmail } from "../src/services/reportRecipients.js";
 
 test("Sunday belongs to the week that just ended", () => {
-  // The weekly email goes out on Sunday morning and must summarise the six
-  // days behind it, not the week about to start.
   assert.equal(weekStartKey(new Date("2026-08-23T10:00:00+05:30")), "2026-08-17");
   assert.equal(weekStartKey(new Date("2026-08-17T09:00:00+05:30")), "2026-08-17", "Monday");
   assert.equal(weekStartKey(new Date("2026-08-22T23:00:00+05:30")), "2026-08-17", "Saturday");
@@ -37,8 +35,6 @@ test("the summary counts attire and compliance per day", () => {
   assert.equal(summary.present_days, 3);
   assert.equal(summary.saree_days, 2);
   assert.equal(summary.kurti_days, 1);
-  // Two: the compliant day, plus a legacy review_required record, which was a
-  // compliant result flagged under a rule that no longer exists.
   assert.equal(summary.compliant_days, 2);
   assert.equal(summary.non_compliant_days, 1);
   assert.equal(summary.missed_checkouts, 1, "b never checked out");
@@ -46,8 +42,6 @@ test("the summary counts attire and compliance per day", () => {
 });
 
 test("two check-ins on one day count once", () => {
-  // Otherwise a re-check-in after a check-out would inflate the day count
-  // past the six working days.
   const summary = summariseWeek([
     { _id: "a", check_in_time: "2026-08-17T04:00:00Z", status: "compliant", attire_type: "FORMAL" },
     { _id: "b", check_in_time: "2026-08-17T09:00:00Z", status: "non_compliant", attire_type: "FORMAL" },

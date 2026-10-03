@@ -10,15 +10,6 @@ import { attendanceCsv, attendanceExportFileName, csvCell } from '../src/attenda
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-/**
- * Daily Records: the status filter, the export, and the filter panel.
- *
- * The status filter and the export both have to agree with what the table
- * shows. A row showing a Non-compliant badge must be found by "Non-compliant"
- * and exported as "Non-compliant" - including old rows stored as `fail`,
- * which display under the normalised name.
- */
-
 const records = [
   { _id: '1', instructor_name: 'Asha', instructor_role: 'Instructor', college_name: 'Campus A', status: 'compliant', check_in_time: '2026-09-24T03:30:00.000Z', attire_type: 'SAREE', remarks: 'Neat' },
   { _id: '2', instructor_name: 'Ravi', instructor_role: 'Instructor', college_name: 'Campus B', status: 'non_compliant', check_in_time: '2026-09-24T03:45:00.000Z', remarks: 'Shirt untucked' },
@@ -62,7 +53,6 @@ test('the export has the table columns and one line per row', () => {
 });
 
 test('a cell that would run as a spreadsheet formula is neutralised', () => {
-  // Remarks and names are typed by people; "=HYPERLINK(...)" must stay text.
   assert.equal(csvCell('=1+1'), "'=1+1");
   assert.equal(csvCell('@SUM(A1)'), "'@SUM(A1)");
   assert.equal(csvCell('+91 98'), "'+91 98");
@@ -95,8 +85,6 @@ test('the header is search, then Filters, then Export - and the filters live in 
   for (const text of ['<DateRangeFilter', 'All institutes', 'All roles', 'All statuses']) {
     assert.ok(drawer.includes(text), `the panel is missing ${text}`);
   }
-  // A click in the date menu is portalled outside the panel, so the panel must
-  // not close on a document-wide outside click.
   assert.ok(!drawer.includes("addEventListener('mousedown'"), 'choosing a date must not close the panel');
 });
 

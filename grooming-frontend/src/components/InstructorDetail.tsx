@@ -43,7 +43,6 @@ async function fetchStoredEvaluation(
       { signal },
     );
   } catch (requestError) {
-    // Older API deployments returned 404 while an evaluation was absent.
     if ((requestError as { status?: number })?.status === 404) return null;
     throw requestError;
   }
@@ -75,13 +74,9 @@ function applyReportStatus(
 interface InstructorDetailProps {
   record: AttendanceRecord | null;
   onBack: () => void;
-  /** Hidden entirely when the signed-in user may not delete the record. */
   canDelete?: boolean;
-  /** Removing a check-out alone is a lesser permission, granted separately. */
   canDeleteCheckout?: boolean;
-  /** Workspace-wide switch for offering re-analysis on a report. */
   canReanalyse?: boolean;
-  /** Called after the record is gone, so the list behind can drop it. */
   onDeleted?: (attendanceId: string) => void;
 }
 
@@ -104,11 +99,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const [freshRecord, setFreshRecord] = useState<AttendanceRecord | null>(record);
   const [reportStates, setReportStates] = useState<ReportPanelStates>({});
   const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
-  // Check-in opens first: it is the half that carries the appearance report,
-  // and on most records the only half that has happened yet.
   const [tab, setTab] = useState<'checkin' | 'checkout'>('checkin');
-  // Which delete is being confirmed. The two remove different things, so they
-  // cannot share one dialog.
   const [confirmDelete, setConfirmDelete] = useState<'record' | 'checkout' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reanalysing, setReanalysing] = useState(false);
@@ -116,8 +107,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const toast = useToast();
   const displayRecord = freshRecord || record;
   const attendanceId = record ? String(record._id) : null;
-  // Each half keeps its own snapshot. A snapshot belonging to another record
-  // is ignored, so navigating between records can never leak stale details.
   const reportState = reportPanelStateForHalf(reportStates, attendanceId, tab);
   const evaluation = evaluationForHalf(reportState, attendanceId, tab);
   const loading = !reportState || reportState.loading;
@@ -127,14 +116,9 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     setFreshRecord(record);
   }, [record]);
 
-  // Distinguishes "still working on it" from "there is nothing". The queue
-  // status is written when the job is created and cleared when it completes.
   const queueStatus = tab === 'checkout'
     ? displayRecord?.checkout_evaluation_queue_status
     : displayRecord?.evaluation_queue_status;
-  // "failed" is a terminal state, not a slow one. Treating it as running left
-  // the page showing "analysing" indefinitely for work that had already given
-  // up, which is the least useful thing it could say.
   const analysisFailed = queueStatus === 'failed';
   const analysisRunning = !analysisFailed && !evaluation
     && (queuedHalf === tab
@@ -142,10 +126,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
       || queueStatus === 'queued'
       || queueStatus === 'processing');
   const shouldPoll = queuedHalf === tab || reportState?.settled === false;
-  // Only worth offering when the photograph it would read is still there.
   const halfHasPhoto = Boolean(tab === 'checkout' ? displayRecord?.check_out_photo_key : displayRecord?.check_in_photo_key);
-  // Two independent conditions: the workspace has to allow re-analysis at all,
-  // and this half must still have the photograph it would read.
   const reanalyseOffered = canReanalyse && halfHasPhoto;
 
   const handleReanalyse = async () => {
@@ -176,7 +157,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         toast.success('Analysis completed', { detail: 'The checkout report has been updated.' });
       } else {
         toast.success('Analysis queued', { detail: 'The report appears here once it finishes.' });
-        // Shows the spinner immediately rather than waiting for the next poll.
         setQueuedHalf('checkin');
       }
     } catch (error) {
@@ -199,8 +179,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         detail: `${record.instructor_name || 'The record'} and its photos have been removed.`,
       });
       setConfirmDelete(null);
-      // Back to the list, which no longer contains this record: staying here
-      // would leave the page describing something that no longer exists.
       onDeleted?.(String(record._id));
       onBack();
     } catch (deleteError) {
@@ -211,11 +189,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     }
   };
 
-  /**
-   * Removes only the check-out. The check-in and its report stay, and the
-   * instructor goes back to being checked in, so this is not a smaller version
-   * of deleting the record — it is a different act.
-   */
   const handleDeleteCheckout = async () => {
     if (!record) return;
     setDeleting(true);
@@ -237,9 +210,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     }
   };
 
-  // Load only when the attendance id or selected half actually changes. A
-  // replacement record object from a parent refresh must not restart this
-  // request or clear a report that has already rendered.
   useEffect(() => {
     if (!attendanceId) return undefined;
     const controller = new AbortController();
@@ -276,8 +246,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         if (status === 401) return;
         setReportStates((current) => {
           const cached = reportPanelStateForHalf(current, attendanceId, tab);
-          // A failed background refresh is not allowed to replace a report
-          // the user can already read with a transient error panel.
           if (cached && !cached.loading) return current;
           return {
             ...current,
@@ -298,9 +266,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     return () => controller.abort();
   }, [attendanceId, tab]);
 
-  // Once the initial request says analysis is outstanding, poll only the
-  // lightweight status endpoint. The full evaluation is fetched exactly once
-  // after the job settles, and polling never touches the visible loader.
   useEffect(() => {
     if (!attendanceId || !shouldPoll) return undefined;
     const controller = new AbortController();
@@ -348,8 +313,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           };
         });
       } catch {
-        // A transient polling failure should neither blank the report nor stop
-        // later attempts. Authentication expiry is handled centrally.
       }
 
       if (!controller.signal.aborted) timer = window.setTimeout(poll, 3000);
@@ -379,11 +342,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         </button>
         <h2 id="instructor-detail-title" className="text-xl sm:text-2xl font-extrabold text-slate-800">Instructor Detail View</h2>
 
-        {/* Acts on the record as a whole, so it sits with the title rather
-            than inside the profile card, which describes the person. */}
-        {/* One button per half, because they remove different things. The
-            check-out button appears only on its own tab and only when there is
-            a check-out to remove. */}
         <div className="ml-auto flex items-center gap-2">
           {tab === 'checkout' && canDeleteCheckout && record.check_out_time && (
             <button
@@ -412,9 +370,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         </div>
       </div>
 
-      {/* One record, two halves. Switching swaps the photo, the time and the
-          location together, so what is on screen always describes the same
-          moment rather than mixing the two. */}
       <div role="tablist" aria-label="Attendance report" className="mb-4 flex shrink-0 gap-1 rounded-md border border-slate-200 bg-white p-1 sm:w-fit">
         {([
           { key: 'checkin', label: 'Check-in report', Icon: LogIn },
@@ -438,10 +393,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         ))}
       </div>
 
-      {/* Nothing about a check-out that has not happened is worth laying out.
-          Splitting it across a status badge from the other half, an empty
-          time, an empty location and an empty summary made the page look
-          broken rather than pending, so it says the one true thing instead. */}
       {tab === 'checkout' && !record.check_out_time ? (
         <div className="flex flex-1 min-h-0 items-start justify-center overflow-y-auto lg:items-center">
           <div className="w-full max-w-lg rounded-md border border-dashed border-slate-300 bg-white p-6 sm:p-10 text-center">
@@ -468,8 +419,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         </div>
       ) : (
       <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 lg:overflow-hidden">
-        {/* pr-2 only once the column can scroll on its own; below lg the page
-            scrolls as one and an inner scrollbar would trap the content. */}
         <div className="w-full lg:w-1/3 flex flex-col gap-4 sm:gap-6 lg:overflow-y-auto lg:pb-6 lg:pr-2">
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 flex flex-col items-center text-center shrink-0">
             <AttendancePhotoCircle
@@ -481,9 +430,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
             />
             <h3 className="mt-4 text-xl sm:text-2xl font-extrabold text-slate-800">{record.instructor_name}</h3>
             <p className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-widest mt-1.5 mb-4 sm:mb-5">{record.instructor_role}</p>
-            {/* Each tab shows its own verdict. This read the check-in's on
-                both, so a check-out could be labelled with the morning's
-                result — or with "Not assessed" when only the check-in was. */}
             <StatusBadge
               status={tab === 'checkout'
                 ? (evaluation?.overall_status
@@ -499,8 +445,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 space-y-5 shrink-0">
             <h4 className="text-sm font-bold text-slate-800 border-b border-slate-100 pb-3">Session Details</h4>
             <div className="flex items-start gap-4"><div className="bg-slate-50 p-2 rounded-md text-slate-400"><Calendar size={18} aria-hidden="true" /></div><div><p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Date</p><p className="text-sm font-semibold text-slate-700">{formatAttendanceDate(tab === 'checkout' ? record.check_out_time : (record.check_in_time || record.date))}</p></div></div>
-            {/* Only this tab's half. Showing the other one's time here put an
-                empty check-out row on a report about the check-in. */}
             <div className="flex items-start gap-4">
               <div className="bg-indigo-50 text-indigo-600 p-2 rounded-md"><Clock size={18} aria-hidden="true" /></div>
               <div>
@@ -533,9 +477,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-6 shrink-0">
             <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3 mb-4">
               <h4 className="text-sm font-bold text-slate-800">AI Remarks Summary</h4>
-              {/* Plain text and icon rather than a filled button: this sits
-                  beside a heading and re-reads the half currently on screen,
-                  so it should not compete with the report itself. */}
               {reanalyseOffered && (
                 <button
                   type="button"
@@ -560,16 +501,11 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           <h3 className="text-base sm:text-lg font-extrabold text-slate-800 mb-4 sm:mb-6 border-b border-slate-100 pb-3 sm:pb-4">
             Detailed Appearance Report
           </h3>
-          {/* Both halves are assessed the same way, so both render the same
-              report. The check-out one only exists when a photo was taken. */}
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
           ) : error ? (
             <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">{error}</div>
           ) : !evaluation ? (
-            /* Three different situations, which all used to read as one red
-               error: nothing was submitted to analyse, the analysis is still
-               running, or it finished without producing a report. */
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 font-medium bg-slate-50 rounded-md border border-dashed border-slate-200 p-8 text-center gap-2">
               {tab === 'checkout' && !record.check_out_photo_key ? (
                 <>
@@ -592,9 +528,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                       ? `The analysis of this ${tab === 'checkout' ? 'check-out' : 'check-in'} photo did not complete.`
                       : `No appearance report was produced for this ${tab === 'checkout' ? 'check-out' : 'check-in'}.`}
                   </p>
-                  {/* The photograph is still in storage, so the analysis can
-                      simply be run again. Without this a record left without a
-                      report could only be fixed by checking in afresh. */}
                   {reanalyseOffered && (
                     <button
                       type="button"
@@ -611,9 +544,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
             </div>
           ) : (
             <div className="flex-1 pb-4">
-              {/* The verdict stands whatever the photo was like. This only
-                  asks for a better one next time, so the checkpoints that
-                  could not be seen can be. */}
               {evaluation.image_quality === 'RETAKE_RECOMMENDED' && (
                 <div role="note" className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
                   <div className="flex items-start gap-3">

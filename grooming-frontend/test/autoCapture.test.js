@@ -10,15 +10,6 @@ import {
   shutterEnabled,
 } from '../src/lib/fullBodyDetector.ts';
 
-/**
- * When the camera takes a photograph by itself.
- *
- * Every automatic capture costs a recognition call, a vision call and a stored
- * photograph of a person, and nobody is looking at the frame before it fires.
- * The rule is therefore stricter than the one behind the manual shutter, and
- * these tests exist to keep the two from being collapsed into one.
- */
-
 test('only a confident whole-body frame fires the camera', () => {
   assert.equal(autoCaptureReady('FULL_BODY', AUTO_CAPTURE_CONFIRMATIONS), true);
   for (const verdict of ['PARTIAL', 'TOO_FAR', 'NO_PERSON', 'MULTIPLE_PEOPLE', 'UNAVAILABLE']) {
@@ -31,9 +22,6 @@ test('only a confident whole-body frame fires the camera', () => {
 });
 
 test('auto-capture is stricter than the manual shutter, deliberately', () => {
-  // A person pressing the button has judged the frame themselves, so the manual
-  // gate stays permissive. Collapsing the two would either auto-submit
-  // half-framed photos or stop somebody capturing a usable one by hand.
   for (const verdict of ['PARTIAL', 'TOO_FAR', 'UNAVAILABLE']) {
     assert.equal(shutterEnabled(verdict, 0, false), true, `${verdict} stays manually capturable`);
     assert.equal(autoCaptureReady(verdict, 99), false, `${verdict} never fires automatically`);
@@ -41,7 +29,6 @@ test('auto-capture is stricter than the manual shutter, deliberately', () => {
 });
 
 test('a good frame has to hold before it fires', () => {
-  // Somebody walking past produces one or two good readings, not three.
   for (let frames = 0; frames < AUTO_CAPTURE_CONFIRMATIONS; frames += 1) {
     assert.equal(autoCaptureReady('FULL_BODY', frames), false, `${frames} readings is not enough`);
   }
@@ -53,7 +40,6 @@ test('holding longer than required still fires', () => {
 });
 
 test('multiple people never fire, however long they stand there', () => {
-  // There would be no way to tell whose attendance it was.
   assert.equal(autoCaptureReady('MULTIPLE_PEOPLE', 1_000), false);
 });
 
@@ -65,8 +51,6 @@ test('the manual shutter is offered once a run of frames is unusable', () => {
 });
 
 test('the fallback arrives in a few seconds, not after a minute of waiting', () => {
-  // At five readings a second. A strict rule that cannot be satisfied is the
-  // thing standing between somebody and their attendance, so the wait is short.
   const seconds = AUTO_CAPTURE_FALLBACK_ATTEMPTS / 5;
   assert.ok(seconds >= 3 && seconds <= 8, `fallback after ${seconds}s should be a few seconds`);
 });
@@ -75,7 +59,6 @@ test('the next person is captured only after two seconds and fresh confirmations
   assert.equal(AUTO_CAPTURE_COOLDOWN_MS, 2_000);
   const end = 10_000 + AUTO_CAPTURE_COOLDOWN_MS;
   let frames = 99;
-  // Nothing counts during the pause, right up to its last millisecond.
   for (const now of [10_000, 11_000, end - 1]) {
     frames = captureConfirmationCount('FULL_BODY', frames, false, end, now);
     assert.equal(frames, 0);
@@ -90,7 +73,6 @@ test('the next person is captured only after two seconds and fresh confirmations
 });
 
 test('the hold is over half a second but under two', () => {
-  // Long enough to exclude a passer-by, short enough not to feel like waiting.
   const ms = (AUTO_CAPTURE_CONFIRMATIONS / 5) * 1_000;
   assert.ok(ms >= 500 && ms <= 2_000, `${ms}ms hold should feel immediate`);
 });

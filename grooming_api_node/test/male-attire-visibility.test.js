@@ -133,10 +133,6 @@ test("the written standards state the required visibility outcomes", () => {
 });
 
 test("a waist that is out of frame keeps its abstention", () => {
-  // Framing is a property of the photograph, not of the clothes. The override
-  // used to fire regardless, so a head-and-shoulders picture produced two
-  // dress-code failures about a waistband that was never in the frame — and
-  // only ever for men, since the women's path has no equivalent rule.
   const rows = rowsWith({ tuck: "N/A", belt: "N/A" });
   resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "NOT_VISIBLE" });
 
@@ -149,14 +145,10 @@ test("advice for an unshown tuck or belt asks for a photograph, not a belt", () 
   resolveMaleAttireVisibility(rows, { upper_body: "PARTIAL", lower_body: "PARTIAL" });
   const tips = improvementTips(rows);
 
-  // The reason on these rows says the photograph did not show the item, so
-  // telling the instructor to wear one contradicts the same report — and
-  // accuses somebody who may well have been wearing it.
   assert.ok(
     tips.every((tip) => !/wear a formal belt/i.test(tip)),
     "an instructor whose belt was never photographed must not be told to wear one"
   );
-  // One sentence covers both, so a report missing the whole waist asks once.
   assert.deepEqual(tips, [
     "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
   ]);
@@ -177,8 +169,6 @@ test("an untucked hem is not counted as a shirt-fit violation", () => {
 
   resolveMaleAttireVisibility(rows, {});
 
-  // "loose" is how an untucked hem gets described, so matching it as a fit
-  // violation defeated the reclassification this block exists to perform.
   assert.equal(fit.status, "PASS");
 });
 
@@ -194,9 +184,6 @@ test("an excessively loose shirt is still a fit violation", () => {
 });
 
 test("a model-returned failure on an unshown waist still gets photograph advice", () => {
-  // The written standards tell the model to FAIL these outright rather than
-  // abstain, so most such rows never pass through the N/A conversion. The
-  // verdict is deliberate policy and stands; only the advice is corrected.
   const rows = rowsWith({ tuck: "FAIL", belt: "FAIL" });
   resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "NOT_VISIBLE" });
 

@@ -15,21 +15,6 @@ import {
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-/**
- * Why the Group tab sometimes did not open, and what now stops it.
- *
- * Three separate causes, each with its own fix and tests here:
- *
- *  1. Switching tabs closed one camera and opened another in the same instant.
- *     Android releases the camera a moment after it is closed, so the second
- *     request was refused as "in use" and nothing asked again.
- *  2. The group screen's code was downloaded on first click, from a file a
- *     later deployment removes. A tablet open across a deployment crashed the
- *     whole app when Group was clicked.
- *  3. A tablet whose screen slept came back to a black camera, because the
- *     stream released on sleep was never reopened.
- */
-
 const busy = () => Object.assign(new Error('Could not start video source'), { name: 'NotReadableError' });
 
 function fakeDevices(outcomes) {
@@ -101,7 +86,6 @@ test('a screen whose code was deployed away is recognised in every browser\'s wo
     assert.equal(isChunkLoadError(new TypeError(message)), true, message);
   }
   assert.equal(isChunkLoadError(Object.assign(new Error('x'), { name: 'ChunkLoadError' })), true);
-  // A screen that is broken, as opposed to missing, is not reloaded away.
   assert.equal(isChunkLoadError(new TypeError("Cannot read properties of undefined (reading 'map')")), false);
   assert.equal(isChunkLoadError(null), false);
 });
@@ -122,13 +106,10 @@ test('the page reloads for a new deployment once, never in a loop', () => {
 
   assert.equal(reloadForNewDeployment({ storage, now: 1_000_000, reload }), true);
   assert.equal(reloads, 1);
-  // Still missing after the reload: a real outage, not a deployment. No loop.
   assert.equal(reloadForNewDeployment({ storage, now: 1_000_000 + 5_000, reload }), false);
   assert.equal(reloads, 1);
-  // A minute later it may try again.
   assert.equal(reloadForNewDeployment({ storage, now: 1_000_000 + CHUNK_RELOAD_COOLDOWN_MS + 1, reload }), true);
   assert.equal(reloads, 2);
-  // With no storage there is no loop guard, so there is no reload either.
   assert.equal(reloadForNewDeployment({ storage: null, now: 5, reload }), false);
   assert.equal(reloads, 2);
 });
@@ -174,8 +155,6 @@ test('both cameras retry a busy camera, and reopen after the screen sleeps', () 
 
 test('both cameras say "hold still" while the still is being taken', () => {
   const single = read('src/components/CameraCapture.tsx');
-  // Guidance continues through the one-second posture hold, even after the
-  // minimum frame confirmations have arrived.
   assert.match(single, /autoCapture && \(capturing \|\| steadyFrames > 0\)/);
   const group = read('src/components/GroupCameraCapture.tsx');
   assert.match(group, /capturing \|\| \(steadyFrames > 0 && steadyFrames < GROUP_CAPTURE_CONFIRMATIONS\)/);

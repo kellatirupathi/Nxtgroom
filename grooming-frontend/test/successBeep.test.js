@@ -13,7 +13,6 @@ import {
 
 const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
 
-/** An AudioContext that records what it was asked to play. */
 function fakeContext(state = 'running') {
   const log = [];
   const ramp = (name) => ({

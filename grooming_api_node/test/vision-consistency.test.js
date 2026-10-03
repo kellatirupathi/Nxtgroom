@@ -3,11 +3,6 @@ import { test } from "node:test";
 import { checkpointSet, SECTION_KEYS } from "../src/checkpoints.js";
 import { telemetrySnapshot } from "../src/services/telemetry.js";
 
-/**
- * Mirrors the consistency rules applied to a parsed grooming report. Kept in
- * step with visionEngine.js by hand: the real function performs a network call
- * to Gemini, which cannot run in a unit test.
- */
 function reconcile(report) {
   const checks = [
     ...report.general_idcard_check,
@@ -55,11 +50,6 @@ function buildReport({ statuses, overall }) {
 }
 
 test("an unevaluable photo is flagged for review instead of failing", () => {
-  // Reproduces a real production failure: a photo showing nothing assessable
-  // came back with every checkpoint N/A and overall NON_COMPLIANT. The old
-  // rule expected COMPLIANT when no check had failed, so the evaluation was
-  // discarded, retried three times, and the attendance record was stuck in
-  // error with no result for the user.
   const report = buildReport({
     statuses: ["N/A", "N/A", "N/A", "N/A", "N/A"],
     overall: "NON_COMPLIANT",
@@ -91,7 +81,6 @@ test("a clean evaluation passes through unchanged", () => {
 });
 
 test("partial visibility is judged on what was actually assessed", () => {
-  // Some checkpoints N/A is normal, so long as at least one was assessed.
   const report = buildReport({
     statuses: ["PASS", "N/A", "N/A", "PASS", "N/A"],
     overall: "COMPLIANT",
@@ -183,7 +172,6 @@ test("vision evaluation sends only the instructor image and structured output to
     assert.equal(cacheRequest.body.model, "models/gemini-2.5-flash-lite");
     assert.equal(cacheRequest.body.ttl, "3600s");
     assert.equal(typeof cacheRequest.body.systemInstruction.parts[0].text, "string");
-    // One request serves both men's attire families and the close-up.
     assert.match(cacheRequest.body.displayName, /^nxtgroom-male-combined-closeup-/);
     assert.equal(captured.body.cachedContent, "cachedContents/nxtgroom-male-test");
     assert.equal(captured.body.systemInstruction, undefined, "cached requests must not resend the full prompt");
@@ -191,8 +179,6 @@ test("vision evaluation sends only the instructor image and structured output to
     assert.equal(captured.body.generationConfig.responseJsonSchema.additionalProperties, false);
     assert.ok(captured.body.generationConfig.maxOutputTokens > 6000);
     assert.equal(captured.body.generationConfig.temperature, 0);
-    // Vision checkpoints need room to inspect each body area before answering;
-    // a zero budget produced verdicts that contradicted the photograph.
     assert.ok(captured.body.generationConfig.thinkingConfig.thinkingBudget >= 1024);
     assert.equal(captured.body.generationConfig.mediaResolution, "MEDIA_RESOLUTION_HIGH");
     assert.equal(captured.body.contents.length, 1);
@@ -299,7 +285,6 @@ test("female attire is classified first, then reported against that family alone
     }
     const body = JSON.parse(options.body);
     imageRequests.push({ url, options, body });
-    // The first image call is the classification, the second the report.
     const payload = imageRequests.length === 1 ? classification : report;
     return new Response(JSON.stringify({
       candidates: [{
@@ -333,8 +318,6 @@ test("female attire is classified first, then reported against that family alone
       request.body.generationConfig.responseJsonSchema
     ));
 
-    // The union of all four attire families is what Gemini refused to serve.
-    // Neither request may carry one, or every female check-in fails again.
     for (const schema of [classify, reportCall]) {
       assert.equal(schema.type, "object");
       assert.equal(JSON.stringify(schema).includes("anyOf"), false, "no schema may use a union");
@@ -344,7 +327,6 @@ test("female attire is classified first, then reported against that family alone
       ["attire_type", "image_quality", "subject_visible", "visible_regions"],
       "the classification step must not ask for checkpoints",
     );
-    // Only the saree rows, and none from the families that were not chosen.
     assert.deepEqual(
       Object.keys(reportCall.properties.attire_check.properties),
       sections.attire_check.map((item) => item.code),
@@ -357,7 +339,6 @@ test("female attire is classified first, then reported against that family alone
       );
     }
 
-    // Each step caches its own prompt, and neither may reach for the men's.
     assert.equal(cacheRequests.length, 2);
     assert.match(cacheRequests[0].body.displayName, /^nxtgroom-female-attire-/);
     assert.match(cacheRequests[1].body.displayName, /^nxtgroom-female-saree-/);
@@ -486,17 +467,12 @@ test("interactive evaluation stays inside the HTTP request timeout", async () =>
   process.env.GEMINI_EXPLICIT_CACHE = "false";
 
   const config = runtimeConfig();
-  // Check-out analysis holds the connection open, so every attempt it is
-  // allowed must finish before the server destroys the socket. This is the
-  // arithmetic that failed in production: the worker's budget is 360s against
-  // a 60s request timeout.
   const interactiveWorstCase = config.geminiInteractiveTimeoutMs
     * (config.geminiInteractiveMaxRetries + 1);
   assert.ok(
     interactiveWorstCase < HTTP_REQUEST_TIMEOUT_MS,
     `interactive worst case ${interactiveWorstCase}ms must be under ${HTTP_REQUEST_TIMEOUT_MS}ms`
   );
-  // The background budget is deliberately larger, so the two must not be equal.
   assert.ok(config.geminiTimeoutMs * (config.geminiMaxRetries + 1) > interactiveWorstCase);
 
   const { evaluateImage } = await import("../src/services/visionEngine.js");
@@ -517,7 +493,6 @@ test("interactive evaluation stays inside the HTTP request timeout", async () =>
     }));
     assert.equal(attempts, config.geminiInteractiveMaxRetries + 1);
 
-    // A caller may only shorten the budget, never extend it past the ceiling.
     attempts = 0;
     await assert.rejects(() => evaluateImage(Buffer.from("x"), "image/jpeg", "MALE", {
       timeoutMs: 999_000,

@@ -7,13 +7,6 @@ import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
 import { BODY_REGIONS_FIELD, type CaptureDetails } from '../lib/bodyRegions';
 
-/**
- * How long a result stays on screen.
- *
- * Long enough to read a name at arm's length, short enough that it is gone
- * before the next person has finished stepping into frame. The camera keeps
- * running underneath either way, so this only governs the message.
- */
 const RESULT_VISIBLE_MS = 1_200;
 
 type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'NOT_RECOGNISED';
@@ -21,11 +14,6 @@ type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'NO
 interface KioskResponse {
   action: KioskAction;
   recorded: boolean;
-  /**
-   * An unrecognised frame inside the tablet's few-second hold - usually the
-   * frame after a person was recognised, caught mid-turn. Nothing was recorded,
-   * and the person has already seen their result, so the screen says nothing.
-   */
   duplicate?: boolean;
   instructor_name: string | null;
   attendance_id: string | null;
@@ -39,32 +27,12 @@ interface KioskResult extends KioskResponse {
 }
 
 interface KioskAttendanceProps {
-  /**
-   * Leaves the camera. The screen is the camera, so closing it has to go
-   * somewhere rather than leaving an empty frame: Daily Records is where a BOA
-   * looks next, and it releases the stream on the way out.
-   */
   onExit: () => void;
   facing: 'user' | 'environment';
   onFlip: () => void;
 }
 
-/**
- * Attendance with no buttons.
- *
- * An instructor stands in front of the tablet, the camera photographs them, and
- * the server works out whether this is their arrival or their departure. The
- * popup is the only confirmation anybody gets — nothing was pressed and no
- * screen is read afterwards — so it names the person and says what was
- * recorded, and stays long enough to be read at arm's length.
- *
- * The camera belongs to this screen rather than to the tablet: it opens when a
- * BOA opens Attendance and releases when they leave. CameraCapture already
- * drops the stream when the tab is hidden, so a backgrounded tablet does not
- * hold the camera either.
- */
 export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttendanceProps) {
-  // Full screen is black around the camera, so the lines above it turn light.
   const fullScreen = useContext(AttendanceFullScreenContext);
   const [result, setResult] = useState<KioskResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -74,8 +42,6 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
   const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const submitInFlight = useRef(false);
 
-  // Followed rather than sampled once: the position is evidence of where the
-  // attendance happened, and a fix from a previous location must never be sent.
   useEffect(() => subscribeToLocation(setFix), []);
 
   useEffect(() => () => {
@@ -84,27 +50,13 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
   }, []);
 
   const showResult = useCallback((next: KioskResponse) => {
-    // One beep when a check-in or check-out was recorded, as a terminal
-    // gives, so somebody already walking away knows it went through.
     if (!next.duplicate && beepsFor(next.action, next.recorded)) playSuccessBeep();
     setResult({ ...next, at: Date.now() });
     clearTimeout(resultTimer.current);
-    // Cleared on a timer rather than on the next capture: the camera is already
-    // in its cooldown, and a result that vanished the instant somebody stepped
-    // away would be unreadable.
     resultTimer.current = setTimeout(() => setResult(null), RESULT_VISIBLE_MS);
   }, []);
 
-  /**
-   * Sends one captured frame and shows what it meant.
-   *
-   * Every outcome is a result, including the ones that record nothing: being
-   * told "already checked out today" is the answer, not a failure. Only a
-   * transport or server fault becomes an error.
-   */
   const submit = useCallback(async (file: File, details?: CaptureDetails) => {
-    // React state is not synchronous. This ref closes the small gap in which a
-    // second capture can arrive before `submitting` has caused a render.
     if (submitInFlight.current) return;
     submitInFlight.current = true;
     setSubmitting(true);
@@ -113,8 +65,6 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
     try {
       const form = new FormData();
       form.append('file', file);
-      // Where the waist, trousers and shoes are, so the report can look at
-      // each close up. Optional: the server judges the photograph without it.
       if (details?.bodyRegions) form.append(BODY_REGIONS_FIELD, JSON.stringify(details.bodyRegions));
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
@@ -127,8 +77,6 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
         body: form,
         timeoutMs: 75_000,
       });
-      // A silent duplicate leaves the current panel alone: replacing it would
-      // cut short the message this person is still reading.
       if (!response.duplicate) showResult(response);
     } catch (requestError) {
       if ((requestError as { status?: number })?.status === 401) return;
@@ -193,16 +141,6 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
           onClose={onExit}
         />
 
-        {/* The photograph has been taken and the person is being recognised,
-            which takes a couple of seconds against Rekognition. Centred and
-            green so that somebody standing at the tablet can see at a glance
-            that they were captured and the machine is working — a small dark
-            pill in a corner read as an incidental status line and left people
-            wondering whether anything had happened at all.
-
-            Hidden while a result is showing: with the camera live the next
-            capture can start before the previous name has faded, and the
-            answer somebody is reading matters more than the next request. */}
         {submitting && !result && (
           <div
             className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-emerald-600/90"
@@ -213,11 +151,6 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
           </div>
         )}
 
-        {/* The answer, over a camera that never stopped: the next instructor
-            can step up while this is still on screen rather than waiting out a
-            blanked frame. Centred and large for the same reason as above — it
-            is the only confirmation anybody gets, and it is read at arm's
-            length by somebody who pressed nothing. */}
         {result && (
           <div
             className={`absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center ${toneStyles[result.tone]}`}

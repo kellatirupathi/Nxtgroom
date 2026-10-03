@@ -1,23 +1,10 @@
 import type { ReactNode } from 'react';
 
 interface IconTooltipProps {
-  /** What the icon means, in a few words. */
   label: string;
-  /** The control itself. It keeps its own aria-label; this is visual only. */
   children: ReactNode;
 }
 
-/**
- * A label that appears the moment an icon is hovered or focused.
- *
- * The browser's own `title` attribute waits roughly a second before showing
- * anything, which is long enough that somebody scanning a column of unfamiliar
- * icons gives up and clicks one to find out. That is the wrong way to learn what
- * a destructive or state-changing control does.
- *
- * Purely visual: it is aria-hidden and every control it wraps keeps its own
- * aria-label, so a screen reader hears the name once rather than twice.
- */
 export default function IconTooltip({ label, children }: IconTooltipProps) {
   return (
     <span className="relative inline-flex group/tip">

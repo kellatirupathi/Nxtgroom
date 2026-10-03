@@ -42,7 +42,6 @@ import {
 import { INSTRUCTOR_ROLES } from '../instructorRoles';
 import type { College } from '../types';
 
-/** A row as the server returns it once it has passed every check. */
 interface PreviewValue {
   name: string;
   email: string;
@@ -61,12 +60,9 @@ interface PreviewResult {
   errors?: string[];
   value?: PreviewValue;
   thumbnail?: string | null;
-  /** Whether the row adds a new instructor or updates an existing one. */
   action?: 'create' | 'update';
   existing?: { id: string; name: string } | null;
-  /** Fields the sheet left blank, kept from the instructor's record. */
   filled?: string[];
-  /** enrol: the sheet's photo is used; keep: they already have one. */
   photo?: 'enrol' | 'keep';
 }
 
@@ -82,18 +78,11 @@ interface CommitResult {
 
 interface ReadyRow {
   row: number;
-  /**
-   * The row as it was sent to be checked, so the import sends the same
-   * thing: blank cells stay blank and are filled from the roster again, and
-   * the server's merged values are never mistaken for the sheet's.
-   */
   source: ImportRow;
   value: PreviewValue;
   thumbnail: string | null;
   action: 'create' | 'update';
-  /** The name on record of the instructor an update applies to. */
   existingName: string;
-  /** Labels of the fields kept from the roster because the sheet left them blank. */
   kept: string[];
   photo: 'enrol' | 'keep';
 }
@@ -111,11 +100,6 @@ function toReadyRow(source: ImportRow, result: PreviewResult): ReadyRow {
   };
 }
 
-/**
- * A flagged row's values as the correction form edits them: gender, role and
- * institute are preselected from however the sheet wrote them, the institute
- * as its id so the server matches it exactly.
- */
 function initialDraft(flaggedRow: FlaggedRow, colleges: College[]): ImportRow {
   const raw = flaggedRow.raw;
   return {
@@ -131,7 +115,6 @@ interface ImportSummary {
   updated: number;
   warnings: { row: number; name: string; warning: string }[];
   failed: FlaggedRow[];
-  /** Why the import stopped early, when it did. */
   stoppedBecause: string;
 }
 
@@ -155,21 +138,9 @@ function genderLabel(gender: string): string {
 interface InstructorImportDialogProps {
   colleges: College[];
   onClose: () => void;
-  /** Called after an import that added at least one instructor. */
   onImported: (added: number) => void;
 }
 
-/**
- * Adds and updates instructors from a CSV file or a Google Sheet.
- *
- * Nothing is written until the admin has seen the preview. The sheet is read
- * here, every row is checked by the server - photograph downloaded and its
- * face checked included - and the rows that pass are listed under Ready, each
- * marked New or as updating the instructor whose email or Employee ID it
- * shares. The rest go under Flagged with the reasons; they are never
- * imported as they are, but each can be corrected in place and checked again,
- * which moves it to Ready once it passes.
- */
 export default function InstructorImportDialog({ colleges: givenColleges, onClose, onImported }: InstructorImportDialogProps) {
   const [stage, setStage] = useState<Stage>('source');
   const [sourceError, setSourceError] = useState('');
@@ -184,32 +155,25 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   const [flagged, setFlagged] = useState<FlaggedRow[]>([]);
   const [tab, setTab] = useState<'ready' | 'flagged'>('ready');
   const [summary, setSummary] = useState<ImportSummary | null>(null);
-  /** Corrections typed into flagged rows, by sheet row number. */
   const [drafts, setDrafts] = useState<Record<number, ImportRow>>({});
   const [editing, setEditing] = useState<Set<number>>(() => new Set());
   const [rechecking, setRechecking] = useState<Set<number>>(() => new Set());
   const [flaggedNotice, setFlaggedNotice] = useState('');
   const [loadedColleges, setLoadedColleges] = useState<College[]>([]);
-  // The correction form's institute list. Loaded here when the page has not
-  // got it yet, so a failed or slow page load never leaves the list empty.
   const colleges = givenColleges.length ? givenColleges : loadedColleges;
   const fileInput = useRef<HTMLInputElement | null>(null);
   const stopRequested = useRef(false);
-  /** Every request in flight, so leaving or cancelling stops them all. */
   const activeRequests = useRef(new Set<AbortController>());
 
   useEffect(() => {
     if (givenColleges.length) return undefined;
     let disposed = false;
-    // No abort signal: the cached request is shared, and aborting it would
-    // fail every other caller waiting on the same list.
     apiFetchCached<College[]>('/api/v2/colleges')
       .then((rows) => { if (!disposed && Array.isArray(rows)) setLoadedColleges(rows); })
       .catch(() => undefined);
     return () => { disposed = true; };
   }, [givenColleges.length]);
 
-  // Leaving the dialog abandons whatever is in flight.
   useEffect(() => () => {
     stopRequested.current = true;
     for (const controller of activeRequests.current) controller.abort();
@@ -218,8 +182,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   const busy = stage === 'checking' || stage === 'importing' || loadingSheet;
 
   useEffect(() => {
-    // Escape never throws away corrections typed into flagged rows; the close
-    // button still does, deliberately.
     const hasCorrections = stage === 'preview' && Object.keys(drafts).length > 0;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && stage !== 'importing' && !hasCorrections) onClose();
@@ -238,12 +200,8 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     }
   };
 
-  /** Reads the sheet's rows and has the server check them, batch by batch. */
   const checkRows = async (csvText: string, name: string) => {
     const table = readImportTable(parseCsv(csvText));
-    // Only a way to find each instructor is essential. Any other missing
-    // column is filled from the roster for people already in it, and flags
-    // only the new ones, so it is noted in the preview rather than refused.
     if (!table.hasIdentifier) {
       setSourceError('The sheet needs an Email or Employee ID column to tell who each row is. Download the template to see the headings the import expects.');
       return;
@@ -323,7 +281,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    // Cleared so choosing the same file again, after fixing it, still fires.
     event.target.value = '';
     void readFile(file);
   };
@@ -366,8 +323,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
   const draftFor = (flaggedRow: FlaggedRow): ImportRow => drafts[flaggedRow.row] ?? initialDraft(flaggedRow, colleges);
 
   const updateDraft = (flaggedRow: FlaggedRow, field: ImportField, value: string) => {
-    // From the latest drafts, not this render's, so quick successive edits
-    // never overwrite one another.
     setDrafts((current) => ({
       ...current,
       [flaggedRow.row]: { ...(current[flaggedRow.row] ?? initialDraft(flaggedRow, colleges)), [field]: value },
@@ -383,12 +338,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     });
   };
 
-  /**
-   * Checks corrected flagged rows again and moves each one that passes to
-   * Ready. Blank required fields and repeats of a Ready row are caught here
-   * first; everything else is the server's same check as the first pass, so
-   * a corrected row is held to exactly the rules the others were.
-   */
   const recheck = async (rows: number[]) => {
     const candidates = flagged.filter((item) => rows.includes(item.row)).map((item) => draftFor(item));
     if (!candidates.length) return;
@@ -399,9 +348,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     const toSend: ImportRow[] = [];
     const taken = ready.map((item) => ({ row: item.row, email: item.value.email, employee_id: item.value.employee_id }));
     for (const candidate of candidates) {
-      // Blank fields are the server's to judge: for someone already in the
-      // roster they are filled from the record. Only a way to find them is
-      // needed here.
       if (!hasIdentifier(candidate)) {
         localErrors.set(candidate.row, ['Fill in an Email or Employee ID']);
         continue;
@@ -451,7 +397,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     }
   };
 
-  /** Imports the Ready rows, several batches at once, and gathers what happened to each. */
   const importRows = async () => {
     const result: ImportSummary = { added: 0, updated: 0, warnings: [], failed: [], stoppedBecause: '' };
     stopRequested.current = false;
@@ -462,9 +407,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
     try {
       await runBatches(inBatches(ready, COMMIT_BATCH), PARALLEL_BATCHES, async (batch) => {
         const { results } = await request<{ results: CommitResult[] }>('/api/v2/instructors/import', {
-          // The row as the sheet gave it, but with a named institute pinned
-          // to the id it matched, so a second institute with the same name
-          // added since the preview cannot change where anyone lands.
           rows: batch.map(({ source, value }) => ({
             ...source,
             institute: (source.institute ?? '').trim() ? value.college_id : '',
@@ -714,8 +656,6 @@ export default function InstructorImportDialog({ colleges: givenColleges, onClos
                   <p className="p-8 text-center text-sm font-medium text-slate-500">No row passed the checks. See Flagged for the reasons.</p>
                 ) : (
                   <>
-                  {/* A card per row on a phone, where the table's columns do
-                      not fit; the table from tablet width up. */}
                   <ul className="divide-y divide-slate-100 sm:hidden">
                     {ready.map(({ row, value, thumbnail, action, existingName, kept, photo }) => (
                       <li key={row} className="flex items-start gap-3 px-4 py-3">
@@ -936,7 +876,6 @@ function ActionBadge({ action, existingName }: { action: 'create' | 'update'; ex
   );
 }
 
-/** Which fields an update keeps from the roster because the sheet left them blank. */
 function KeptNote({ kept }: { kept: string[] }) {
   if (!kept.length) return null;
   return <p className="mt-1 max-w-[14rem] text-xs text-slate-500">Kept from roster: {kept.join(', ')}</p>;
@@ -975,11 +914,6 @@ interface FlaggedEditorProps {
   onCheck: () => void;
 }
 
-/**
- * One flagged row: its reasons, and a form to fill in or correct every field
- * and send it to be checked again. The fields a reason is about are marked;
- * a select whose sheet value matched nothing says what the sheet had.
- */
 function FlaggedEditor({ item, draft, colleges, open, checking, busy, onToggle, onChange, onCheck }: FlaggedEditorProps) {
   const marked = fieldsInError(item.errors);
   const blanks = blankRequiredFields(draft);

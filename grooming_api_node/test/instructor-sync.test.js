@@ -22,7 +22,6 @@ test("maps the roster columns the Settings table displays", () => {
 });
 
 test("column names are matched regardless of casing", () => {
-  // The warehouse is not consistent about casing between tables.
   const mapped = mapInstructorRow({
     INSTRUCTOR_USER_ID: "U-2",
     Instructor_Name: "Pasika Archana",
@@ -34,8 +33,6 @@ test("column names are matched regardless of casing", () => {
 });
 
 test("an instructor with no email in the warehouse is still imported", () => {
-  // The email is joined from a second table that covers only about half the
-  // roster, so a missing address must not drop the instructor.
   const mapped = mapInstructorRow({ instructor_user_id: "U-3", instructor_name: "No Email" });
   assert.equal(mapped.email, null);
   assert.equal(mapped.instructor_user_id, "U-3", "the row is still usable");
@@ -43,8 +40,6 @@ test("an instructor with no email in the warehouse is still imported", () => {
 });
 
 test("rows without an id or a name are rejected", () => {
-  // These cannot be keyed or displayed, so they are skipped rather than
-  // written as anonymous records.
   assert.equal(mapInstructorRow({ instructor_name: "Nameless Id" }), null);
   assert.equal(mapInstructorRow({ instructor_user_id: "U-4" }), null);
   assert.equal(mapInstructorRow({ instructor_user_id: "  ", instructor_name: " " }), null);
@@ -64,7 +59,6 @@ test("sync reports itself unconfigured rather than throwing", () => {
     process.env.BIGQUERY_CREDENTIALS_JSON = creds;
     assert.equal(isSyncConfigured(), true);
 
-    // Some hosts mangle multi-line values, so a base64 copy is accepted too.
     process.env.BIGQUERY_CREDENTIALS_JSON = Buffer.from(creds).toString("base64");
     assert.equal(isSyncConfigured(), true, "base64 credentials are accepted");
   } finally {

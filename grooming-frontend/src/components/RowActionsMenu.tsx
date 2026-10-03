@@ -17,10 +17,6 @@ interface RowActionsMenuProps {
   actions: RowAction[];
 }
 
-/**
- * Overflow menu for a table row. Rendered as a fixed-position popover so it is
- * never clipped by the table's own overflow-x container.
- */
 export default function RowActionsMenu({ label, actions }: RowActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
@@ -35,7 +31,6 @@ export default function RowActionsMenu({ label, actions }: RowActionsMenuProps) 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
-    // Any scroll or resize invalidates the anchored coordinates.
     const reposition = () => setOpen(false);
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', onKey);
@@ -58,7 +53,6 @@ export default function RowActionsMenu({ label, actions }: RowActionsMenuProps) 
     if (rect) {
       const menuWidth = 208;
       const menuHeight = actions.length * 44 + 8;
-      // Flip above / clamp within the viewport so the menu is never cut off.
       const top = rect.bottom + menuHeight > window.innerHeight
         ? Math.max(8, rect.top - menuHeight - 4)
         : rect.bottom + 4;

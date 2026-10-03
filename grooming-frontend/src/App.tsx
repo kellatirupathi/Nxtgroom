@@ -52,10 +52,8 @@ interface SessionState {
   email: string | null;
   collegeId: string | null;
   validated: boolean;
-  /** Decided by the server; the UI only uses it to hide what it would refuse. */
   canDeleteRecords?: boolean;
   canReanalyse?: boolean;
-  /** Whether this tablet's college identifies the instructor from the photo. */
   faceIdentification?: boolean;
   canDeleteCheckout?: boolean;
 }
@@ -69,15 +67,11 @@ function initialSession(): SessionState {
   try {
     localStorage.removeItem('nxtwave_token');
     localStorage.removeItem('nxtwave_role');
-  } catch { /* Legacy storage may be blocked by browser policy. */ }
+  } catch { }
   const token = getSessionToken();
   return { token, role: token ? getSessionRole() : null, email: null, collegeId: null, validated: !token };
 }
 
-/**
- * Reads a password link token from the URL. The app is served as a single
- * page, so /reset-password?token=... arrives here rather than at a router.
- */
 function initialResetToken(): string | null {
   try {
     if (typeof window === 'undefined') return null;
@@ -90,16 +84,12 @@ function initialResetToken(): string | null {
 }
 
 export default function App() {
-  // Resolved once: the report route is decided by the URL alone and never
-  // changes without a full navigation.
   const [publicReport] = useState<PublicReportRoute | null>(publicReportFromLocation);
   const [dailyReport] = useState<DailyReportRoute | null>(dailyReportFromLocation);
   const [session, setSession] = useState(initialSession);
   const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
-  // Seed from the URL so a refresh or a shared link opens the right screen.
   const [activeTab, setActiveTab] = useState<string>(currentTabFromLocation);
   const [instructors, setInstructors] = useState<Instructor[]>(() => {
-    // Render the attendance list from the last session's data on first paint.
     const cached = readStale<Instructor[]>(INSTRUCTORS_PATH);
     return Array.isArray(cached) ? cached : [];
   });
@@ -111,12 +101,8 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('notifications');
 
   const handleLogin = (token: string, role: Role) => {
-    // validated: false so /me runs. Marking a fresh sign-in as validated
-    // skipped it entirely, which left email, college and — once permissions
-    // arrived — the delete capability unset until the next full page load.
     setSession({ token, role, email: null, collegeId: null, validated: false });
     setSessionCheckError('');
-    // Administrators start on the Dashboard, their first menu item.
     const home = homeTabForRole(isElevatedRole(role));
     setActiveTab(home);
     replaceTabPath(home);
@@ -129,7 +115,6 @@ export default function App() {
     setInstructors([]);
     setSelectedAttendanceRecord(null);
     setActiveTab('overview');
-    // Clear any deep link so the next sign-in does not land on a stale screen.
     replaceTabPath('overview');
   }, []);
 
@@ -167,7 +152,6 @@ export default function App() {
         signal,
       });
       if (signal?.aborted) return;
-      // Cache the assembled list so the next load paints without waiting.
       if (Array.isArray(data)) primeCache(INSTRUCTORS_PATH, data);
       setInstructors(Array.isArray(data) ? data : []);
       setLoadError('');
@@ -183,18 +167,10 @@ export default function App() {
     return () => controller.abort();
   }, [session.token, session.validated, fetchInstructors]);
 
-  /**
-   * Moves to a tab and puts its URL in the address bar. The permission and
-   * prerequisite redirects below decide the real destination first, so the URL
-   * always reflects what is actually rendered.
-   */
   const navigate = useCallback((tab: string, { replace = false } = {}) => {
-    // Choosing Settings itself opens its first tab, as it always has.
     if (tab === 'settings') setSettingsTab('notifications');
     let target = tab;
     if (ADMIN_TABS.has(tab) && !isElevatedRole(session.role)) target = 'overview';
-    // The detail view renders one selected record, so it cannot be opened
-    // cold from a URL; send those visits back to the list.
     else if (tab === 'instructor-detail' && !selectedAttendanceRecord) target = 'daily-records';
 
     setActiveTab(target);
@@ -202,11 +178,6 @@ export default function App() {
     else pushTabPath(target);
   }, [session.role, selectedAttendanceRecord]);
 
-  /**
-   * Restores the record named in the URL. Opening the detail view from the
-   * list hands the record over in memory, but a refresh or a pasted link has
-   * only the id, and the page previously rendered its empty state.
-   */
   useEffect(() => {
     if (publicReport || dailyReport || resetToken) return undefined;
     if (!session.token || !session.validated) return undefined;
@@ -221,8 +192,6 @@ export default function App() {
         if (!controller.signal.aborted) setSelectedAttendanceRecord(record);
       })
       .catch(() => {
-        // A deleted or out-of-scope record falls back to the list rather than
-        // leaving the user on a page that can never fill in.
         if (controller.signal.aborted) return;
         setActiveTab('daily-records');
         replaceTabPath('daily-records');
@@ -230,7 +199,6 @@ export default function App() {
     return () => controller.abort();
   }, [session.token, session.validated, selectedAttendanceRecord, publicReport, dailyReport, resetToken]);
 
-  // Keep the rendered tab in step with Back and Forward.
   useEffect(() => {
     if (publicReport || dailyReport || resetToken) return undefined;
     const onPopState = () => {
@@ -245,17 +213,9 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [session.role, publicReport, dailyReport, resetToken]);
 
-  // Normalise the entry URL once the session is known: "/" becomes the role's
-  // home screen, and a deep link the role cannot open is rewritten rather
-  // than left pointing at a screen that is not being shown.
   useEffect(() => {
-    // A report or password link is not a tab. Without this guard the effect
-    // resolved those paths to Attendance and rewrote the address bar, so the
-    // report rendered under the wrong URL and a refresh lost it entirely.
     if (publicReport || dailyReport || resetToken) return;
     if (!session.validated || !session.token) return;
-    // The bare root opens the role's home screen: the Dashboard for an
-    // administrator, Attendance for a BOA. Any other path keeps its own screen.
     const atRoot = (window.location.pathname.replace(/\/+$/, '') || '/') === '/';
     const requested = atRoot ? homeTabForRole(isElevatedRole(session.role)) : currentTabFromLocation();
     const tab = requested;
@@ -263,14 +223,9 @@ export default function App() {
       ? 'overview'
       : tab;
     setActiveTab(allowed);
-    // Carry the record id through, or normalising the entry URL would strip
-    // it and the detail page would lose the record it was asked for.
     replaceTabPath(allowed, recordIdFromLocation() || undefined);
   }, [session.validated, session.token, session.role, publicReport, dailyReport, resetToken]);
 
-  // Checked before everything else, including the session validation gate: the
-  // recipient has no account, and an administrator opening the link from their
-  // own browser must see the report rather than the dashboard.
   if (publicReport) {
     return (
       <Suspense fallback={<BrandedLoader label="Loading report" />}>
@@ -278,16 +233,12 @@ export default function App() {
           token={publicReport.token}
           kind={publicReport.kind}
           date={publicReport.date}
-          // Without this the page falls back to its check-in default, so an
-          // emailed check-out link rendered the morning's report under a
-          // check-out URL. The half is parsed from the path; pass it on.
           half={publicReport.half}
         />
       </Suspense>
     );
   }
 
-  // The daily report's "See all reports" page: public for the same reason.
   if (dailyReport) {
     return (
       <Suspense fallback={<BrandedLoader label="Loading report" />}>
@@ -296,15 +247,11 @@ export default function App() {
     );
   }
 
-  // Checked before the auth gate: the link arrives by email and may be opened
-  // in a browser that still holds an old session, which must not hide the form.
   if (resetToken) {
     return (
       <ResetPassword
         token={resetToken}
         onDone={() => {
-          // Drop the token from the URL so a refresh or a shared link does not
-          // reopen a form whose token is now spent.
           window.history.replaceState(null, '', '/');
           setResetToken(null);
           handleLogout();
@@ -318,8 +265,6 @@ export default function App() {
   }
 
   if (!session.validated) {
-    // A failure still needs its explanation and the two recovery actions; only
-    // the ordinary wait becomes the branded splash.
     if (sessionCheckError) {
       return (
         <main className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -339,8 +284,6 @@ export default function App() {
 
   return (
     <div className="flex h-[calc(100dvh-var(--shell-offset-top))] bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
-      {/* Desktop keeps the full sidebar; below lg it is hidden entirely in
-          favour of the app-style bottom navigation bar. */}
       <Sidebar
         activeTab={activeTab}
         navigate={navigate}
@@ -351,21 +294,7 @@ export default function App() {
         onOpenChangePassword={() => setAccountModal('password')}
       />
 
-      {/* A column, so the bar below is a row of the layout rather than
-          something painted over it. main takes what is left after the bar has
-          taken its height, which is what keeps the page from ever occupying
-          the same pixels — reserving padding instead only adds scrolling room
-          at the end, and the content still passes under the bar on its way
-          there.
-
-          min-h-0 is what makes that work: without it a flex child refuses to
-          shrink below its content and the column grows past the viewport. */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
-      {/* The shell is exactly the visible viewport — 100dvh, not 100vh, which
-          on phones counts the retracting address bar and makes the document
-          taller than the screen, less the status bar the app pads for. Only
-          this element scrolls; overscroll-contain stops a list reaching its
-          end from dragging the page behind it. */}
       <main className="flex-1 min-h-0 overflow-auto overscroll-contain p-4 md:p-6 pb-6 flex flex-col w-full">
         {loadError && (
           <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">
@@ -375,16 +304,12 @@ export default function App() {
 
         <div className="flex flex-col xl:flex-row gap-6 items-start flex-1 min-h-0 w-full">
           <Suspense fallback={<div className="w-full"><BrandedLoader label="Loading screen" /></div>}>
-          {/* A face-only college has no selector and no buttons: the camera is
-              the whole screen. Everywhere else keeps the card, which is still
-              how a college mid-enrolment records attendance. */}
           {activeTab === 'dashboard' && isElevatedRole(session.role) && (
             <div className="w-full h-full">
               <Dashboard onNavigate={navigate} />
             </div>
           )}
 
-          {/* Reached only from "View all" on the Dashboard: no menu lists it. */}
           {activeTab === 'escalations' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><EscalationsPage onBack={() => navigate('dashboard')} /></div>
           )}
@@ -421,8 +346,6 @@ export default function App() {
               <DailyAttendanceTable
                 canBulkDelete={isElevatedRole(session.role)}
                 onRowClick={(record) => {
-                  // Set the record first: navigate() refuses the detail tab
-                  // when nothing is selected and would bounce back to the list.
                   setSelectedAttendanceRecord(record);
                   pushTabPath('instructor-detail', String(record._id));
                   setActiveTab('instructor-detail');

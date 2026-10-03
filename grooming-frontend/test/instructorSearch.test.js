@@ -18,7 +18,6 @@ test('an email address finds its owner', () => {
 });
 
 test('a name prefix outranks the same text appearing later', () => {
-  // "Nivedha Rao" starts with the query; "A Nivedha" only contains it.
   assert.deepEqual(names('nivedha'), ['Nivedha Rao', 'A Nivedha']);
 });
 
@@ -39,7 +38,6 @@ test('search is case and whitespace insensitive', () => {
 });
 
 test('an instructor without an email is still findable by name', () => {
-  // Roughly half the roster has no address, so they must not be unreachable.
   assert.deepEqual(names('no contact'), ['No Contact']);
 });
 
@@ -49,7 +47,6 @@ test('an empty query lists the roster instead of nothing', () => {
 });
 
 test('results are capped so a huge roster cannot flood the list', () => {
-  // 599 options rendered per keystroke is wasted work nobody scrolls through.
   const many = Array.from({ length: 599 }, (_, i) => ({
     _id: String(i), name: `Instructor ${i}`, email: `person${i}@nxtwave.co.in`,
   }));

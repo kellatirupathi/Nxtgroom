@@ -25,9 +25,6 @@ import {
 } from "../src/routes/attendanceRoutes.js";
 
 function fakeDb(collections) {
-  // enqueueNotification consults workspace notification settings before
-  // queueing mail. Default the stub to "not configured" so these tests keep
-  // exercising the permissive defaults unless a case overrides it.
   const withDefaults = {
     app_settings: { findOne: async () => null },
     ...collections,
@@ -43,8 +40,6 @@ function fakeDb(collections) {
 test("evaluation outbox reconciliation creates one deterministic job and clears the photo source", async () => {
   const jobWrites = [];
   const attendanceWrites = [];
-  // Relative to now: a hardcoded deadline silently expires and makes
-  // reconciliation take the EVALUATION_DEADLINE_EXCEEDED branch instead.
   const checkInTime = new Date(Date.now() - 60 * 60 * 1000);
   const deadlineAt = new Date(Date.now() + 23 * 60 * 60 * 1000);
   const attendance = {
@@ -52,7 +47,6 @@ test("evaluation outbox reconciliation creates one deterministic job and clears 
     check_in_time: checkInTime,
     _private_evaluation_outbox: {
       instructor: { name: "Instructor", email: "instructor@example.com", gender: "MALE" },
-      // Photos live in R2; the outbox carries only the object key.
       photo_key: "attendance/2026/08/17/instructor-1-checkin-abc123.jpg",
       mime_type: "image/jpeg",
       check_in_time: checkInTime,
@@ -264,8 +258,6 @@ test("a normal retry reuses a stored evaluation rather than paying for it twice"
   assert.equal(await recoverClaimedEvaluation(db, job), true);
   assert.equal(attendanceUpdates[0][1].$set.status, "compliant");
   assert.equal(attendanceUpdates[0][1].$set.compliance_status, "COMPLIANT");
-  // The photo quality is still recorded, so the instructor is still told to
-  // retake it even though nothing failed.
   assert.equal(attendanceUpdates[0][1].$set.image_quality, "RETAKE_RECOMMENDED");
   assert.equal(deletedJobs.length, 1);
 });
@@ -664,20 +656,6 @@ test("notification enqueue is idempotent for the same attendance and type", asyn
   ]);
 });
 
-/**
- * Which failures are worth paying to repeat.
- *
- * visionEngine already decides this — a rate limit, a timeout, a network fault
- * or a provider 5xx can come out differently next time, and a wrong credential,
- * a malformed request, a truncated response, a safety block or unreadable JSON
- * cannot. It honours the distinction inside its own retry loop; the worker did
- * not read the flag at all, so every hopeless failure was sent to Gemini three
- * times and billed three times.
- *
- * The wasted money is the smaller half. Attempts are one budget of three, so a
- * job that spends them on an answer that was never going to change has none
- * left for the transient fault that follows.
- */
 test("a permanent Gemini failure is not retried, and a transient one still is", async () => {
   const jobUpdates = [];
   const transitions = [];
@@ -708,7 +686,6 @@ test("a permanent Gemini failure is not retried, and a transient one still is", 
     },
   });
 
-  // The safety filter will block the same image every time.
   const blocked = Object.assign(new Error("Gemini blocked the response"), {
     code: "GEMINI_BLOCKED_RESPONSE",
     retryable: false,
@@ -724,7 +701,6 @@ test("a permanent Gemini failure is not retried, and a transient one still is", 
     "a permanent failure must never be queued again",
   );
 
-  // A rate limit is the same request arriving at a better moment.
   transitions.length = 0;
   jobUpdates.length = 0;
   const throttled = Object.assign(new Error("Gemini rate limit"), {
@@ -738,14 +714,6 @@ test("a permanent Gemini failure is not retried, and a transient one still is", 
   assert.ok(jobUpdates[0][1].$set.available_at instanceof Date, "and waits before its next attempt");
 });
 
-/**
- * An error nobody classified keeps the benefit of the doubt.
- *
- * Only an explicit false means "this cannot succeed". Anything thrown outside
- * visionEngine — a driver fault, a bug in the commit path — carries no flag,
- * and treating unclassified as permanent would turn a passing glitch into a
- * lost report.
- */
 test("an unclassified failure is still retried", async () => {
   const jobUpdates = [];
   const job = {

@@ -11,13 +11,6 @@ import { asyncRoute } from "../utils.js";
 
 export const dashboardRouter = Router();
 
-/**
- * The administrators' Dashboard. SUPER_ADMIN and ADMIN only: it counts every
- * college, and a BOA's view of their own campus is Daily Records.
- *
- * `college_id` narrows every figure to one institute; absent or "all" covers
- * the whole organisation.
- */
 dashboardRouter.get(
   "/",
   requireSuperAdmin,
@@ -39,12 +32,6 @@ dashboardRouter.get(
   })
 );
 
-/**
- * The Institutes table for a chosen date range. `from` and `to` are inclusive
- * local dates; either may be empty to leave that side open, and both empty is
- * "All time". Today's table arrives with the Dashboard itself, so the page
- * calls this only for another range.
- */
 dashboardRouter.get(
   "/institutes",
   requireSuperAdmin,
@@ -62,13 +49,6 @@ dashboardRouter.get(
   })
 );
 
-/**
- * The Escalations page behind "View all" on the Dashboard: every instructor
- * escalated in a range of dates, one row per failed day of the run. `from`
- * and `to` (YYYY-MM-DD, both included) choose the range; without them `week`
- * is any date in one week, and this week when that is absent too.
- * `college_id` narrows it to one institute.
- */
 dashboardRouter.get(
   "/escalations",
   requireSuperAdmin,

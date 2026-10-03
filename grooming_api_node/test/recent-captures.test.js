@@ -11,18 +11,9 @@ const {
   wasRecentlyCaptured,
 } = recentCaptures;
 
-/**
- * The only hold left is a short one per tablet, for photographs nobody can be
- * recognised from. A recognised person is answered from their day's record
- * instead, so there is nothing to hold them by.
- */
-
 beforeEach(() => resetRecentCaptures());
 
 test("there is no hold by instructor any more", () => {
-  // A 45-second hold by name was claimed before the record was written and
-  // never released on failure, so one failed request silenced that person's
-  // retries for the whole window.
   assert.equal("instructorCaptureKey" in recentCaptures, false);
   assert.equal("RECENT_CAPTURE_WINDOW_MS" in recentCaptures, false);
 });
@@ -74,6 +65,5 @@ test("an empty key is never treated as held", () => {
 });
 
 test("the hold is a few seconds, not a queue", () => {
-  // Short enough that a failed request is retryable almost at once.
   assert.ok(CAPTURE_WINDOW_MS >= 1_000 && CAPTURE_WINDOW_MS <= 5_000);
 });

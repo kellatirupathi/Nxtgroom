@@ -1,18 +1,7 @@
 import type { Instructor } from '../types';
 
-/**
- * Ranked search over the instructor roster.
- *
- * A plain `includes` over 599 records is fast enough, but it ranks nothing:
- * typing "a" would put whoever happens to be first in the array at the top.
- * Tokenising the query and scoring each field means a prefix match on the name
- * outranks an incidental substring in an institute, and multi-word queries
- * like "nivedha tech" match across fields.
- */
-
 export interface SearchableInstructor {
   instructor: Instructor;
-  /** Lowercased haystack fields, precomputed so filtering does no work per keystroke. */
   name: string;
   email: string;
   role: string;
@@ -33,10 +22,8 @@ export function buildSearchIndex(instructors: Instructor[]): SearchableInstructo
   }));
 }
 
-/** Higher is better. Returns 0 when the token appears nowhere. */
 function scoreToken(entry: SearchableInstructor, token: string): number {
   if (entry.name.startsWith(token)) return 100;
-  // A match at a word boundary beats one buried mid-word.
   if (entry.name.includes(` ${token}`)) return 80;
   if (entry.email.startsWith(token)) return 70;
   if (entry.name.includes(token)) return 50;
@@ -49,14 +36,6 @@ function scoreToken(entry: SearchableInstructor, token: string): number {
   return 0;
 }
 
-/**
- * Filters and ranks. Every token must match somewhere, so extra words narrow
- * the list rather than widening it.
- *
- * `limit` caps how many results are rendered: with 599 instructors and an
- * empty query, building 599 option elements on every keystroke is wasted work
- * when only a handful are ever visible.
- */
 export function searchInstructors(
   index: SearchableInstructor[],
   query: string,
@@ -83,7 +62,6 @@ export function searchInstructors(
   }
 
   scored.sort((a, b) => (
-    // Ties fall back to alphabetical so the order never looks arbitrary.
     b.score - a.score || a.entry.name.localeCompare(b.entry.name)
   ));
   return scored.slice(0, limit).map((item) => item.entry.instructor);

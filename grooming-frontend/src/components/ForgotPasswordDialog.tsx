@@ -4,7 +4,6 @@ import { apiJson } from '../api';
 
 interface ForgotPasswordDialogProps {
   open: boolean;
-  /** Prefills the field with whatever was already typed on the sign-in form. */
   initialEmail?: string;
   onClose: () => void;
 }
@@ -27,8 +26,6 @@ export default function ForgotPasswordDialog({ open, initialEmail = '', onClose 
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-    // submitting is deliberately excluded: re-running on each keystroke of the
-    // request would reset the form mid-submit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialEmail, onClose]);
 
@@ -44,8 +41,6 @@ export default function ForgotPasswordDialog({ open, initialEmail = '', onClose 
         auth: false,
         body: { email: email.trim().toLowerCase() },
       });
-      // The server answers identically for known and unknown addresses, so the
-      // UI must not imply the account exists either.
       setSent(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));

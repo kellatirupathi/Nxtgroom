@@ -3,14 +3,6 @@ import { test } from "node:test";
 import { deliverAttendanceReminders } from "../src/routes/reportRoutes.js";
 import { recordRunTerminal } from "../src/services/mailWorker.js";
 
-/**
- * A delivery run counts the emails of one cron job (weekly reports, evening
- * reminders) and is marked completed when every one has been delivered or
- * has failed. The mail worker now starts sending as soon as a job is queued,
- * so deliveries routinely land while the cron job is still queuing. These
- * reproduce that: every email is "delivered" the moment it is queued.
- */
-
 function matches(document, filter) {
   for (const [field, condition] of Object.entries(filter)) {
     if (field === "$expr") {
@@ -42,7 +34,6 @@ function reminderDb({ openCheckIns }) {
         return {
           async updateOne({ _id }, update) {
             mailJobs.push(_id);
-            // Delivered at once, exactly as the woken mail worker may.
             await recordRunTerminal(db, update.$setOnInsert.run_id, "sent", new Date());
             return { matchedCount: 0, upsertedCount: 1 };
           },
@@ -61,7 +52,6 @@ function reminderDb({ openCheckIns }) {
         },
         async findOneAndUpdate(filter, update) {
           const existing = runs.get(filter._id);
-          // No upsert, as in the worker: a count for a missing run is lost.
           if (!existing) return null;
           for (const [field, amount] of Object.entries(update.$inc)) {
             existing[field] = (existing[field] || 0) + amount;

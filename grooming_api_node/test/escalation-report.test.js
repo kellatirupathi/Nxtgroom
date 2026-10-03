@@ -10,12 +10,6 @@ import {
   weekdayOf,
 } from "../src/services/escalationReport.js";
 
-/**
- * The Escalations page behind "View all" on the Dashboard: the runs of three
- * or more non-compliant check-ins in a row, one row per day, by the same rule
- * that emails the reporting partners.
- */
-
 function matches(doc, filter = {}) {
   for (const [key, condition] of Object.entries(filter)) {
     const value = doc[key];
@@ -65,7 +59,6 @@ const collections = () => ({
   ],
   colleges: [{ _id: "c1", name: "NIAT Hyderabad" }, { _id: "c2", name: "Aditya University" }],
   attendance: [
-    // Ravi: Mon, (Tue absent), Wed, Thu failed - escalated, Tuesday skipped.
     day("r-mon", "i1", "2026-09-21", { ...fail, check_in_photo_key: "in/r-mon.jpg" }),
     day("r-wed", "i1", "2026-09-23", fail),
     day("r-thu", "i1", "2026-09-24", {
@@ -75,16 +68,13 @@ const collections = () => ({
       check_in_photo_key: "in/r-thu.jpg",
       check_out_photo_key: "out/r-thu.jpg",
     }),
-    // Asha: three in a row at another institute.
     day("a-tue", "i2", "2026-09-22", { ...fail, college_id: "c2" }),
     day("a-wed", "i2", "2026-09-23", { ...fail, college_id: "c2" }),
     day("a-thu", "i2", "2026-09-24", { ...fail, college_id: "c2", check_out_time: new Date("2026-09-24T12:00:00Z"), checkout_compliance_status: "NON_COMPLIANT" }),
-    // Kiran: a pass breaks the run - not escalated.
     day("k-mon", "i3", "2026-09-21", fail),
     day("k-tue", "i3", "2026-09-22"),
     day("k-wed", "i3", "2026-09-23", fail),
     day("k-thu", "i3", "2026-09-24", fail),
-    // Last week's failures never count towards this week.
     day("r-last", "i1", "2026-09-20", fail),
   ],
 });
@@ -173,7 +163,6 @@ test("one institute only, and an empty week", async () => {
 
 test("a range across weeks reads each week whole and lists only the failed days inside it", async () => {
   const data = collections();
-  // Kiran fails Monday to Wednesday of the next week: a second week's run.
   data.attendance.push(
     day("k-mon2", "i3", "2026-09-28", fail),
     day("k-tue2", "i3", "2026-09-29", fail),
@@ -188,8 +177,6 @@ test("a range across weeks reads each week whole and lists only the failed days 
     "Kiran 2026-09-28 1/3 from 2026-09-28",
     "Kiran 2026-09-29 2/3 from 2026-09-28",
     "Kiran 2026-09-30 3/3 from 2026-09-28",
-    // Ravi's run began on the Monday before the range: it still counts that
-    // day, which is not listed.
     "Ravi Teja 2026-09-23 2/3 from 2026-09-21",
     "Ravi Teja 2026-09-24 3/3 from 2026-09-21",
   ]);

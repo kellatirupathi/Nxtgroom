@@ -4,12 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>FacultyTrack</title>
-  <!--
-    Shown by the Android app, from inside the APK, when the site cannot be
-    opened: no connection, or a WebView too old to run it. Nothing here may
-    need the network, and the script is ES5 because an old WebView is one of
-    the two reasons this page exists.
-  -->
   <style>
     html, body { margin: 0; height: 100%; background: #f8f9fc; color: #1e293b;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -58,7 +52,6 @@
   <script>
     (function () {
       var SITE = 'https://nxtgroom-xi.vercel.app/';
-      // Keep in step with android.minWebViewVersion in capacitor.config.ts.
       var MIN_VERSION = 111;
       var match = /Chrome\/(\d+)/.exec(navigator.userAgent);
       var version = match ? parseInt(match[1], 10) : 0;
@@ -79,7 +72,6 @@
       }
       document.getElementById('retry').onclick = retry;
       window.addEventListener('online', retry);
-      // Some devices never fire "online" after a Wi-Fi change, so check now and then.
       setInterval(function () { if (navigator.onLine) retry(); }, 15000);
     })();
   </script>

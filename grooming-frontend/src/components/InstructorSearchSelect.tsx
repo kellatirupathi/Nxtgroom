@@ -8,33 +8,11 @@ interface InstructorSearchSelectProps {
   selectedId: string;
   onSelect: (instructorId: string) => void;
   disabled?: boolean;
-  /**
-   * A shorter box for sitting in a row of small controls, such as a card in
-   * instructor selection. The results list keeps a readable width even when
-   * the box itself is narrow.
-   */
   compact?: boolean;
 }
 
-/** Rendering all 599 matches would cost more than anyone scrolls through. */
 const MAX_RESULTS = 40;
 
-/**
- * Type-to-search selector for the instructor roster.
- *
- * A native select over 599 people is unusable: it cannot be searched beyond
- * first-letter jumping, and it renders every option. This filters on name,
- * email, institute, role and user id, and shows the email under each name so
- * two people with the same name are distinguishable.
- */
-/**
- * What to say under an instructor's name.
- *
- * A BOA is not shown contact details, so an absent email here means "you may
- * not see it", not "there isn't one" — and saying the latter told an
- * administrator an instructor could not be emailed a report when they could.
- * The role fills the space instead, which is useful and always visible.
- */
 function describeContact(instructor: Instructor): string {
   if (instructor.email) return instructor.email;
   if (instructor.has_email) return instructor.instructor_role || instructor.role || 'Instructor';
@@ -55,7 +33,6 @@ export default function InstructorSearchSelect({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
 
-  // Built once per roster change, not per keystroke.
   const index = useMemo(() => buildSearchIndex(instructors), [instructors]);
   const results = useMemo(
     () => searchInstructors(index, query, MAX_RESULTS),
@@ -66,7 +43,6 @@ export default function InstructorSearchSelect({
     [instructors, selectedId],
   );
 
-  // Close when focus or a click leaves the control.
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
@@ -79,7 +55,6 @@ export default function InstructorSearchSelect({
     setActiveIndex(0);
   }, [query]);
 
-  // Keep the highlighted row in view during keyboard navigation.
   useEffect(() => {
     if (!open) return;
     const node = listRef.current?.children[activeIndex] as HTMLElement | undefined;
@@ -130,8 +105,6 @@ export default function InstructorSearchSelect({
   return (
     <div ref={containerRef} className="relative">
       {selected && !open ? (
-        // Once chosen, show the person rather than an empty search box, with a
-        // clear button to start over.
         <div className={`flex items-center gap-3 rounded-md border-2 border-indigo-200 bg-indigo-50/40 ${compact ? 'px-3 py-1' : 'p-4'}`}>
           <Check size={compact ? 16 : 18} className="shrink-0 text-emerald-600" aria-hidden="true" />
           <span className="min-w-0 flex-1">
@@ -200,8 +173,6 @@ export default function InstructorSearchSelect({
                 aria-selected={position === activeIndex}
                 onMouseEnter={() => setActiveIndex(position)}
                 onMouseDown={(event) => {
-                  // mousedown, not click: the input's blur would close the list
-                  // before a click ever landed.
                   event.preventDefault();
                   choose(instructor);
                 }}

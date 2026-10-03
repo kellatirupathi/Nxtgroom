@@ -37,20 +37,6 @@ import { telemetrySnapshot } from "./src/services/telemetry.js";
 
 const config = runtimeConfig();
 
-/**
- * The path as it is safe to record.
- *
- * A public report URL carries the recipient's report token in the path, and
- * that token is the only credential guarding their photographs and their
- * whole report history. Logging it verbatim copied a working credential into
- * every log sink and retention system downstream. The shape of the request is
- * all the log needs; the cron paths under the same prefix carry no secret and
- * stay readable so an operator can still tell the jobs apart.
- *
- * Password-reset and invitation links carry their token the same way, and a
- * logged invitation token lets anyone who can read the logs activate the
- * account before its owner does.
- */
 export function loggedPath(path) {
   return String(path)
     .replace(/^(\/api\/v2\/reports\/)(?!cron(?:\/|$))[^/]+/, "$1<token>")
@@ -63,8 +49,6 @@ if (isProduction()) app.set("trust proxy", config.trustProxyHops);
 
 app.use((req, res, next) => {
   const startedAt = Date.now();
-  // Captured on arrival: by "finish" a mounted router has cut its prefix off
-  // req.path, and the prefix is what loggedPath matches to hide the token.
   const path = loggedPath(req.path);
   req.requestId = randomUUID();
   res.set("X-Request-ID", req.requestId);
@@ -101,9 +85,6 @@ app.use(rateLimit({
   limit: isProduction() ? 600 : 5000,
   standardHeaders: "draft-8",
   legacyHeaders: false,
-  // Only the orchestrator's own probes are exempt. /health/metrics used to be
-  // covered by the prefix too, which left an unauthenticated endpoint that
-  // could be polled without limit.
   skip: (req) => req.method === "OPTIONS"
     || req.path === "/health"
     || req.path === "/health/live"
@@ -128,9 +109,6 @@ app.get("/", (_req, res) => {
 app.get("/health/live", (_req, res) => {
   res.json({ status: "ok" });
 });
-// Operational counters, including provider token spend. Guarded by the same
-// shared secret the schedulers use: it was previously open to anyone who knew
-// the path, which published usage and failure rates to the internet.
 app.get("/health/metrics", requireCronSecret, (_req, res) => res.json(telemetrySnapshot()));
 
 async function readinessStatus() {
@@ -161,13 +139,6 @@ async function readinessStatus() {
   });
 }
 
-/**
- * Readiness pings MongoDB and Cloudflare R2. The endpoint is unauthenticated
- * because an orchestrator probe cannot hold credentials, which meant anybody
- * could turn one cheap HTTP request into a round trip against both providers.
- * Results are held briefly and concurrent callers share one in-flight check,
- * so probe frequency no longer drives dependency load.
- */
 const READINESS_CACHE_MS = 5_000;
 let readinessCache = null;
 let readinessInFlight = null;
@@ -199,10 +170,6 @@ app.get("/health", readinessHandler);
 
 app.use("/api/v2/auth/login", loginLimiter);
 app.use("/api/v2/auth", requireDatabase, authRouter);
-// Mounted before the authenticated routers and without getCurrentUser: report
-// pages are opened by instructors who have no account, and cron endpoints are
-// called by cron-jobs.org, which cannot hold a session. Each authenticates
-// itself — a report token in the path, or a shared secret header.
 app.use("/api/v2/reports", requireDatabase, reportRouter);
 app.use("/api/v2/dashboard", requireDatabase, getCurrentUser, dashboardRouter);
 app.use("/api/v2", requireDatabase, getCurrentUser, adminRouter);
@@ -231,21 +198,6 @@ app.use((error, req, res, _next) => {
   return res.status(500).json({ detail: "Internal server error", request_id: req.requestId });
 });
 
-/**
- * Ensures the bootstrap administrator exists.
- *
- * The database owns the password. The environment supplies one only when the
- * account is being created for the first time; after that the stored hash is
- * authoritative and a deploy never touches it. It used to rotate whenever
- * ADMIN_PASSWORD_VERSION differed from the stored value, which meant an
- * ordinary redeploy could silently replace the password an administrator was
- * using and lock them out with no indication of why.
- *
- * ADMIN_PASSWORD_RESET=true forces one rotation, for the case where the
- * password is genuinely lost and email recovery is unavailable. It is deliberately
- * separate from the version string so it cannot happen as a side effect of
- * routine configuration changes.
- */
 export async function seedAdmin(db) {
   const currentConfig = runtimeConfig();
   const now = new Date();
@@ -254,8 +206,6 @@ export async function seedAdmin(db) {
     throw new Error("The configured bootstrap administrator account is disabled");
   }
 
-  // Adopt and rotate one old bootstrap account so an admin@123 hash cannot
-  // survive the first production deployment under a different email.
   if (!user) {
     const legacyBootstrap = await db.collection("users").findOne({
       email: "admin@nxtwave.com",
@@ -324,7 +274,6 @@ export async function seedAdmin(db) {
           bootstrap_managed: true,
           updated_at: now,
         },
-        // Every existing token stops working, which is the point of a reset.
         $inc: { session_version: 1 },
       }
     );
@@ -333,7 +282,6 @@ export async function seedAdmin(db) {
       + "Unset it and redeploy, or the next restart will overwrite it again."
     );
   } else if (user.password_version !== currentConfig.adminPasswordVersion) {
-    // Recorded, not acted on. The stored password stays exactly as it is.
     await db.collection("users").updateOne(
       { _id: user._id },
       { $set: { password_version: currentConfig.adminPasswordVersion, updated_at: now } }
@@ -370,8 +318,6 @@ export async function startServer() {
     startMailWorker(db),
     startDailyReportScheduler(db),
   ];
-  // Shared with the environment check that keeps interactive Gemini work
-  // inside this window, so the two cannot drift apart.
   server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
   server.headersTimeout = HTTP_REQUEST_TIMEOUT_MS + 5_000;
   server.keepAliveTimeout = 5_000;

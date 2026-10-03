@@ -93,8 +93,6 @@ const checkInLimiter = rateLimit({
   message: { detail: "Too many check-in attempts. Please try again later." },
 });
 
-// Check-out runs the vision call inside the request, so it is at least as
-// expensive as check-in and needs the same protection.
 const checkOutLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
@@ -104,12 +102,6 @@ const checkOutLimiter = rateLimit({
   message: { detail: "Too many check-out attempts. Please try again later." },
 });
 
-// One group photograph is up to GROUP_ATTENDANCE_MAX_PEOPLE check-ins, each
-// with its own crop, upload, face search and vision call. The count is
-// therefore lower than the single-person limiter above even though the ceiling
-// on people recorded is higher: at six to a photograph this is still several
-// hundred check-ins per quarter hour, which is more than a tablet can
-// physically photograph.
 const groupCheckInLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 60,
@@ -119,8 +111,6 @@ const groupCheckInLimiter = rateLimit({
   message: { detail: "Too many group check-in attempts. Please try again later." },
 });
 
-// Re-analysis spends a vision call on an image that already has a report, so
-// it is the cheapest way to run up a bill by accident. Deliberately tighter.
 const reanalyseLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,
@@ -130,30 +120,6 @@ const reanalyseLimiter = rateLimit({
   message: { detail: "Too many re-analysis requests. Please try again later." },
 });
 
-/**
- * Bounds how many photographs are being decoded at once.
- *
- * This is a memory guard, not a rate limit. The limiters above count requests
- * over fifteen minutes; this counts requests in flight right now, because the
- * cost being bounded is sharp holding an uncompressed image in RAM. See
- * checkInConcurrencyLimit in config/env.js for why the number is what it is.
- *
- * It sheds rather than queues: a tablet that is told to retry in five seconds
- * has a person standing at it who can wait, whereas a queue of held
- * connections would run into the request timeout and fail anyway, having
- * consumed the memory in the meantime.
- */
-/**
- * Bounds how many group photographs are being processed at once.
- *
- * In addition to the gate below, not instead of it. A group photograph is held
- * as decoded pixels at up to 3072 on its long side - roughly 19MB - for the
- * whole of its request, several times what one single-person photograph
- * costs, so ten of them at once is a different amount of memory from ten
- * check-ins. Group photographs are rare enough that two at a time is plenty,
- * and the tablet is asked to retry rather than queued, for the same reason
- * the gate below sheds.
- */
 let activeGroupCaptures = 0;
 export function groupCaptureGate(_req, res, next) {
   if (activeGroupCaptures >= runtimeConfig().groupConcurrencyLimit) {
@@ -221,26 +187,11 @@ function activeInstructorFilter(currentUser, instructorId) {
 }
 
 function attendanceScope(currentUser) {
-  // Both elevated roles see every college. Testing for SUPER_ADMIN alone left
-  // an ADMIN scoped to currentUser.collegeId, which administrators do not
-  // have, so the filter matched nothing and Daily Records looked empty.
   return isElevated(currentUser?.role)
     ? {}
     : { college_id: idMatch(String(currentUser.collegeId)) };
 }
 
-/**
- * Removes a check-in entirely: the record, its evaluation, its queued job and
- * its photographs.
- *
- * Photographs are normally kept indefinitely and never expired on a schedule.
- * This is the one path that removes them, because it is someone deliberately
- * erasing the check-in they belong to — leaving the images behind would retain
- * a person's photograph with no record explaining why it was held.
- *
- * The record goes last. If a photo delete fails the record is still there to
- * try again, whereas the reverse would leave images nothing points at.
- */
 async function purgeAttendance(db, attendance) {
   const marked = await db.collection("attendance").updateOne(
     { _id: attendance._id, deleting_at: { $exists: false } },
@@ -255,18 +206,9 @@ async function purgeAttendance(db, attendance) {
   );
   if (!marked.matchedCount) {
     const current = await db.collection("attendance").findOne({ _id: attendance._id });
-    // Already gone: another caller finished the whole deletion.
     if (!current) return;
-    // Still here, but already carrying a tombstone, so a deletion is in flight
-    // elsewhere. Continuing would race that one to the photographs, and the
-    // loser reports PHOTO_DELETE_FAILED for a key the winner has already
-    // removed — a 503 telling somebody their deletion failed when it
-    // succeeded, and a retry that then answers 404. The record is being
-    // removed either way; the only thing left to do is not interfere.
     return;
   }
-  // Cancel both halves before touching storage. Workers also re-check the
-  // tombstone immediately before external work, covering already-claimed jobs.
   await Promise.all([
     db.collection("evaluation_jobs").deleteMany({ attendance_id: attendance._id }),
     db.collection("notification_jobs").deleteMany({ attendance_id: attendance._id }),
@@ -289,8 +231,6 @@ async function compensateUploadedPhoto(db, key, reason) {
   if (!key) return;
   const result = await deletePhoto(key);
   if (result.deleted) return;
-  // A transient R2 outage must not turn the original conflict into a 500.
-  // Persist a durable cleanup request so storage reconciliation can retry it.
   await db.collection("storage_cleanup_jobs").updateOne(
     { _id: key },
     {
@@ -309,17 +249,6 @@ async function compensateUploadedPhoto(db, key, reason) {
   );
 }
 
-/**
- * Matches an instructor's attendance record for the current local day.
- *
- * The guard used to match any open check-in ever. A check-out that was never
- * done left the record open forever, so one missed check-out on Monday blocked
- * that instructor from checking in for the rest of time. A day here is a local
- * calendar day — midnight to midnight where the instructor is — so yesterday's
- * unclosed record is a missed check-out to chase, not a reason to refuse today.
- * Completed records still match because the product allows one check-in and
- * one checkout per instructor per day, rather than multiple daily sessions.
- */
 export function attendanceOnLocalDay(instructorId, now = new Date()) {
   const timeZone = runtimeConfig().appTimeZone;
   const attendanceDay = localDateKey(now, timeZone);
@@ -343,16 +272,6 @@ function openCheckInToday(instructorId, now = new Date()) {
   };
 }
 
-/**
- * Pure decision used before any check-out photo is processed or stored.
- *
- * `too_early` is checked last, after the states that describe the record rather
- * than the clock: somebody who never checked in, or already checked out, should
- * be told that regardless of the time of day.
- *
- * `now` is defaulted so existing callers that ask only about the record keep
- * working, and so the timing boundaries stay testable.
- */
 export function checkoutAvailability(attendance, now = new Date()) {
   if (!attendance) return "not_checked_in_today";
   if (attendance.check_out_time) return "already_checked_out_today";
@@ -362,13 +281,6 @@ export function checkoutAvailability(attendance, now = new Date()) {
   return "available";
 }
 
-/**
- * The id of the instructor's attendance record for today, or null.
- *
- * Used only on the refusal path, where a duplicate check-in has already been
- * rejected and the caller needs somewhere to look. A failed lookup must not
- * turn a clear 409 into a 500, so it degrades to null.
- */
 async function attendanceIdForToday(db, instructorId) {
   try {
     const record = await db.collection("attendance").findOne(
@@ -402,13 +314,6 @@ function lookupIdVariants(ids) {
   return variants;
 }
 
-/**
- * Revalidates and commits check-in after image processing. Updating the same
- * instructor document that profile mutations update gives MongoDB transactions
- * a shared write-conflict boundary: either the profile change wins and this
- * transaction retries with the new profile, or check-in wins and the profile
- * mutation retries and observes the open attendance.
- */
 export async function commitGuardedCheckIn(
   db,
   {
@@ -420,8 +325,6 @@ export async function commitGuardedCheckIn(
     locationAccuracyM = null,
     capturedAt = null,
     identification = null,
-    // Where the tablet found the waist, trousers and shoes in the photograph;
-    // read by the report request (detailCheck.js). Optional.
     bodyRegions = null,
     now = new Date(),
   },
@@ -457,8 +360,6 @@ export async function commitGuardedCheckIn(
         gender: instructor.gender,
         collegeId: instructor.college_id ? String(instructor.college_id) : null,
       },
-      // Only the R2 key travels through the queue. The worker downloads the
-      // image when it runs, so no image bytes are ever written to MongoDB.
       photo_key: photoKey,
       mime_type: normalizedImage.mimeType,
       check_in_time: now,
@@ -468,14 +369,7 @@ export async function commitGuardedCheckIn(
     const attendance = createDocument({
       instructor_id: String(instructor._id),
       instructor_name: instructor.name,
-      // instructor_role first: an instructor imported from BigQuery carries
-      // their real role there and has no `role` at all, so snapshotting
-      // `role` alone recorded null for 599 of 600 people and lost the
-      // distinction between an INSTRUCTOR and a CENTRAL_INSTRUCTOR.
       instructor_role: instructor.instructor_role || instructor.role || null,
-      // Null stays null. String() turned an unlinked instructor's absent
-      // college into the literal text "null", which then sat in the record as
-      // if it were a real college id and matched nothing anywhere.
       college_id: instructor.college_id ? String(instructor.college_id) : null,
       boa_id: currentUser.referenceId ? String(currentUser.referenceId) : "super-admin",
       attendance_day: localDateKey(now, runtimeConfig().appTimeZone),
@@ -483,8 +377,6 @@ export async function commitGuardedCheckIn(
       check_in_time: now,
       check_out_time: null,
       location_coordinates: coordinates,
-      // Accuracy is kept next to the coordinates so a reading from a coarse
-      // IP lookup is distinguishable from a real GPS fix.
       location_accuracy_m: locationAccuracyM,
       check_in_photo_key: photoKey,
       check_in_photo_captured_at: capturedAt || now,
@@ -496,10 +388,6 @@ export async function commitGuardedCheckIn(
       evaluation_queue_status: "outbox_pending",
       checkin_email_status: "waiting_for_analysis",
       checkout_email_status: "not_requested",
-      // How this record came to name the instructor it names. A face match and
-      // a BOA's dropdown choice are different kinds of evidence, and once the
-      // selector is retired this is the only way to tell a recognised record
-      // from one identified by hand, or to find the matches that were close.
       ...(identification ? { identification } : {}),
       _private_evaluation_outbox: evaluationPayload,
       created_at: now,
@@ -519,19 +407,6 @@ export function serializeAttendance(attendance) {
   return serializeDocument(publicAttendance);
 }
 
-/**
- * One photograph, and the system decides what it means.
- *
- * The attendance screen has no buttons: somebody stands in front of the tablet,
- * the camera photographs them, and this works out whether it is their arrival or
- * their departure. Registered before every "/:attendanceId/..." route, because
- * a literal path declared after one of those is read as an attendance id.
- *
- * Nothing here invents a rule. The identity comes from the same face search
- * check-in uses, the arrival is committed by the same guarded transaction, and
- * the departure applies the same timing rules — this route only chooses between
- * them, which is the part a person used to do by pressing a button.
- */
 attendanceRouter.post(
   "/auto",
   checkInLimiter,
@@ -555,14 +430,9 @@ attendanceRouter.post(
     if (req.body.location_coordinates && !coordinates) {
       return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
     }
-    // Where the tablet found the waist, trousers and shoes. Optional, and
-    // dropped if malformed: it sharpens the report, it never gates attendance.
     const bodyRegions = parseBodyRegions(req.body?.body_regions);
     const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
 
-    // Normalized once. The same buffer is recognised, stored and analysed, so a
-    // refused or mistaken match can be reproduced from the photograph the record
-    // keeps rather than from a second encoding of it.
     let normalizedImage;
     try {
       normalizedImage = await normalizeInstructorImage(req.file.buffer);
@@ -579,14 +449,11 @@ attendanceRouter.post(
         )
       : null;
 
-    // Hold trailing unknown frames briefly; recognised attendance keeps its daily guard.
     const tabletKey = tabletCaptureKey(req.currentUser.email);
     const tabletHold = { now: now.getTime(), windowMs: CAPTURE_WINDOW_MS };
     if (instructor) {
       rememberCapture(tabletKey, tabletHold);
     } else if (!claimCapture(tabletKey, tabletHold)) {
-      // Silent: this is a trailing frame from a moment the tablet has already
-      // answered, and nothing is stored for it.
       incrementMetric("kiosk_duplicate_capture_total");
       return res.status(200).json({
         action: KIOSK_ACTIONS.NOT_RECOGNISED,
@@ -599,9 +466,6 @@ attendanceRouter.post(
       });
     }
 
-    // A face that matched somebody this tablet cannot see is treated as no
-    // match: the college scope is what stops one campus recording another's
-    // attendance, and it must not be bypassed by a recognition result.
     const today = instructor
       ? await db.collection("attendance").findOne(attendanceOnLocalDay(instructor._id, now))
       : null;
@@ -610,7 +474,6 @@ attendanceRouter.post(
       availability: checkoutAvailability(today, now),
     });
 
-    /** Nothing is recorded, so nothing is stored: the photo is simply dropped. */
     if (action === KIOSK_ACTIONS.TOO_EARLY || action === KIOSK_ACTIONS.ALREADY_DONE) {
       const timing = checkoutTiming(today?.check_in_time, { now });
       const opensAtLabel = timing.opens_at
@@ -634,7 +497,6 @@ attendanceRouter.post(
       });
     }
 
-    // Reject an unknown face before generating a storage key or writing attendance.
     if (action === KIOSK_ACTIONS.NOT_RECOGNISED) {
       return res.status(200).json({
         action,
@@ -645,27 +507,6 @@ attendanceRouter.post(
       });
     }
 
-    /**
-     * The upload runs alongside the rest of the request rather than in front of
-     * it.
-     *
-     * Storing the photograph is the slowest thing this route does — measured at
-     * 400-900ms against R2, where recognition is 200-400ms and every database
-     * step is tens of milliseconds. Waiting for it before answering meant
-     * somebody stood at the tablet for a second longer than the system needed
-     * to know who they were and what to record.
-     *
-     * The key is generated here, so the record can reference the object before
-     * the bytes have finished arriving. Nothing reads that reference
-     * synchronously: the orphan reconciler skips referenced keys and waits an
-     * hour regardless, and the photo endpoints mint a link on demand rather
-     * than at write time.
-     *
-     * The one thing that genuinely needs the bytes is the analysis, because the
-     * worker downloads the photograph by key and is woken the moment a job is
-     * queued. So the response goes early and the enqueue still waits — see
-     * settleUpload below.
-     */
     const photoKind = action === KIOSK_ACTIONS.CHECK_OUT ? "checkout" : "checkin";
     const photoKey = buildPhotoKey({
       instructorId: String(instructor._id),
@@ -692,14 +533,6 @@ attendanceRouter.post(
       }
     );
 
-    /**
-     * Waits for the upload, and records the failure on the attendance row.
-     *
-     * A photograph that never arrived leaves a record pointing at nothing. The
-     * record still matters — it is the evidence somebody turned up — so it is
-     * kept and marked rather than deleted, and the analysis is not queued for
-     * an image the worker could never download.
-     */
     const settleUpload = async (attendanceId, kind) => {
       if (await uploading) return true;
       const field = kind === "checkout" ? "check_out_photo_key" : "check_in_photo_key";
@@ -723,14 +556,6 @@ attendanceRouter.post(
       incrementMetric("kiosk_photo_upload_failures_total");
       return false;
     };
-    /**
-     * Throws the photograph away once its upload has settled.
-     *
-     * Deleting the key while the upload is still in flight would race it: the
-     * delete finds nothing, the object lands a moment later, and it stays in
-     * the bucket forever with no record pointing at it. Waiting first means
-     * there is either something to delete or nothing to do.
-     */
     const discardPendingUpload = async (reason) => {
       if (await uploading) await compensateUploadedPhoto(db, photoKey, reason);
     };
@@ -772,8 +597,6 @@ attendanceRouter.post(
         throw error;
       }
       if (committed.outcome !== "created") {
-        // invalid_email and the duplicate guard both land here. The photo has an
-        // owner only when a record was written, so it is discarded otherwise.
         await discardPendingUpload(`kiosk_${committed.outcome}`);
         return res.status(committed.outcome === "invalid_email" ? 422 : 409).json({
           detail: committed.outcome === "invalid_email"
@@ -783,9 +606,6 @@ attendanceRouter.post(
       }
 
       const { attendance, evaluationPayload } = committed;
-      // Detached deliberately: the worker downloads the photograph by key and is
-      // woken as soon as a job exists, so the queue has to wait for the bytes —
-      // but the person at the tablet does not.
       void settleUpload(attendance._id, "checkin").then(async (ok) => {
         if (!ok) return;
         try {
@@ -812,8 +632,6 @@ attendanceRouter.post(
       });
     }
 
-    // CHECK_OUT. Guarded on check_out_time so two photographs taken moments
-    // apart cannot both close the same session.
     const recipient = isValidEmail(instructor.email) ? instructor.email : null;
     const result = await db.collection("attendance").findOneAndUpdate(
       { _id: today._id, check_out_time: null, ...attendanceScope(req.currentUser) },
@@ -876,29 +694,6 @@ attendanceRouter.post(
   })
 );
 
-/**
- * One photograph, several people, one attendance record each.
- *
- * The single-person route above is untouched and remains how attendance is
- * normally taken. This is the same sequence — identify, decide, record,
- * analyse — applied to everybody standing in one frame, and it exists because
- * the obvious shortcut does not work: `SearchFacesByImage` answers about the
- * largest face in a photograph and ignores the others, so pointing the existing
- * route at a group would record the nearest person and silently discard the
- * rest.
- *
- * Every person is treated as their own check-in. Their identity comes from the
- * same collection at the same threshold, their day is read from the same
- * record, the action is chosen by the same decideKioskAction, and the
- * photograph analysed for their grooming report is a crop containing them
- * rather than the whole group — otherwise six people would receive six
- * identical reports describing whoever the model happened to look at.
- *
- * One person's failure is theirs alone. A refused upload, a duplicate record or
- * an unreachable service is reported against that person and the others are
- * still recorded, because five people should not lose their attendance because
- * a sixth stood too far back.
- */
 attendanceRouter.post(
   "/auto/group",
   groupCheckInLimiter,
@@ -925,9 +720,6 @@ attendanceRouter.post(
     }
     const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
 
-    // Decoded once, to pixels, at up to 3072 on the long side. The group frame
-    // itself is never stored, so it is never re-encoded either; each person's
-    // crop is cut from these pixels and encoded exactly once.
     let groupImage;
     try {
       groupImage = await normalizeGroupImage(req.file.buffer);
@@ -939,8 +731,6 @@ attendanceRouter.post(
 
     const identified = await identifyPeopleInPhoto(groupImage);
     if (!identified.ok) {
-      // Too many people is the one refusal worth a distinct status: it is a
-      // request the tablet should not repeat unchanged, unlike an empty frame.
       const tooMany = identified.reason === FACE_REASONS.MULTIPLE_FACES;
       return res.status(tooMany ? 422 : 200).json({
         detail: identified.message
@@ -953,8 +743,6 @@ attendanceRouter.post(
       });
     }
 
-    // Suppress trailing unknown-only frames, while always processing recognised
-    // members of a mixed group. Their daily attendance guards prevent duplicates.
     const hasUnrecognisedFaces = identified.people.some((person) => (
       person.outcome === GROUP_OUTCOMES.NO_MATCH
       || person.outcome === GROUP_OUTCOMES.AMBIGUOUS
@@ -975,14 +763,6 @@ attendanceRouter.post(
       });
     }
 
-    /**
-     * Stores one person's crop and records the failure against their record.
-     *
-     * The same contract as the single route's settleUpload: the record is kept
-     * and marked rather than deleted, because it is still the evidence that
-     * somebody turned up, and no analysis is queued for bytes that never
-     * arrived.
-     */
     const settleUpload = async (uploading, attendanceId, kind) => {
       if (await uploading) return true;
       const field = kind === "checkout" ? "check_out_photo_key" : "check_in_photo_key";
@@ -1007,7 +787,6 @@ attendanceRouter.post(
       return false;
     };
 
-    /** Begins one person's upload without waiting for it. */
     const beginUpload = (person, instructorId, kind) => {
       const key = buildPhotoKey({
         instructorId: String(instructorId),
@@ -1025,8 +804,6 @@ attendanceRouter.post(
           captured_at: now.toISOString(),
           coordinates: coordinates || "",
           accuracy_m: req.body.location_accuracy_m || "",
-          // Marks this image as one person cut out of a group photograph, so a
-          // thin report or an unusual framing has a recorded explanation.
           capture_mode: "group",
         },
       }).then(
@@ -1039,11 +816,6 @@ attendanceRouter.post(
       return { key, uploading };
     };
 
-    /**
-     * How this person came to be named, recorded on their row exactly as the
-     * single route records it — plus where in the group photograph they stood,
-     * which is the only way to check a disputed match afterwards.
-     */
     const identificationFor = (person) => ({
       method: "FACE",
       outcome: "MATCHED",
@@ -1057,16 +829,6 @@ attendanceRouter.post(
       group_body_coverage: person.bodyCoverage,
     });
 
-    /**
-     * One person's line on the tablet.
-     *
-     * `recorded_at` is when this photograph wrote something for them, and
-     * `check_in_time` is when their day began - the same instant for a
-     * check-in, an earlier one for a check-out, and the only time worth
-     * showing for somebody told they had already checked in. Both are null
-     * when nothing is known, so the screen can show a time or nothing rather
-     * than guess.
-     */
     const answer = (person, fields) => ({
       position: person.box,
       similarity: person.similarity,
@@ -1075,7 +837,6 @@ attendanceRouter.post(
       ...fields,
     });
 
-    /** Everything one person's turn can end in. Never throws to the request. */
     const processPerson = async (person) => {
       if (!person.image) {
         return answer(person, {
@@ -1089,7 +850,6 @@ attendanceRouter.post(
         });
       }
 
-      // Background faces too small to recognise are rejected without storage.
       if (person.outcome === GROUP_OUTCOMES.TOO_SMALL) {
         incrementMetric("group_too_small_total");
         return answer(person, {
@@ -1117,7 +877,6 @@ attendanceRouter.post(
         availability: checkoutAvailability(today, now),
       });
 
-      // Nothing is recorded, so nothing is stored and no crop is uploaded.
       if (action === KIOSK_ACTIONS.TOO_EARLY || action === KIOSK_ACTIONS.ALREADY_DONE) {
         const timing = checkoutTiming(today?.check_in_time, { now });
         const opensAtLabel = timing.opens_at
@@ -1176,11 +935,6 @@ attendanceRouter.post(
         }
         if (committed.outcome !== "created") {
           if (await uploading) await compensateUploadedPhoto(db, key, `group_${committed.outcome}`);
-          // The record that beat this one to the day - written between this
-          // turn's lookup and its transaction, by the single-person tablet or
-          // by another crop of the same person in this photograph. Its time is
-          // what "already checked in" should show. Cosmetic, so a failed lookup
-          // degrades to no time rather than to no answer for this person.
           let existing = null;
           if (committed.outcome === "already_checked_in_today") {
             try {
@@ -1237,8 +991,6 @@ attendanceRouter.post(
         });
       }
 
-      // CHECK_OUT, guarded on check_out_time exactly as the single route is, so
-      // two photographs a moment apart cannot both close one session.
       const { key, uploading } = beginUpload(person, instructor._id, "checkout");
       const recipient = isValidEmail(instructor.email) ? instructor.email : null;
       const result = await db.collection("attendance").findOneAndUpdate(
@@ -1308,14 +1060,6 @@ attendanceRouter.post(
       });
     };
 
-    /**
-     * People are processed a few at a time rather than all at once.
-     *
-     * Each turn holds a crop, an upload and a MongoDB transaction, and the
-     * container this runs in has 512MB and a fifth of a CPU. Six at once is not
-     * meaningfully faster than three at a time here, and it is the difference
-     * between a busy tablet and an out-of-memory restart.
-     */
     const people = [];
     for (let index = 0; index < identified.people.length; index += config.groupCropConcurrency) {
       const batch = identified.people.slice(index, index + config.groupCropConcurrency);
@@ -1325,9 +1069,6 @@ attendanceRouter.post(
           people.push(outcome.value);
           continue;
         }
-        // One person's turn threw. Theirs is reported and everybody else's
-        // still stands, which is the whole reason these are settled rather
-        // than awaited together.
         console.error(`Group attendance failed for one person: ${outcome.reason?.name || "Error"}`);
         incrementMetric("group_person_failed_total");
         people.push({
@@ -1363,10 +1104,6 @@ attendanceRouter.post(
     if (!validation.valid) return res.status(400).json({ detail: validation.detail });
 
     const db = req.app.locals.db;
-    // The tablet is signed in as its own college, and that college decides
-    // whether this check-in identifies by face or by the submitted id. It has to
-    // be known before anybody has been identified, so it cannot come from the
-    // instructor.
     const identificationSettings = await getIdentificationSettings(db);
     const faceMode = usesFaceIdentification(identificationSettings, req.currentUser.collegeId);
 
@@ -1374,9 +1111,6 @@ attendanceRouter.post(
     if (suppliedInstructorId.length > 100) {
       return res.status(422).json({ detail: "A valid instructor_id is required" });
     }
-    // Only the selector requires one. In face mode the photograph is the
-    // identity, and an id arriving anyway is ignored rather than trusted: the
-    // whole point is that nobody chooses who the record belongs to.
     if (!faceMode && !suppliedInstructorId) {
       return res.status(422).json({ detail: "A valid instructor_id is required" });
     }
@@ -1386,10 +1120,6 @@ attendanceRouter.post(
       return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
     }
 
-    // Normalized before recognition so the bytes that identify the person are
-    // the same bytes that get stored and analysed. Recognising the raw upload
-    // and storing a re-encoded copy would make a failed match impossible to
-    // reproduce from the record.
     let normalizedImage;
     try {
       normalizedImage = await normalizeInstructorImage(req.file.buffer);
@@ -1405,8 +1135,6 @@ attendanceRouter.post(
 
     if (faceMode) {
       if (!isFaceRecognitionConfigured()) {
-        // Nothing can be recognised, and guessing from a submitted id would
-        // silently reintroduce the selector this mode exists to remove.
         recognitionFailure = { reason: "NOT_CONFIGURED", bestSimilarity: null, candidateInstructorId: null };
       } else {
         const match = await searchFaceByImage(normalizedImage.buffer);
@@ -1417,8 +1145,6 @@ attendanceRouter.post(
             outcome: "MATCHED",
             similarity: match.similarity,
             face_id: match.faceId,
-            // Kept so a near-tie between two people is findable later, even
-            // though look-alike handling is deliberately still open.
             runner_up_instructor_id: match.runnerUp?.instructorId || null,
             runner_up_similarity: match.runnerUp?.similarity ?? null,
             attempted_at: new Date(),
@@ -1437,7 +1163,6 @@ attendanceRouter.post(
 
     const now = new Date();
 
-    // Face mode rejects unknown captures; selector mode keeps its selected instructor.
     if (recognitionFailure) {
       return res.status(422).json({
         action: KIOSK_ACTIONS.NOT_RECOGNISED,
@@ -1468,9 +1193,6 @@ attendanceRouter.post(
       });
     }
 
-    // Return the open record's id, not just the refusal: the caller's next
-    // step is almost always to look at that check-in, and without the id the
-    // user has to go and find it by hand.
     const activeRecord = await db.collection("attendance").findOne(
       attendanceOnLocalDay(instructor._id)
     );
@@ -1481,11 +1203,6 @@ attendanceRouter.post(
       });
     }
 
-    // The photo goes to R2 and only its key is stored, so MongoDB never holds
-    // image bytes. Upload before the transaction: a failure here should stop
-    // the check-in rather than leave a record pointing at a missing object.
-    // `now` is the one declared before recognition ran, so the stored time is
-    // when the photograph arrived rather than when the match finished.
     const stored = await storeAttendancePhoto({
       instructorId: instructor._id,
       kind: "checkin",
@@ -1555,9 +1272,6 @@ attendanceRouter.post(
       console.error(`Evaluation outbox ${attendance._id} remains pending (${error.name || "ERROR"})`);
     }
 
-    // Fire-and-forget: the response has already been decided, so a slow or
-    // failing address lookup cannot delay or fail the check-in. The record
-    // keeps its coordinates either way.
     if (coordinates) {
       void attachAddressToAttendance(db, attendance._id, coordinates);
     }
@@ -1569,19 +1283,6 @@ attendanceRouter.post(
   })
 );
 
-/**
- * Stores one attendance photograph and returns its key.
- *
- * The only part of check-in and check-out that is genuinely the same: build a
- * date-partitioned key, put the normalized bytes in R2, and record who and when
- * in the object metadata. Everything around it differs deliberately — check-in
- * refuses when the photo cannot be stored, because the photograph is the
- * check-in, while check-out proceeds without one because the attendance matters
- * more than its picture — so only this much is shared.
- *
- * Returns { stored: false } rather than throwing, leaving each caller to decide
- * what a storage failure means for it.
- */
 async function storeAttendancePhoto({
   instructorId,
   kind,
@@ -1614,13 +1315,7 @@ async function storeAttendancePhoto({
 attendanceRouter.post(
   "/check-out",
   checkOutLimiter,
-  // Shares the check-in gate deliberately: both decode an image and call the
-  // vision model in-process, so one shared ceiling bounds the real work rather
-  // than letting each half reach the limit independently.
   checkInConcurrencyGate,
-  // Accepts multipart so a check-out photo can be attached. Optional in a
-  // selector college, where check-out must still work when a camera is
-  // unavailable; required where the face is what says whose session to close.
   upload.single("file"),
   validate(checkoutSchema),
   asyncRoute(async (req, res) => {
@@ -1631,20 +1326,6 @@ attendanceRouter.post(
     const identificationSettings = await getIdentificationSettings(db);
     const faceMode = usesFaceIdentification(identificationSettings, req.currentUser.collegeId);
 
-    /**
-     * Who is checking out.
-     *
-     * In a selector college this is the submitted id, as it always was. In a
-     * face-only college the photograph decides, so it is normalized once here
-     * and the same buffer is reused for the appearance analysis further down:
-     * recognising one encoding and analysing another would make a failed match
-     * impossible to reproduce from the stored photo.
-     *
-     * An unrecognised face is refused rather than recorded. Unlike check-in
-     * there is nothing to create — a check-out closes one specific open
-     * session, and guessing which would attach one person's departure to
-     * another's day.
-     */
     let instructorId = req.validatedBody.instructor_id || "";
     let identifiedCheckout = null;
     let normalizedCheckoutImage = null;
@@ -1676,8 +1357,6 @@ attendanceRouter.post(
       if (!match.ok) {
         incrementMetric("checkout_unrecognised_total");
         return res.status(422).json({
-          // Says what to do about it: a bare refusal leaves somebody standing at
-          // a tablet with no idea whether to retry or find an administrator.
           detail: "Not recognised. Try again, or ask an administrator to update your reference photo.",
           outcome: match.reason,
         });
@@ -1714,14 +1393,6 @@ attendanceRouter.post(
         attendance_id: String(candidate._id),
       });
     }
-    /**
-     * Too soon to close this day, so nothing is recorded.
-     *
-     * Refused before the photograph is decoded or stored: an early appearance
-     * should cost nothing and leave nothing behind. The response names the time
-     * check-out opens, because somebody standing at the tablet who is told only
-     * "no" cannot tell a rule from a fault.
-     */
     if (checkoutState === "too_early") {
       const timing = checkoutTiming(candidate.check_in_time, { now: checkOutTime });
       return res.status(409).json({
@@ -1750,19 +1421,12 @@ attendanceRouter.post(
       deadline_at: notificationDeadline,
       created_at: checkOutTime,
     };
-    // Store the check-out photo when one was supplied. A failure here is
-    // logged and skipped rather than blocking the check-out itself, which is
-    // the record that actually matters for attendance.
     let checkOutPhotoKey = null;
     let checkOutPhoto = null;
     if (req.file) {
       const validation = validateImageUpload(req.file);
       if (!validation.valid) return res.status(400).json({ detail: validation.detail });
       try {
-        // Reused when face identification already normalized it. Decoding the
-        // same upload twice would store a second encoding of the bytes the
-        // match was made against, so a refused or mistaken match could not be
-        // reproduced from the photograph the record keeps.
         const normalized = normalizedCheckoutImage
           || await normalizeInstructorImage(req.file.buffer);
         const stored = await storeAttendancePhoto({
@@ -1773,9 +1437,6 @@ attendanceRouter.post(
           accuracyMetres: req.validatedBody.location_accuracy_m,
           now: checkOutTime,
         });
-        // Unlike check-in, a failure here is logged and skipped: the check-out
-        // is what attendance depends on, and refusing it over a photograph
-        // would lose the departure to a storage outage.
         if (stored.stored) {
           checkOutPhotoKey = stored.key;
           checkOutPhoto = normalized;
@@ -1797,9 +1458,6 @@ attendanceRouter.post(
         ? { check_out_location_accuracy_m: req.validatedBody.location_accuracy_m }
         : {}),
       updated_at: checkOutTime,
-      // How this check-out established whose session it was closing. Kept
-      // beside the check-in's own identification so a record carries the
-      // evidence for both halves of the day.
       ...(identifiedCheckout ? { checkout_identification: identifiedCheckout } : {}),
       checkout_email_status: recipient
         ? (req.file
@@ -1833,34 +1491,12 @@ attendanceRouter.post(
       });
     }
 
-    // The check-out has its own coordinates, and nothing was turning them into
-    // a place name — the report showed "Address unavailable" beside a perfectly
-    // good fix. Detached, as at check-in: a slow geocoder must not hold up the
-    // response.
     if (checkoutCoordinates) {
       void attachAddressToAttendance(db, attendance._id, checkoutCoordinates, "checkout");
     }
 
     const checkoutAnalysisFailed = Boolean(req.file && !checkOutPhotoKey);
 
-    // A photographed check-out is analysed in this request. Its email outbox
-    // is created only after the detailed report is stored, so the email can
-    // never race ahead carrying the morning/check-in assessment.
-    /**
-     * The photographed check-out is analysed by the worker, exactly as the
-     * check-in is.
-     *
-     * It used to run inside this request so its email could not race ahead of
-     * its report. The worker now owns both — it stores the report and only then
-     * queues the email — so the ordering is preserved without holding the
-     * connection open for a vision call. That matters because the tablet is a
-     * kiosk: a person stands in front of it, and twenty seconds of waiting for
-     * an analysis nobody is reading blocks the next person in the queue.
-     *
-     * A failure to enqueue is logged rather than surfaced. The check-out itself
-     * is committed and is what attendance depends on; the outbox reconciler
-     * picks the job up on its next pass.
-     */
     if (checkOutPhotoKey) {
       try {
         await enqueueEvaluation(db, {
@@ -1883,9 +1519,6 @@ attendanceRouter.post(
       }
     }
 
-    // A photoless check-out has no report to wait for, so its plain
-    // confirmation is queued here. A photographed one is emailed by the worker
-    // once the report exists, which is what keeps the email behind its report.
     if (recipient && !req.file) {
       try {
         await enqueueNotification(db, {
@@ -1900,9 +1533,6 @@ attendanceRouter.post(
       }
     }
 
-    // 202 rather than 200: with a photo the appearance report is still being
-    // produced when this returns, so the check-out is accepted rather than
-    // complete.
     return res.status(202).json({
       message: checkoutAnalysisFailed
         ? "Check-out successful, but its photo could not be stored, so no appearance report will be produced."
@@ -1930,13 +1560,8 @@ attendanceRouter.get(
     let pagination;
     try {
       const zone = runtimeConfig().appTimeZone;
-      // A range wins when either end is given; otherwise this stays the
-      // single-day endpoint it has always been, so existing callers and saved
-      // links keep working.
       const ranged = req.query.from !== undefined || req.query.to !== undefined;
       if (ranged) {
-        // An empty bound means that side is open, which is how "all time"
-        // arrives: both present and both blank.
         const blankToUndefined = (value) => (value === "" ? undefined : value);
         const { start, end } = dateRangeBoundsInTimeZone(
           blankToUndefined(req.query.from),
@@ -1970,8 +1595,6 @@ attendanceRouter.get(
       throw error;
     }
     const attendances = await db.collection("attendance")
-      // An unbounded range still filters on the field so the same index is
-      // used; $exists alone would fall back to a collection scan.
       .find({
         ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
         ...(updatedSince ? { updated_at: { $gt: updatedSince } } : {}),
@@ -1988,16 +1611,10 @@ attendanceRouter.get(
       .limit(pagination.limit)
       .toArray();
 
-    // Every row is looked up now, not only the ones missing a name snapshot:
-    // the report token lives on the instructor and the table needs it to build
-    // the public report links.
     const instructorIds = [...new Set(attendances.map((row) => String(row.instructor_id)))];
     const legacyInstructors = instructorIds.length
       ? await db.collection("instructors").find(
           { _id: { $in: lookupIdVariants(instructorIds) } },
-          // instructor_role as well as role: an instructor imported from
-          // BigQuery carries only the former, so projecting role alone left
-          // every synced person showing as "Unknown".
           { projection: { name: 1, role: 1, instructor_role: 1, college_id: 1, report_token: 1 } }
         ).toArray()
       : [];
@@ -2015,16 +1632,12 @@ attendanceRouter.get(
         }).toArray()
       : [];
     const collegeMap = new Map(colleges.map((row) => [String(row._id), row.name]));
-    // Counted across each instructor's whole week, under the same scope as the
-    // rows themselves, so a campus sees only its own records counted.
     const escalations = await weeklyEscalations(db, attendances, attendanceScope(req.currentUser));
     return res.json(attendances.map((attendance) => {
       const instructor = instructorMap.get(String(attendance.instructor_id));
       const collegeId = attendance.college_id || instructor?.college_id || null;
       return {
         ...serializeAttendance(attendance),
-        // Three or more non-compliant results in this row's Monday-to-Sunday
-        // week, or null. The same count that sends partners the URGENT email.
         escalation: escalationFor(escalations, attendance),
         instructor_name: attendance.instructor_name || instructor?.name || "Unknown",
         instructor_role: attendance.instructor_role
@@ -2034,19 +1647,12 @@ attendanceRouter.get(
         college_name: collegeId
           ? (collegeMap.get(String(collegeId)) || "Unknown College")
           : "No College",
-        // Lets the table link straight to the public report an instructor
-        // receives by email, rather than a second internal-only view of it.
         report_token: instructor?.report_token || null,
       };
     }));
   })
 );
 
-/**
- * One attendance record by id, so the detail page can be opened directly from
- * a URL. Without this the page could only render a record handed to it by the
- * list, and a refresh or a shared link showed an empty screen.
- */
 attendanceRouter.get(
   "/:attendanceId",
   asyncRoute(async (req, res) => {
@@ -2058,9 +1664,6 @@ attendanceRouter.get(
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 
-    // Records written before the snapshot was fixed carry no role, and this
-    // route is what serves a detail page opened directly from its URL. Without
-    // the lookup the role reads blank there while the list shows it correctly.
     const instructor = await db.collection("instructors").findOne(
       { _id: idMatch(String(attendance.instructor_id)) },
       { projection: { name: 1, role: 1, instructor_role: 1, report_token: 1 } }
@@ -2077,12 +1680,6 @@ attendanceRouter.get(
   })
 );
 
-/**
- * Recovers a checkout whose optional photo could not be stored. The attendance
- * already exists, so calling /check-out again can never work; this narrowly
- * attaches the missing photo, runs checkout analysis directly, and only then
- * creates the report email job.
- */
 attendanceRouter.post(
   "/:attendanceId/checkout-photo",
   upload.single("file"),
@@ -2242,25 +1839,15 @@ attendanceRouter.get(
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 
-    // ?kind=checkout selects the check-out assessment. The default stays the
-    // check-in one, so every existing caller keeps the report it asked for.
     const kind = req.query.kind === "checkout" ? "checkout" : "checkin";
     const evaluation = await getEvaluation(db, String(attendance._id), kind);
     if (!evaluation) {
-      // 204, not 404. A half with no evaluation is an ordinary state — no
-      // photo was taken, or the analysis has not finished — and returning an
-      // error made the page paint it red as though something had broken.
       return res.status(204).end();
     }
     return res.json(serializeDocument(evaluation));
   })
 );
 
-/**
- * Lightweight status for the check-in screen to poll while analysis runs.
- * Deliberately small: it is requested every few seconds and must not carry
- * the full evaluation payload.
- */
 attendanceRouter.get(
   "/:attendanceId/status",
   asyncRoute(async (req, res) => {
@@ -2282,15 +1869,10 @@ attendanceRouter.get(
     );
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 
-    // Each half is assessed separately, so the caller says which one it is
-    // waiting on. The default stays the check-in, which is what every existing
-    // caller means.
     if (req.query.kind === "checkout") {
       const queueStatus = attendance.checkout_evaluation_queue_status || null;
       return res.json({
         attendance_id: String(attendance._id),
-        // No photo means nothing was ever queued, so the caller must not be
-        // left polling for an analysis that will never arrive.
         status: attendance.checkout_compliance_status
           ? String(attendance.checkout_compliance_status).toLowerCase()
           : "pending",
@@ -2310,29 +1892,18 @@ attendanceRouter.get(
       compliance_status: attendance.compliance_status || null,
       remarks: attendance.remarks || null,
       queue_status: attendance.evaluation_queue_status || null,
-      // Lets the client stop polling instead of guessing from the status text.
       settled: attendance.status !== "pending",
       updated_at: attendance.updated_at || null,
     });
   })
 );
 
-/**
- * Runs the grooming analysis again on the photo already in R2.
- *
- * Used when a result looks wrong or the first attempt failed. The photo is
- * never re-uploaded, so this cannot change what was captured at check-in — it
- * only re-runs the model over the same image.
- */
 attendanceRouter.post(
   "/:attendanceId/reanalyse",
   requireSuperAdmin,
   reanalyseLimiter,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
-    // Enforced here, not only by hiding the button: re-analysis spends a
-    // vision call and replaces a report the instructor may already have been
-    // emailed, so a workspace that has not enabled it must be refused.
     const { reanalyse_enabled: reanalyseEnabled } = await getNotificationSettings(db);
     if (!reanalyseEnabled) {
       return res.status(403).json({
@@ -2345,8 +1916,6 @@ attendanceRouter.post(
     });
     if (!attendance) return res.status(404).json({ detail: "Attendance record not found" });
 
-    // Each half has its own photograph, its own job and its own report, so a
-    // re-analysis has to say which one it means.
     const kind = req.query.kind === "checkout" ? "checkout" : "checkin";
     const photoKey = kind === "checkout"
       ? attendance.check_out_photo_key
@@ -2362,16 +1931,11 @@ attendanceRouter.post(
     });
 
     const now = new Date();
-    // Clear any older job for this half before starting fresh work. Checkout
-    // is direct; check-in continues through the durable evaluation worker.
     await db.collection("evaluation_jobs").deleteOne({
       _id: kind === "checkout"
         ? `${attendance._id}:evaluation:checkout`
         : `${attendance._id}:evaluation`,
     });
-    // Scoped to the half being re-run. An unscoped delete threw away the other
-    // half's report as well, so re-analysing a check-in silently destroyed the
-    // check-out one.
     await deleteEvaluation(db, String(attendance._id), kind);
     await db.collection("attendance").updateOne(
       { _id: attendance._id },
@@ -2452,11 +2016,6 @@ attendanceRouter.post(
   })
 );
 
-/**
- * Time-limited link to a stored photo. The bucket is private, so this is the
- * only way to view one; the URL is generated per request and expires, rather
- * than being stored anywhere it could leak.
- */
 attendanceRouter.get(
   "/:attendanceId/photo/:kind",
   asyncRoute(async (req, res) => {
@@ -2479,14 +2038,6 @@ attendanceRouter.get(
   })
 );
 
-/**
- * Deletes a bounded set of complete attendance records for administrators.
- *
- * This endpoint deliberately does not inherit the BOA deletion toggle. Bulk
- * deletion has a wider blast radius than deleting one reviewed detail record,
- * so only ADMIN and SUPER_ADMIN may use it. Each record still goes through the
- * same storage/job/evaluation cleanup as the single-record endpoint.
- */
 attendanceRouter.post(
   "/bulk-delete",
   requireSuperAdmin,
@@ -2541,13 +2092,6 @@ attendanceRouter.post(
   })
 );
 
-/**
- * Permanently removes a check-in.
- *
- * Scoped like every other read: a BOA can only reach records at their own
- * college, so the capability toggle governs whether they may delete, never
- * whose records they can see.
- */
 attendanceRouter.delete(
   "/:attendanceId",
   asyncRoute(async (req, res) => {
@@ -2577,14 +2121,6 @@ attendanceRouter.delete(
   })
 );
 
-/**
- * Removes only the check-out half, leaving the check-in and its report intact.
- *
- * A record cannot exist without a check-in, so deleting that is deleting the
- * record — which is what DELETE /:attendanceId does. This is the other half:
- * the time, the photograph, the location and the check-out assessment go, and
- * the instructor is back to being checked in.
- */
 attendanceRouter.delete(
   "/:attendanceId/check-out",
   asyncRoute(async (req, res) => {
@@ -2605,9 +2141,6 @@ attendanceRouter.delete(
       return res.status(409).json({ detail: "This record has no check-out to delete" });
     }
 
-    // The photograph goes first. If it fails the record is untouched and the
-    // delete can be retried, where the reverse would leave an image in storage
-    // that nothing points at.
     await db.collection("attendance").updateOne(
       { _id: attendance._id, checkout_deleting_at: { $exists: false } },
       {

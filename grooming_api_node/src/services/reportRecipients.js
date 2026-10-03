@@ -9,12 +9,6 @@ const SETTINGS_ID = "rp_recipients";
 const MAX_RECIPIENTS = 50;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * Reporting Partners: addresses that are copied on grooming alerts alongside
- * the instructor, so someone accountable sees a failed audit without having
- * to watch the dashboard.
- */
-
 export function normaliseEmail(value) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -30,13 +24,6 @@ export async function getReportRecipients(db) {
   return emails.filter(isValidRecipient);
 }
 
-/**
- * Which halves reporting partners are copied on.
- *
- * Both default to on, so an existing configuration keeps behaving as it did.
- * They are separate because the two are genuinely different asks: somebody may
- * want the morning's failures without a second message every evening.
- */
 export const DEFAULT_RECIPIENT_EVENTS = Object.freeze({
   checkin_enabled: true,
   checkout_enabled: true,
@@ -68,19 +55,12 @@ export async function saveRecipientEvents(db, body, updatedBy) {
   return next;
 }
 
-/**
- * The partners to copy for one half, or none when that half is switched off.
- */
 export async function reportRecipientsFor(db, kind) {
   const events = await getRecipientEvents(db);
   const enabled = kind === "checkout" ? events.checkout_enabled : events.checkin_enabled;
   return enabled ? getReportRecipients(db) : [];
 }
 
-/**
- * Adds one address. Returns the reason on refusal rather than throwing, so the
- * route can report it without a try/catch.
- */
 export async function addReportRecipient(db, value, addedBy) {
   const email = normaliseEmail(value);
   if (!isValidRecipient(email)) return { ok: false, reason: "invalid" };
@@ -90,8 +70,6 @@ export async function addReportRecipient(db, value, addedBy) {
   if (current.length >= MAX_RECIPIENTS) return { ok: false, reason: "limit" };
 
   const now = new Date();
-  // Added as a set rather than pushed: two administrators adding the same
-  // address at once would otherwise store it twice.
   await addSettingListValue(db, SETTINGS_ID, "emails", email, {
     set: { updated_at: now, updated_by: addedBy || null },
     setOnInsert: { _id: SETTINGS_ID, created_at: now },

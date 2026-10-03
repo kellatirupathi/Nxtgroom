@@ -37,8 +37,6 @@ import { sealSecret } from "../services/secretBox.js";
 import { withMongoTransaction } from "../config/db.js";
 import rateLimit from "express-rate-limit";
 
-// Credential verification is a network call to Google; rate limit it so a
-// flood of forged tokens cannot exhaust the request budget.
 const googleLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,
@@ -47,8 +45,6 @@ const googleLoginLimiter = rateLimit({
   message: { detail: "Too many sign-in attempts. Please try again later." },
 });
 
-// Anonymous endpoints that send mail or test tokens. Tighter than the Google
-// limiter because each accepted request costs an outbound email.
 const passwordResetLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
@@ -57,11 +53,6 @@ const passwordResetLimiter = rateLimit({
   message: { detail: "Too many password reset attempts. Please try again later." },
 });
 
-/**
- * Greeting name for an account. Admin records carry their own name; a BOA's
- * lives on the linked boas document, so fall back to the email local part
- * rather than address the person as "there".
- */
 async function displayNameForUser(db, user) {
   if (user.name) return user.name;
   if (user.role === ROLES.BOA && user.reference_id) {
@@ -104,23 +95,14 @@ authRouter.post("/logout", (_req, res) => {
 
 authRouter.get("/me", getCurrentUser, asyncRoute(async (req, res) => {
   const settings = await getAccessSettings(req.app.locals.db);
-  // Read here rather than from the settings endpoint, which is super-admin
-  // only: a BOA opens the same record view and must see the same control.
   const notifications = await getNotificationSettings(req.app.locals.db);
   res.json({
     email: req.currentUser.email,
     role: req.currentUser.role,
     college_id: req.currentUser.collegeId,
     reanalyse_enabled: notifications.reanalyse_enabled,
-    // Sent so the interface can hide an action the server would refuse. The
-    // server still checks on every delete; this only keeps the UI honest.
     can_delete_records: canDeleteAttendance(req.currentUser, settings),
     can_delete_checkout: canDeleteCheckout(req.currentUser, settings),
-    // Whether this tablet's college identifies the instructor from the
-    // photograph. Resolved for the caller's own college, so two tablets signed
-    // in as different colleges get different answers, and sent here rather than
-    // read from the settings endpoint because that one is elevated-only and the
-    // BOA at the tablet is the person who needs it.
     face_identification: usesFaceIdentification(
       await getIdentificationSettings(req.app.locals.db),
       req.currentUser.collegeId
@@ -182,9 +164,6 @@ authRouter.post(
       return res.status(401).json({ detail: "Current password is incorrect" });
     }
 
-    // Bumping session_version invalidates every existing token for this user,
-    // including the one making this request, so a stolen token cannot survive
-    // a password change.
     await db.collection("users").updateOne(
       { _id: user._id },
       {
@@ -201,19 +180,10 @@ authRouter.post(
   })
 );
 
-/**
- * Starts a self-service reset. Always answers 200 with the same body: a
- * different response for a known versus unknown address would let anyone
- * enumerate which emails hold accounts.
- */
 authRouter.post(
   "/forgot-password",
   passwordResetLimiter,
   asyncRoute(async (req, res) => {
-    // Started before any lookup so a known and an unknown address take the same
-    // observable time. It lived in the change-password handler's scope, where
-    // this one could not see it, so every request here threw a ReferenceError
-    // and self-service reset answered 500 instead of the generic message.
     const minimumResponse = new Promise((resolve) => setTimeout(resolve, 300));
     const email = String(req.body?.email || "").trim().toLowerCase();
     const genericResponse = {
@@ -227,7 +197,6 @@ authRouter.post(
     const db = req.app.locals.db;
     const user = await db.collection("users").findOne({ email });
 
-    // Disabled accounts get no link; re-enabling is an administrator action.
     if (user && !user.disabled_at && Object.values(ROLES).includes(user.role)) {
       const token = await issueResetToken(db, { email, kind: "reset", ttlMs: RESET_TTL_MS });
       const name = await displayNameForUser(db, user);
@@ -243,9 +212,6 @@ authRouter.post(
         payload: {
           name,
           appUrl: appUrl(),
-          // Sealed, not raw. password_resets stores only a hash of this token
-          // precisely so a database copy cannot be replayed; a queued job
-          // holding the plaintext gave that back until the mail was sent.
           token_sealed: sealSecret(token),
           expiresInMinutes: Math.round(RESET_TTL_MS / 60000),
         },
@@ -256,7 +222,6 @@ authRouter.post(
   })
 );
 
-/** Lets the reset page show "this link expired" before asking for a password. */
 authRouter.get(
   "/reset-password/:token",
   passwordResetLimiter,
@@ -274,7 +239,6 @@ authRouter.get(
   })
 );
 
-/** Redeems a token and sets the password. Used by both invites and resets. */
 authRouter.post(
   "/reset-password",
   passwordResetLimiter,
@@ -332,16 +296,10 @@ authRouter.post(
   })
 );
 
-/** Advertises whether the Google button should render, so the UI never shows a dead control. */
 authRouter.get("/google/config", (_req, res) => {
   res.json({ enabled: isGoogleLoginEnabled(), client_id: googleClientId() || null });
 });
 
-/**
- * Sign-in only. A verified Google address must already belong to an active
- * user; this route never provisions accounts, so administrators keep sole
- * control of who exists via BOA management.
- */
 authRouter.post(
   "/google",
   googleLoginLimiter,
@@ -359,8 +317,6 @@ authRouter.post(
       .collection("users")
       .findOne({ email: verification.email });
 
-    // One message for "no such user", "disabled", and "bad role" so the
-    // endpoint cannot be used to enumerate which emails hold accounts.
     if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role)) {
       return res.status(403).json({
         detail: "This Google account is not authorised. Ask an administrator to add it first.",

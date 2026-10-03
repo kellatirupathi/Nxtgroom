@@ -47,7 +47,6 @@ const row = (overrides = {}) => ({
 
 test('the dates dropdown offers this week, last week, this month and a custom range', () => {
   assert.deepEqual(ESCALATION_PERIODS.map((option) => option.label), ['This week', 'Last week', 'This month', 'Custom range']);
-  // Saturday 3 Oct 2026: weeks run Monday to Sunday, a month is the calendar month.
   assert.deepEqual(periodRange('this_week', '2026-10-03'), { from: '2026-09-28', to: '2026-10-04' });
   assert.deepEqual(periodRange('last_week', '2026-10-03'), { from: '2026-09-21', to: '2026-09-27' });
   assert.deepEqual(periodRange('this_month', '2026-10-03'), { from: '2026-10-01', to: '2026-10-31' });
@@ -141,7 +140,6 @@ test('the page has its own address, for administrators only, and no menu lists i
   for (const menu of ['components/Sidebar.tsx', 'components/BottomNav.tsx']) {
     assert.ok(!source(menu).includes('escalations'), `${menu} must not list the page`);
   }
-  // Reached from "View all" on the Dashboard's escalation card.
   const dashboard = source('components/Dashboard.tsx');
   assert.match(dashboard, /<TileLink tone="rose" onClick=\{onViewAll\}>View all<\/TileLink>/);
   assert.match(dashboard, /onViewAll=\{\(\) => onNavigate\('escalations'\)\}/);
@@ -161,14 +159,11 @@ test('the table is Instructor, Institute and Dates, one clickable row per person
   }
   assert.match(page, /people\.map\(\(person\) => \(\s*<tr\s+key=\{person\.instructor_id\}\s+onClick=\{\(\) => setOpenId\(person\.instructor_id\)\}/);
   assert.match(page, /aria-label=\{`Open escalation details for \$\{person\.name\}`\}/);
-  // On a phone the institute moves under the name, so the dates fit.
   assert.ok(page.includes('<span className="block text-xs text-slate-500 md:hidden">{person.institute}</span>'));
-  // Each date in the cell carries its check-in and check-out photos and reports.
   assert.match(page, /person\.days\.map\(\(day\) => \([\s\S]*?<DayLinks row=\{day\} onPhoto=\{setPhoto\} \/>/);
   for (const label of ['Check-in photo of', 'Check-out photo of', 'Check-in report of', 'Check-out report of']) {
     assert.ok(page.includes(label), label);
   }
-  // Clicking the row opens the person's details: every run and day, both halves, remarks.
   assert.match(page, /role="dialog"[\s\S]*aria-labelledby="escalation-person-title"/);
   assert.match(page, /<Half label="Check-in" time=\{day\.check_in_time\} status=\{day\.check_in_status\} remarks=\{day\.check_in_remarks\} \/>/);
   assert.match(page, /<Half label="Check-out" time=\{day\.check_out_time\} status=\{day\.check_out_status\} remarks=\{day\.check_out_remarks\} \/>/);
@@ -180,7 +175,6 @@ test('the toolbar has search on the left, then the dates, institute, day and Exp
   const positions = order.map((piece) => page.indexOf(piece));
   assert.ok(positions.every((position) => position > 0), 'every control is on the page');
   assert.deepEqual([...positions].sort((left, right) => left - right), positions, order.join(' then '));
-  // The right-hand group is pushed to the right edge.
   const group = page.lastIndexOf('<div className="flex min-w-0 flex-wrap items-center gap-2 sm:ml-auto sm:justify-end">', positions[1]);
   assert.ok(group > positions[0] && group < positions[1]);
 });

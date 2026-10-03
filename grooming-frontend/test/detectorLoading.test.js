@@ -22,8 +22,6 @@ test('the model is served by this site, in a versioned folder, with every weight
   assert.deepEqual(paths, ['group1-shard1of3.bin', 'group1-shard2of3.bin', 'group1-shard3of3.bin']);
   const folder = MOVENET_MODEL_URL.replace(/model\.json$/, '');
   const sizes = paths.map((path) => statSync(publicFile(folder + path)).size);
-  // The sizes Google serves for MultiPose Lightning v1: a truncated copy would
-  // load and then fail on the first reading.
   assert.deepEqual(sizes, [4194304, 4194304, 1060230]);
 });
 
@@ -43,8 +41,6 @@ test('our copy is tried first, Google only if it cannot be reached, then the win
   const google = source.indexOf('poseDetection.SupportedModels.MoveNet,\n          config,');
   const prime = source.indexOf('await primeFullBodyDetector(detector, window.innerWidth, window.innerHeight);');
   assert.ok(ours > 0 && google > ours && prime > google, 'ours, then the fallback, then the preparation');
-  // Same model settings as before: only where it comes from and how its
-  // programs are built have changed.
   assert.match(source, /const MULTI_POSE_MAX_DIMENSION = 320;/);
   assert.match(source, /modelType: poseDetection\.movenet\.modelType\.MULTIPOSE_LIGHTNING,\s*enableTracking: true,\s*multiPoseMaxDimension: MULTI_POSE_MAX_DIMENSION,\s*minPoseScore: 0\.15,/);
   assert.match(source, /tf\.env\(\)\.set\('WEBGL_USE_SHAPES_UNIFORMS', true\);/);
@@ -52,20 +48,16 @@ test('our copy is tried first, Google only if it cannot be reached, then the win
 
 test('programs are built in parallel, and compile-only mode is always switched back off', () => {
   const source = read('src/lib/fullBodyDetector.ts').replace(/\r\n/g, '\n');
-  assert.match(source, /tf\.env\(\)\.set\('ENGINE_COMPILE_ONLY', true\);\s*try \{\s*output = model\.execute\(input\);\s*\} finally \{\s*\/\/[^\n]*\n\s*tf\.env\(\)\.set\('ENGINE_COMPILE_ONLY', false\);\s*\}/);
+  assert.match(source, /tf\.env\(\)\.set\('ENGINE_COMPILE_ONLY', true\);\s*try \{\s*output = model\.execute\(input\);\s*\} finally \{\s*tf\.env\(\)\.set\('ENGINE_COMPILE_ONLY', false\);\s*\}/);
   assert.match(source, /await backend\.checkCompileCompletionAsync\(\);\s*backend\.getUniformLocations\(\);/);
-  // reset() throws on the multi-person model; only the tracker is reset.
   assert.ok(!/detector\.reset\?\.\(\)/.test(source));
   assert.match(source, /detector\.tracker\?\.reset\?\.\(\);/);
 });
 
 test('the picture and network shapes match what readFrame and MoveNet use', () => {
-  // A tablet's portrait preview: 480 on the long side, as readFrame draws it.
   assert.deepEqual(analysisSize(736, 850), { width: 416, height: 480 });
-  // Already small enough: left as it is.
   assert.deepEqual(analysisSize(300, 400), { width: 300, height: 400 });
   assert.deepEqual(analysisSize(1024, 600), { width: 480, height: 281 });
-  // Long side 320, the other rounded up to a multiple of 32.
   assert.deepEqual(modelInputShape(416, 480), [320, 288]);
   assert.deepEqual(modelInputShape(360, 480), [320, 256]);
   assert.deepEqual(modelInputShape(480, 281), [192, 320]);
@@ -99,7 +91,6 @@ test('each preview shape is prepared once, shared by whoever asks, and never thr
 
     const broken = { estimatePoses: async () => { throw new Error('context lost'); } };
     await assert.doesNotReject(primeFullBodyDetector(broken, 500, 700));
-    // Nothing to prepare for no detector or a preview not yet laid out.
     await primeFullBodyDetector(null, 736, 850);
     await primeFullBodyDetector(detector, 0, 850);
     assert.equal(readings, 1);
@@ -110,7 +101,6 @@ test('each preview shape is prepared once, shared by whoever asks, and never thr
 
 test('loading settles even where it fails, so a camera never says it is starting for ever', async () => {
   assert.equal(fullBodyDetectorSettled(), false);
-  // No WebGL here: the same null a device without it gets.
   assert.equal(await loadFullBodyDetector(), null);
   assert.equal(fullBodyDetectorSettled(), true);
 });
@@ -127,7 +117,6 @@ test('both cameras say they are starting only while the detector has not loaded'
   assert.match(single, /if \(!fullBodyDetectorSettled\(\)\) setGuidance\(DETECTOR_STARTING_GUIDANCE\);\s*const detector = await loadFullBodyDetector\(\);/);
   const group = read('src/components/GroupCameraCapture.tsx');
   assert.match(group, /if \(!fullBodyDetectorSettled\(\)\) \{\s*setReading\(\(current\) => \(\{ \.\.\.current, guidance: DETECTOR_STARTING_GUIDANCE \}\)\);\s*\}\s*const detector = await loadFullBodyDetector\(\);/);
-  // The four-second fallback to the manual button is unchanged.
   assert.match(single, /\}, 4_000\);/);
   assert.match(group, /\}, 4_000\);/);
 });
@@ -136,7 +125,7 @@ test('both cameras prepare their own preview shape after loading, outside the fo
   for (const file of ['src/components/CameraCapture.tsx', 'src/components/GroupCameraCapture.tsx']) {
     assert.match(
       read(file),
-      /const detector = await loadFullBodyDetector\(\);\s*clearTimeout\(detectorGraceTimer\);\s*(?:\/\/[^\n]*\n\s*)+const preview = viewportRef\.current;\s*if \(preview\) await primeFullBodyDetector\(detector, preview\.clientWidth, preview\.clientHeight\);/,
+      /const detector = await loadFullBodyDetector\(\);\s*clearTimeout\(detectorGraceTimer\);\s*const preview = viewportRef\.current;\s*if \(preview\) await primeFullBodyDetector\(detector, preview\.clientWidth, preview\.clientHeight\);/,
       file,
     );
   }

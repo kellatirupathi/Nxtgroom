@@ -1,37 +1,11 @@
-/**
- * What one photograph at the tablet should do.
- *
- * The kiosk has no buttons: somebody stands in front of the camera and the
- * system works out whether this is their arrival or their departure. That
- * decision is made here, apart from the route, because it is the whole
- * behaviour of the screen and it must be provable without a camera, a database
- * or a clock.
- *
- * Every branch is a state the day can already be in, so nothing new is being
- * invented — the rules are the ones check-in and check-out already apply, read
- * in one place rather than chosen by whoever pressed a button.
- */
-
 export const KIOSK_ACTIONS = Object.freeze({
   CHECK_IN: "CHECK_IN",
   CHECK_OUT: "CHECK_OUT",
-  /** Recognised, but their day is already closed. Nothing to record. */
   ALREADY_DONE: "ALREADY_DONE",
-  /** Recognised and checked in, but too soon to close the day. */
   TOO_EARLY: "TOO_EARLY",
-  /** Nobody matched. No photo or attendance is saved. */
   NOT_RECOGNISED: "NOT_RECOGNISED",
 });
 
-/**
- * Decides the action from the day's record.
- *
- * `availability` is checkoutAvailability's verdict for that record, so the
- * timing rules — noon for a morning arrival, five minutes for an afternoon one —
- * are applied in exactly one place rather than restated here.
- *
- * Unknown faces are rejected before storage or attendance writes.
- */
 export function decideKioskAction({ matched, availability }) {
   if (!matched) return KIOSK_ACTIONS.NOT_RECOGNISED;
   switch (availability) {
@@ -44,20 +18,10 @@ export function decideKioskAction({ matched, availability }) {
     case "already_checked_out_today":
       return KIOSK_ACTIONS.ALREADY_DONE;
     default:
-      // An unknown verdict must not silently become a check-in, which would
-      // write a second record for a day that already has one.
       return KIOSK_ACTIONS.ALREADY_DONE;
   }
 }
 
-/**
- * What the tablet says, for each outcome.
- *
- * The popup is the only confirmation anybody gets: there is no button press to
- * review and no screen to read afterwards. So each message names the person and
- * says what was recorded, and a refusal says why rather than only that it
- * failed.
- */
 export function describeKioskAction(action, { instructorName, opensAtLabel, minutesRemaining } = {}) {
   const name = instructorName || "Instructor";
   switch (action) {
@@ -92,7 +56,6 @@ export function describeKioskAction(action, { instructorName, opensAtLabel, minu
   }
 }
 
-/** Whether this outcome wrote anything, for the counters and the screen. */
 export function kioskActionRecorded(action) {
   return action === KIOSK_ACTIONS.CHECK_IN
     || action === KIOSK_ACTIONS.CHECK_OUT;

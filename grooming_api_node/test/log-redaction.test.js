@@ -2,17 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { app, loggedPath } from "../server.js";
 
-/**
- * A public report URL carries the recipient's report token in its path, and
- * that token is the only credential protecting their photographs and their
- * whole report history. The request log recorded req.path verbatim, so every
- * report a recipient opened copied a working credential into the platform log
- * stream and everything downstream of it.
- */
-
 test("a report token never reaches the log", () => {
-  // Deliberately repetitive. The value is irrelevant to the assertion, and a
-  // random-looking fixture reads to a secret scanner as a real credential.
   const token = "tokentokentokentoken";
   for (const path of [
     `/api/v2/reports/${token}/day/2026-01-05`,
@@ -34,8 +24,6 @@ test("the rest of the path survives, so the log still says what was requested", 
 });
 
 test("cron paths under the same prefix stay readable", () => {
-  // They carry no secret, and an operator needs to tell the scheduled jobs
-  // apart in the log.
   for (const path of [
     "/api/v2/reports/cron/weekly-reports",
     "/api/v2/reports/cron/attendance-reminders",
@@ -52,7 +40,6 @@ test("a password-reset or invitation token never reaches the log", () => {
     loggedPath(`/api/v2/auth/reset-password/${token}`),
     "/api/v2/auth/reset-password/<token>"
   );
-  // The POST that completes a reset has no token in its path.
   assert.equal(loggedPath("/api/v2/auth/reset-password"), "/api/v2/auth/reset-password");
 });
 
@@ -62,12 +49,6 @@ test("paths outside the report prefix are untouched", () => {
   }
 });
 
-/**
- * The request log is written when the response finishes. By then a mounted
- * router has cut its prefix off req.path, so a report request was logged as
- * "/<token>/day/..." and slipped past the redaction above, which only matches
- * the full "/api/v2/reports/..." path. These go through the real middleware.
- */
 let server;
 let baseUrl;
 
@@ -93,8 +74,6 @@ async function requestLogFor(path) {
   try {
     const response = await fetch(`${baseUrl}${path}`);
     await response.arrayBuffer();
-    // The log line is written on "finish", which can land just after the
-    // client has the body.
     await new Promise((resolve) => setTimeout(resolve, 20));
   } finally {
     console.log = originalLog;

@@ -7,7 +7,6 @@ export interface CapturePosture {
 
 export const POSTURE_HOLD_MS = 1_000;
 
-/** Check visible arm landmarks, using torso-relative distances at any camera size. */
 export function assessCapturePosture(points: Keypoint[], frameHeight?: number, frameWidth?: number): CapturePosture {
   const find = (name: string) => points.find((point) => point.name === name
     && (point.score ?? 0) >= 0.35 && Number.isFinite(point.x) && Number.isFinite(point.y)
@@ -53,7 +52,6 @@ export function assessCapturePosture(points: Keypoint[], frameHeight?: number, f
   return { ready: true, guidance: null };
 }
 
-/** Any unusable frame breaks the hold, including one received during cooldown. */
 export function postureHoldStart(ready: boolean, previous: number | null, now: number): number | null {
   return ready ? previous ?? now : null;
 }

@@ -5,17 +5,6 @@ import { preparePhoto } from '../lib/imageCapture';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { useToast } from './useToast';
 
-/**
- * The reference face photograph one instructor is recognised against.
- *
- * Recognition compares a check-in photo to what is enrolled here, so a poor
- * reference does not fail loudly — it produces confident matches against the
- * wrong person for as long as it stays enrolled. The server refuses a photo
- * with no face, with several faces, or too blurry to use; this component's job
- * is to carry that refusal back in words an admin can act on, rather than as a
- * status code.
- */
-
 export interface ReferencePhotoState {
   has_reference: boolean;
   face_count: number;
@@ -24,16 +13,9 @@ export interface ReferencePhotoState {
 }
 
 interface ReferencePhotoFieldProps {
-  /** Absent while creating: there is no instructor to attach a photo to yet. */
   instructorId?: string | null;
-  /**
-   * Create mode holds the chosen file until the instructor exists, then uploads
-   * it. Edit mode uploads immediately, because the record is already there.
-   */
   mode: 'create' | 'edit';
-  /** Create mode only: hands the chosen file up so the form can upload it. */
   onFileSelected?: (file: File | null) => void;
-  /** Create mode only: a photo is required before the instructor can be saved. */
   required?: boolean;
 }
 
@@ -56,8 +38,6 @@ export default function ReferencePhotoField({
   const fileInput = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
 
-  // Revoked on replacement and unmount: an object URL held for the life of the
-  // dialog leaks the decoded image for every photo the admin previews.
   useEffect(() => () => {
     if (localPreview) URL.revokeObjectURL(localPreview);
   }, [localPreview]);
@@ -76,8 +56,6 @@ export default function ReferencePhotoField({
     } catch (requestError) {
       if (signal?.aborted) return;
       const status = (requestError as { status?: number })?.status;
-      // 401 is owned by the central session handler, and 503 means the AWS
-      // collection has not been created yet — neither is this screen's error.
       if (status === 401) return;
       if (status === 503) {
         setNotConfigured(true);
@@ -95,22 +73,12 @@ export default function ReferencePhotoField({
     return () => controller.abort();
   }, [loadState]);
 
-  /**
-   * Validates and downscales before anything is sent.
-   *
-   * Same two-stage order the attendance capture uses: the raw camera file is
-   * checked leniently, then the downscaled result is checked against the limit
-   * the server actually enforces. Checking the 8 MB rule on the original would
-   * reject an ordinary 12MP photo that becomes a few hundred KB once resized.
-   */
   const prepare = async (file: File): Promise<File | null> => {
     const sourceProblem = validateSourcePhoto(file);
     if (sourceProblem) {
       setError(sourceProblem);
       return null;
     }
-    // preparePhoto returns the downscaled file alongside its dimensions, so the
-    // File itself has to be unwrapped before validating or uploading it.
     const { file: prepared } = await preparePhoto(file);
     const problem = validatePhoto(prepared);
     if (problem) {
@@ -139,8 +107,6 @@ export default function ReferencePhotoField({
       const form = new FormData();
       form.append('photo', prepared, prepared.name || 'reference.jpg');
       form.append('mode', uploadMode);
-      // FormData is passed through untouched so the browser sets its own
-      // multipart boundary; apiJson would stringify it into "[object Object]".
       const result = await apiFetch<{ face_count?: number; retired_faces?: number }>(
         `/api/v2/instructors/${encodeURIComponent(instructorId)}/face`,
         { method: 'POST', body: form, timeoutMs: 60_000 },
@@ -172,9 +138,6 @@ export default function ReferencePhotoField({
     if (!file) return;
     setError('');
 
-    // Create mode cannot upload yet: the instructor does not exist, so there is
-    // nothing to attach a face to. The file is held and the form sends it once
-    // the record has an id.
     if (mode === 'create') {
       const prepared = await prepare(file);
       if (!prepared) {
@@ -186,9 +149,6 @@ export default function ReferencePhotoField({
       return;
     }
 
-    // Reached only from the Add buttons. Replace has its own path, so adding is
-    // correct whether or not a face is already enrolled: the server keeps the
-    // existing ones and drops the oldest only at the cap.
     await upload(file, MODE_ADD);
   };
 
@@ -303,8 +263,6 @@ export default function ReferencePhotoField({
 
               {enrolled && mode === 'edit' ? (
                 <>
-                  {/* Add keeps the existing faces, so recognition improves with
-                      each correction instead of resetting to one photograph. */}
                   <button
                     type="button"
                     onClick={handleAdd}

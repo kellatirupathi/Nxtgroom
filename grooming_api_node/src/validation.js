@@ -9,8 +9,6 @@ export const boaSchema = z.object({
   employee_id: z.string().trim().min(1).max(50),
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-  // Omitted means "invite them to choose their own"; the route then emails a
-  // one-time link instead of storing a password nobody selected.
   password: z.preprocess(
     (value) => (value === "" || value == null ? undefined : value),
     z.string().min(12).max(128).optional()
@@ -30,18 +28,12 @@ export const boaUpdateSchema = z.object({
 });
 
 export const instructorSchema = z.object({
-  // Optional: instructors synced from BigQuery are keyed by instructor_user_id
-  // and many carry no employee id at all.
   employee_id: z.preprocess(
     (value) => (value === "" || value == null ? undefined : value),
     z.string().trim().max(50).optional()
   ),
   name: z.string().trim().min(2).max(120),
   role: z.string().trim().min(1).max(80),
-  // Mirrors role onto the field the tables display. Synced instructors are
-  // shown by instructor_role, so an edit that only set role would appear to
-  // do nothing. A later sync restores the BigQuery value, which is correct:
-  // the warehouse is authoritative for people it knows about.
   instructor_role: z.preprocess(
     (value) => (value === "" || value == null ? undefined : value),
     z.string().trim().max(80).optional()
@@ -55,13 +47,6 @@ export const instructorSchema = z.object({
   ),
 });
 
-/**
- * Gender on its own, for the inline editor in the instructor table.
- *
- * Separate from instructorSchema because that requires a college and email,
- * which synced instructors do not have — demanding them here would make the
- * field uneditable for exactly the people whose gender is missing.
- */
 export const instructorGenderSchema = z.object({
   gender: z
     .string()
@@ -70,14 +55,6 @@ export const instructorGenderSchema = z.object({
     .pipe(z.enum(["MALE", "FEMALE"])),
 });
 
-/**
- * One batch of spreadsheet rows for the instructor import.
- *
- * Only the shape is checked here: every cell is taken as text and bounded in
- * length. What the values must be is decided per row by the import service,
- * so a bad row is reported against its row number instead of failing the
- * whole batch with a 422.
- */
 const importCell = z.preprocess(
   (value) => (value == null ? undefined : String(value)),
   z.string().max(2048).optional()
@@ -104,9 +81,6 @@ export const instructorImportSheetSchema = z.object({
 });
 
 export const checkoutSchema = z.object({
-  // Optional because a face-only college sends no id: the photograph decides
-  // whose session is being closed. The route still requires one in selector
-  // mode, so relaxing it here does not let an unidentified check-out through.
   instructor_id: z.preprocess(
     (value) => (value === "" || value == null ? undefined : value),
     z.string().trim().min(1).max(100).optional()
@@ -151,8 +125,6 @@ export function validate(schema) {
 export const adminSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-  // Optional for the same reason as boaSchema: a blank password means the new
-  // administrator receives an invitation link instead.
   password: z.preprocess(
     (value) => (value === "" || value == null ? undefined : value),
     z.string().min(12).max(128).optional()
@@ -162,7 +134,6 @@ export const adminSchema = z.object({
 export const adminUpdateSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-  // Blank means "leave the existing credential alone".
   password: z.preprocess(
     (value) => (value === "" || value === null ? undefined : value),
     z.string().min(12).max(128).optional()

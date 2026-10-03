@@ -10,7 +10,6 @@ interface MissingGenderModalProps {
   onSaved: (instructorId: string, gender: string) => void;
 }
 
-/** Collects a required profile field at the point where it is first needed. */
 export default function MissingGenderModal({
   instructor,
   onClose,
@@ -47,8 +46,6 @@ export default function MissingGenderModal({
         method: 'PATCH',
         body: { gender },
       });
-      // The attendance roster is cached for fast reloads. Do not allow that
-      // cache to restore the missing value after this confirmed mutation.
       invalidateCache('/api/v2/instructors');
       onSaved(instructor._id, gender);
       toast.success('Gender updated', {

@@ -53,7 +53,6 @@ function StatusBadge({ status }: { status?: string }) {
   }
 }
 
-/** Formal / Saree / Kurti, classified by the AI independently of pass or fail. */
 function AttireTag({ attire }: { attire?: string | null }) {
   const labels: Record<string, { text: string; style: string }> = {
     FORMAL: { text: 'Formal', style: 'bg-sky-50 text-sky-700 border-sky-200' },
@@ -63,8 +62,6 @@ function AttireTag({ attire }: { attire?: string | null }) {
     KURTA_PAJAMA: { text: 'Kurta + Payjama', style: 'bg-amber-50 text-amber-700 border-amber-200' },
   };
   const match = attire ? labels[attire] : undefined;
-  // UNKNOWN and missing both render as a dash: an unclassified photo must not
-  // be presented as though it were one of the three.
   if (!match) return <span className="text-xs text-slate-300">--</span>;
   return (
     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-bold whitespace-nowrap ${match.style}`}>
@@ -73,13 +70,6 @@ function AttireTag({ attire }: { attire?: string | null }) {
   );
 }
 
-/**
- * Three or more non-compliant results in the instructor's week.
- *
- * It belongs to the instructor's week, not to this row, so a compliant row in
- * an escalated week carries it too. Solid red, to stand apart from the
- * Non-compliant badge beside it.
- */
 function EscalationTag({ escalation, today }: { escalation?: AttendanceEscalation | null; today: string }) {
   const label = escalationLabel(escalation, today);
   if (!label) return <span className="text-xs text-slate-300">--</span>;
@@ -94,13 +84,6 @@ function EscalationTag({ escalation, today }: { escalation?: AttendanceEscalatio
   );
 }
 
-/**
- * Every column of the table, which is the same on every screen.
- *
- * Each width is written twice: below lg for phones and tablets, where the
- * cells are tighter, and from lg the desktop's own. The table's total width
- * (RECORD_TABLE_WIDTH) is the sum of these, which table-fixed needs.
- */
 const RECORD_COLUMNS = [
   { label: 'Instructor Name', width: 'w-[160px] lg:w-[200px]' },
   { label: 'Role', width: 'w-[130px] lg:w-[150px]' },
@@ -117,31 +100,17 @@ const RECORD_COLUMNS = [
   { label: 'Remark', width: 'w-[260px] lg:w-[320px]' },
 ] as const;
 
-/** The checkbox column, when this account may delete records. */
 const SELECT_COLUMN_WIDTH = 'w-10 lg:w-12';
 
-/**
- * The sums of the widths above, with and without the checkbox column. The
- * desktop's used to say 2010px, short of its own columns since Escalation was
- * added; a fixed table is never narrower than its columns, so it has always
- * drawn at these widths.
- */
 const RECORD_TABLE_WIDTH = {
   withSelect: 'w-[1900px] lg:w-[2158px]',
   withoutSelect: 'w-[1860px] lg:w-[2110px]',
 } as const;
 
-/** Tighter on phones and tablets; the desktop's p-4 from lg. */
 const HEAD_CELL = 'px-3 py-3 lg:p-4';
 const CELL = 'px-3 py-2.5 lg:p-4';
-/** Small print on a phone, the desktop's size from sm. */
 const CELL_TEXT = 'text-xs sm:text-sm';
 
-/**
- * The name stays in view while the other columns are swiped past on a phone or
- * tablet. Opaque, so the cells sliding underneath do not show through, and
- * with a rule on its right edge. From lg the table is as it always was.
- */
 const PINNED_HEAD = 'max-lg:sticky max-lg:left-0 max-lg:z-20 bg-slate-50 max-lg:shadow-[inset_-1px_0_0_rgb(226_232_240)]';
 const PINNED_CELL = 'max-lg:sticky max-lg:left-0 max-lg:z-[1] max-lg:shadow-[inset_-1px_0_0_rgb(226_232_240)]';
 
@@ -154,8 +123,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  // Saved for the tab, so opening a record and coming back keeps the table
-  // as it was left; a new tab starts on today with nothing narrowed.
   const [savedFilters] = useState(() => loadRecordsFilters(undefined, today));
   const [preset, setPreset] = useState<DatePreset>(savedFilters.preset);
   const [range, setRange] = useState<DateRange>(savedFilters.range);
@@ -193,9 +160,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     setRecords([]);
     setLoading(true);
 
-    // Poll quickly during analysis and slowly while idle. After the first
-    // complete range load, every poll asks only for rows updated since the
-    // previous request, so an all-time view does not re-download every page.
     const schedule = (hasPendingWork: boolean) => {
       clearTimeout(timer);
       if (!disposed && document.visibilityState === 'visible') {
@@ -233,8 +197,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
         } else {
           currentRows = rows;
         }
-        // A refresh fetches only changed rows, so an escalation that arrives
-        // with today's row is copied to the instructor's earlier rows that week.
         currentRows = spreadEscalation(currentRows);
         syncCursor = requestStartedAt;
         pendingWork = currentRows.some(
@@ -310,9 +272,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     if (canOpenRecord(record.status)) onRowClick(record);
   };
 
-  // One cell across the table. Below lg the table is far wider than the
-  // screen, so the message is held to the visible width at the left rather
-  // than centred somewhere off to the right.
   const emptyRow = (message: string) => (
     <tr>
       <td colSpan={RECORD_COLUMNS.length + (canBulkDelete ? 1 : 0)} className="py-8 lg:p-8 text-slate-400">
@@ -329,18 +288,12 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     setRange(nextRange);
   };
 
-  /**
-   * How many filters differ from the defaults, for the badge on the button.
-   * The panel hides them, so without the count a filtered table looks like a
-   * short day.
-   */
   const activeFilterCount = (preset !== 'today' ? 1 : 0)
     + (collegeFilter ? 1 : 0)
     + (roleFilter ? 1 : 0)
     + (statusFilter ? 1 : 0)
     + (escalationFilter ? 1 : 0);
 
-  // Stable, because the panel re-subscribes its Escape handler when this changes.
   const closeFilters = useCallback(() => setFiltersOpen(false), []);
 
   const clearAllFilters = () => {
@@ -348,7 +301,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     setRoleFilter('');
     setStatusFilter('');
     setEscalationFilter('');
-    // Only reload when the dates actually change; Today is already loaded.
     if (preset !== 'today') handleRangeChange('today', rangeForPreset('today', today));
   };
 
@@ -404,18 +356,12 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
 
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="daily-records-title" aria-busy={loading}>
-      {/* One band: the title on the left, the filters on the right. The
-          subtitle is gone and the heading no longer wraps, so the filters stay
-          on the same line instead of pushing the table down a row. Labels live
-          in aria-label, since the controls read clearly without visible ones. */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 md:mb-5">
         <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
           <History size={22} className="text-indigo-600" aria-hidden="true" />
           Daily Attendance Records
         </h2>
 
-        {/* On a phone: search takes the row, Filters and Export become icon
-            buttons beside it, and every control is a full touch target. */}
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-1">
           {canBulkDelete && selectedIds.size > 0 && (
             <button
@@ -459,7 +405,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               </span>
             )}
           </button>
-          {/* One tap back to today's whole table: every filter and the search. */}
           {(activeFilterCount > 0 || search) && (
             <button
               type="button"
@@ -475,8 +420,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               <span className="hidden sm:inline">Clear</span>
             </button>
           )}
-          {/* Exports the rows on screen - search and every filter applied -
-              so what is downloaded is what was being looked at. */}
           <button
             type="button"
             onClick={() => {
@@ -520,28 +463,8 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      {/* One table on every screen. It fills the height left under the
-          header, so its own header row stays in view while the rows scroll,
-          and on a phone or tablet the columns are swiped sideways past the
-          pinned name. The minimum height keeps it usable on a phone held
-          sideways; the page scrolls then instead. */}
       <div className="flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col max-lg:min-h-[20rem]">
-        {/* Contained, so a sideways swipe that reaches the end does not turn
-            into the browser's back gesture. */}
         <div className="overflow-x-auto flex-1 max-lg:overscroll-x-contain">
-          {/*
-            table-fixed with explicit widths, because auto layout was sizing
-            columns from their content and wrapping "Vikram Balai" and
-            "Aug 17, 2026" onto two and three lines. Every column now gets a
-            width that fits one line, and the table scrolls horizontally rather
-            than compressing to fit.
-          */}
-          {/*
-            An explicit total width, not w-max. w-max sizes the table to its
-            content, which let the Remark column grow to fit a paragraph and
-            scroll the row far off screen instead of truncating. The total is
-            the sum of RECORD_COLUMNS' widths, for each screen size.
-          */}
           <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? RECORD_TABLE_WIDTH.withSelect : RECORD_TABLE_WIDTH.withoutSelect}`}>
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
@@ -601,8 +524,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                         />
                       </td>
                     )}
-                    {/* truncate on every text cell: one line, an ellipsis when
-                        it overflows, and the full value in the tooltip. */}
                     <td className={`${CELL} ${PINNED_CELL} ${selected ? 'max-lg:bg-indigo-50' : 'max-lg:bg-white'} ${canOpen && !selected ? 'max-lg:group-hover:bg-slate-50' : ''} font-bold text-slate-800 truncate max-lg:text-sm`} title={record.instructor_name || ''}>{record.instructor_name}</td>
                     <td className={`${CELL} ${CELL_TEXT} font-medium text-slate-500 truncate`} title={record.instructor_role || ''}>{record.instructor_role || '--'}</td>
                     <td className={`${CELL} ${CELL_TEXT} font-medium text-slate-600 truncate`} title={record.college_name || ''}>{record.college_name || 'Unknown'}</td>
@@ -624,8 +545,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                     <td className={`${CELL} whitespace-nowrap`}><EscalationTag escalation={record.escalation} today={today} /></td>
                     <td className={`${CELL} whitespace-nowrap`}><AttireTag attire={record.attire_type} /></td>
                     <td className={CELL}>
-                      {/* stopPropagation: the row itself opens the evaluation
-                          detail, and viewing a photo should not also do that. */}
                       <div className="flex items-center gap-1.5 whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                         {record.check_in_photo_key ? (
                           <button
@@ -654,9 +573,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                       </div>
                     </td>
                     <td className={CELL}>
-                      {/* The public report an instructor is emailed, one link
-                          per half. New tab, and the click is kept off the row
-                          so it does not also open the internal detail view. */}
                       <div className="flex items-center gap-1.5 whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                         {record.report_token ? (
                           <>

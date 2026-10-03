@@ -8,13 +8,10 @@ import { useToast } from './useToast';
 import { currentIndiaMonth, monthLabel, shiftMonth } from '../lib/reportMonths';
 
 const DAYS_PATH = '/api/v2/settings/daily-report/days';
-/** How often the counts refresh while the tab is on screen. */
 const REFRESH_MS = 60_000;
 
 export interface ReportDay {
-  /** YYYY-MM-DD */
   date: string;
-  /** DD/MM/YYYY */
   date_label: string;
   checkins: number;
   checkouts: number;
@@ -31,7 +28,6 @@ interface ReportLinkProps {
   exporting: boolean;
 }
 
-/** A day's report link, with buttons that copy it and export the day. */
 function ReportLink({ day, onCopy, onExport, exporting }: ReportLinkProps) {
   if (!day.report_url) return <span className="text-slate-400">No check-ins</span>;
   const url = day.report_url;
@@ -70,14 +66,6 @@ function ReportLink({ day, onCopy, onExport, exporting }: ReportLinkProps) {
   );
 }
 
-/**
- * Settings → Reports: one row per day, with that day's check-ins, check-outs,
- * those checked in but not yet out, and the link to the day's full report.
- *
- * The link is the day's own - a random UUID after the date - and the same one
- * that day's daily report emails carry. The page behind it reads the data
- * when opened, and the counts here refresh every minute, so both are live.
- */
 export default function ReportsTab() {
   const latestMonth = currentIndiaMonth();
   const [month, setMonth] = useState(latestMonth);
@@ -130,10 +118,6 @@ export default function ReportsTab() {
     }
   };
 
-  /**
-   * Downloads one whole day as CSV: the same rows, read from the same place,
-   * as the day's report page exports.
-   */
   const exportDay = async (day: ReportDay) => {
     const path = day.report_url ? dayReportApiPath(day.report_url) : null;
     if (!path) return;
@@ -217,7 +201,6 @@ export default function ReportsTab() {
         <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>
       )}
 
-      {/* Phones: one card per day. */}
       <ul className="flex flex-col gap-3 md:hidden">
         {loading ? (
           <li className="rounded-md border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">Loading reports…</li>
@@ -265,7 +248,6 @@ export default function ReportsTab() {
         </table>
       </div>
 
-      {/* The daily report emails: switch, send times, recipients. */}
       <DailyReportSettings />
     </section>
   );

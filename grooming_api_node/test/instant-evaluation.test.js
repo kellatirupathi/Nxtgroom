@@ -2,18 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { onEvaluationQueued } from "../src/services/evaluationWorker.js";
 
-/**
- * A check-in returns 202 and the analysis runs on the worker. The loop already
- * drains back-to-back while jobs exist and waits only when it finds the queue
- * empty — which is exactly the state a fresh check-in arrives into. That wait
- * was dead time between accepting the photograph and starting the analysis,
- * caused only by the next poll not having come round yet.
- *
- * enqueueEvaluation now signals the idle loop. The polling is still what
- * guarantees delivery: the signal is in-process, so it reaches nobody when the
- * API and the workers run as separate services.
- */
-
 function fakeDb() {
   const jobs = new Map();
   return {
@@ -66,8 +54,6 @@ test("the signal arrives after the job is readable, not before", async () => {
   });
   try {
     await enqueueEvaluation(db, payload());
-    // Waking before the write lands would send the worker to an empty queue,
-    // and it would go back to sleep having done nothing.
     assert.ok(jobVisibleWhenWoken, "the job must exist by the time the worker is woken");
   } finally {
     stop();
@@ -78,8 +64,6 @@ test("a listener that throws cannot fail the check-in", async () => {
   const { enqueueEvaluation } = await import("../src/services/evaluationWorker.js");
   const stop = onEvaluationQueued(() => { throw new Error("worker exploded"); });
   try {
-    // The photograph is already stored and the record already written. A
-    // wake-up is an optimisation and must never turn that into a failure.
     await enqueueEvaluation(fakeDb(), payload());
   } finally {
     stop();

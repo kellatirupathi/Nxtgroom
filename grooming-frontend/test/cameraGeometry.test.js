@@ -32,7 +32,6 @@ test('matching aspect ratios save the complete sensor frame', () => {
 });
 
 test('capture saves exactly what the preview shows - the whole camera view', () => {
-  // No outline crops the photo any more: the frame is the whole preview.
   assert.deepEqual(BODY_GUIDE_BOUNDS, { left: 0, top: 0, width: 1, height: 1 });
   const visible = coverSourceRect(1920, 1080, 900, 1600);
   const crop = bodyGuideSourceRect(1920, 1080, 900, 1600);
@@ -45,7 +44,6 @@ test('the single camera draws no outline to stand in', async () => {
   assert.ok(!camera.includes('BODY_GUIDE_BOUNDS'), 'the outline was drawn from the guide bounds');
   assert.ok(!camera.includes('<rect'), 'an outline shape is drawn on the camera again');
   assert.ok(!/stand in the outline/i.test(camera));
-  // What is photographed is still what the preview shows.
   assert.match(camera, /const crop = bodyGuideSourceRect\(/);
 });
 

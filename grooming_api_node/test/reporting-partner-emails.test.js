@@ -10,22 +10,6 @@ import {
 } from "../src/services/evaluationWorker.js";
 import { buildEscalationEmail, buildGroomingAlertEmail } from "../src/services/emailService.js";
 
-/**
- * What reporting partners receive.
- *
- * Two additions, both alongside what was already sent and neither replacing it:
- *
- *  - a report for every COMPLIANT result, so partners hear about the
- *    instructors getting it right and not only the failures;
- *  - an URGENT escalation when one instructor fails three or more times in a
- *    Monday-to-Sunday week, sent again at each further failure that week, each
- *    listing the whole week.
- *
- * The end-to-end tests drive the worker's real completion path against a small
- * in-memory database, and read the mail queue it leaves behind: that queue is
- * exactly what would be emailed.
- */
-
 function matches(doc, filter = {}) {
   for (const [key, condition] of Object.entries(filter)) {
     if (key === "$or") {
@@ -70,7 +54,6 @@ function memoryDb(seed = {}) {
           return { toArray: async () => result, project: () => ({ toArray: async () => result }) };
         },
         async updateOne(filter, update, options = {}) {
-          // Lease bookkeeping is the worker's concern, not these tests'.
           if (name === "evaluation_jobs") return { matchedCount: 1, modifiedCount: 1 };
           const doc = docs.find((candidate) => matches(candidate, filter));
           if (!doc) {
@@ -102,7 +85,6 @@ function world({ attendance = [], rpSettings = {} } = {}) {
   });
 }
 
-/** One attendance day for Himanshu. */
 const day = (id, attendanceDay, extra = {}) => ({
   _id: id,
   instructor_id: "i1",
@@ -112,7 +94,6 @@ const day = (id, attendanceDay, extra = {}) => ({
   ...extra,
 });
 
-/** Completes one evaluation through the worker's real path. */
 async function complete(db, { attendanceId, kind = "checkin", overall = "NON_COMPLIANT", summary = "Sneakers instead of formal shoes." }) {
   const attendance = db.docs("attendance").find((doc) => doc._id === attendanceId);
   db.docs("evaluations").push({
@@ -150,9 +131,7 @@ test("a compliant check-in now reaches every reporting partner, and only them", 
     assert.equal(job.payload.forReviewer, true);
     assert.match(job.payload.reportUrl, /\/reports\/tok-himanshu\/day\/2026-09-25\/check-in$/);
   }
-  // The instructor already gets their own report for every result.
   assert.equal(reports.some((job) => job.to_email === INSTRUCTOR.email), false);
-  // Nothing about a failure is sent for a pass.
   assert.equal(byPrefix(db, ":grooming-alert:").length, 0);
   assert.equal(byPrefix(db, "escalation:").length, 0);
 });
@@ -208,7 +187,6 @@ test("the third check-in day in a row escalates to every partner, listing the ru
     "Sneakers instead of formal shoes.",
   ]);
   assert.match(payload.occurrences[1].reportUrl, /\/day\/2026-09-22\/check-in$/);
-  // Sent in addition to the ordinary alert, never instead of it.
   assert.equal(byPrefix(db, "wed:grooming-alert:checkin:").length, 3);
 });
 
@@ -224,7 +202,6 @@ test("a fourth day in a row sends a new escalation; a repeat of the third sends 
   await complete(db, { attendanceId: "wed" });
   assert.equal(byPrefix(db, "escalation:i1:streak:2026-09-21:3:").length, 2);
 
-  // The same evaluation finishing twice - a retry - must not email twice.
   await complete(db, { attendanceId: "wed" });
   assert.equal(byPrefix(db, "escalation:").length, 2);
 
@@ -236,7 +213,6 @@ test("a fourth day in a row sends a new escalation; a repeat of the third sends 
 });
 
 test("an absent day is skipped: Monday, then Wednesday and Thursday, escalates on Thursday", async () => {
-  // The example from the team: present Monday, absent Tuesday, present after.
   const db = world({
     attendance: [
       day("mon", "2026-09-21", { status: "non_compliant", remarks: "One." }),
@@ -271,7 +247,6 @@ test("a check-in with no verdict is skipped like an absence; a compliant one sta
 
 test("three failures that are not three check-ins in a row do not escalate", async () => {
   const cases = {
-    // Three results on two days: the check-out does not count.
     "two days, three results": [
       [
         day("mon", "2026-09-21", {
@@ -308,7 +283,6 @@ test("three failures that are not three check-ins in a row do not escalate", asy
     assert.equal(byPrefix(db, "escalation:").length, 0, name);
   }
 
-  // A failed check-out never starts or extends a run.
   const checkout = world({
     attendance: [
       day("mon", "2026-09-21", { status: "non_compliant" }),
@@ -418,7 +392,6 @@ test("the escalation says URGENT, how many times, and every occurrence", () => {
     assert.ok(email.text.includes(needle), `text is missing ${needle}`);
     assert.ok(email.html.includes(needle), `html is missing ${needle}`);
   }
-  // Times are shown in India time: 04:00 UTC is 09:30 IST.
   assert.match(email.text, /09:30/);
   assert.ok(email.html.includes("Hair &lt;on&gt; forehead."), "summaries are escaped");
 });

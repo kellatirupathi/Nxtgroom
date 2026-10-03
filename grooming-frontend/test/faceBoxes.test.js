@@ -3,23 +3,8 @@ import assert from 'node:assert/strict';
 import { faceBoxPixels, faceBoxesFromPoses } from '../src/lib/faceBoxes.ts';
 import { readPoses, readKeypoints } from '../src/lib/fullBodyDetector.ts';
 
-/**
- * The boxes drawn on faces in the live preview.
- *
- * Decoration, and the tests are written on that basis: the thing that must stay
- * true is that adding them changed no decision anywhere. A box is shown to the
- * person in front of the camera and read by nothing.
- *
- * The one property that genuinely matters for the person looking at it is
- * mirroring. The front-camera preview is flipped, and a box drawn without
- * accounting for that lands on the opposite side of the screen from the face —
- * which looks like a bug in the face detection rather than in an overlay, and
- * the front camera is now the default everywhere.
- */
-
 const FRAME = { frameWidth: 480, frameHeight: 360 };
 
-/** One person, with their head around `x`. */
 function person(x, { landmarks = 'full', shoulders = true, id } = {}) {
   const head = {
     full: [
@@ -52,10 +37,8 @@ test('a box covers the face it was built from', () => {
   const top = box.top * FRAME.frameHeight;
   const bottom = (box.top + box.height) * FRAME.frameHeight;
 
-  // Both ears are inside it, and so is the nose.
   assert.ok(left < 222 && right > 258, `box spans ${left}-${right}, ears are at 222 and 258`);
   assert.ok(top < 94 && bottom > 100, `box spans ${top}-${bottom}, eyes at 94 and nose at 100`);
-  // A face is taller than it is wide, in pixels rather than in ratios.
   assert.ok((bottom - top) > (right - left));
   assert.equal(box.confident, true);
 });
@@ -67,8 +50,6 @@ test('the front camera mirrors the box, or it lands on the wrong person', () => 
   assert.equal(mirrored.width, normal.width, 'mirroring must not resize anything');
   assert.equal(mirrored.top, normal.top, 'mirroring is horizontal only');
 
-  // A face a quarter of the way across becomes one three quarters across: the
-  // two boxes must sit either side of the centre line, the same distance from it.
   const normalCentre = normal.left + normal.width / 2;
   const mirroredCentre = mirrored.left + mirrored.width / 2;
   assert.ok(Math.abs((normalCentre + mirroredCentre) - 1) < 1e-9, 'the mirror is not about the centre');
@@ -76,8 +57,6 @@ test('the front camera mirrors the box, or it lands on the wrong person', () => 
 });
 
 test('the single-person camera draws one box, and it is the nearest face', () => {
-  // Somebody walking past in the background must not steal the box from the
-  // person standing at the tablet. Largest face wins, which is the closest one.
   const near = person(240);
   const far = {
     keypoints: person(80).keypoints.map((point) => ({
@@ -94,13 +73,10 @@ test('the single-person camera draws one box, and it is the nearest face', () =>
     'the box should be on the person in the middle, who is nearest',
   );
 
-  // Without a limit both are drawn, which is what the group camera asks for.
   assert.equal(faceBoxesFromPoses([far, near], FRAME).length, 2);
 });
 
 test('a face turned away is boxed but marked unconfident', () => {
-  // The group screen colours these amber and labels them, which is what turns
-  // "2 people are not facing the camera" into something actionable.
   const [box] = faceBoxesFromPoses([person(240, { landmarks: 'one' })], FRAME);
   assert.equal(box.confident, false);
   assert.ok(box.width > 0, 'they are still a person, and still worth showing');
@@ -110,8 +86,6 @@ test('a face turned away is boxed but marked unconfident', () => {
 });
 
 test('shoulders give the scale when the face barely shows', () => {
-  // One landmark spans no width at all, so a box built from it alone would be a
-  // dot on somebody's cheek.
   const withShoulders = faceBoxPixels(person(240, { landmarks: 'one' }), 0.35);
   const without = faceBoxPixels(person(240, { landmarks: 'one', shoulders: false }), 0.35);
 
@@ -127,7 +101,6 @@ test('nobody visible means no box', () => {
 });
 
 test('a box never escapes the preview', () => {
-  // Somebody at the very edge of the frame has part of their head outside it.
   for (const x of [2, 478]) {
     for (const mirrored of [false, true]) {
       const [box] = faceBoxesFromPoses([person(x)], { ...FRAME, mirrored });
@@ -150,8 +123,6 @@ test('boxes come back in reading order with stable keys', () => {
     'left to right, so React does not reorder elements under a CSS transition',
   );
 
-  // A tracked person keeps their key as they move, so the box animates across
-  // rather than one disappearing and another appearing.
   const [first] = faceBoxesFromPoses([person(100, { id: 7 })], FRAME);
   const [moved] = faceBoxesFromPoses([person(160, { id: 7 })], FRAME);
   assert.equal(first.key, moved.key);
@@ -159,8 +130,6 @@ test('boxes come back in reading order with stable keys', () => {
 });
 
 test('drawing boxes changed no capture decision', () => {
-  // The whole claim. readPoses and readKeypoints are what gate a capture, and
-  // neither knows the overlay exists.
   const group = [person(100), person(300)];
   assert.equal(readPoses(group, 360, 480).verdict, 'MULTIPLE_PEOPLE');
   assert.equal(readPoses([], 360, 480).verdict, 'NO_PERSON');
@@ -172,8 +141,6 @@ test('drawing boxes changed no capture decision', () => {
 });
 
 test('a caller can put an instruction under a box, and only where it has one', () => {
-  // The module knows where a face is, not what its owner needs to fix; that
-  // judgement arrives as a function and the result rides on the box.
   const boxes = faceBoxesFromPoses([person(100), person(300)], {
     ...FRAME,
     labelFor: (pose) => (pose.keypoints[0].x < 200 ? 'Step back' : null),
@@ -182,7 +149,6 @@ test('a caller can put an instruction under a box, and only where it has one', (
   assert.equal(left.label, 'Step back');
   assert.equal('label' in right, false, 'no instruction means no key, not an empty string');
 
-  // Without the function nothing changes for anybody.
   for (const box of faceBoxesFromPoses([person(100)], FRAME)) {
     assert.equal('label' in box, false);
   }
@@ -191,8 +157,6 @@ test('a caller can put an instruction under a box, and only where it has one', (
 import { stabilizeBoxLabels, withoutLabels } from '../src/lib/faceBoxes.ts';
 
 test('ears alone do not make a face the camera could identify', () => {
-  // Side-on: both ears, no eyes. The gates call this "not facing the camera",
-  // and a green box would contradict the line saying so.
   const sideOn = {
     keypoints: [
       { name: 'left_ear', score: 0.8, x: 222, y: 98 },
@@ -214,23 +178,18 @@ test('a chip changes only once its replacement has been seen three times', () =>
   });
   let memory = {};
   let out;
-  // The first sighting shows at once.
   ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box('Step back')]));
   assert.equal(out[0].label, 'Step back');
-  // Two ticks of disagreement change nothing...
   ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(null)]));
   assert.equal(out[0].label, 'Step back');
   ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(null)]));
   assert.equal(out[0].label, 'Step back');
-  // ...the third in a row does.
   ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(null)]));
   assert.equal('label' in out[0], false);
-  // A flicker - back and forth - never gets three in a row, so it never shows.
   for (const label of ['Step back', null, 'Step back', null, 'Step back']) {
     ({ boxes: out, memory } = stabilizeBoxLabels(memory, [box(label)]));
     assert.equal('label' in out[0], false, `flicker leaked through on ${label}`);
   }
-  // A face that leaves the frame is forgotten.
   ({ memory } = stabilizeBoxLabels(memory, []));
   assert.deepEqual(memory, {});
 });

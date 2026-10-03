@@ -29,21 +29,12 @@ const framedPerson = [
 ];
 const wholePerson = framedPerson;
 
-/**
- * The gate exists because a head-and-shoulders photograph leaves eleven of
- * twenty checkpoints unassessable. It must never become a reason somebody
- * cannot check in, so detector infrastructure failures open the shutter. A
- * working detector still blocks empty frames and multiple people.
- */
-
 test('a whole person includes face, shoulders, hips, knees and both ankles', () => {
   assert.equal(readKeypoints(wholePerson).verdict, 'FULL_BODY');
   assert.equal(readKeypoints(wholePerson).guidance, null, 'a correct frame needs no commentary');
 });
 
 test('one ankle is not a full-body photograph', () => {
-  // Someone standing at an angle, or with one foot just out of frame, has not
-  // given the report anything to judge their footwear by.
   const oneFoot = framedPerson.map((keypoint) => (
     keypoint.name === 'right_ankle' ? { ...keypoint, score: 0.05 } : keypoint
   ));
@@ -66,7 +57,6 @@ test('a large head-to-feet subject is ready', () => {
 });
 
 test('somebody off to one side but fully in view is photographed', () => {
-  // The whole camera view is the frame now, not a centred outline.
   const offCenter = framedPerson.map((keypoint) => ({ ...keypoint, x: keypoint.x - 75 }));
   assert.equal(readKeypoints(offCenter, 1000, 240).verdict, 'FULL_BODY');
 });
@@ -156,8 +146,6 @@ test('a low-confidence keypoint is a guess, not a sighting', () => {
 });
 
 test('the instruction names what to change', () => {
-  // "Step back" and "move the camera down" are opposite corrections, and
-  // giving the wrong one sends somebody further from a usable photograph.
   const feetOnly = [point('left_ankle', 0.8), point('right_ankle', 0.8)];
   assert.match(readKeypoints(feetOnly).guidance, /face/i);
 
@@ -209,33 +197,16 @@ test('multiple people can never be bypassed with the accessibility override', ()
 });
 
 test('the shutter opens when the detector cannot run at all', () => {
-  // No WebGL, a blocked download, an unsupported device. None of those is the
-  // instructor's fault, and none may stop them checking in.
   assert.equal(shutterEnabled('UNAVAILABLE', 0, false), true);
 });
 
 test('the override permits an imperfect person frame but never an empty frame', () => {
-  // A saree hiding the ankles, a wheelchair, a room too small to step back in.
-  // Across six hundred daily check-ins even a small miss rate is people who
-  // cannot record attendance at all.
   assert.equal(shutterEnabled('PARTIAL', 0, true), true);
   assert.equal(shutterEnabled('NO_PERSON', 0, true), false, 'an empty frame is never attendance evidence');
-  // And it is offered soon enough to be a way out, not a punishment.
   assert.ok(OVERRIDE_AFTER_MS <= 20_000, 'nobody should be stuck for longer than this');
 });
 
-/**
- * A half-body frame must not be photographed automatically.
- *
- * Every keypoint the gate asks for was present in these frames, because
- * MoveNet predicts joints it cannot see. What distinguishes them from a whole
- * person is where the invented ankles landed, and that is what the gate now
- * reads. Frame: 1000 tall, 240 wide, so the person sits inside the outline.
- */
 test('a person cut off at the knees is told to step back, not photographed', () => {
-  // The model's ankles for legs that end at the knee land just below it. Head
-  // to "ankle" still spans more than half the frame, so the distance rule
-  // passes; only the leg proportions give it away.
   const cutAtKnees = framedPerson.map((keypoint) => (
     keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 660, score: 0.6 } : keypoint
   ));
@@ -245,9 +216,6 @@ test('a person cut off at the knees is told to step back, not photographed', () 
 });
 
 test('the gate accepts feet anywhere inside the outline, and refuses them just past it', () => {
-  // The feet margin is the outline's own bottom edge. A gate stricter than the
-  // outline was tried and reproduced the old ping-pong - "step back" inside the
-  // outline, "move closer" outside it - so the two must agree exactly.
   const insideOutline = framedPerson.map((keypoint) => (
     keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 975, score: 0.7 } : keypoint
   ));
@@ -262,27 +230,20 @@ test('the gate accepts feet anywhere inside the outline, and refuses them just p
 });
 
 test('ankles the model is unsure of are not feet', () => {
-  // Above the general floor - so the gate used to accept them - and below the
-  // stricter one feet are now held to.
   const uncertainFeet = framedPerson.map((keypoint) => (
     keypoint.name.endsWith('_ankle') ? { ...keypoint, score: 0.4 } : keypoint
   ));
   assert.equal(readKeypoints(uncertainFeet, 1000, 240).verdict, 'PARTIAL');
-  // And the same frame with confident feet is the whole person it was.
   assert.equal(readKeypoints(framedPerson, 1000, 240).verdict, 'FULL_BODY');
 });
 
 test('ankles pushed off the bottom of the outline are told to step back, not to centre', () => {
-  // The model pushes joints it cannot see to the frame edge. Those land past
-  // the outline's bottom, where the old wording said "center yourself" to a
-  // person who was centred. The fix is to step back, and that is what is said.
   const pushedToEdge = framedPerson.map((keypoint) => (
     keypoint.name.endsWith('_ankle') ? { ...keypoint, y: 990, score: 0.5 } : keypoint
   ));
   const reading = readKeypoints(pushedToEdge, 1000, 240);
   assert.equal(reading.verdict, 'PARTIAL');
   assert.match(reading.guidance, /step back/i);
-  // Somebody genuinely off to one side is still told to centre.
   const offToTheSide = framedPerson.map((keypoint) => ({ ...keypoint, x: keypoint.x + 200 }));
   assert.match(readKeypoints(offToTheSide, 1000, 240).guidance, /center/i);
 });

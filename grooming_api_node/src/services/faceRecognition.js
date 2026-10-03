@@ -8,33 +8,9 @@ import {
 import { runtimeConfig } from "../config/env.js";
 import { incrementMetric, observeDuration } from "./telemetry.js";
 
-/**
- * Face identification for photo-first attendance.
- *
- * The instructor is no longer chosen from a dropdown, so the match is what
- * supplies gender, college and the open session to close. Everything here is
- * therefore written to fail towards "I do not know" rather than towards a
- * guess: a wrong identity files one person's grooming record against another's
- * name, which is worse than recording no name at all.
- *
- * Identity resolves from ExternalImageId, which holds the instructor's own id,
- * never from a FaceId. One instructor accumulates several faces as admins
- * correct mistakes, so a FaceId names one photograph of a person while
- * ExternalImageId names the person.
- */
-
 let client = null;
 let clientFingerprint = "";
 
-/**
- * Test seam for the provider client.
- *
- * The decision layer here — grouping candidates by person, applying the
- * threshold, refusing a poor reference — is the part worth proving, and it must
- * be provable without a live collection or a credential. Node's module mocking
- * is still behind a flag, and `npm test` runs a plain `node --test`, so the
- * client is injected rather than intercepted.
- */
 let clientOverride = null;
 
 export function setRekognitionClientForTests(stub) {
@@ -43,15 +19,6 @@ export function setRekognitionClientForTests(stub) {
   clientFingerprint = "";
 }
 
-/**
- * Rekognition is optional until the collection exists.
- *
- * The flow is being built before the AWS collection has been created, and the
- * existing select-an-instructor check-in must keep working in the meantime.
- * Every entry point therefore reports NOT_CONFIGURED instead of throwing, so a
- * half-configured deployment degrades to the old behaviour rather than failing
- * every attendance submission with an AWS credentials error.
- */
 export function isFaceRecognitionConfigured() {
   const config = runtimeConfig();
   return Boolean(
@@ -62,10 +29,6 @@ export function isFaceRecognitionConfigured() {
   );
 }
 
-/**
- * Rebuilt when the region or credentials change, matching photoStorage: caching
- * on nothing would keep using a rotated key until the process restarted.
- */
 function getClient() {
   if (clientOverride) return clientOverride;
   const config = runtimeConfig();
@@ -73,9 +36,6 @@ function getClient() {
   if (!client || clientFingerprint !== fingerprint) {
     client = new RekognitionClient({
       region: config.rekognitionRegion,
-      // Passed explicitly rather than left to the SDK's credential chain, which
-      // would otherwise pick up the SES account's key from the environment and
-      // authenticate against an account that holds no face collection.
       credentials: {
         accessKeyId: config.rekognitionAccessKeyId,
         secretAccessKey: config.rekognitionSecretAccessKey,
@@ -88,7 +48,6 @@ function getClient() {
   return client;
 }
 
-/** Reasons a caller may act on. Returned as data; nothing here throws for them. */
 export const FACE_REASONS = {
   NOT_CONFIGURED: "NOT_CONFIGURED",
   NO_FACE: "NO_FACE",
@@ -99,7 +58,6 @@ export const FACE_REASONS = {
   PROVIDER_ERROR: "PROVIDER_ERROR",
 };
 
-/** Wording shown to an admin, so a refusal says what to do about it. */
 export const FACE_REASON_MESSAGES = {
   NOT_CONFIGURED: "Face recognition is not configured on the server.",
   NO_FACE: "No face was found in this photograph. Use a clear, front-facing photo.",
@@ -114,12 +72,6 @@ function failure(reason) {
   return { ok: false, reason, message: FACE_REASON_MESSAGES[reason] };
 }
 
-/**
- * Provider faults are recorded and reported, never thrown.
- *
- * The caller reports a provider outage as an unrecognised capture and saves
- * no attendance or photograph, so the instructor can retry.
- */
 function providerFailure(operation, error) {
   incrementMetric("rekognition_request_failures_total");
   console.error(`Rekognition ${operation} failed: ${error?.name || "Error"}`);
@@ -139,14 +91,6 @@ async function send(operation, command) {
   }
 }
 
-/**
- * Whether one photograph is usable as a reference.
- *
- * Run before indexing, never after. A blurry or half-turned reference does not
- * fail loudly; it produces confident wrong matches for as long as it stays in
- * the collection, which is the most expensive failure this module can have.
- * Refusing the upload costs an admin one retake.
- */
 export async function checkFaceQuality(imageBuffer) {
   if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
@@ -185,19 +129,6 @@ export async function checkFaceQuality(imageBuffer) {
   };
 }
 
-/**
- * Adds one face for an instructor and returns its FaceId.
- *
- * ExternalImageId carries the instructor id so a later search resolves to the
- * person without a second database lookup. Rekognition restricts that field to
- * `[a-zA-Z0-9_.\-:]`, which the app's UUID ids already satisfy; anything else
- * is refused here rather than at the provider, where the error does not say
- * which instructor it was about.
- *
- * MaxFaces is 1 and QualityFilter is AUTO: a reference photo showing two people
- * must be refused by checkFaceQuality, not quietly resolved by indexing
- * whichever face Rekognition considers largest.
- */
 export async function indexFace(imageBuffer, instructorId) {
   if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
   const externalImageId = String(instructorId || "");
@@ -221,9 +152,6 @@ export async function indexFace(imageBuffer, instructorId) {
 
   const faceId = response?.FaceRecords?.[0]?.Face?.FaceId;
   if (!faceId) {
-    // Rekognition accepted the request and indexed nothing, which is what
-    // QualityFilter rejection looks like. Report it as a quality refusal so the
-    // admin is told to retake rather than left with a silent no-op.
     incrementMetric("rekognition_index_rejected_total");
     return failure(FACE_REASONS.POOR_QUALITY);
   }
@@ -231,19 +159,6 @@ export async function indexFace(imageBuffer, instructorId) {
   return { ok: true, faceId, instructorId: externalImageId };
 }
 
-/**
- * Identifies who is in one photograph.
- *
- * Rekognition is asked for several candidates rather than one, because the
- * nearest face may be another of the same instructor's own embeddings. Results
- * are grouped by ExternalImageId and the best score per person is compared, so
- * two embeddings of one person scoring alike is the system working rather than
- * an ambiguous match.
- *
- * FaceMatchThreshold is set to the configured accept threshold, so a candidate
- * below it is never returned at all: a 70% match is not evidence of identity
- * and must not reach the caller as a suggestion.
- */
 export async function searchFaceByImage(imageBuffer) {
   if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
@@ -258,15 +173,10 @@ export async function searchFaceByImage(imageBuffer) {
       Image: { Bytes: imageBuffer },
       FaceMatchThreshold: config.rekognitionMatchThreshold,
       MaxFaces: config.rekognitionSearchCandidates,
-      // Full-body attendance frames naturally contain a smaller face. LOW still
-      // rejects the poorest inputs without filtering usable faces as aggressively
-      // as AUTO before similarity matching gets a chance to run.
       QualityFilter: "LOW",
     })
   );
   if (error) {
-    // A photograph with no detectable face is reported by this API as an
-    // InvalidParameterException rather than an empty match list.
     if (error?.name === "InvalidParameterException") {
       incrementMetric("rekognition_search_no_face_total");
       return failure(FACE_REASONS.NO_FACE);
@@ -291,7 +201,6 @@ export async function searchFaceByImage(imageBuffer) {
     }
   }
   if (bestByPerson.size === 0) {
-    // Indexed faces with no ExternalImageId cannot be traced to an instructor.
     incrementMetric("rekognition_search_unattributed_total");
     return failure(FACE_REASONS.NO_MATCH);
   }
@@ -312,23 +221,12 @@ export async function searchFaceByImage(imageBuffer) {
     instructorId: best.instructorId,
     faceId: best.faceId,
     similarity: best.similarity,
-    // The closest different person, so a caller can record how clear-cut the
-    // identification was. Look-alike handling is deliberately deferred, but the
-    // margin is captured now so those records can be found later.
     runnerUp: runnerUp
       ? { instructorId: runnerUp.instructorId, similarity: runnerUp.similarity }
       : null,
   };
 }
 
-/**
- * Removes faces from the collection.
- *
- * Called when a reference photo is replaced, and when an instructor is deleted:
- * a soft-deleted instructor keeps their attendance history, but there is no
- * reason to keep their biometric data in a collection that is searched on every
- * check-in.
- */
 export async function deleteFaces(faceIds) {
   if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
   const ids = (Array.isArray(faceIds) ? faceIds : [faceIds])
@@ -350,14 +248,6 @@ export async function deleteFaces(faceIds) {
   return { ok: true, deleted: response?.DeletedFaces || [] };
 }
 
-/**
- * Which face to discard when an instructor has reached the cap.
- *
- * Faces accumulate as admins correct mistakes, so the list is allowed to grow
- * to REKOGNITION_MAX_FACES_PER_INSTRUCTOR and then drops its oldest entry. The
- * newest photographs are the ones taken on the tablet actually in use, in the
- * lighting that collection actually has, so they are the ones worth keeping.
- */
 export function facesToEvict(existingFaceIds, { adding = 1 } = {}) {
   const config = runtimeConfig();
   const current = (Array.isArray(existingFaceIds) ? existingFaceIds : []).filter(Boolean);
@@ -366,25 +256,6 @@ export function facesToEvict(existingFaceIds, { adding = 1 } = {}) {
   return current.slice(0, overflow);
 }
 
-/**
- * Every face in one photograph, with where each of them is.
- *
- * `SearchFacesByImage` deliberately does not do this. It searches the largest
- * face it finds and ignores the rest, which is correct for one person at a
- * tablet and silently wrong for six: five people would be photographed,
- * analysed by nobody, and told nothing. So a group photograph is detected
- * first, then each face is cut out and searched on its own.
- *
- * Detection only. Nothing here decides who anybody is, and no crop is made —
- * this reports boxes and lets the caller choose what to cut, because the crop a
- * face search wants and the crop a grooming report wants are different
- * rectangles around the same person.
- *
- * `maxFaces` is a refusal, not a limit to silently apply. Quietly dropping the
- * seventh person would record attendance for six and leave the seventh
- * believing they were photographed, which is the one failure worth being loud
- * about.
- */
 export async function detectFacesForGroup(imageBuffer, { maxFaces = 0 } = {}) {
   if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
   if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) {
@@ -395,9 +266,6 @@ export async function detectFacesForGroup(imageBuffer, { maxFaces = 0 } = {}) {
     "DetectFaces",
     new DetectFacesCommand({
       Image: { Bytes: imageBuffer },
-      // Quality and Pose come with DEFAULT, and both are wanted: a face turned
-      // away or badly lit is worth reporting as unusable rather than searching
-      // for and reporting as unrecognised.
       Attributes: ["DEFAULT"],
     })
   );
@@ -430,9 +298,6 @@ export async function detectFacesForGroup(imageBuffer, { maxFaces = 0 } = {}) {
     yaw: Number(detail?.Pose?.Yaw ?? 0),
     pitch: Number(detail?.Pose?.Pitch ?? 0),
   }))
-    // A low-confidence detection in a group is usually a pattern on a wall or a
-    // face on a poster. Searching for it costs a call and can only produce an
-    // capture nobody can identify.
     .filter((face) => face.confidence >= config.rekognitionMinFaceConfidence
       && face.box.width > 0
       && face.box.height > 0);

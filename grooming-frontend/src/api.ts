@@ -70,24 +70,12 @@ function notifySessionExpired(): void {
   }
 }
 
-/**
- * The API issues both a Secure, HttpOnly cookie and a bearer token. Keep the
- * token as a compatibility fallback because the deployed frontend and API are
- * on different sites, and some tablet/mobile browsers reject that cookie as a
- * third-party cookie. apiFetch still sends the cookie whenever the browser
- * accepts it, while the Authorization header prevents a successful login from
- * being followed immediately by an unauthenticated /me request.
- *
- * COOKIE_SESSION_MARKER remains supported so sessions created by the previous
- * cookie-only frontend continue to work on browsers that accepted the cookie.
- */
 function readStorage(key: string): string | null {
   try {
     if (typeof localStorage !== 'undefined') {
       const value = localStorage.getItem(key);
       if (value !== null) return value;
     }
-    // Fall back to any session started before persistent storage shipped.
     return typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(key) : null;
   } catch {
     return null;
@@ -126,15 +114,10 @@ export function clearSession(): void {
       store.removeItem(SESSION_ROLE_KEY);
       store.removeItem('nxtwave_token');
       store.removeItem('nxtwave_role');
-    } catch { /* Storage may be disabled by browser policy. */ }
+    } catch { }
   }
 }
 
-/**
- * Short-lived GET cache. Repeat navigations render instantly from memory while
- * a background revalidation keeps the data fresh, and concurrent callers share
- * one in-flight request instead of racing duplicates.
- */
 interface CacheEntry {
   value: unknown;
   expiresAt: number;
@@ -144,14 +127,7 @@ const responseCache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<unknown>>();
 const DEFAULT_CACHE_MS = 15_000;
 
-/**
- * Mirror of the GET cache in sessionStorage. The in-memory map dies on reload,
- * which is exactly when the wait is most visible, so the last response is
- * replayed from disk to paint immediately while the network revalidates.
- * sessionStorage (not localStorage) so the copy dies with the tab.
- */
 const PERSIST_PREFIX = 'ft_cache:';
-/** Anything older than this is treated as too stale to show at all. */
 const PERSIST_MAX_AGE_MS = 10 * 60_000;
 
 function persistKey(path: string): string {
@@ -163,7 +139,6 @@ function persistCache(path: string, value: unknown): void {
     if (typeof sessionStorage === 'undefined') return;
     sessionStorage.setItem(persistKey(path), JSON.stringify({ value, storedAt: Date.now() }));
   } catch {
-    /* Quota exceeded or storage blocked: the memory cache still works. */
   }
 }
 
@@ -188,9 +163,6 @@ function dropPersisted(prefix: string): void {
   try {
     if (typeof sessionStorage === 'undefined') return;
     const target = persistKey(prefix);
-    // Storage keys are not own enumerable properties, so Object.keys() returns
-    // nothing here; the indexed key() API is the only reliable way to list them.
-    // Collect first, then delete, because removing shifts the remaining indices.
     const doomed: string[] = [];
     for (let index = 0; index < sessionStorage.length; index += 1) {
       const key = sessionStorage.key(index);
@@ -198,41 +170,28 @@ function dropPersisted(prefix: string): void {
     }
     for (const key of doomed) sessionStorage.removeItem(key);
   } catch {
-    /* Nothing to clean up if storage is unavailable. */
   }
 }
 
 export function clearRequestCache(): void {
   responseCache.clear();
   inFlight.clear();
-  // Persisted copies hold another user's data after a logout, so they must go.
   dropPersisted('');
 }
 
-/** Drops cached reads whose path starts with the given prefix after a mutation. */
 export function invalidateCache(prefix: string): void {
   for (const key of [...responseCache.keys()]) {
     if (key.startsWith(prefix)) responseCache.delete(key);
   }
-  // Drop the persisted copy too, or a reload would resurrect pre-mutation data.
   dropPersisted(prefix);
 }
 
-/**
- * Last known value for a path, even if expired. Screens use this to paint
- * immediately on load; the caller still awaits the live request to correct it.
- */
 export function readStale<T>(path: string): T | undefined {
   const entry = responseCache.get(path);
   if (entry) return entry.value as T;
   return readPersisted<T>(path);
 }
 
-/**
- * Stores a value assembled by the caller (for example the concatenation of a
- * paginated fetch) so the next visit can paint from it before the network
- * responds. Reads back through readStale().
- */
 export function primeCache(path: string, value: unknown, cacheMs = DEFAULT_CACHE_MS): void {
   responseCache.set(path, { value, expiresAt: Date.now() + cacheMs });
   persistCache(path, value);
@@ -269,10 +228,6 @@ export async function apiFetch<T = unknown>(path: string, options: ApiRequestOpt
   }
 
   const controller = new AbortController();
-  // Mobile browsers freeze timers in a backgrounded tab. Returning from the
-  // Google sign-in tab can therefore fire a timeout that "elapsed" while the
-  // page was hidden even though no time was spent waiting on the network, so
-  // measure against wall-clock and re-arm instead of aborting blindly.
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const deadline = Date.now() + timeoutMs;
   const armTimeout = () => {
@@ -319,10 +274,6 @@ export async function apiFetch<T = unknown>(path: string, options: ApiRequestOpt
   }
 }
 
-/**
- * Cached GET used by list screens. Deduplicates concurrent calls and serves a
- * fresh-enough cached value without a network round trip.
- */
 export async function apiFetchCached<T = unknown>(
   path: string,
   options: ApiRequestOptions & { cacheMs?: number } = {},

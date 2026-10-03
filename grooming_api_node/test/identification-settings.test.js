@@ -9,16 +9,6 @@ import {
   validateIdentificationSettings,
 } from "../src/services/identificationSettings.js";
 
-/**
- * Which colleges identify an instructor from their photograph.
- *
- * The mode decides whether a BOA sees a camera or a dropdown, so a setting that
- * resolves wrongly either hides the selector from a college with no enrolled
- * faces, or keeps it in front of one that has finished enrolling. Both are
- * visible immediately, but only to the BOA standing at the tablet, so they are
- * pinned here instead.
- */
-
 test("a college with no override follows the global default", () => {
   const settings = normalizeIdentificationSettings({ default_mode: "FACE_ONLY" });
   assert.equal(identificationModeForCollege(settings, "college-1"), "FACE_ONLY");
@@ -42,16 +32,12 @@ test("an override wins over the default, in both directions", () => {
 });
 
 test("face identification is the default for a workspace that has set nothing", () => {
-  // The intended operating mode. A college with no enrolled faces still records
-  // attendance, because an unrecognised check-in is saved as unidentified.
   assert.equal(DEFAULT_IDENTIFICATION_SETTINGS.default_mode, "FACE_ONLY");
   assert.equal(usesFaceIdentification(undefined, "college-1"), true);
   assert.equal(usesFaceIdentification({}, null), true);
 });
 
 test("an override equal to the default is not stored", () => {
-  // Keeping it would pin that college silently: a later change to the default
-  // would move every college except this one, for no stated reason.
   const settings = normalizeIdentificationSettings({
     default_mode: "FACE_ONLY",
     college_modes: { "college-1": "FACE_ONLY", "college-2": "SELECTOR" },
@@ -69,7 +55,6 @@ test("an unreadable mode falls back to the default rather than disabling anythin
 });
 
 test("a missing college id resolves to the default, never to undefined", () => {
-  // The tablet's college is absent for a super admin, who belongs to no college.
   const settings = normalizeIdentificationSettings({ default_mode: "SELECTOR" });
   assert.equal(identificationModeForCollege(settings, null), "SELECTOR");
   assert.equal(identificationModeForCollege(settings, undefined), "SELECTOR");
@@ -85,12 +70,10 @@ test("unknown keys and bad modes are refused", () => {
 
   assert.equal(validateIdentificationSettings({ default_mode: "SELECTOR" }).valid, true);
   assert.equal(validateIdentificationSettings({ college_modes: { "c1": "SELECTOR" } }).valid, true);
-  // null is how the UI clears one college's override.
   assert.equal(validateIdentificationSettings({ college_modes: { "c1": null } }).valid, true);
 });
 
 test("low enrolment is advisory and never changes the mode", () => {
-  // The administrator's choice stands. The flag is what makes it informed.
   const settings = normalizeIdentificationSettings({ default_mode: "FACE_ONLY" });
   const colleges = [
     { _id: "c1", name: "Ready College" },
@@ -110,7 +93,6 @@ test("low enrolment is advisory and never changes the mode", () => {
   assert.equal(byId.get("c1").low_enrolment, false);
   assert.equal(byId.get("c1").enrolled_percent, 95);
 
-  // Still FACE_ONLY: flagged, not switched.
   assert.equal(byId.get("c2").mode, "FACE_ONLY");
   assert.equal(byId.get("c2").low_enrolment, true);
   assert.equal(byId.get("c2").enrolled_percent, 20);
@@ -121,7 +103,6 @@ test("low enrolment is advisory and never changes the mode", () => {
 });
 
 test("a SELECTOR college is never flagged for low enrolment", () => {
-  // It does not use recognition, so enrolment is irrelevant to it.
   const settings = normalizeIdentificationSettings({
     default_mode: "FACE_ONLY",
     college_modes: { "c2": "SELECTOR" },
@@ -159,6 +140,5 @@ test("a college with no instructors reports zero rather than dividing by zero", 
   assert.equal(described[0].instructors, 0);
   assert.equal(described[0].enrolled, 0);
   assert.equal(described[0].enrolled_percent, 0);
-  // Nothing enrolled is exactly the case worth warning about.
   assert.equal(described[0].low_enrolment, true);
 });

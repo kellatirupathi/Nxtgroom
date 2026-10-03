@@ -2,16 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { linkInstructorsToInstitutes } from "../src/services/instructorSync.js";
 
-/**
- * college_id is the only scope boundary a BOA has: instructorScope filters on
- * it, so whichever college an instructor lands in decides who can see them,
- * check them in, and read their grooming reports.
- *
- * Linking resolved that from institute_name against a Map keyed on the college
- * name alone. Colleges are unique on (name, location), so two campuses can
- * share a name — and every instructor of that name went to whichever college
- * the cursor happened to return last, silently, into another campus's records.
- */
 function fakeDb({ colleges, instructors }) {
   const written = [];
   return {
@@ -42,7 +32,6 @@ function fakeDb({ colleges, instructors }) {
   };
 }
 
-/** Mirrors the "not soft deleted" clause the linker now sends. */
 function matchesActive(row, filter) {
   if (!filter?.$or) return true;
   return row.deleted_at === null || row.deleted_at === undefined;

@@ -9,25 +9,10 @@ import { isChunkLoadError, memoizedImport, reloadForNewDeployment } from '../lib
 import { preloadFullBodyDetector } from '../lib/fullBodyDetector';
 import { armBeepUnlock } from '../lib/successBeep';
 
-/**
- * The group screen's code, fetched at most once per page.
- *
- * It is fetched in the background shortly after Attendance opens, not when the
- * tab is first clicked. That makes the first click instant instead of a
- * loading screen, and it means the code is already in the page before any
- * later deployment can remove the file it came from: a tablet opened in the
- * morning can switch to Group in the afternoon however many deployments
- * happened in between.
- */
 const loadGroupScreen = memoizedImport(() => import('./GroupKioskAttendance'));
 
-/** After the one-person camera has started, so the two do not compete. */
 const GROUP_PRELOAD_DELAY_MS = 1_500;
 
-/**
- * Set just before the page reloads for a new deployment, so it comes back on
- * the group screen somebody was opening rather than on the default.
- */
 const REOPEN_GROUP_KEY = 'facultytrack:reopen-group';
 
 function reopenGroupRequested(): boolean {
@@ -42,7 +27,6 @@ function clearReopenGroup(): void {
   try {
     sessionStorage.removeItem(REOPEN_GROUP_KEY);
   } catch {
-    // Nothing was stored, so nothing to clear.
   }
 }
 
@@ -61,17 +45,6 @@ interface GroupScreenBoundaryState {
   failed: boolean;
 }
 
-/**
- * Keeps a failure of the group screen inside its panel.
- *
- * Without this, a group screen that failed to open took the whole app down to
- * "FacultyTrack could not load", including the one-person camera and the
- * navigation. Now the panel says so and offers another try, and everything
- * around it keeps working.
- *
- * A download failure - the code deployed away - is fixed by loading the page
- * again, so that is done at once rather than asked for, once a minute at most.
- */
 class GroupScreenBoundary extends Component<GroupScreenBoundaryProps, GroupScreenBoundaryState> {
   constructor(props: GroupScreenBoundaryProps) {
     super(props);
@@ -88,7 +61,6 @@ class GroupScreenBoundary extends Component<GroupScreenBoundaryProps, GroupScree
     try {
       sessionStorage.setItem(REOPEN_GROUP_KEY, '1');
     } catch {
-      // Without storage the page cannot remember to reopen the group screen.
     }
     if (!reloadForNewDeployment()) clearReopenGroup();
   }
@@ -115,46 +87,22 @@ class GroupScreenBoundary extends Component<GroupScreenBoundaryProps, GroupScree
   }
 }
 
-/**
- * Chooses between photographing one person and photographing several.
- *
- * Single is the default and stays the default. It is what every college's
- * attendance currently runs on, it is the mode that handles somebody walking up
- * to a tablet alone, and nothing about opening this screen should change for
- * anybody who has not asked for the other one. The one exception is a page
- * reloaded while somebody was opening Group, which returns them to Group.
- *
- * Group is a different screen rather than a setting on the same one: a
- * different camera gate, a different request, and a list of outcomes instead of
- * a single answer. The toggle swaps which is mounted, so the two never share a
- * camera, a hold, or a moment of state — the screen that was not chosen is not
- * running.
- */
 export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
-  // Read without clearing, because React may run this twice in development;
-  // the flag is cleared once the screen has mounted.
   const [mode, setMode] = useState<CaptureMode>(() => (reopenGroupRequested() ? 'group' : 'single'));
   const [groupAttempt, setGroupAttempt] = useState(0);
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const flipCamera = () => setFacing((current) => current === 'user' ? 'environment' : 'user');
-  // A lazy component remembers a failed download for good, so a retry needs a
-  // new one; the import underneath is shared and fetched once.
   const [GroupScreen, setGroupScreen] = useState(() => lazy(loadGroupScreen));
 
-  // As the screen opens, behind the start card and the camera starting rather
-  // than after them, so the face boxes are ready when somebody steps up.
   useEffect(() => {
     preloadFullBodyDetector();
   }, []);
 
-  // A browser plays sound only after the page is touched; the first tap here
-  // (Start full screen, or anything else) lets the check-in beep play.
   useEffect(() => armBeepUnlock(), []);
 
   useEffect(() => {
     clearReopenGroup();
     const timer = setTimeout(() => {
-      // A failure here is quiet: clicking Group tries again, and says so.
       loadGroupScreen().catch(() => {});
     }, GROUP_PRELOAD_DELAY_MS);
     return () => clearTimeout(timer);
@@ -168,8 +116,6 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
   const fullScreen = useAttendanceFullScreen();
   const [confirmingExit, setConfirmingExit] = useState(false);
 
-  // Cleared on the way in: a question left open when Esc ended full screen
-  // must not greet the next one.
   const startFullScreen = () => {
     setConfirmingExit(false);
     fullScreen.enter();
@@ -201,16 +147,11 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
   );
 
   return (
-    // The same element in and out of full screen, only restyled, so the camera
-    // underneath keeps running rather than starting again. Fixed over the
-    // window is what hides the menus; the browser's own full screen, where it
-    // has one, hides its address bar as well.
     <div
       className={fullScreen.active
         ? 'fixed inset-0 z-[55] overflow-hidden bg-black'
         : 'relative w-full h-full overflow-hidden rounded-md bg-black'}
     >
-      {/* Controls float above the preview without reserving any camera height. */}
       <div className="pointer-events-none absolute inset-x-0 top-[max(0.75rem,var(--inset-top))] z-30 flex items-start justify-between gap-2 px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
         <div className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-lg border border-white/25 bg-black/50 p-1 shadow-lg backdrop-blur-sm" role="group" aria-label="Attendance capture mode">
           {tab('single', 'Single', User)}
@@ -263,8 +204,6 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
         </AttendanceFullScreenContext.Provider>
       </div>
 
-      {/* Asked first: an instructor leaning on the corner of the tablet should
-          not be able to bring the browser back by accident. */}
       <ConfirmDialog
         open={confirmingExit && fullScreen.active}
         title="Exit full screen?"
@@ -287,11 +226,6 @@ interface FullScreenPromptProps {
   onDecline: () => void;
 }
 
-/**
- * What Attendance opens on in a browser. Full screen needs a tap, so the tap
- * that starts attendance is the one that asks for it. The camera starts once
- * either button is pressed, so nobody is photographed behind the card.
- */
 function FullScreenPrompt({ supported, onStart, onDecline }: FullScreenPromptProps) {
   return (
     <div className="w-full h-full min-h-[24rem] flex items-center justify-center rounded-md bg-slate-800 p-4 sm:p-8">

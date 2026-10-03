@@ -14,21 +14,12 @@ import {
 } from "../src/services/detailCheck.js";
 import { checkpointSet, improvementTips, SECTION_KEYS } from "../src/checkpoints.js";
 
-/**
- * The close-up of a man's face, waist, trousers and shoes, asked in the same
- * request as his report. The cases it exists for, from photographs reviewed
- * by the team: no belt passed as "a dark, simple belt"; slim black jeans and
- * grey sneakers passed as formal; a trimmed and a negligible beard failed for
- * edges the model could not see; hair over the forehead passed.
- */
-
 const HEAD = [40, 400, 160, 600];
 const WAIST = [480, 330, 560, 640];
 const LEGS = [470, 360, 820, 620];
 const FEET = [780, 340, 880, 620];
 const REGIONS = { head: HEAD, waist: WAIST, legs: LEGS, feet: FEET };
 
-/** A man's rows with every checkpoint passed, as the full-length read returned them. */
 function passedRows(attire = "FORMAL") {
   const sections = checkpointSet("MALE", attire);
   return Object.fromEntries(SECTION_KEYS.map((key) => [key, sections[key].map((item) => ({
@@ -42,7 +33,6 @@ function passedRows(attire = "FORMAL") {
 
 const row = (rows, code) => SECTION_KEYS.flatMap((key) => rows[key]).find((item) => item.code === code);
 
-/** What the close-up of the belt photograph reports, in the reply's own shape. */
 const NO_BELT_CLOSE_UP = {
   head_box: [30, 390, 170, 610],
   waist_box: [470, 320, 570, 650],
@@ -74,8 +64,6 @@ async function photo() {
   return sharp({ create: { width: 600, height: 900, channels: 3, background: "#d8d2c4" } }).jpeg().toBuffer();
 }
 
-// -- Boxes and the tablet's regions ----------------------------------------------
-
 test("boxes are widened for context, clamped to the image, and refused when unusable", () => {
   assert.deepEqual(paddedBox([480, 330, 560, 640]), [460, 293, 580, 677]);
   assert.deepEqual(paddedBox([0, 0, 1000, 1000]), [0, 0, 1000, 1000]);
@@ -95,8 +83,6 @@ test("the tablet's regions are read from the form field, and anything malformed 
     assert.equal(parseBodyRegions(bad), null, String(bad).slice(0, 20));
   }
 });
-
-// -- Waist, trousers and shoes ---------------------------------------------------------
 
 test("a belt the close-up cannot find fails, and so do jeans and sneakers", () => {
   const rows = passedRows();
@@ -174,8 +160,6 @@ test("a waist the close-up cannot see fails the belt as not shown, but leaves th
 });
 
 test("a belt seen in the close-up passes even when an ID card covers part of the waist", () => {
-  // Simhadri, 3 Oct: black belt and silver buckle in plain view, failed as
-  // "not shown" because the close-up called the waist partly obscured.
   for (const seen of [{ belt_buckle_visible: true }, { belt_strap_visible: true }]) {
     const rows = passedRows();
     const result = applyDetailFindings(rows, face({
@@ -192,7 +176,6 @@ test("a belt seen in the close-up passes even when an ID card covers part of the
     assert.ok(!improvementTips(rows).some((tip) => /shows your waist/.test(tip)));
   }
 
-  // A waist with no belt on it still fails, seen or hidden.
   const none = passedRows();
   applyDetailFindings(none, face(), REGIONS, CROPPED);
   assert.equal(row(none, "M_BELT").status, "FAIL");
@@ -216,8 +199,6 @@ test("an untucked shirt fails the tuck; an unclear one does not", () => {
   applyDetailFindings(unclear, face({ belt_buckle_visible: true, shirt_tucked: "UNCLEAR" }));
   assert.equal(row(unclear, "M_SHIRT_COLLAR_TUCK").status, "PASS");
 });
-
-// -- The face ----------------------------------------------------------------------------
 
 test("hair over the forehead and messy hair fail, as the full-length read missed", () => {
   const rows = passedRows();
@@ -259,12 +240,10 @@ test("a forehead the full-length read failed passes on a real face close-up that
   assert.equal(position.observation, "Close-up of the face: Curly hair set up and back; the forehead is clear from the hairline to the eyebrows.");
   assert.equal(position.reason, "The close-up of the face shows the forehead clear of hair from the hairline to the eyebrows.");
   assert.ok(!improvementTips(rows).includes("Set your hair back or up so your forehead is fully clear."));
-  // Messy hair the report saw is never passed by the close-up.
   assert.equal(row(rows, "M_HAIR_NEATNESS").status, "FAIL");
   assert.equal(row(rows, "M_HAIR_NEATNESS").reason, "Dishevelled at the crown.");
   assert.ok(!result.passed.includes("M_HAIR_NEATNESS"));
 
-  // Without a real face crop, or with an unclear answer, the failure stands.
   for (const [findings, options] of [
     [clear, { croppedRegions: ["waist", "legs", "feet"] }],
     [face({ hair_on_forehead: "UNCLEAR" }), CROPPED],
@@ -319,8 +298,6 @@ test("without a real face crop a beard failure stands, and an untrimmed beard al
   assert.equal(row(hidden, "M_HAIR_NEATNESS").status, "PASS");
 });
 
-// -- A kurta ---------------------------------------------------------------------------
-
 test("a kurta's bottom wear fails for jeans and is confirmed for payjama; it has no beard or belt rows", () => {
   const jeans = passedRows("KURTA_PAJAMA");
   const result = applyDetailFindings(jeans, NO_BELT, REGIONS, CROPPED);
@@ -334,8 +311,6 @@ test("a kurta's bottom wear fails for jeans and is confirmed for payjama; it has
   assert.equal(row(payjama, "M_KURTA_BOTTOM").status, "PASS");
   assert.equal(row(payjama, "M_KURTA_BOTTOM").reason, "Confirmed in the close-up: White cotton payjama.");
 });
-
-// -- Evidence and crops ---------------------------------------------------------------------
 
 test("evidence shows the crops the model was given, or else where it says it looked", () => {
   const crops = { waist: paddedBox(WAIST) };
@@ -364,8 +339,6 @@ test("the tablet's regions become labelled full-resolution crops for the request
   assert.deepEqual(await buildCloseUps(await photo(), null), { parts: [], boxes: {} });
   assert.deepEqual(await buildCloseUps(Buffer.from([0xff, 0xd8, 0xff, 0xe0]), REGIONS), { parts: [], boxes: {} });
 });
-
-// -- One request -------------------------------------------------------------------------
 
 function stubGemini(responses) {
   const GEMINI_ENV = ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES", "GEMINI_EXPLICIT_CACHE"];

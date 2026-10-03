@@ -1,50 +1,6 @@
 import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
 
-// Version every material prompt change so stored evaluations remain auditable.
-// 2026-08-18.1 replaced the single free-form prompt with fixed checkpoint sets
-// generated per gender and garment. 2026-08-18.2 stopped asking for a
-// human-review flag. 2026-08-20.1 made the ID card a presence-only check after
-// the model failed a card that was plainly being worn for being "not clearly
-// displayed". 2026-08-18.3 reduced the ID card to one row, dropped
-// eyewear and hair colour, split hair position from neatness, and tightened
-// the saree, kurti and earring rules. 2026-08-19.1 asks whether the photograph
-// shows a person at all. 2026-08-21.1 replaces visual reference manuals with a
-// complete, text-only standard embedded in the applicable checkpoints.
-// 2026-08-24.1 makes the required men's tuck and belt checks fail when the
-// submitted photo does not show them, and makes clearly absent rings/chains a
-// PASS rather than an abstention when the relevant body area is assessable.
-// 2026-08-24.2 makes facial-detail assessment explicit and prevents shirt
-// tuck evidence from being misfiled as a shirt-fit violation. 2026-08-24.3
-// classifies a woman's attire and evaluates its matching checkpoints in the
-// same response, removing the duplicate image-analysis request. 2026-09-09.1
-// splits that single response back into a classification step and a report
-// step: Gemini began rejecting the combined schema outright, so no woman's
-// check-in could be evaluated at all (see buildFemaleAttirePrompt).
-// 2026-09-15.1 asks every observation to name where on the garment its
-// evidence was seen, and tells the model how pressing and tucking are actually
-// read from a photograph - a fold line against a crush line, a hem's line of
-// disappearance against fabric hanging below the waistband. No checkpoint was
-// added, removed or rescoped: the condition and tuck rows already owned these
-// questions and were deciding them from a general impression of the garment.
-// 2026-10-02.1 adds the abaya for women (no hair checkpoints) and the long
-// kurta with payjama for men (no beard checkpoints, no jeans), chosen by the
-// men's report request itself; allows light stubble and a thin moustache
-// clear of the lip.
-// 2026-10-03.1 adds a Headwear row for everyone except the kurta family:
-// caps and hats fail; a prayer cap, turban or hijab passes. The kurta family
-// also stops assessing hair, and its condition row no longer judges creases.
-// Facial Hair passes a short, close-cropped beard of even length whose edges
-// follow natural growth; only a longer beard needs shaped edges.
-// 2026-10-03.2 stops accepting shirt and trousers for women: the FORMAL
-// family's Attire Type always fails. No other family or row changed.
-// 2026-10-03.3: for men, curls or waves at the hairline and hair at the
-// temples are not on the forehead, and natural curly or wavy hair is not
-// messy in itself when it is shaped and under control.
-// 2026-10-03.4 asks every report whether a blazer or suit jacket is worn, in
-// any colour, for men and women (blazer.js): when one is, the shirt and belt
-// rows it covers pass and a Blazer / Suit row is added; a woman's shirt and
-// trousers under one are an accepted suit.
 export const PROMPT_VERSION = "2026-10-03.4";
 
 const SECTION_TITLES = {
@@ -55,13 +11,6 @@ const SECTION_TITLES = {
   footwear_check: "FOOTWEAR CHECK",
 };
 
-/**
- * Rules that hold for every instructor, whatever they are wearing.
- *
- * The leniency paragraph is not padding. Without it the model fails a single
- * stray hair or a slightly rotated ID card, and a report that flags everyone
- * for trivia is one nobody reads.
- */
 const COMMON_ANALYSIS_RULES = `
 You are an appearance-compliance auditor for NxtWave.
 
@@ -245,19 +194,6 @@ not list everything that passed. Do not claim identity, intent, or anything not
 directly visible.
 `.trim();
 
-/**
- * How pressing and tucking are actually read from a photograph.
- *
- * Kept out of COMMON_ANALYSIS_RULES on purpose. The female classification step
- * shares that block, and it is told to return no checkpoint at all — sending it
- * a thousand tokens on how to judge a crease both contradicted that
- * instruction and was paid for on every check-in by a woman.
- *
- * These two questions earn the detail because the checkpoints that own them
- * were deciding from a general impression of the garment: "Covers cleanliness,
- * stains, tears and heavy wrinkling" gave the model nothing to look at, so it
- * answered from the whole shirt rather than from the placket and the sleeve.
- */
 const GARMENT_EVIDENCE_RULES = `
 ### PRESSED, OR MERELY WORN
 Whether a garment has been ironed is decided on the same evidence a person uses
@@ -363,7 +299,6 @@ it as FORMAL and judge its other rows as usual. The one exception is a blazer
 or suit jacket worn over them, which makes an accepted suit.
 `.trim();
 
-/** Renders one section's checkpoints as a numbered, ordered list. */
 function renderSection(key, items) {
   const lines = items.map(
     (item, index) => `${index + 1}. code: ${item.code}\n   checkpoint_name: ${item.name}\n   standard: ${item.rule}`
@@ -371,14 +306,6 @@ function renderSection(key, items) {
   return `## ${SECTION_TITLES[key]}\nReturn these ${items.length} checkpoints in "${key}", in this order:\n${lines.join("\n")}`;
 }
 
-/**
- * The full system prompt for one instructor.
- *
- * Built from the checkpoint tables rather than written out by hand, so the
- * prompt and the schema validation can never disagree about what was asked
- * for — the previous prompt listed rules in prose and left the model to decide
- * which ones became rows.
- */
 export function buildSystemPrompt(gender, attireType) {
   const sections = checkpointSet(gender, attireType);
   if (!sections) throw new Error("A checkpoint set requires a known gender");
@@ -388,8 +315,6 @@ export function buildSystemPrompt(gender, attireType) {
 
   return [
     COMMON_ANALYSIS_RULES,
-    // Only the step that returns checkpoints needs to know how a crease or a
-    // hem is read; the classification step is told to judge nothing.
     GARMENT_EVIDENCE_RULES,
     genderRules,
     BLAZER_INSTRUCTIONS,
@@ -405,14 +330,6 @@ ${rendered}`,
   ].join("\n\n");
 }
 
-/**
- * How a man's report request chooses between his two attire families.
- *
- * A man's photograph is assessed in one request, so the family is named in the
- * same reply rather than asked first, as a woman's is: the checkpoints of both
- * families are listed, and the rows of the one he is not wearing come back
- * N/A and are discarded (checkpointSet picks the chosen family's rows).
- */
 const MEN_ATTIRE_FAMILY_RULES = `
 ### WHICH ATTIRE FAMILY
 Set attire_type from the photograph before you judge the attire rows:
@@ -431,11 +348,6 @@ Hair Length, Facial Hair, Moustache and Headwear N/A with the observation "Not
 assessed for a kurta." Every other checkpoint applies to both families.
 `.trim();
 
-/**
- * The system prompt for a man's report: both attire families' checkpoints,
- * and how to choose between them. buildSystemPrompt("MALE", "FORMAL") is still
- * used, unchanged, when this request cannot be served.
- */
 export function buildMaleReportPrompt() {
   const sections = maleCombinedSet();
   const total = SECTION_KEYS.reduce((sum, key) => sum + sections[key].length, 0);
@@ -459,29 +371,6 @@ ${rendered}`,
   ].join("\n\n");
 }
 
-/**
- * Reads which garment family a woman is wearing, and nothing else.
- *
- * This used to be folded into the report request: one call returned the
- * classification and the matching checkpoints together, expressed as a schema
- * that offered all four attire families as a union. Gemini compiles a
- * response schema into a constrained-decoding state machine, and that union
- * required every row of every branch — 71 properties against the 20 a man's
- * report needs. The provider began refusing it outright with "the specified
- * schema produces a constraint that has too many states for serving", a
- * deterministic 400 that no retry could clear, so every female check-in
- * failed and no woman could be assessed at all.
- *
- * Asking the garment first costs a second request, which is exactly what
- * 2026-08-24.3 removed. That saving is not available: one call that is always
- * rejected is worth less than two that work. The report step then asks for a
- * single family's rows through the same flat schema the men's path has always
- * used, so neither request carries a union.
- *
- * The garment must be read from the photograph rather than assumed from her
- * gender — a woman in formal trousers is a real case the weekly rotation
- * needs to see.
- */
 export function buildFemaleAttirePrompt() {
   return [
     COMMON_ANALYSIS_RULES,

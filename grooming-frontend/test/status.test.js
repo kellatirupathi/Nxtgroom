@@ -15,9 +15,6 @@ test('maps current and legacy attendance states', () => {
   assert.equal(normalizeAttendanceStatus('fail'), 'non_compliant');
   assert.equal(normalizeAttendanceStatus('error'), 'error');
   assert.equal(normalizeAttendanceStatus('processing'), 'pending');
-  // Records evaluated before human review was removed still carry these. They
-  // were compliant results that had been flagged, so they read as compliant
-  // rather than falling through to "pending" and looking unanalysed.
   assert.equal(normalizeAttendanceStatus('review_required'), 'compliant');
   assert.equal(normalizeAttendanceStatus('needs_review'), 'compliant');
   assert.equal(hasEvaluation('error'), false);
@@ -25,8 +22,6 @@ test('maps current and legacy attendance states', () => {
 });
 
 test('image quality is reported separately from the verdict', () => {
-  // Kept after human review was removed because it says something different:
-  // the verdict stands either way, but a poor photo is worth retaking.
   assert.equal(imageQualityLabel('RETAKE_RECOMMENDED'), 'Retake recommended');
   assert.equal(imageQualityLabel('ADEQUATE'), 'Adequate');
   assert.equal(imageQualityLabel(null), 'Not reported');
@@ -42,7 +37,6 @@ test('links coordinates to a map, and only real coordinates', () => {
     mapUrlForCoordinates('17.42138, 78.33251'),
     'https://www.openstreetmap.org/?mlat=17.42138&mlon=78.33251#map=17/17.42138/78.33251',
   );
-  // Nothing to open, so no link rather than a map of the ocean at 0,0.
   assert.equal(mapUrlForCoordinates(null), null);
   assert.equal(mapUrlForCoordinates(''), null);
   assert.equal(mapUrlForCoordinates('not-coordinates'), null);

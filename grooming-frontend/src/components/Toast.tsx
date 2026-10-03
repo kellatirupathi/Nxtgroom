@@ -8,7 +8,6 @@ import {
   type ToastOptions,
 } from './toastContext';
 
-/** Errors stay up longer because they usually require the user to act. */
 const DEFAULT_DURATION: Record<ToastKind, number> = {
   success: 3500,
   info: 4000,
@@ -23,7 +22,6 @@ const STYLES: Record<ToastKind, { icon: typeof Info; ring: string; iconColor: st
   info: { icon: Info, ring: 'ring-indigo-200', iconColor: 'text-indigo-600' },
 };
 
-/** Keeps the stack from covering the screen if something loops. */
 const MAX_VISIBLE = 4;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -47,8 +45,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const toast: Toast = { id, kind, title, detail: options.detail };
 
       setToasts((current) => {
-        // Collapse an identical message already on screen instead of stacking
-        // duplicates when a user retries the same failing action.
         const duplicate = current.find(
           (item) => item.title === title && item.detail === options.detail && item.kind === kind,
         );
@@ -64,7 +60,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismiss],
   );
 
-  // Clear pending timers if the provider unmounts mid-countdown.
   useEffect(() => {
     const pending = timers.current;
     return () => {
@@ -98,9 +93,6 @@ function ToastViewport({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id:
 
   return (
     <div
-      // Top-centre on phones/tablets where there is no room beside content, and
-      // top-right on desktop. pointer-events-none lets clicks reach the page
-      // behind the empty part of the column.
       className="pointer-events-none fixed inset-x-0 top-0 z-[100] flex flex-col items-center gap-2 p-3 pt-[max(0.75rem,var(--inset-top))] sm:inset-x-auto sm:right-0 sm:items-end sm:p-4 sm:pt-[max(1rem,var(--inset-top))]"
       role="region"
       aria-label="Notifications"

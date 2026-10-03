@@ -19,10 +19,6 @@ export default function Login({ onLogin }: LoginProps) {
   const [showForgot, setShowForgot] = useState(false);
   const toast = useToast();
 
-  /**
-   * A rejected Google account is the one failure the user cannot fix by
-   * retrying, so it gets an explicit next step rather than the raw message.
-   */
   const reportSignInError = (message: string) => {
     setError(message);
     if (/not authorised|not authorized/i.test(message)) {
@@ -125,7 +121,6 @@ export default function Login({ onLogin }: LoginProps) {
           </button>
         </form>
 
-        {/* Renders nothing unless the server reports Google sign-in is configured. */}
         <GoogleSignInButton
           onLogin={onLogin}
           onError={reportSignInError}

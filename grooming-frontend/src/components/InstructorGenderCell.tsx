@@ -10,16 +10,6 @@ interface InstructorGenderCellProps {
   onSaved: (gender: string) => void;
 }
 
-/**
- * Gender, editable in place.
- *
- * The AI is told the instructor's gender so it compares the photo against the
- * right reference examples; without it, everyone is judged against both men's
- * and women's standards. Synced instructors arrive without one and the roster
- * has no such field, so this is the only way the value ever gets set — which
- * is why it is a single click in the table rather than a trip through the
- * edit dialog.
- */
 export default function InstructorGenderCell({
   instructorId,
   instructorName,
@@ -34,8 +24,6 @@ export default function InstructorGenderCell({
   const save = async (next: string) => {
     if (!next || next === current) return;
     setSaving(true);
-    // Applied immediately: the select would otherwise snap back to the old
-    // value until the request returned, which reads as a failed click.
     onSaved(next);
     try {
       await apiJson(`/api/v2/instructors/${encodeURIComponent(instructorId)}/gender`, {
@@ -48,8 +36,6 @@ export default function InstructorGenderCell({
         detail: `${instructorName} is now recorded as ${next === 'MALE' ? 'Male' : 'Female'}.`,
       });
     } catch (error) {
-      // Put the old value back rather than leaving the table showing a change
-      // the database never accepted.
       onSaved(current);
       toast.error('Could not update gender', {
         detail: error instanceof Error ? error.message : String(error),
@@ -72,8 +58,6 @@ export default function InstructorGenderCell({
             : 'border-amber-200 bg-amber-50 text-amber-700'
         }`}
       >
-        {/* Unset is a real state, not a default: showing "Male" for a record
-            with no gender would hide exactly the rows that need attention. */}
         <option value="" disabled>Not set</option>
         <option value="MALE">Male</option>
         <option value="FEMALE">Female</option>

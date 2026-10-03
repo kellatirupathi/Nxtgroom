@@ -7,14 +7,6 @@ import { formatAttendanceTime } from '../attendanceFilters';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
 
-/**
- * How long a group's results stay on screen.
- *
- * Longer than the single-person panel's second and a bit, because there are
- * several names to find yours in rather than one to read. Still short enough
- * that the next group is not kept waiting behind it, and the camera runs
- * underneath the whole time.
- */
 const RESULT_VISIBLE_MS = 5_000;
 
 type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'NOT_RECOGNISED';
@@ -28,18 +20,14 @@ interface GroupPerson {
   detail?: string;
   tone: 'success' | 'info' | 'warning';
   similarity?: number | null;
-  /** Where in the photograph this person stood, as ratios of the frame. */
   position?: { left: number; top: number; width: number; height: number };
-  /** When this photograph recorded something for them, or null if it did not. */
   recorded_at?: string | null;
-  /** When their day began, if it has: the time worth showing next to their name. */
   check_in_time?: string | null;
 }
 
 interface GroupResponse {
   detected: number;
   recorded: number;
-  /** A trailing frame from a moment the tablet has already answered. */
   duplicate?: boolean;
   people: GroupPerson[];
   detail?: string;
@@ -49,21 +37,7 @@ interface GroupResult extends GroupResponse {
   at: number;
 }
 
-/**
- * Attendance for several people at once.
- *
- * One photograph, one row per person, and each row is that person's own
- * outcome: their arrival, their departure, or the fact that nobody recognised
- * them. The screen has to name everybody rather than summarise, because six
- * people walking away from a tablet that said "4 recorded" have no way to tell
- * which two of them it meant.
- *
- * Nothing here decides anything. Every name, every action and every refusal
- * comes back from the server, which applies the same rules to each person as
- * the single-person screen applies to one.
- */
 export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'environment' }) {
-  // Full screen is black around the camera, so the lines above it turn light.
   const fullScreen = useContext(AttendanceFullScreenContext);
   const [result, setResult] = useState<GroupResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -81,7 +55,6 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
   }, []);
 
   const showResult = useCallback((next: GroupResponse) => {
-    // One beep for the photograph when anybody in it was checked in or out.
     if (!next.duplicate && next.people.some((person) => beepsFor(person.action, person.recorded))) playSuccessBeep();
     setResult({ ...next, at: Date.now() });
     clearTimeout(resultTimer.current);
@@ -89,8 +62,6 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
   }, []);
 
   const submit = useCallback(async (file: File) => {
-    // React state is not synchronous; this ref closes the gap in which a second
-    // capture arrives before `submitting` has caused a render.
     if (submitInFlight.current) return;
     submitInFlight.current = true;
     setSubmitting(true);
@@ -112,8 +83,6 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
       });
       if (response.duplicate) return;
       if (!response.people?.length) {
-        // Nobody was found, or nobody was usable. The server says which, and
-        // that sentence is more use than an empty list of names.
         setError(response.detail || 'Nobody could be identified from that photo.');
         errorTimer.current = setTimeout(() => setError(''), 5_000);
         return;
@@ -172,9 +141,6 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
           </div>
         )}
 
-        {/* One row per person, over a camera that never stopped. Everybody has
-            to be named: a group told only how many were recorded cannot tell
-            which of them still needs to try again. */}
         {result && (
           <div
             className="absolute inset-0 flex flex-col bg-slate-900/95 px-4 py-4 overflow-y-auto"
@@ -187,9 +153,6 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
             <ul className="flex flex-col gap-2">
               {result.people.map((person, index) => {
                 const Icon = RowIcon(person.tone);
-                // The moment this photograph recorded, or failing that the
-                // check-in it is being measured against. Somebody told they
-                // have already checked in wants to know when.
                 const when = person.recorded_at || person.check_in_time || null;
                 const timeLabel = when ? formatAttendanceTime(when) : null;
                 return (
@@ -216,8 +179,6 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
                 );
               })}
             </ul>
-            {/* Somebody standing in the photograph whom the detector never
-                found would otherwise vanish without trace. */}
             {result.detected > result.people.length && (
               <p className="mt-3 text-xs font-semibold text-amber-300 shrink-0">
                 {result.detected - result.people.length} more {result.detected - result.people.length === 1 ? 'face was' : 'faces were'} seen

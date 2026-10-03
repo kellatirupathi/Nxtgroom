@@ -7,7 +7,6 @@ interface JpegCanvas {
   toBlob(callback: (blob: Blob | null) => void, type: string, quality: number): void;
 }
 
-/** Keep detail first, reducing compression quality only for oversized uploads. */
 export async function encodeUploadJpeg(canvas: JpegCanvas, quality = PHOTO_JPEG_QUALITY): Promise<Blob> {
   for (const candidate of [quality, 0.9, 0.85, 0.8, 0.7, 0.6, 0.5].filter((value) => value <= quality)) {
     const blob = await new Promise<Blob>((resolve, reject) => {

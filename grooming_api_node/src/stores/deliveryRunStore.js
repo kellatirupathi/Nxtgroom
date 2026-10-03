@@ -3,21 +3,12 @@ import { dynamoTableName, getDynamoDocumentClient } from "../config/dynamo.js";
 import { fromItem, isConditionFailure, upsertCommandInput } from "./dynamoItems.js";
 import { routedRead, routedWrite } from "./routing.js";
 
-/**
- * report_delivery_runs: one document per weekly-report, reminder or daily
- * report run, counting its emails as they are delivered (weekly:<date>,
- * attendance-reminders:<date>, daily-report:<date>:<HH:MM>). Written by the
- * cron routes, the daily report scheduler and the mail worker. A daily report
- * run is also read back by id: it holds the period the report covers and the
- * secret that opens its public page.
- */
 const STORE = "report_delivery_runs";
 
 function table() {
   return dynamoTableName(STORE);
 }
 
-/** One run by id, or null. */
 export async function getDeliveryRun(db, runId) {
   return routedRead(STORE, {
     mongo: () => db.collection(STORE).findOne({ _id: runId }),
@@ -32,7 +23,6 @@ export async function getDeliveryRun(db, runId) {
   });
 }
 
-/** MongoDB updateOne({ _id }, { $set, $setOnInsert }, { upsert: true }). */
 export async function saveDeliveryRun(db, runId, { set = {}, setOnInsert } = {}) {
   await routedWrite(STORE, "save", {
     mongo: () => db.collection(STORE).updateOne(
@@ -47,7 +37,6 @@ export async function saveDeliveryRun(db, runId, { set = {}, setOnInsert } = {})
   });
 }
 
-/** Applies `set` only when every queued email has been delivered or failed. */
 export async function completeDeliveryRunIfDone(db, runId, set) {
   await routedWrite(STORE, "complete_if_done", {
     mongo: () => db.collection(STORE).updateOne(
@@ -69,11 +58,6 @@ export async function completeDeliveryRunIfDone(db, runId, set) {
   });
 }
 
-/**
- * Counts one delivered ("sent") or abandoned ("failed") email and returns the
- * run as it now stands, or null when the run does not exist. Never creates
- * the run: startDeliveryRun does that before the first email is queued.
- */
 export async function recordDeliveryOutcome(db, runId, outcome, now) {
   return routedWrite(STORE, "record_outcome", {
     mongo: async () => {

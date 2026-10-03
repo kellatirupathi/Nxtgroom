@@ -13,13 +13,6 @@ interface RecipientEvents {
   checkout_enabled: boolean;
 }
 
-/**
- * Which halves the partners are copied on.
- *
- * Two switches rather than one, because they are genuinely different asks:
- * somebody may want the morning's failures without a second message every
- * evening. Both default to on, so an existing setup keeps behaving as it did.
- */
 function EventToggles() {
   const [events, setEvents] = useState<RecipientEvents>({ checkin_enabled: true, checkout_enabled: true });
   const [loading, setLoading] = useState(true);
@@ -81,11 +74,6 @@ function EventToggles() {
   );
 }
 
-/**
- * Reporting Partners: the addresses copied on an instructor's appearance
- * alert. Administrators and BOAs are never sent these, so this list is the
- * only way anyone other than the instructor sees a failed result by email.
- */
 export default function ReportRecipients() {
   const [emails, setEmails] = useState<string[]>([]);
   const [email, setEmail] = useState('');
@@ -122,8 +110,6 @@ export default function ReportRecipients() {
     setSubmitting(true);
     setError('');
     try {
-      // The server returns the full list, so local state comes from the
-      // response rather than a refetch.
       const data = await apiJson<{ emails: string[] }>(RP_PATH, {
         method: 'POST',
         body: { email: value },
@@ -172,7 +158,6 @@ export default function ReportRecipients() {
           and on the urgent email when an instructor fails three or more times in a week.
           The instructor is always emailed their own report; these settings control who else is.
         </p>
-        {/* Stated plainly: it is the only way anyone but the instructor is told. */}
         <p className="mt-1 text-xs text-slate-400">
           Administrators, super admins and BOAs are never emailed these reports. Only the
           instructor and the partners listed here.

@@ -11,18 +11,11 @@ const LABEL_CLASS = 'block text-xs font-bold text-slate-500 uppercase tracking-w
 
 interface InstituteFormDialogProps {
   open: boolean;
-  /** The institute being edited, or null to add a new one. */
   college: College | null;
   onClose: () => void;
-  /** Called with the saved institute once the server has accepted it. */
   onSaved: (college: College, wasEdit: boolean) => void;
 }
 
-/**
- * Adds or edits one institute: its name and location, both required, which
- * is everything the API stores for one. Shared by Settings and the Institutes
- * page so the two cannot drift apart.
- */
 export default function InstituteFormDialog({ open, college, onClose, onSaved }: InstituteFormDialogProps) {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
@@ -31,8 +24,6 @@ export default function InstituteFormDialog({ open, college, onClose, onSaved }:
   const toast = useToast();
   const isEdit = Boolean(college);
 
-  // Refilled on every open, so a dialog closed half-typed never carries its
-  // text into the next institute.
   useEffect(() => {
     if (!open) return;
     setName(college?.name ?? '');

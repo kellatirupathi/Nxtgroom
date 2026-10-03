@@ -1,13 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-/**
- * The female path now asks for the garment first and the checkpoints second.
- * These cover what that split has to guarantee: the report request is made
- * against the family that was actually identified, and it is not made at all
- * when there is nothing to report on.
- */
-
 const GEMINI_ENV = [
   "GEMINI_API_KEY",
   "GEMINI_MODEL",
@@ -23,7 +16,6 @@ function withStubbedGemini(responses) {
   process.env.GEMINI_MODEL = "gemini-2.5-flash-lite";
   process.env.GEMINI_TIMEOUT_MS = "120000";
   process.env.GEMINI_MAX_RETRIES = "0";
-  // Off, so each call is one request and the counts read directly.
   process.env.GEMINI_EXPLICIT_CACHE = "false";
 
   const requests = [];
@@ -120,8 +112,6 @@ test("an unidentifiable outfit is still reported on, minus the attire rows", asy
     assert.equal(result.unassessed_reason, "ATTIRE_NOT_IDENTIFIED");
     assert.equal(result.visible_regions.lower_body, "NOT_VISIBLE");
 
-    // The garment-independent rows do not depend on the family and were
-    // reported before the split; dropping them would lose real findings.
     assert.deepEqual(
       result.general_idcard_check.map((item) => item.code),
       sections.general_idcard_check.map((item) => item.code),
@@ -130,8 +120,6 @@ test("an unidentifiable outfit is still reported on, minus the attire rows", asy
     assert.ok(result.footwear_check.length > 0);
     assert.deepEqual(result.attire_check, [], "there is no family to score attire against");
 
-    // An empty section is left out of the schema rather than requested as an
-    // empty object.
     const reportSchema = stub.requests[1].generationConfig.responseJsonSchema;
     assert.equal("attire_check" in reportSchema.properties, false);
     assert.equal(reportSchema.required.includes("attire_check"), false);
@@ -178,8 +166,6 @@ test("the report request follows whichever family was classified", async () => {
       sections.attire_check.map((item) => item.code),
     );
 
-    // The second request must be built for the classified family, not the
-    // default one, or the rows would be scored against the wrong dress code.
     const reportSchema = stub.requests[1].generationConfig.responseJsonSchema;
     assert.deepEqual(
       Object.keys(reportSchema.properties.attire_check.properties),
@@ -190,7 +176,6 @@ test("the report request follows whichever family was classified", async () => {
   }
 });
 
-/** A report on one family's rows, every row passed by the model. */
 async function allPassReport(attireType, summary = "Assessed.") {
   const { checkpointSet, SECTION_KEYS } = await import("../src/checkpoints.js");
   const sections = checkpointSet("FEMALE", attireType);
@@ -242,8 +227,6 @@ test("saree, kurti and abaya are untouched by the shirt-and-trousers rule", asyn
       stub.restore();
     }
   }
-  // A failure the model already gave keeps its own reason, and a man's formal
-  // rows have no such row to change.
   const failed = { attire_check: [{ code: "W_FORMAL_ATTIRE_TYPE", status: "FAIL", reason: "Jeans are not formal." }] };
   assert.equal(resolveWomenFormalAttire(failed, "FORMAL"), false);
   assert.equal(failed.attire_check[0].reason, "Jeans are not formal.");
@@ -259,10 +242,8 @@ test("the women's prompt and the row's standard and tip say shirt and trousers a
   assert.match(rule, /^Shirt and trousers are not permitted for women/);
   assert.match(rule, /always FAIL/);
   assert.match(buildSystemPrompt("FEMALE", "FORMAL"), /### SHIRT AND TROUSERS\nShirt and trousers are not permitted for women/);
-  // The garment step still names the family, so the rows can be reported.
   assert.match(buildFemaleAttirePrompt(), /identify\nit as FORMAL/);
   assert.match(buildFemaleAttirePrompt(), /- FORMAL: the outfit belongs to the western formal-wear family/);
-  // Men's prompts never carry it.
   assert.doesNotMatch(buildSystemPrompt("MALE", "FORMAL"), /SHIRT AND TROUSERS/);
   const report = { overall_status: "NON_COMPLIANT", attire_check: [{ code: "W_FORMAL_ATTIRE_TYPE", status: "FAIL" }] };
   assert.match(improvementTips(report).join(" "), /Shirt and trousers are not permitted for women\. Wear a saree or a kurti with dupatta\./);

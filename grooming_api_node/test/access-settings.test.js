@@ -9,13 +9,6 @@ import {
   validateAccessSettings,
 } from "../src/services/accessSettings.js";
 
-/**
- * Deleting a check-in removes the record, its evaluation and its photographs,
- * with no undo. These tests hold the rule that the capability is off until
- * somebody grants it, and that granting it to one person never grants it to
- * everyone.
- */
-
 const boa = (override) => (
   override === undefined ? { role: "BOA" } : { role: "BOA", can_delete_records: override }
 );
@@ -25,7 +18,6 @@ test("nobody but an admin can delete until the workspace allows it", () => {
   assert.equal(canDeleteAttendance(boa(), closed), false);
   assert.equal(canDeleteAttendance({ role: "ADMIN" }, closed), true);
   assert.equal(canDeleteAttendance({ role: "SUPER_ADMIN" }, closed), true);
-  // An absent or malformed user is never granted anything by default.
   assert.equal(canDeleteAttendance(null, closed), false);
   assert.equal(canDeleteAttendance({}, closed), false);
 });
@@ -42,15 +34,11 @@ test("the workspace default reaches every BOA who has no setting of their own", 
 });
 
 test("a person's own setting overrides the workspace in both directions", () => {
-  // Granting one BOA the capability must not require opening it to all of
-  // them, and denying one must not require closing it for the rest.
   assert.equal(canDeleteAttendance(boa(true), { boa_can_delete_records: false }), true);
   assert.equal(canDeleteAttendance(boa(false), { boa_can_delete_records: true }), false);
 });
 
 test("the permissions view says where the answer came from", () => {
-  // "On because the workspace allows it" and "on because someone chose it for
-  // this person" behave differently later, and look identical without this.
   assert.deepEqual(describeDeletePermission(boa(), { boa_can_delete_records: true }), {
     can_delete_records: true,
     source: "WORKSPACE",
@@ -89,8 +77,6 @@ test("a permission change is not hidden behind the cache", async () => {
   await getAccessSettings(db);
   assert.equal(reads, 1, "a repeat read within the window should not hit the database");
 
-  // Revoking has to take effect, so the cached copy must expire rather than
-  // leaving a BOA able to delete after the permission was withdrawn.
   stored = { boa_can_delete_records: false };
   const settings = await getAccessSettings(db, { now: Date.now() + 60_000 });
   assert.equal(settings.boa_can_delete_records, false);
@@ -102,13 +88,10 @@ test("deleting a check-out is a lesser permission than deleting the record", asy
   const { canDeleteCheckout } = await import("../src/services/accessSettings.js");
   const closed = { boa_can_delete_records: false, boa_can_delete_checkout: false };
 
-  // Anyone who may destroy the whole record may certainly remove half of it.
   assert.equal(canDeleteCheckout({ role: "ADMIN" }, closed), true);
   assert.equal(canDeleteCheckout({ role: "BOA", can_delete_records: true }, closed), true);
   assert.equal(canDeleteCheckout({ role: "BOA" }, { boa_can_delete_records: true }), true);
 
-  // The reverse does not hold: removing a check-out leaves the check-in and
-  // its report standing, so it can be granted on its own.
   assert.equal(canDeleteCheckout({ role: "BOA" }, { boa_can_delete_checkout: true }), true);
   assert.equal(canDeleteAttendance({ role: "BOA" }, { boa_can_delete_checkout: true }), false);
 

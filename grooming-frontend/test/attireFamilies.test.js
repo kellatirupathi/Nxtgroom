@@ -8,7 +8,6 @@ const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url)
 test('the abaya and the kurta are named wherever an attire type is shown', () => {
   assert.equal(attireSectionTitle('ABAYA'), '3. Attire Check (Abaya)');
   assert.equal(attireSectionTitle('KURTA_PAJAMA'), '3. Attire Check (Kurta with Payjama)');
-  // The existing titles are unchanged.
   assert.equal(attireSectionTitle('SAREE'), '3. Attire Check (Saree)');
   assert.equal(attireSectionTitle('FORMAL'), '3. Attire Check');
 

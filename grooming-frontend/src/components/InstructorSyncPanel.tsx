@@ -30,12 +30,6 @@ function formatSyncedAt(value: string | null): string {
   return `Last synced ${date.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-/**
- * Pulls the instructor roster from BigQuery on demand and shows what is
- * currently stored. The sync is manual rather than scheduled because the
- * roster changes rarely and an administrator should decide when the local
- * copy is replaced.
- */
 export default function InstructorSyncPanel() {
   const [state, setState] = useState<SyncState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,8 +64,6 @@ export default function InstructorSyncPanel() {
         SYNC_PATH,
         { method: 'POST', timeoutMs: 180_000 },
       );
-      // The roster feeds the Instructors page and the check-in dropdown, so
-      // their cached copies are now stale.
       invalidateCache('/api/v2/instructors');
       await load();
       toast.success('Sync complete', {
@@ -111,8 +103,6 @@ export default function InstructorSyncPanel() {
           <p className="text-sm text-slate-500 mt-1">
             Import the instructor roster from BigQuery into FacultyTrack.
           </p>
-          {/* Stated up front: an administrator should know a sync cannot lose
-              anything before they run one against 4,000+ records. */}
           <p className="text-xs text-slate-400 mt-1">
             Adds new instructors and updates changed details. Nothing is ever deleted —
             instructors no longer in BigQuery keep their records and history.
@@ -120,8 +110,6 @@ export default function InstructorSyncPanel() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Sits to the left of the button so the state of the data reads
-              before the action that changes it. */}
           <span className="text-xs font-medium text-slate-500 text-right">
             {formatSyncedAt(state?.last_sync_at ?? null)}
             {state?.record_count ? (
@@ -177,8 +165,6 @@ export default function InstructorSyncPanel() {
 
       <div className="bg-white rounded-md border border-slate-200 overflow-hidden flex-1 flex flex-col min-h-0">
         <div className="overflow-auto">
-          {/* A phone shows the name, with role and category under it, and the
-              institute; the id, role and category columns return from md up. */}
           <table className="w-full text-left border-collapse md:min-w-[720px]">
             <thead className="sticky top-0 bg-slate-50 z-10">
               <tr className="border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">

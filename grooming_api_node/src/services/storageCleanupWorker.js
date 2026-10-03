@@ -106,8 +106,6 @@ export function startStorageCleanupWorker(db) {
   let timer = null;
   let inFlight = Promise.resolve();
   const monitor = createWorkerMonitor("storage_cleanup", { busyStaleAfterMs: LEASE_MS + 60_000 });
-  // Photo deletion is never urgent, so an idle worker needs no wake-up; it
-  // backs off like the others and drains without pause once it finds work.
   const backoff = createIdleBackoff({ minMs: 2_000, maxMs: runtimeConfig().workerIdleMaxPollMs });
   const tick = () => {
     monitor.cycleStarted();

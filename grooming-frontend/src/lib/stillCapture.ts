@@ -1,25 +1,3 @@
-/**
- * Takes the attendance photograph at the camera's full still resolution.
- *
- * Until now the photograph was a frame grabbed from the live video, which on a
- * tablet is one to two megapixels - and much of that is spent on the room,
- * because the whole body has to fit. A face came out 40 to 90 pixels tall, and
- * below about 60 face search stops being sure enough to name anybody. The same
- * camera takes still photographs at eight to twelve megapixels.
- *
- * So the photograph is now a still where the browser can take one (Chrome and
- * the Android app shell can; Safari and Firefox cannot), and the video frame
- * otherwise. A still is only used once it is proven to show what the camera
- * approved - see stillRegistration - and every failure along the way falls
- * back to the video frame, taken at the moment the camera decided to fire.
- * The worst a still can do is cost a second; it can never change what is
- * photographed.
- *
- * Both are unmirrored. The preview is mirrored for the front camera because an
- * unmirrored self-view is disorienting, but the saved photograph must not be:
- * a mirrored image reverses the text on a lanyard or badge.
- */
-
 import type { SourceRect } from './cameraGeometry.ts';
 import { encodeUploadJpeg, PHOTO_MAX_DIMENSION } from './photoEncoding.ts';
 import {
@@ -40,27 +18,12 @@ import {
   type Size,
 } from './stillRegistration.ts';
 
-/** The longest side the upload may have; the server keeps no more. */
 export const SINGLE_UPLOAD_MAX_DIMENSION = PHOTO_MAX_DIMENSION;
-/** Matches the server's GROUP_MAX_DIMENSION: a group spends pixels on several people. */
 export const GROUP_UPLOAD_MAX_DIMENSION = 3072;
 
-/**
- * The largest still asked for. Twelve megapixels is several times what either
- * upload keeps, and a 48-megapixel still decoded on a tablet is 190MB of
- * memory for nothing.
- */
 export const MAX_STILL_LONG_SIDE = 4032;
-/** A still slower than this is abandoned for the video frame. */
 export const STILL_TIMEOUT_MS = 3000;
-/** Errors in a row before stills are given up on for this camera. */
 export const MAX_STILL_FAILURES = 2;
-/**
- * Stills in a row that could not be matched before they are given up on. More
- * than the error limit, because one person moving as the shutter went is not
- * a fault; the same miss four times over is a device whose stills do not line
- * up, and every attempt is a second of waiting for nothing.
- */
 export const MAX_STILL_MISSES = 4;
 
 interface PhotoSettingsLike {
@@ -101,7 +64,6 @@ interface Context2DLike {
   getImageData(sx: number, sy: number, sw: number, sh: number): { data: Uint8ClampedArray };
 }
 
-/** What the capture needs from the browser, injectable so it can be tested. */
 export interface CaptureEnvironment {
   createCanvas: () => CanvasLike;
   createImageBitmap: (blob: Blob) => Promise<BitmapLike>;
@@ -124,16 +86,13 @@ function browserEnvironment(): CaptureEnvironment {
   };
 }
 
-/** Per camera, kept by the component across photographs. */
 export interface StillCaptureState {
   trackId: string | null;
   camera: ImageCaptureLike | null;
-  /** undefined: not asked yet. null: let the browser choose. */
   settings: PhotoSettingsLike | null | undefined;
   failures: number;
   misses: number;
   disabled: boolean;
-  /** How the last photograph was taken. */
   lastSource: 'still' | 'video' | null;
 }
 
@@ -151,13 +110,6 @@ export function createStillCaptureState(): StillCaptureState {
 
 export type StillOutcome = 'used' | 'miss' | 'failure';
 
-/**
- * Updates the running record after one still.
- *
- * Success clears both counts. A miss clears the error count (the camera works)
- * and adds a miss; an error adds an error. Either limit reached, stills are
- * off until the camera is next opened - a new track starts a new record.
- */
 export function recordStillOutcome(state: StillCaptureState, outcome: StillOutcome): void {
   if (outcome === 'used') {
     state.failures = 0;
@@ -173,14 +125,6 @@ export function recordStillOutcome(state: StillCaptureState, outcome: StillOutco
   if (state.failures >= MAX_STILL_FAILURES || state.misses >= MAX_STILL_MISSES) state.disabled = true;
 }
 
-/**
- * The still size to ask for, or that stills are pointless on this camera.
- *
- * A still no bigger than the video - a desktop webcam, typically - costs the
- * wait and buys nothing, so such a camera never takes one. Otherwise the
- * largest still is asked for, capped at MAX_STILL_LONG_SIDE; the browser picks
- * the nearest size the camera actually offers.
- */
 export function decidePhotoSettings(
   capabilities: PhotoCapabilitiesLike | null | undefined,
   video: Size,
@@ -212,8 +156,6 @@ function canvas2d(env: CaptureEnvironment, size: Size, readable = false) {
   canvas.height = size.height;
   const context = canvas.getContext('2d', readable ? { willReadFrequently: true } : undefined);
   if (!context) throw new Error('no 2d context');
-  // High quality, because every draw here shrinks: a thumbnail drawn with the
-  // default filter aliases, and an aliased thumbnail aligns badly.
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
   return { canvas, context };
@@ -232,7 +174,6 @@ function encode(canvas: CanvasLike, quality: number): Promise<Blob> {
   return encodeUploadJpeg(canvas, quality);
 }
 
-/** Trims a region that overhangs the still by rounding, so no edge is left blank. */
 function clampRegion(region: Rect, size: Size): Rect {
   const x = Math.max(0, region.x);
   const y = Math.max(0, region.y);
@@ -254,7 +195,6 @@ export interface CapturedPhoto {
 export interface CaptureOptions {
   video: HTMLVideoElement | { videoWidth: number; videoHeight: number };
   track: Pick<MediaStreamTrack, 'id' | 'readyState'> | null;
-  /** The part of the video frame to keep, in video pixels. */
   region: SourceRect;
   maxDimension: number;
   quality: number;
@@ -289,8 +229,6 @@ async function takeStill({
   }
   let bitmap: BitmapLike | null = null;
   try {
-    // One ImageCapture per camera track. A restarted or flipped camera is a
-    // new track, and starts a new record of what its stills can do.
     if (state.trackId !== track.id || !state.camera) {
       state.trackId = track.id;
       state.camera = new ImageCapture(track as MediaStreamTrack);
@@ -320,7 +258,6 @@ async function takeStill({
     const raw = { width: bitmap.width, height: bitmap.height };
     const source = bitmap;
 
-    // Each way up the still might have been handed over, aligned in turn.
     const candidates = candidateRotations(raw, videoSize).map((rotation: Rotation) => {
       const oriented = orientedSize(raw, rotation);
       const scale = thumbnailScale(oriented, videoSize, region);
@@ -371,22 +308,12 @@ async function takeStill({
   }
 }
 
-/**
- * The photograph for one capture.
- *
- * The video frame is taken first and at once - it is the moment the camera
- * approved, it is the reference a still is checked against, and it is the
- * photograph whenever a still cannot be used. Only then is a still attempted.
- */
 export async function capturePhoto(
   { video, track, region, maxDimension, quality, state }: CaptureOptions,
   env: CaptureEnvironment = browserEnvironment(),
 ): Promise<CapturedPhoto> {
   const videoSize = { width: video.videoWidth, height: video.videoHeight };
 
-  // A different camera track - reopened after the screen slept, after a tab
-  // switch, or flipped front to back - starts a clean record. Whatever made
-  // stills unusable on the last camera may not be true of this one.
   if (track && state.trackId !== null && state.trackId !== track.id) {
     Object.assign(state, createStillCaptureState());
   }

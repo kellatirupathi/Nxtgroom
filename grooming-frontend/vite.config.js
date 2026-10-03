@@ -29,9 +29,6 @@ export default defineConfig(({ mode }) => {
   return {
     resolve: {
       alias: {
-        // pose-detection imports this for BlazePose, which is unused here.
-        // The published bundle is not valid ESM, so it fails the build rather
-        // than merely adding weight.
         '@mediapipe/pose': fileURLToPath(new URL('./src/lib/mediapipeStub.js', import.meta.url)),
       },
     },

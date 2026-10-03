@@ -39,14 +39,6 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
   { key: 'enrolled_percent', label: 'Faces enrolled', numeric: true },
 ];
 
-/**
- * Institutes: every institute side by side, for today or any range.
- *
- * Its own screen rather than a section of the Dashboard, so the Dashboard
- * stays a summary and the comparison has the whole page. Every range, today
- * included, comes from the same endpoint, and one that reaches today refreshes
- * itself every 30 seconds while the page is on screen, as the Dashboard does.
- */
 export default function InstituteAnalytics() {
   const [sort, setSort] = useState<InstituteSort>({ key: 'present_percent', direction: 1 });
   const [preset, setPreset] = useState<DatePreset>('today');
@@ -55,8 +47,6 @@ export default function InstituteAnalytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
-  // Bumped after an institute is added, so the table fetches again and shows
-  // it; the rows on screen stay put while it does.
   const [reloadKey, setReloadKey] = useState(0);
   const hasResult = useRef(false);
 
@@ -67,8 +57,6 @@ export default function InstituteAnalytics() {
     let active: AbortController | null = null;
     const params = new URLSearchParams({ from: range.from, to: range.to });
     const path = `/api/v2/dashboard/institutes?${params.toString()}`;
-    // A range that ends before today cannot change, so only one that reaches
-    // today keeps refreshing.
     const live = !range.to || range.to >= localDateValue();
 
     const schedule = () => {
@@ -122,7 +110,6 @@ export default function InstituteAnalytics() {
   }, [preset, range, reloadKey]);
 
   const changeRange = (nextPreset: DatePreset, nextRange: DateRange) => {
-    // Rows for the previous range must not stand in for the new one.
     hasResult.current = false;
     setResult(null);
     setError('');
@@ -141,12 +128,7 @@ export default function InstituteAnalytics() {
   };
 
   return (
-    // As tall as the screen allows, like Daily Records: the page itself does
-    // not scroll, the table does, so every institute is reachable without the
-    // heading or the date filter leaving the screen.
     <section className="mx-auto flex h-full min-h-0 w-full max-w-[1400px] flex-col gap-5" aria-labelledby="institutes-title">
-      {/* The date filter sits at the right end of the heading row and never
-          wraps below it; the note a longer range brings goes under the title. */}
       <div className="flex shrink-0 items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h2 id="institutes-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
@@ -159,8 +141,6 @@ export default function InstituteAnalytics() {
             </p>
           )}
         </div>
-        {/* Add sits before the date filter, which stays at the far right.
-            On a phone the button keeps only its icon so the row never wraps. */}
         <div className="flex shrink-0 items-center gap-2">
           <button
             type="button"
@@ -199,9 +179,6 @@ export default function InstituteAnalytics() {
         ) : rows.length === 0 ? (
           <p className="p-6 text-sm text-slate-400">No institutes have been added yet.</p>
         ) : (
-          // Fills the rest of the card and scrolls under a pinned header. A
-          // floor keeps a few rows visible on a very short screen, where the
-          // page then scrolls as well.
           <div
             className="min-h-[18rem] flex-1 overflow-auto overscroll-contain"
             tabIndex={0}

@@ -17,14 +17,6 @@ const SOURCE_NOTE: Record<UserPermissions['source'], string> = {
   WORKSPACE: 'Following the workspace default. Changing it here applies to this account only.',
 };
 
-/**
- * One account's deletion permission.
- *
- * Shows where the current answer comes from, because a switch that is on
- * because the workspace allows it behaves differently from one somebody chose
- * for this person: changing the workspace default moves the first and leaves
- * the second alone, and the two are indistinguishable without saying so.
- */
 export default function UserPermissionsModal({ userId, email, onClose }: UserPermissionsModalProps) {
   const [permissions, setPermissions] = useState<UserPermissions | null>(null);
   const [loading, setLoading] = useState(true);
