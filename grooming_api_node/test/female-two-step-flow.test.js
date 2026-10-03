@@ -190,6 +190,84 @@ test("the report request follows whichever family was classified", async () => {
   }
 });
 
+/** A report on one family's rows, every row passed by the model. */
+async function allPassReport(attireType, summary = "Assessed.") {
+  const { checkpointSet, SECTION_KEYS } = await import("../src/checkpoints.js");
+  const sections = checkpointSet("FEMALE", attireType);
+  const report = { subject_visible: true, image_quality: "ADEQUATE", ai_summary: summary, visible_regions: ALL_VISIBLE };
+  for (const key of SECTION_KEYS) {
+    report[key] = Object.fromEntries(sections[key].map((item) => [item.code, {
+      status: "PASS",
+      observation: "Visible and acceptable.",
+      reason: "Meets the checkpoint.",
+    }]));
+  }
+  return report;
+}
+
+const classified = (attireType) => ({ subject_visible: true, attire_type: attireType, image_quality: "ADEQUATE", visible_regions: ALL_VISIBLE });
+
+test("a woman in shirt and trousers fails Attire Type even when the model passed it", async () => {
+  const stub = withStubbedGemini([
+    classified("FORMAL"),
+    await allPassReport("FORMAL", "The instructor wears a dark shirt with grey formal trousers and is compliant."),
+  ]);
+  try {
+    const { evaluateImage } = await import("../src/services/visionEngine.js");
+    const result = await evaluateImage(image(), "image/jpeg", "FEMALE");
+
+    assert.equal(result.attire_type, "FORMAL", "the outfit is still identified");
+    assert.equal(result.overall_status, "NON_COMPLIANT");
+    const [attireType, ...others] = result.attire_check;
+    assert.equal(attireType.code, "W_FORMAL_ATTIRE_TYPE");
+    assert.equal(attireType.status, "FAIL");
+    assert.equal(attireType.reason, "Shirt and trousers are not permitted for women; wear a saree or a kurti with dupatta.");
+    assert.equal(attireType.observation, "Visible and acceptable.", "what the model saw is kept");
+    assert.ok(others.length === 5 && others.every((row) => row.status === "PASS"), "the other formal rows keep their answers");
+    assert.match(result.ai_summary, /^Shirt and trousers are not permitted for women; .* is compliant\.$/);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("saree, kurti and abaya are untouched by the shirt-and-trousers rule", async () => {
+  const { evaluateImage, resolveWomenFormalAttire } = await import("../src/services/visionEngine.js");
+  for (const family of ["SAREE", "KURTI_WITH_DUPATTA", "ABAYA"]) {
+    const stub = withStubbedGemini([classified(family), await allPassReport(family)]);
+    try {
+      const result = await evaluateImage(image(), "image/jpeg", "FEMALE");
+      assert.equal(result.overall_status, "COMPLIANT", family);
+      assert.equal(result.ai_summary, "Assessed.", family);
+    } finally {
+      stub.restore();
+    }
+  }
+  // A failure the model already gave keeps its own reason, and a man's formal
+  // rows have no such row to change.
+  const failed = { attire_check: [{ code: "W_FORMAL_ATTIRE_TYPE", status: "FAIL", reason: "Jeans are not formal." }] };
+  assert.equal(resolveWomenFormalAttire(failed, "FORMAL"), false);
+  assert.equal(failed.attire_check[0].reason, "Jeans are not formal.");
+  const men = { attire_check: [{ code: "M_SHIRT_TYPE", status: "PASS", reason: "Formal shirt." }] };
+  assert.equal(resolveWomenFormalAttire(men, "FORMAL"), false);
+  assert.equal(men.attire_check[0].status, "PASS");
+});
+
+test("the women's prompt and the row's standard and tip say shirt and trousers are not permitted", async () => {
+  const { buildSystemPrompt, buildFemaleAttirePrompt } = await import("../src/prompts.js");
+  const { checkpointSet, improvementTips } = await import("../src/checkpoints.js");
+  const rule = checkpointSet("FEMALE", "FORMAL").attire_check.find((row) => row.code === "W_FORMAL_ATTIRE_TYPE").rule;
+  assert.match(rule, /^Shirt and trousers are not permitted for women/);
+  assert.match(rule, /always FAIL/);
+  assert.match(buildSystemPrompt("FEMALE", "FORMAL"), /### SHIRT AND TROUSERS\nShirt and trousers are not permitted for women/);
+  // The garment step still names the family, so the rows can be reported.
+  assert.match(buildFemaleAttirePrompt(), /identify\nit as FORMAL/);
+  assert.match(buildFemaleAttirePrompt(), /- FORMAL: the outfit belongs to the western formal-wear family/);
+  // Men's prompts never carry it.
+  assert.doesNotMatch(buildSystemPrompt("MALE", "FORMAL"), /SHIRT AND TROUSERS/);
+  const report = { overall_status: "NON_COMPLIANT", attire_check: [{ code: "W_FORMAL_ATTIRE_TYPE", status: "FAIL" }] };
+  assert.match(improvementTips(report).join(" "), /Shirt and trousers are not permitted for women\. Wear a saree or a kurti with dupatta\./);
+});
+
 test("the classification step spends less reasoning budget than the report", async () => {
   const stub = withStubbedGemini([{
     subject_visible: false,

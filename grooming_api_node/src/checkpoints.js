@@ -196,9 +196,14 @@ export const KURTI_ATTIRE_CHECKS = [
  * incorrectly introduce men's belt, shirt and trouser requirements into a
  * woman's report, while routing FORMAL through the kurti rows would judge the
  * wrong garment altogether.
+ *
+ * Shirt and trousers are not permitted for women, so Attire Type always fails
+ * here (resolveWomenFormalAttire in visionEngine.js holds it to that). The
+ * family is still identified, and its other rows still judged, so the report
+ * says what was worn rather than leaving the attire unassessed.
  */
 export const WOMEN_FORMAL_ATTIRE_CHECKS = [
-  { code: "W_FORMAL_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms the visible outfit belongs to the western formal-wear family. A professional shirt or blouse with formal trousers is acceptable. FAIL t-shirts, crop tops, jeans, denim, sportswear and clearly casual combinations." },
+  { code: "W_FORMAL_ATTIRE_TYPE", name: "Attire Type", rule: "Shirt and trousers are not permitted for women: the accepted attire is a saree, a kurti with dupatta, or an abaya. This row is always FAIL for a shirt or blouse worn with trousers, however formal, neat and well fitted the outfit is. Say in the observation what she is wearing, top and bottom, and give as the reason that shirt and trousers are not permitted for women." },
   { code: "W_FORMAL_TOP", name: "Formal Top", rule: "The top must be a professional shirt or blouse with appropriate workplace coverage. Sleeves must reach at least halfway from the shoulder to the elbow: FAIL a sleeveless top, a cap sleeve or any sleeve ending above the middle of the upper arm, and say where the hem ends. FAIL clearly casual tops, loud novelty designs, sheer fabric, exposed straps or an obviously inappropriate neckline." },
   { code: "W_FORMAL_TOP_FIT_CONDITION", name: "Top Fit & Condition", rule: "Covers fit, cleanliness, stains, tears, damage and heavy wrinkling together. Ordinary folds and normal ease are acceptable. Read pressing from the placket, the collar or neckline and the sleeve line, where a pressed garment lies flat and an unpressed one shows branching wrinkles that hold their shape across the body and upper sleeve. Read fit from whether the cloth pulls at the buttons or shoulders, not from how it drapes when the wearer is standing still. Name the region your evidence came from in the observation." },
   { code: "W_FORMAL_BOTTOM_TYPE", name: "Formal Bottom Wear", rule: "Formal trousers in an opaque professional fabric, falling straight from the hip, are expected. FAIL jeans, denim, leggings, jeggings or any skin-tight trousers that follow the outline of the thigh, knee and calf, joggers, shorts and clearly casual bottoms." },
@@ -393,7 +398,7 @@ export const IMPROVEMENT_TIPS = {
   W_DUPATTA: "Wear the dupatta properly draped and secured, not loosely placed.",
   W_KURTI_CONDITION: "Wear a clean, pressed, undamaged kurti.",
   W_BOTTOM_WEAR: "Wear palazzo pants or straight formal trousers in an opaque fabric. Leggings, churidar and gathered salwar are not permitted.",
-  W_FORMAL_ATTIRE_TYPE: "Wear a professional formal shirt or blouse with formal trousers.",
+  W_FORMAL_ATTIRE_TYPE: "Shirt and trousers are not permitted for women. Wear a saree or a kurti with dupatta.",
   W_FORMAL_TOP: "Wear a professional, appropriately covered formal top with sleeves reaching at least halfway to the elbow.",
   W_FORMAL_TOP_FIT_CONDITION: "Wear a clean, pressed formal top that fits well.",
   W_FORMAL_BOTTOM_TYPE: "Wear straight formal trousers instead of leggings or casual bottom wear.",

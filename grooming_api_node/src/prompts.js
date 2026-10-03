@@ -35,7 +35,9 @@ import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 // also stops assessing hair, and its condition row no longer judges creases.
 // Facial Hair passes a short, close-cropped beard of even length whose edges
 // follow natural growth; only a longer beard needs shaped edges.
-export const PROMPT_VERSION = "2026-10-03.1";
+// 2026-10-03.2 stops accepting shirt and trousers for women: the FORMAL
+// family's Attire Type always fails. No other family or row changed.
+export const PROMPT_VERSION = "2026-10-03.2";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -342,6 +344,12 @@ decorative earrings fail at any size when you can identify them clearly.
 ### ABAYA
 An abaya, with or without a head scarf (hijab), is accepted attire. Her hair
 is not assessed when she wears one, so no hair checkpoint is given for it.
+
+### SHIRT AND TROUSERS
+Shirt and trousers are not permitted for women. A shirt or blouse worn with
+trousers fails Attire Type however formal, neat and well fitted it is, and the
+check-in is non-compliant. It is still the FORMAL attire family, so identify
+it as FORMAL and judge its other rows as usual.
 `.trim();
 
 /** Renders one section's checkpoints as a numbered, ordered list. */

@@ -762,6 +762,27 @@ export function resolveMaleAttireVisibility(rows, visibleRegions) {
   return rows;
 }
 
+export const WOMEN_FORMAL_NOT_PERMITTED = "Shirt and trousers are not permitted for women; wear a saree or a kurti with dupatta.";
+
+/**
+ * Holds a woman's shirt and trousers to a failed Attire Type.
+ *
+ * Shirt and trousers are not permitted for women. The written standard says
+ * so, but a pressed shirt with formal trousers is exactly the outfit a vision
+ * model is inclined to call professional, and the first such check-in was
+ * reported compliant on every row. The family the classification step named
+ * decides it here instead of the wording; the other formal rows keep their
+ * answers. Returns whether the row had to be changed.
+ */
+export function resolveWomenFormalAttire(rows, attireType) {
+  if (attireType !== "FORMAL") return false;
+  const row = (rows.attire_check || []).find((item) => item.code === "W_FORMAL_ATTIRE_TYPE");
+  if (!row || row.status === "FAIL") return false;
+  row.status = "FAIL";
+  row.reason = WOMEN_FORMAL_NOT_PERMITTED;
+  return true;
+}
+
 /**
  * The compliance verdict, computed from the checkpoints rather than asked for.
  *
@@ -998,6 +1019,8 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
 
   const rows = toOrderedRows(sections, parsed);
   resolveIdCardAbstention(rows, parsed.visible_regions);
+  // Shirt and trousers fail for a woman, whatever the model made of them.
+  const womenFormalCorrected = normalizedGender === "FEMALE" && resolveWomenFormalAttire(rows, attireType);
   let detailCheck = null;
   if (normalizedGender === "MALE") {
     resolveMaleAttireVisibility(rows, parsed.visible_regions);
@@ -1032,7 +1055,8 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
   return {
     ...verdict,
     attire_type: attireType,
-    ai_summary: String(parsed.ai_summary || "").slice(0, 1500),
+    // A summary written while the outfit was passed must still say why it failed.
+    ai_summary: `${womenFormalCorrected ? `${WOMEN_FORMAL_NOT_PERMITTED} ` : ""}${parsed.ai_summary || ""}`.slice(0, 1500),
     visible_regions: parsed.visible_regions,
     ...(detailCheck ? { detail_check: detailCheck } : {}),
     ...(attireType === "UNKNOWN" ? { unassessed_reason: "ATTIRE_NOT_IDENTIFIED" } : {}),
