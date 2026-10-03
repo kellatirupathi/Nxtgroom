@@ -44,6 +44,7 @@ const UserManagement = lazy(() => import('./components/UserManagement'));
 const SettingsPage = lazy(() => import('./components/SettingsPage'));
 const InstructorManagement = lazy(() => import('./components/InstructorManagement'));
 const AttendanceScreen = lazy(() => import('./components/AttendanceScreen'));
+const EscalationsPage = lazy(() => import('./components/EscalationsPage'));
 
 interface SessionState {
   token: string | null;
@@ -61,7 +62,7 @@ interface SessionState {
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
-const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management']);
+const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management', 'escalations']);
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 
 function initialSession(): SessionState {
@@ -381,6 +382,11 @@ export default function App() {
             <div className="w-full h-full">
               <Dashboard onNavigate={navigate} />
             </div>
+          )}
+
+          {/* Reached only from "View all" on the Dashboard: no menu lists it. */}
+          {activeTab === 'escalations' && isElevatedRole(session.role) && (
+            <div className="w-full h-full"><EscalationsPage onBack={() => navigate('dashboard')} /></div>
           )}
 
           {activeTab === 'institutes' && isElevatedRole(session.role) && (

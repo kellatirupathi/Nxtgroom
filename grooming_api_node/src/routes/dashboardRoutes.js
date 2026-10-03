@@ -6,6 +6,7 @@ import {
   DashboardCollegeNotFound,
   DashboardRangeError,
 } from "../services/dashboardStats.js";
+import { escalationReport, EscalationWeekError } from "../services/escalationReport.js";
 import { asyncRoute } from "../utils.js";
 
 export const dashboardRouter = Router();
@@ -56,6 +57,33 @@ dashboardRouter.get(
       return res.json(await cachedInstituteStats(req.app.locals.db, { from, to }));
     } catch (error) {
       if (error instanceof DashboardRangeError) return res.status(422).json({ detail: error.message });
+      throw error;
+    }
+  })
+);
+
+/**
+ * The Escalations page behind "View all" on the Dashboard: every instructor
+ * escalated in a Monday-to-Sunday week, one row per failed day of the run.
+ * `week` is any date in the week (YYYY-MM-DD), this week when absent;
+ * `college_id` narrows it to one institute.
+ */
+dashboardRouter.get(
+  "/escalations",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const { week, college_id: rawCollege } = req.query;
+    if (week !== undefined && typeof week !== "string") {
+      return res.status(422).json({ detail: "week must be given once" });
+    }
+    if (rawCollege !== undefined && (typeof rawCollege !== "string" || rawCollege.length > 100)) {
+      return res.status(422).json({ detail: "college_id must be a single institute id" });
+    }
+    const collegeId = rawCollege && rawCollege !== "all" ? rawCollege.trim() : null;
+    try {
+      return res.json(await escalationReport(req.app.locals.db, { week, collegeId }));
+    } catch (error) {
+      if (error instanceof EscalationWeekError) return res.status(422).json({ detail: error.message });
       throw error;
     }
   })

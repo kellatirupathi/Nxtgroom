@@ -391,15 +391,19 @@ function FailedCheckpoints({ data }: { data: DashboardData }) {
   );
 }
 
-function Escalations({ data }: { data: DashboardData }) {
+function Escalations({ data, onViewAll }: { data: DashboardData; onViewAll: () => void }) {
   const rows = data.escalations;
   return (
     <section className={`${CARD} p-4 md:p-5`} aria-labelledby="dashboard-escalations-title">
-      <h3 id="dashboard-escalations-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
-        <ShieldAlert size={18} className="text-rose-600" aria-hidden="true" />
-        Escalated this week
-        {rows.length > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{rows.length}</span>}
-      </h3>
+      <div className="flex items-start justify-between gap-3">
+        <h3 id="dashboard-escalations-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
+          <ShieldAlert size={18} className="text-rose-600" aria-hidden="true" />
+          Escalated this week
+          {rows.length > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{rows.length}</span>}
+        </h3>
+        {/* Every escalated day of this week or any other, with photos and reports. */}
+        <TileLink tone="rose" onClick={onViewAll}>View all</TileLink>
+      </div>
       <p className="text-xs text-slate-500">Non-compliant at check-in on 3 or more days in a row since {weekdayLabel(data.week_start)}. Reporting partners are emailed on each day the run continues.</p>
       {rows.length === 0 ? (
         <p className="mt-6 text-sm text-slate-400">Nobody is escalated this week.</p>
@@ -597,7 +601,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <Escalations data={data} />
+        <Escalations data={data} onViewAll={() => onNavigate('escalations')} />
         <FailedCheckpoints data={data} />
       </div>
     </section>

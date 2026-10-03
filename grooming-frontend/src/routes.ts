@@ -19,6 +19,8 @@ export const TABS = {
   INSTRUCTORS: 'instructor-management',
   USERS: 'boa-management',
   SETTINGS: 'settings',
+  /** Opened from "View all" on the Dashboard; deliberately in no menu. */
+  ESCALATIONS: 'escalations',
 } as const;
 
 export type Tab = (typeof TABS)[keyof typeof TABS];
@@ -33,6 +35,7 @@ const TAB_TO_PATH: Record<Tab, string> = {
   [TABS.INSTRUCTORS]: '/instructors',
   [TABS.USERS]: '/users',
   [TABS.SETTINGS]: '/settings',
+  [TABS.ESCALATIONS]: '/dashboard/escalations',
 };
 
 const PATH_TO_TAB = new Map<string, Tab>(
