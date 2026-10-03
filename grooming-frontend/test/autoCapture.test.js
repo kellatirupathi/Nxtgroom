@@ -71,11 +71,12 @@ test('the fallback arrives in a few seconds, not after a minute of waiting', () 
   assert.ok(seconds >= 3 && seconds <= 8, `fallback after ${seconds}s should be a few seconds`);
 });
 
-test('the next person is captured only after three seconds and fresh confirmations', () => {
-  assert.equal(AUTO_CAPTURE_COOLDOWN_MS, 3_000);
+test('the next person is captured only after two seconds and fresh confirmations', () => {
+  assert.equal(AUTO_CAPTURE_COOLDOWN_MS, 2_000);
   const end = 10_000 + AUTO_CAPTURE_COOLDOWN_MS;
   let frames = 99;
-  for (const now of [10_000, 11_000, 12_999]) {
+  // Nothing counts during the pause, right up to its last millisecond.
+  for (const now of [10_000, 11_000, end - 1]) {
     frames = captureConfirmationCount('FULL_BODY', frames, false, end, now);
     assert.equal(frames, 0);
     assert.equal(autoCaptureReady('FULL_BODY', frames), false);

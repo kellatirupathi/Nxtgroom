@@ -720,11 +720,11 @@ export const AUTO_CAPTURE_CONFIRMATIONS = 3;
 /**
  * How long the camera waits after firing before it will fire again.
  *
- * Three seconds after the response lets the captured person move away before
+ * Two seconds after the response lets the captured person move away before
  * another photograph is taken. The request itself remains locked separately.
  * Fresh frame confirmations begin only once this pause has finished.
  */
-export const AUTO_CAPTURE_COOLDOWN_MS = 3_000;
+export const AUTO_CAPTURE_COOLDOWN_MS = 2_000;
 
 /** Frames collected during a request or pause cannot arm the next capture. */
 export function captureConfirmationCount(verdict: FrameVerdict, frames: number, busy: boolean, cooldownUntil: number, now: number): number {

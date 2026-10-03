@@ -2,7 +2,7 @@
  * A brief per-tablet hold suppresses trailing unknown frames and redundant
  * recognition requests. No unknown photo or attendance is stored.
  * Recognised people use their daily attendance record to prevent duplicates.
- * The camera also waits three seconds after every single-person capture.
+ * The camera also waits two seconds after every capture.
  */
 
 /**
