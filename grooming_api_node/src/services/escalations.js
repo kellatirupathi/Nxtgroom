@@ -9,7 +9,8 @@ import {
  * Which instructors are in escalation, for the rows of a Daily Records page.
  *
  * An instructor is escalated for a Monday-to-Sunday week once their check-in
- * was non-compliant on three or more days in a row in it - the same rule, from
+ * was non-compliant three or more times in a row in it, absent days skipped and
+ * a compliant check-in ending the run - the same rule, from
  * the same function, that sends reporting partners the URGENT email, so the
  * table and the inbox can never disagree about who is escalated.
  *

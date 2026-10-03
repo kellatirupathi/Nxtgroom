@@ -260,8 +260,9 @@ async function sendComplianceReports(db, {
 }
 
 /**
- * Consecutive days with a non-compliant check-in, inside one Monday-to-Sunday
- * week, at which reporting partners are sent an escalation.
+ * Non-compliant check-ins in a row, inside one Monday-to-Sunday week, at which
+ * reporting partners are sent an escalation. Days not at work do not break the
+ * row; a compliant check-in does.
  */
 export const ESCALATION_THRESHOLD = 3;
 
@@ -313,15 +314,21 @@ export function nonCompliantOccurrences(records) {
   return occurrences.sort((a, b) => new Date(a.time || 0) - new Date(b.time || 0));
 }
 
+/** Check-in statuses that end a run of failures: a verdict of compliance. */
+const RUN_BREAKING_STATUSES = new Set(["compliant", "done", "needs_review", "review_required"]);
+
 /**
- * The runs of consecutive days on which an instructor's check-in was
- * non-compliant, inside the Monday-to-Sunday week starting at weekStart, in
- * day order. Each run is its days' records, oldest first.
+ * The runs of non-compliant check-ins, one after another, inside the
+ * Monday-to-Sunday week starting at weekStart, in day order. Each run is its
+ * failed days' records, oldest first.
  *
  * A day counts as failed by its check-in alone, as the daily report does; the
- * check-out does not count. A compliant day ends a run, and so does a day with
- * no attendance at all - absent or off - since the days must be continuous. A
- * run never crosses into another week.
+ * check-out does not count. Only a compliant check-in ends a run. A day the
+ * instructor was not at work - absent, on leave, a holiday or a weekly off -
+ * is skipped rather than ending it, and so is a check-in with no verdict
+ * (still being analysed, not assessed, or analysis failed): neither says
+ * anything about how they came to work. A run never crosses into another
+ * week.
  */
 export function failedDayStreaks(records, weekStart) {
   const byDay = new Map();
@@ -337,12 +344,14 @@ export function failedDayStreaks(records, weekStart) {
   let current = [];
   for (let offset = 0; offset < 7; offset += 1) {
     const record = byDay.get(addDaysToKey(weekStart, offset));
-    if (record && NON_COMPLIANT_STATUSES.has(String(record.status || "").toLowerCase())) {
+    const status = String(record?.status || "").toLowerCase();
+    if (record && NON_COMPLIANT_STATUSES.has(status)) {
       current.push(record);
-    } else if (current.length) {
+    } else if (record && RUN_BREAKING_STATUSES.has(status) && current.length) {
       streaks.push(current);
       current = [];
     }
+    // Anything else - no attendance that day, or no verdict yet - is skipped.
   }
   if (current.length) streaks.push(current);
   return streaks;
@@ -356,10 +365,11 @@ export function longestFailedStreak(records, weekStart) {
 
 /**
  * Escalates to the reporting partners once an instructor's check-in has been
- * non-compliant on three days in a row in one Monday-to-Sunday week.
+ * non-compliant three times in a row in one Monday-to-Sunday week - counting
+ * the days they came to work, so an absence in between does not reset it.
  *
- * Sent on the third consecutive day and again on each further day the run
- * continues, each message listing the whole run. The job is keyed by the run's
+ * Sent on the third failed check-in of the run and again on each further
+ * one, each message listing the whole run. The job is keyed by the run's
  * first day and length, so a retried or repeated evaluation reaching the same
  * run sends nothing twice, while a longer run always sends. A check-out never
  * starts one: only the check-in decides whether a day failed. Copied to the

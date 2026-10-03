@@ -235,7 +235,41 @@ test("a fourth day in a row sends a new escalation; a repeat of the third sends 
   assert.equal(fourth[0].payload.occurrences.length, 4);
 });
 
-test("three failures that are not three check-in days in a row no longer escalate", async () => {
+test("an absent day is skipped: Monday, then Wednesday and Thursday, escalates on Thursday", async () => {
+  // The example from the team: present Monday, absent Tuesday, present after.
+  const db = world({
+    attendance: [
+      day("mon", "2026-09-21", { status: "non_compliant", remarks: "One." }),
+      day("wed", "2026-09-23", { status: "non_compliant", remarks: "Two." }),
+      day("thu", "2026-09-24"),
+      day("fri", "2026-09-25"),
+    ],
+  });
+  await complete(db, { attendanceId: "thu" });
+  const third = byPrefix(db, "escalation:i1:streak:2026-09-21:3:");
+  assert.equal(third.length, 2);
+  assert.deepEqual(third[0].payload.occurrences.map((o) => o.day), ["2026-09-21", "2026-09-23", "2026-09-24"], "Tuesday is not listed");
+
+  await complete(db, { attendanceId: "fri" });
+  assert.equal(byPrefix(db, "escalation:i1:streak:2026-09-21:4:").length, 2, "and again on Friday");
+});
+
+test("a check-in with no verdict is skipped like an absence; a compliant one starts the count again", async () => {
+  for (const status of ["pending", "unassessed", "error", "analysis_error"]) {
+    const db = world({
+      attendance: [
+        day("mon", "2026-09-21", { status: "non_compliant" }),
+        day("tue", "2026-09-22", { status }),
+        day("wed", "2026-09-23", { status: "non_compliant" }),
+        day("thu", "2026-09-24"),
+      ],
+    });
+    await complete(db, { attendanceId: "thu" });
+    assert.equal(byPrefix(db, "escalation:i1:streak:2026-09-21:3:").length, 2, status);
+  }
+});
+
+test("three failures that are not three check-ins in a row do not escalate", async () => {
   const cases = {
     // Three results on two days: the check-out does not count.
     "two days, three results": [
@@ -249,10 +283,6 @@ test("three failures that are not three check-in days in a row no longer escalat
       ],
       "tue",
     ],
-    "scattered days": [
-      [day("mon", "2026-09-21", { status: "non_compliant" }), day("wed", "2026-09-23", { status: "non_compliant" }), day("fri", "2026-09-25")],
-      "fri",
-    ],
     "a compliant day between": [
       [
         day("mon", "2026-09-21", { status: "non_compliant" }),
@@ -262,9 +292,14 @@ test("three failures that are not three check-in days in a row no longer escalat
       ],
       "thu",
     ],
-    "an absent day between": [
-      [day("mon", "2026-09-21", { status: "non_compliant" }), day("wed", "2026-09-23", { status: "non_compliant" }), day("thu", "2026-09-24")],
-      "thu",
+    "a compliant day before the last two": [
+      [
+        day("mon", "2026-09-21", { status: "non_compliant" }),
+        day("wed", "2026-09-23", { status: "compliant" }),
+        day("thu", "2026-09-24", { status: "non_compliant" }),
+        day("fri", "2026-09-25"),
+      ],
+      "fri",
     ],
   };
   for (const [name, [attendance, last]] of Object.entries(cases)) {

@@ -87,7 +87,7 @@ test("every row of an escalated instructor that week is marked, compliant ones t
   }
 });
 
-test("only check-in days in a row count: not results, scattered days, or a run broken by a pass or an absence", async () => {
+test("only check-ins in a row count: not results, or a run broken by a pass; absences and no-verdict days are skipped", async () => {
   const week = (...days) => days.map(([day, extra], index) => row(`r${index}`, "i1", day, extra));
   const escalatedFor = async (rows) => (await weeklyEscalations(memoryDb(rows), rows)).size > 0;
   const fail = { status: "non_compliant" };
@@ -96,9 +96,12 @@ test("only check-in days in a row count: not results, scattered days, or a run b
     ["2026-09-21", { ...fail, checkout_compliance_status: "NON_COMPLIANT" }],
     ["2026-09-22", fail],
   )), false);
-  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-25", fail])), false, "scattered");
+  // Absent on Tuesday and Thursday: the days they came are still in a row.
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-25", fail])), true, "absences between");
   assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-22", {}], ["2026-09-23", fail], ["2026-09-24", fail])), false, "a pass between");
-  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-24", fail])), false, "an absence between");
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-24", fail])), true, "an absence between");
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-22", { status: "unassessed" }], ["2026-09-23", fail], ["2026-09-24", fail])), true, "a check-in with no verdict between");
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-22", { status: "pending" }], ["2026-09-23", { status: "compliant" }], ["2026-09-24", fail])), false, "a pass after a skipped day");
   assert.equal(await escalatedFor(week(["2026-09-22", fail], ["2026-09-23", fail], ["2026-09-24", fail])), true, "Tue-Wed-Thu");
   assert.equal(await escalatedFor(week(["2026-09-25", fail], ["2026-09-26", fail], ["2026-09-27", fail])), true, "Fri-Sat-Sun");
 });
