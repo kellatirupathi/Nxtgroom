@@ -1,22 +1,6 @@
-import { useEffect, useState } from 'react';
 import { Lightbulb } from 'lucide-react';
-import { apiFetch } from '../api';
-import {
-  evidenceCrop,
-  hasEvidenceBoxes,
-  improvementTipsFor,
-  isUnassessed,
-  REPORT_COLUMNS,
-  reportTables,
-  validEvidenceBox,
-} from '../reportLayout';
+import { improvementTipsFor, isUnassessed, REPORT_COLUMNS, reportTables } from '../reportLayout';
 import type { CheckItem, Evaluation } from '../types';
-
-/** Where the report's photograph comes from: its endpoint, and whether it needs a sign-in. */
-export interface ReportPhoto {
-  path: string;
-  auth?: boolean;
-}
 
 /** Kept beside REPORT_COLUMNS so a column can never lose its width. */
 const COLUMN_WIDTHS = ['w-[23%]', 'w-[10%]', 'w-[31%]', 'w-[36%]'];
@@ -27,37 +11,6 @@ interface ReportRow {
   observation?: unknown;
   status?: string;
   reasoning?: string;
-  evidenceBox?: [number, number, number, number];
-  evidenceLabel?: string;
-}
-
-/**
- * The area a close-up check read, cut from the photograph and shown at the
- * size of a thumbnail, so whoever reads the report sees what was judged.
- */
-function EvidenceCrop({ url, box, label }: { url: string; box: [number, number, number, number]; label?: string }) {
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const crop = evidenceCrop(box, size?.width, size?.height);
-  // At most 160px wide and about 150px high, so a tall crop (the trousers)
-  // does not stretch its row.
-  const width = Math.max(64, Math.min(160, Math.round(150 * crop.ratio)));
-  return (
-    <figure className="mt-2" style={{ width }}>
-      <a href={url} target="_blank" rel="noopener noreferrer" title="Open the full photograph" className="block">
-        <div className="relative w-full overflow-hidden rounded-md border border-slate-200 bg-slate-100" style={{ aspectRatio: crop.aspectRatio }}>
-          <img
-            src={url}
-            alt={label || 'Close-up from the photograph'}
-            loading="lazy"
-            onLoad={(event) => setSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-            className="absolute max-w-none"
-            style={{ width: crop.width, height: crop.height, left: crop.left, top: crop.top }}
-          />
-        </div>
-      </a>
-      {label && <figcaption className="mt-1 text-[11px] font-semibold text-slate-500">{label}</figcaption>}
-    </figure>
-  );
 }
 
 export function CheckStatus({ status }: { status?: string }) {
@@ -71,7 +24,7 @@ export function CheckStatus({ status }: { status?: string }) {
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-bold ${style}`}>{normalized}</span>;
 }
 
-export function ReportSection({ title, items, photoUrl }: { title: string; items?: CheckItem[] | Record<string, unknown> | null; photoUrl?: string | null }) {
+export function ReportSection({ title, items }: { title: string; items?: CheckItem[] | Record<string, unknown> | null }) {
   if (!items || (Array.isArray(items) && items.length === 0)) return null;
   const rows: ReportRow[] = Array.isArray(items)
     ? items.map((item, index) => ({
@@ -80,8 +33,6 @@ export function ReportSection({ title, items, photoUrl }: { title: string; items
       observation: item.observation,
       status: item.status,
       reasoning: item.reason || (item as CheckItem & { reasoning?: string }).reasoning,
-      evidenceBox: validEvidenceBox(item.evidence_box) ? item.evidence_box : undefined,
-      evidenceLabel: item.evidence_label,
     }))
     : Object.entries(items as Record<string, unknown>).map(([name, observation]) => ({ key: name, name, observation }));
 
@@ -101,7 +52,6 @@ export function ReportSection({ title, items, photoUrl }: { title: string; items
             </div>
             <p className="mt-1 text-sm text-slate-600">{String(item.observation ?? '--')}</p>
             {item.reasoning && <p className="mt-1 text-xs leading-snug text-slate-500">{item.reasoning}</p>}
-            {photoUrl && item.evidenceBox && <EvidenceCrop url={photoUrl} box={item.evidenceBox} label={item.evidenceLabel} />}
           </li>
         ))}
       </ul>
@@ -120,10 +70,7 @@ export function ReportSection({ title, items, photoUrl }: { title: string; items
                 <td className="p-3 font-bold text-slate-700">{item.name}</td>
                 <td className="p-3"><CheckStatus status={item.status} /></td>
                 <td className="p-3 text-slate-600">{String(item.observation ?? '--')}</td>
-                <td className="p-3 text-slate-500">
-                  {item.reasoning || '--'}
-                  {photoUrl && item.evidenceBox && <EvidenceCrop url={photoUrl} box={item.evidenceBox} label={item.evidenceLabel} />}
-                </td>
+                <td className="p-3 text-slate-500">{item.reasoning || '--'}</td>
               </tr>
             ))}
           </tbody>
@@ -169,20 +116,7 @@ export function ImprovementTips({ evaluation }: { evaluation: Evaluation }) {
  * modal, so the same evaluation cannot appear differently in different parts
  * of FacultyTrack.
  */
-export default function GroomingReport({ evaluation, photo }: { evaluation: Evaluation; photo?: ReportPhoto | null }) {
-  // The photograph is fetched only when a row has a close-up to show: a
-  // signed link, so the crops load straight from storage.
-  const wantsPhoto = Boolean(photo?.path) && hasEvidenceBoxes(evaluation);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!wantsPhoto || !photo?.path) return undefined;
-    let active = true;
-    apiFetch<{ url: string }>(photo.path, { auth: photo.auth ?? true })
-      .then((data) => { if (active && data?.url) setPhotoUrl(data.url); })
-      .catch(() => { /* The report reads the same without the thumbnails. */ });
-    return () => { active = false; };
-  }, [wantsPhoto, photo?.path, photo?.auth]);
-
+export default function GroomingReport({ evaluation }: { evaluation: Evaluation }) {
   // An evaluation with no dress code applied has nothing to tabulate. Five
   // empty tables would imply the checks ran and found nothing.
   if (isUnassessed(evaluation)) {
@@ -198,7 +132,7 @@ export default function GroomingReport({ evaluation, photo }: { evaluation: Eval
   return (
     <>
       {reportTables(evaluation).map((table) => (
-        <ReportSection key={table.key} title={table.title} items={table.items} photoUrl={wantsPhoto ? photoUrl : null} />
+        <ReportSection key={table.key} title={table.title} items={table.items} />
       ))}
       <ImprovementTips evaluation={evaluation} />
     </>

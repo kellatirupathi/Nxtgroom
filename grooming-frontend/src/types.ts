@@ -167,14 +167,6 @@ export interface CheckItem {
   observation: string;
   status: 'PASS' | 'FAIL' | 'N/A';
   reason: string;
-  /**
-   * The area of the photograph a close-up check read this row from, as
-   * [ymin, xmin, ymax, xmax] on a 0-1000 scale. Set on a man's tuck, belt,
-   * trousers and footwear rows; the report shows that area as evidence.
-   */
-  evidence_box?: [number, number, number, number];
-  /** What that area is, e.g. "Close-up of the waist". */
-  evidence_label?: string;
 }
 
 export type Visibility = 'VISIBLE' | 'PARTIAL' | 'NOT_VISIBLE';

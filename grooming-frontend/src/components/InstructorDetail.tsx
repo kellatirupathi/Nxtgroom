@@ -628,12 +628,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                   </div>
                 </div>
               )}
-              <GroomingReport
-                evaluation={evaluation}
-                photo={halfHasPhoto && attendanceId
-                  ? { path: `/api/v2/attendance/${encodeURIComponent(attendanceId)}/photo/${tab}` }
-                  : null}
-              />
+              <GroomingReport evaluation={evaluation} />
             </div>
           )}
         </div>

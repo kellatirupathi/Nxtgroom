@@ -265,12 +265,7 @@ export default function PublicReportPage({ token, kind, date, half }: PublicRepo
             <section className="rounded-md border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-4 text-base font-extrabold text-slate-800">Detailed Appearance Report</h2>
               {day.evaluation ? (
-                <GroomingReport
-                  evaluation={day.evaluation}
-                  photo={(half === 'checkout' ? day.attendance.has_checkout_photo : day.attendance.has_checkin_photo)
-                    ? { path: `/api/v2/reports/${encodeURIComponent(token)}/day/${encodeURIComponent(date)}/photo/${half === 'checkout' ? 'checkout' : 'checkin'}`, auth: false }
-                    : null}
-                />
+                <GroomingReport evaluation={day.evaluation} />
               ) : (
                 <p className="py-6 text-center text-sm text-slate-500">
                   The checkpoint detail for this check-in is not available.
