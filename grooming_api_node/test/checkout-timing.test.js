@@ -45,21 +45,22 @@ test("11:55 can close at 12:00, five minutes later", () => {
   assert.equal(justBefore.state, CHECKOUT_TIMING.TOO_EARLY);
 });
 
-test("an afternoon check-in waits ten minutes, not for the next noon", () => {
+test("an afternoon check-in waits five minutes, not for the next noon", () => {
   // Waiting for noon would mean waiting until tomorrow, which is not a rule
   // anybody could follow.
+  assert.equal(AFTERNOON_MINIMUM_MS, 5 * 60_000);
   const checkedIn = ist(14, 0);
   assert.equal(
-    checkoutTiming(checkedIn, { now: ist(14, 5), timeZone: zone }).state,
+    checkoutTiming(checkedIn, { now: ist(14, 4), timeZone: zone }).state,
     CHECKOUT_TIMING.TOO_EARLY
   );
   assert.equal(
-    checkoutTiming(checkedIn, { now: ist(14, 10), timeZone: zone }).state,
+    checkoutTiming(checkedIn, { now: ist(14, 5), timeZone: zone }).state,
     CHECKOUT_TIMING.ALLOWED
   );
   assert.equal(
-    checkoutTiming(checkedIn, { now: ist(14, 5), timeZone: zone }).rule,
-    "afternoon_waits_ten_minutes"
+    checkoutTiming(checkedIn, { now: ist(14, 4), timeZone: zone }).rule,
+    "afternoon_waits_five_minutes"
   );
 });
 
@@ -67,10 +68,10 @@ test("a check-in exactly at noon takes the afternoon rule", () => {
   // Noon is not before noon, so there is nothing left to wait for but the
   // minimum gap.
   const timing = checkoutTiming(ist(12, 0), { now: ist(12, 1), timeZone: zone });
-  assert.equal(timing.rule, "afternoon_waits_ten_minutes");
+  assert.equal(timing.rule, "afternoon_waits_five_minutes");
   assert.equal(timing.state, CHECKOUT_TIMING.TOO_EARLY);
   assert.equal(
-    checkoutTiming(ist(12, 0), { now: ist(12, 10), timeZone: zone }).state,
+    checkoutTiming(ist(12, 0), { now: ist(12, 5), timeZone: zone }).state,
     CHECKOUT_TIMING.ALLOWED
   );
 });
@@ -93,7 +94,7 @@ test("an allowed check-out still reports which rule applied", () => {
 
 test("minutes remaining is never zero while the answer is still too early", () => {
   // Rounded up: "0 minutes from now" alongside a refusal reads as a bug.
-  const timing = checkoutTiming(ist(14, 0), { now: new Date(ist(14, 10).getTime() - 1_000), timeZone: zone });
+  const timing = checkoutTiming(ist(14, 0), { now: new Date(ist(14, 5).getTime() - 1_000), timeZone: zone });
   assert.equal(timing.state, CHECKOUT_TIMING.TOO_EARLY);
   assert.ok(timing.minutes_remaining >= 1);
 });
@@ -115,7 +116,7 @@ test("noon is local noon, not the server's", () => {
     now: new Date(Date.UTC(2026, 8, 11, 8, 5)),
     timeZone: zone,
   });
-  assert.equal(timing.rule, "afternoon_waits_ten_minutes");
+  assert.equal(timing.rule, "afternoon_waits_five_minutes");
 });
 
 test("the message names the time check-out opens", () => {
@@ -130,7 +131,7 @@ test("the message names the time check-out opens", () => {
     checkoutTiming(ist(14, 0), { now: ist(14, 2), timeZone: zone }),
     { timeZone: zone }
   );
-  assert.match(afternoon, /2:10/);
+  assert.match(afternoon, /2:05/);
   assert.match(afternoon, /minute/);
 });
 

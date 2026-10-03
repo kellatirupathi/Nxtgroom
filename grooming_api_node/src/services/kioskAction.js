@@ -27,7 +27,7 @@ export const KIOSK_ACTIONS = Object.freeze({
  * Decides the action from the day's record.
  *
  * `availability` is checkoutAvailability's verdict for that record, so the
- * timing rules — noon for a morning arrival, ten minutes for an afternoon one —
+ * timing rules — noon for a morning arrival, five minutes for an afternoon one —
  * are applied in exactly one place rather than restated here.
  *
  * Unknown faces are rejected before storage or attendance writes.

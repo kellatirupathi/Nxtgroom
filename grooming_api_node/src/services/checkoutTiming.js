@@ -10,7 +10,7 @@ import { runtimeConfig } from "../config/env.js";
  * - Checked in before noon: check-out opens at noon. Somebody who arrives in the
  *   morning is there for the morning, and noon is the boundary the college
  *   already works to.
- * - Checked in at or after noon: check-out opens ten minutes later. There is no
+ * - Checked in at or after noon: check-out opens five minutes later. There is no
  *   later boundary to wait for, so the rule only has to stop an immediate
  *   check-out.
  *
@@ -25,7 +25,7 @@ import { runtimeConfig } from "../config/env.js";
 export const NOON_HOUR = 12;
 
 /** The wait applied to an afternoon check-in. */
-export const AFTERNOON_MINIMUM_MS = 10 * 60_000;
+export const AFTERNOON_MINIMUM_MS = 5 * 60_000;
 
 export const CHECKOUT_TIMING = Object.freeze({
   ALLOWED: "allowed",
@@ -96,7 +96,7 @@ export function checkoutTiming(checkInTime, { now = new Date(), timeZone = runti
   const opensAt = beforeNoon
     ? noon
     : new Date(checkedInAt.getTime() + AFTERNOON_MINIMUM_MS);
-  const rule = beforeNoon ? "morning_waits_for_noon" : "afternoon_waits_ten_minutes";
+  const rule = beforeNoon ? "morning_waits_for_noon" : "afternoon_waits_five_minutes";
 
   if (now.getTime() >= opensAt.getTime()) {
     return { state: CHECKOUT_TIMING.ALLOWED, opens_at: opensAt, rule };

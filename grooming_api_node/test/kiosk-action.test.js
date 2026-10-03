@@ -31,7 +31,7 @@ test("a recognised instructor with an open record checks out", () => {
 
 test("too soon to close the day records nothing", () => {
   // The timing rules live in checkoutAvailability, so this branch only has to
-  // carry the refusal through rather than restate noon and ten minutes.
+  // carry the refusal through rather than restate noon and five minutes.
   assert.equal(
     decideKioskAction({ matched: true, availability: "too_early" }),
     KIOSK_ACTIONS.TOO_EARLY,
