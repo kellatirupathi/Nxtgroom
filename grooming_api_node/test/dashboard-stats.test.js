@@ -188,9 +188,13 @@ test("a check-out failure stops counting once that check-out is deleted", () => 
   assert.ok(!names.includes("Shirt Collar / Tuck"));
 });
 
-test("escalation uses the same count as the URGENT email", () => {
-  const { escalations } = build();
-  assert.equal(escalations.length, 1, "i1 has three non-compliant results this week");
+test("escalation uses the same rule as the URGENT email: check-in days in a row", () => {
+  // Monday's check-in and check-out and today's check-in: three results, but
+  // two days, which is not an escalation.
+  assert.equal(build().escalations.length, 0);
+  const third = record("w1", "i1", "2026-09-30", "08:50", { status: "non_compliant" });
+  const { escalations } = build({ weekRecords: [...weekRecords, third] });
+  assert.equal(escalations.length, 1, "i1 failed at check-in on three days in a row");
   const [row] = escalations;
   assert.equal(row.instructor_id, "i1");
   assert.equal(row.name, "Ravi");

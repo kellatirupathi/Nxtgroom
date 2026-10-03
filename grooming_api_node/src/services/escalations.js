@@ -1,17 +1,17 @@
 import {
   addDaysToKey,
   ESCALATION_THRESHOLD,
-  nonCompliantOccurrences,
+  longestFailedStreak,
   weekStartKey,
 } from "./evaluationWorker.js";
 
 /**
  * Which instructors are in escalation, for the rows of a Daily Records page.
  *
- * An instructor is escalated for a Monday-to-Sunday week once they have three
- * or more non-compliant results in it - the same count, from the same function,
- * that sends reporting partners the URGENT email, so the table and the inbox
- * can never disagree about who is escalated.
+ * An instructor is escalated for a Monday-to-Sunday week once their check-in
+ * was non-compliant on three or more days in a row in it - the same rule, from
+ * the same function, that sends reporting partners the URGENT email, so the
+ * table and the inbox can never disagree about who is escalated.
  *
  * The count covers the whole week whatever range the page is showing. A page
  * filtered to today still knows about Monday's and Tuesday's failures, which
@@ -63,10 +63,17 @@ export async function weeklyEscalations(db, rows, scope = {}) {
 
   const escalated = new Map();
   for (const [key, group] of groups) {
-    const count = nonCompliantOccurrences(group).length;
-    if (count < ESCALATION_THRESHOLD) continue;
     const weekStart = key.slice(key.lastIndexOf("|") + 1);
-    escalated.set(key, { week_start: weekStart, week_end: addDaysToKey(weekStart, 6), count });
+    const streak = longestFailedStreak(group, weekStart);
+    if (streak.length < ESCALATION_THRESHOLD) continue;
+    escalated.set(key, {
+      week_start: weekStart,
+      week_end: addDaysToKey(weekStart, 6),
+      // Days in a row, and which: the label says "3 days in a row".
+      count: streak.length,
+      streak: true,
+      days: streak.map((record) => record.attendance_day),
+    });
   }
   return escalated;
 }

@@ -179,44 +179,40 @@ test("a non-compliant result still sends exactly the alerts it always did", asyn
   assert.equal(byPrefix(db, "escalation:").length, 0, "one failure is not an escalation");
 });
 
-test("the third failure in a week escalates to every partner, listing the whole week", async () => {
+test("the third check-in day in a row escalates to every partner, listing the run", async () => {
   const db = world({
     attendance: [
       day("mon", "2026-09-21", { status: "non_compliant", remarks: "Shirt untucked." }),
-      day("tue", "2026-09-22", {
-        status: "compliant",
-        checkout_compliance_status: "NON_COMPLIANT",
-        checkout_remarks: "Hair falling across the forehead.",
-        check_out_time: new Date("2026-09-22T12:30:00Z"),
-      }),
-      day("fri", "2026-09-25"),
+      day("tue", "2026-09-22", { status: "non_compliant", remarks: "Hair falling across the forehead." }),
+      day("wed", "2026-09-23"),
     ],
   });
-  await complete(db, { attendanceId: "fri", summary: "Sneakers instead of formal shoes." });
+  await complete(db, { attendanceId: "wed", summary: "Sneakers instead of formal shoes." });
 
-  const escalations = byPrefix(db, "escalation:i1:2026-09-21:3:");
+  const escalations = byPrefix(db, "escalation:i1:streak:2026-09-21:3:");
   assert.deepEqual(escalations.map((job) => job.to_email).sort(), RPS);
   const [{ payload, type }] = escalations;
   assert.equal(type, "grooming_escalation");
   assert.equal(payload.count, 3);
+  assert.equal(payload.streak, true, "worded as days in a row");
   assert.equal(payload.weekStart, "2026-09-21");
   assert.equal(payload.weekEnd, "2026-09-27");
   assert.deepEqual(payload.occurrences.map((o) => `${o.day} ${o.kind}`), [
     "2026-09-21 checkin",
-    "2026-09-22 checkout",
-    "2026-09-25 checkin",
+    "2026-09-22 checkin",
+    "2026-09-23 checkin",
   ]);
   assert.deepEqual(payload.occurrences.map((o) => o.summary), [
     "Shirt untucked.",
     "Hair falling across the forehead.",
     "Sneakers instead of formal shoes.",
   ]);
-  assert.match(payload.occurrences[1].reportUrl, /\/day\/2026-09-22\/check-out$/);
+  assert.match(payload.occurrences[1].reportUrl, /\/day\/2026-09-22\/check-in$/);
   // Sent in addition to the ordinary alert, never instead of it.
-  assert.equal(byPrefix(db, "fri:grooming-alert:checkin:").length, 3);
+  assert.equal(byPrefix(db, "wed:grooming-alert:checkin:").length, 3);
 });
 
-test("the fourth failure sends a new escalation; a repeat of the third sends nothing", async () => {
+test("a fourth day in a row sends a new escalation; a repeat of the third sends nothing", async () => {
   const db = world({
     attendance: [
       day("mon", "2026-09-21", { status: "non_compliant", remarks: "One." }),
@@ -226,17 +222,67 @@ test("the fourth failure sends a new escalation; a repeat of the third sends not
     ],
   });
   await complete(db, { attendanceId: "wed" });
-  assert.equal(byPrefix(db, "escalation:i1:2026-09-21:3:").length, 2);
+  assert.equal(byPrefix(db, "escalation:i1:streak:2026-09-21:3:").length, 2);
 
   // The same evaluation finishing twice - a retry - must not email twice.
   await complete(db, { attendanceId: "wed" });
   assert.equal(byPrefix(db, "escalation:").length, 2);
 
   await complete(db, { attendanceId: "thu" });
-  const fourth = byPrefix(db, "escalation:i1:2026-09-21:4:");
-  assert.equal(fourth.length, 2, "a fourth failure is news, and is sent");
+  const fourth = byPrefix(db, "escalation:i1:streak:2026-09-21:4:");
+  assert.equal(fourth.length, 2, "a fourth day in a row is news, and is sent");
   assert.equal(fourth[0].payload.count, 4);
   assert.equal(fourth[0].payload.occurrences.length, 4);
+});
+
+test("three failures that are not three check-in days in a row no longer escalate", async () => {
+  const cases = {
+    // Three results on two days: the check-out does not count.
+    "two days, three results": [
+      [
+        day("mon", "2026-09-21", {
+          status: "non_compliant",
+          checkout_compliance_status: "NON_COMPLIANT",
+          check_out_time: new Date("2026-09-21T12:30:00Z"),
+        }),
+        day("tue", "2026-09-22"),
+      ],
+      "tue",
+    ],
+    "scattered days": [
+      [day("mon", "2026-09-21", { status: "non_compliant" }), day("wed", "2026-09-23", { status: "non_compliant" }), day("fri", "2026-09-25")],
+      "fri",
+    ],
+    "a compliant day between": [
+      [
+        day("mon", "2026-09-21", { status: "non_compliant" }),
+        day("tue", "2026-09-22", { status: "compliant" }),
+        day("wed", "2026-09-23", { status: "non_compliant" }),
+        day("thu", "2026-09-24"),
+      ],
+      "thu",
+    ],
+    "an absent day between": [
+      [day("mon", "2026-09-21", { status: "non_compliant" }), day("wed", "2026-09-23", { status: "non_compliant" }), day("thu", "2026-09-24")],
+      "thu",
+    ],
+  };
+  for (const [name, [attendance, last]] of Object.entries(cases)) {
+    const db = world({ attendance });
+    await complete(db, { attendanceId: last });
+    assert.equal(byPrefix(db, "escalation:").length, 0, name);
+  }
+
+  // A failed check-out never starts or extends a run.
+  const checkout = world({
+    attendance: [
+      day("mon", "2026-09-21", { status: "non_compliant" }),
+      day("tue", "2026-09-22", { status: "non_compliant" }),
+      day("wed", "2026-09-23", { status: "compliant", check_out_time: new Date("2026-09-23T12:30:00Z") }),
+    ],
+  });
+  await complete(checkout, { attendanceId: "wed", kind: "checkout" });
+  assert.equal(byPrefix(checkout, "escalation:").length, 0, "a failed check-out");
 });
 
 test("failures in last week do not count towards this week", async () => {

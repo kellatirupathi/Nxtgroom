@@ -115,3 +115,15 @@ test('the table shows the column after Status, and the panel filters on it', () 
   assert.ok(drawer.includes('>Escalation</span>'));
   assert.ok(drawer.includes('ESCALATION_FILTER_OPTIONS.map'));
 });
+
+test('a days-in-a-row escalation is labelled as days in a row, with the week in the tooltip', async () => {
+  const { escalationLabel, ESCALATION_FILTER_OPTIONS } = await import('../src/attendanceFilters.ts');
+  const label = escalationLabel(
+    { week_start: '2026-09-21', week_end: '2026-09-27', count: 3, streak: true, days: ['2026-09-21', '2026-09-22', '2026-09-23'] },
+    '2026-09-23',
+  );
+  assert.equal(label.text, 'Escalated · 3 days in a row');
+  assert.match(label.title, /non-compliant at check-in on 3 days in a row in the week of/);
+  assert.equal(ESCALATION_FILTER_OPTIONS[0].label, 'Escalated (3+ check-in days in a row)');
+  assert.equal(escalationLabel({ week_start: '2026-09-21', week_end: '2026-09-27', count: 2, streak: true }, '2026-09-23'), null, 'two days is not yet escalated');
+});

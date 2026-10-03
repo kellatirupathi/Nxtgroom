@@ -4,7 +4,7 @@ import { dateRangeBoundsInTimeZone } from "../utils.js";
 import {
   addDaysToKey,
   ESCALATION_THRESHOLD,
-  nonCompliantOccurrences,
+  longestFailedStreak,
   weekStartKey,
 } from "./evaluationWorker.js";
 import {
@@ -293,7 +293,8 @@ export function buildDashboard({
   }
   const escalations = [];
   for (const [instructorId, group] of weekByInstructor) {
-    const count = nonCompliantOccurrences(group).length;
+    // Days in a row with a non-compliant check-in, the rule the email uses.
+    const count = longestFailedStreak(group, weekStartKey(group[0].attendance_day)).length;
     if (count < ESCALATION_THRESHOLD) continue;
     const latest = group.reduce((a, b) => (new Date(a.check_in_time || 0) > new Date(b.check_in_time || 0) ? a : b));
     const instructor = rosterById.get(instructorId);

@@ -560,10 +560,14 @@ function clockTime(value) {
  * separate alerts. The count in the subject is the week's total, which is why
  * a fourth failure sends a new message rather than repeating the third.
  */
-export function buildEscalationEmail({ name, count, weekStart, weekEnd, occurrences = [] }) {
+export function buildEscalationEmail({ name, count, weekStart, weekEnd, occurrences = [], streak = false }) {
   const person = name || "Instructor";
   const range = `${shortDay(weekStart)} to ${shortDay(weekEnd)}`;
-  const subject = `URGENT action needed: Check-in appearance report - ${person} non-compliant ${count} times this week (${range})`;
+  // A streak escalation counts days in a row; one queued before the change
+  // still counts results, and keeps its wording.
+  const subject = streak
+    ? `URGENT action needed: Check-in appearance report - ${person} non-compliant ${count} days in a row (${range})`
+    : `URGENT action needed: Check-in appearance report - ${person} non-compliant ${count} times this week (${range})`;
   const rows = occurrences.map((occurrence, index) => ({
     number: index + 1,
     day: shortDay(occurrence.day),
@@ -572,7 +576,9 @@ export function buildEscalationEmail({ name, count, weekStart, weekEnd, occurren
     summary: occurrence.summary || "See the report for the checkpoint detail.",
     reportUrl: occurrence.reportUrl,
   }));
-  const opening = `${person} has not met the appearance standards ${count} times this week (${range}). This needs your attention.`;
+  const opening = streak
+    ? `${person} has not met the appearance standards at check-in on ${count} days in a row this week (${range}). This needs your attention.`
+    : `${person} has not met the appearance standards ${count} times this week (${range}). This needs your attention.`;
 
   return {
     subject,

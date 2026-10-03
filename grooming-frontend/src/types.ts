@@ -152,7 +152,12 @@ export interface AttendanceRecord {
 export interface AttendanceEscalation {
   week_start: string;
   week_end: string;
+  /** Days in a row with a non-compliant check-in. */
   count: number;
+  /** Set by the days-in-a-row rule; absent on an older response. */
+  streak?: boolean;
+  /** The days of the run, as YYYY-MM-DD. */
+  days?: string[];
 }
 
 export interface CheckItem {

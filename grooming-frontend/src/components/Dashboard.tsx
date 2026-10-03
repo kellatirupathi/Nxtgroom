@@ -400,7 +400,7 @@ function Escalations({ data }: { data: DashboardData }) {
         Escalated this week
         {rows.length > 0 && <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white tabular-nums">{rows.length}</span>}
       </h3>
-      <p className="text-xs text-slate-500">3 or more non-compliant results since {weekdayLabel(data.week_start)}. Reporting partners are emailed each time.</p>
+      <p className="text-xs text-slate-500">Non-compliant at check-in on 3 or more days in a row since {weekdayLabel(data.week_start)}. Reporting partners are emailed on each day the run continues.</p>
       {rows.length === 0 ? (
         <p className="mt-6 text-sm text-slate-400">Nobody is escalated this week.</p>
       ) : (
@@ -417,7 +417,7 @@ function Escalations({ data }: { data: DashboardData }) {
                 </span>
               </span>
               <span className="inline-flex shrink-0 items-center rounded-full border border-rose-600 bg-rose-600 px-2.5 py-1 text-xs font-bold text-white tabular-nums">
-                {row.count} this week
+                {row.count} days in a row
               </span>
             </li>
           ))}

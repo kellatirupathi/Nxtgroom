@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import { escalationFor, weeklyEscalations } from "../src/services/escalations.js";
+import { failedDayStreaks, longestFailedStreak } from "../src/services/evaluationWorker.js";
 
 /**
  * The Escalation column on Daily Records.
@@ -57,30 +58,66 @@ const row = (id, instructor, day, extra = {}) => ({
 
 const WEEK = [
   row("mon", "i1", "2026-09-21", { status: "non_compliant" }),
-  row("tue", "i1", "2026-09-22", { checkout_compliance_status: "NON_COMPLIANT", check_out_time: "2026-09-22T12:00:00Z" }),
-  row("fri", "i1", "2026-09-25", { status: "non_compliant" }),
+  row("tue", "i1", "2026-09-22", { status: "non_compliant" }),
+  row("wed", "i1", "2026-09-23", { status: "non_compliant" }),
+  row("fri", "i1", "2026-09-25"),
   row("fri2", "i2", "2026-09-25", { status: "non_compliant" }),
 ];
 
 test("a page showing only today still counts the rest of the week", async () => {
   const db = memoryDb(WEEK);
-  const todayOnly = [WEEK[2], WEEK[3]];
+  const todayOnly = [WEEK[3], WEEK[4]];
   const escalations = await weeklyEscalations(db, todayOnly);
 
-  assert.deepEqual(escalationFor(escalations, WEEK[2]), {
+  assert.deepEqual(escalationFor(escalations, WEEK[3]), {
     week_start: "2026-09-21",
     week_end: "2026-09-27",
     count: 3,
+    streak: true,
+    days: ["2026-09-21", "2026-09-22", "2026-09-23"],
   });
-  assert.equal(escalationFor(escalations, WEEK[3]), null, "one failure is not an escalation");
+  assert.equal(escalationFor(escalations, WEEK[4]), null, "one failure is not an escalation");
   assert.equal(db.queries.length, 1, "one query for the whole page");
 });
 
 test("every row of an escalated instructor that week is marked, compliant ones too", async () => {
   const escalations = await weeklyEscalations(memoryDb(WEEK), WEEK);
-  for (const id of ["mon", "tue", "fri"]) {
+  for (const id of ["mon", "tue", "wed", "fri"]) {
     assert.equal(escalationFor(escalations, WEEK.find((r) => r._id === id)).count, 3, id);
   }
+});
+
+test("only check-in days in a row count: not results, scattered days, or a run broken by a pass or an absence", async () => {
+  const week = (...days) => days.map(([day, extra], index) => row(`r${index}`, "i1", day, extra));
+  const escalatedFor = async (rows) => (await weeklyEscalations(memoryDb(rows), rows)).size > 0;
+  const fail = { status: "non_compliant" };
+  // Three results on two days: Monday's check-in and check-out, Tuesday's check-in.
+  assert.equal(await escalatedFor(week(
+    ["2026-09-21", { ...fail, checkout_compliance_status: "NON_COMPLIANT" }],
+    ["2026-09-22", fail],
+  )), false);
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-25", fail])), false, "scattered");
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-22", {}], ["2026-09-23", fail], ["2026-09-24", fail])), false, "a pass between");
+  assert.equal(await escalatedFor(week(["2026-09-21", fail], ["2026-09-23", fail], ["2026-09-24", fail])), false, "an absence between");
+  assert.equal(await escalatedFor(week(["2026-09-22", fail], ["2026-09-23", fail], ["2026-09-24", fail])), true, "Tue-Wed-Thu");
+  assert.equal(await escalatedFor(week(["2026-09-25", fail], ["2026-09-26", fail], ["2026-09-27", fail])), true, "Fri-Sat-Sun");
+});
+
+test("the runs of a week are found in order, and the longest is the escalation", () => {
+  const fail = { status: "non_compliant" };
+  const rows = [
+    row("a", "i1", "2026-09-21", fail),
+    row("b", "i1", "2026-09-22", fail),
+    row("c", "i1", "2026-09-23"),
+    row("d", "i1", "2026-09-24", fail),
+    row("e", "i1", "2026-09-25", fail),
+    row("f", "i1", "2026-09-26", fail),
+    // Deleted records never count.
+    row("g", "i1", "2026-09-27", { ...fail, deleting_at: "2026-09-27T10:00:00Z" }),
+  ];
+  assert.deepEqual(failedDayStreaks(rows, "2026-09-21").map((run) => run.map((record) => record._id)), [["a", "b"], ["d", "e", "f"]]);
+  assert.deepEqual(longestFailedStreak(rows, "2026-09-21").map((record) => record._id), ["d", "e", "f"]);
+  assert.deepEqual(longestFailedStreak([], "2026-09-21"), []);
 });
 
 test("each week is counted on its own", async () => {

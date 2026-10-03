@@ -199,13 +199,13 @@ export interface AttendanceFilters {
   escalation?: EscalationFilter;
 }
 
-/** Failures in a week at which an instructor is escalated. Matches the server. */
+/** Days in a row with a non-compliant check-in, in one week, at which an instructor is escalated. Matches the server. */
 export const ESCALATION_THRESHOLD = 3;
 
 export type EscalationFilter = '' | 'escalated' | 'not_escalated';
 
 export const ESCALATION_FILTER_OPTIONS: ReadonlyArray<{ value: Exclude<EscalationFilter, ''>; label: string }> = [
-  { value: 'escalated', label: 'Escalated (3+ non-compliant in a week)' },
+  { value: 'escalated', label: 'Escalated (3+ check-in days in a row)' },
   { value: 'not_escalated', label: 'Not escalated' },
 ];
 
@@ -236,8 +236,8 @@ function shortDay(dayKey: string, withYear = false): string {
 /**
  * The one line shown in the Escalation column, and the full sentence behind it.
  *
- * "This week" only when it is: a row from an earlier week says "that week",
- * and the tooltip and the export always carry the dates.
+ * Counted in days in a row with a non-compliant check-in, as the server
+ * counts it. The tooltip and the export carry the week's dates.
  */
 export function escalationLabel(
   escalation: AttendanceEscalation | null | undefined,
@@ -246,9 +246,16 @@ export function escalationLabel(
   if (!escalation || !isEscalated(escalation)) return null;
   const thisWeek = escalation.week_start === weekStartOf(today);
   const range = `${shortDay(escalation.week_start)} - ${shortDay(escalation.week_end, true)}`;
+  // An older response counted results in a week; it keeps its own wording.
+  if (!escalation.streak) {
+    return {
+      text: `Escalated · ${escalation.count}× ${thisWeek ? 'this week' : 'that week'}`,
+      title: `Escalated: non-compliant ${escalation.count} times in the week of ${range}`,
+    };
+  }
   return {
-    text: `Escalated · ${escalation.count}× ${thisWeek ? 'this week' : 'that week'}`,
-    title: `Escalated: non-compliant ${escalation.count} times in the week of ${range}`,
+    text: `Escalated · ${escalation.count} days in a row`,
+    title: `Escalated: non-compliant at check-in on ${escalation.count} days in a row in the week of ${range}`,
   };
 }
 

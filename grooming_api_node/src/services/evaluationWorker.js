@@ -259,7 +259,10 @@ async function sendComplianceReports(db, {
   return recipients.length;
 }
 
-/** Failures in a week at which reporting partners are sent an escalation. */
+/**
+ * Consecutive days with a non-compliant check-in, inside one Monday-to-Sunday
+ * week, at which reporting partners are sent an escalation.
+ */
 export const ESCALATION_THRESHOLD = 3;
 
 const NON_COMPLIANT_STATUSES = new Set(["non_compliant", "fail"]);
@@ -311,17 +314,60 @@ export function nonCompliantOccurrences(records) {
 }
 
 /**
- * Escalates to the reporting partners once an instructor has failed three or
- * more times in the Monday-to-Sunday week of this result.
+ * The runs of consecutive days on which an instructor's check-in was
+ * non-compliant, inside the Monday-to-Sunday week starting at weekStart, in
+ * day order. Each run is its days' records, oldest first.
  *
- * Sent on the third failure and again on each one after, each message listing
- * the whole week so far. The job is keyed by the week's count, so a retried or
- * repeated evaluation reaching the same count sends nothing twice, while a new
- * failure - a new count - always sends. Copied to the same partners, under the
- * same switch, as the alert for the half that triggered it.
+ * A day counts as failed by its check-in alone, as the daily report does; the
+ * check-out does not count. A compliant day ends a run, and so does a day with
+ * no attendance at all - absent or off - since the days must be continuous. A
+ * run never crosses into another week.
+ */
+export function failedDayStreaks(records, weekStart) {
+  const byDay = new Map();
+  for (const record of records || []) {
+    if (record?.deleting_at || !record?.attendance_day) continue;
+    const existing = byDay.get(record.attendance_day);
+    // The day's first check-in, as everywhere else a day is counted.
+    if (!existing || new Date(record.check_in_time || 0) < new Date(existing.check_in_time || 0)) {
+      byDay.set(record.attendance_day, record);
+    }
+  }
+  const streaks = [];
+  let current = [];
+  for (let offset = 0; offset < 7; offset += 1) {
+    const record = byDay.get(addDaysToKey(weekStart, offset));
+    if (record && NON_COMPLIANT_STATUSES.has(String(record.status || "").toLowerCase())) {
+      current.push(record);
+    } else if (current.length) {
+      streaks.push(current);
+      current = [];
+    }
+  }
+  if (current.length) streaks.push(current);
+  return streaks;
+}
+
+/** The longest run of failed days in the week, the latest of equals; [] if none. */
+export function longestFailedStreak(records, weekStart) {
+  return failedDayStreaks(records, weekStart)
+    .reduce((longest, streak) => (streak.length >= longest.length ? streak : longest), []);
+}
+
+/**
+ * Escalates to the reporting partners once an instructor's check-in has been
+ * non-compliant on three days in a row in one Monday-to-Sunday week.
+ *
+ * Sent on the third consecutive day and again on each further day the run
+ * continues, each message listing the whole run. The job is keyed by the run's
+ * first day and length, so a retried or repeated evaluation reaching the same
+ * run sends nothing twice, while a longer run always sends. A check-out never
+ * starts one: only the check-in decides whether a day failed. Copied to the
+ * same partners, under the same switch, as the check-in alert.
  */
 async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, kind = "checkin" }) {
   if (!instructorId) return 0;
+  if (kind !== "checkin") return 0;
   const attendance = await db.collection("attendance").findOne(
     { _id: attendanceId },
     { projection: { attendance_day: 1, check_in_time: 1 } }
@@ -350,8 +396,16 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
       },
     }
   ).toArray();
-  const occurrences = nonCompliantOccurrences(records);
-  if (occurrences.length < ESCALATION_THRESHOLD) return 0;
+  // The run this day belongs to: a re-analysed earlier day can join two runs.
+  const streak = failedDayStreaks(records, weekStart)
+    .find((days) => days.some((record) => record.attendance_day === dayKey)) || [];
+  if (streak.length < ESCALATION_THRESHOLD) return 0;
+  const occurrences = streak.map((record) => ({
+    kind: "checkin",
+    day: record.attendance_day,
+    time: record.check_in_time || null,
+    summary: record.remarks || "",
+  }));
 
   const recipients = await reportRecipientsFor(db, kind);
   if (!recipients.length) return 0;
@@ -362,6 +416,8 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
   const payload = {
     name: instructor.name,
     count: occurrences.length,
+    // Days in a row, not results in a week: the email words it that way.
+    streak: true,
     weekStart,
     weekEnd,
     occurrences: occurrences.map((occurrence) => ({
@@ -374,7 +430,7 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
   };
   for (const recipient of recipients) {
     await enqueueMailJob(db, {
-      id: `escalation:${instructorId}:${weekStart}:${occurrences.length}:${recipientKey(recipient)}`,
+      id: `escalation:${instructorId}:streak:${streak[0].attendance_day}:${streak.length}:${recipientKey(recipient)}`,
       type: "grooming_escalation",
       toEmail: recipient,
       attendanceId,
