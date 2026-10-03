@@ -5,6 +5,7 @@ import {
   applyDetailFindings,
   boxToPixels,
   buildCloseUps,
+  CLOSE_UP_INSTRUCTIONS,
   DETAIL_CHECK_VERSION,
   evidenceBoxes,
   findingsFromCloseUp,
@@ -170,6 +171,39 @@ test("a waist the close-up cannot see fails the belt as not shown, but leaves th
   assert.equal(belt.evidence, "NOT_SHOWN");
   assert.ok(improvementTips(rows).some((tip) => /full-length photograph that shows your waist/.test(tip)));
   assert.equal(row(rows, "M_SHIRT_COLLAR_TUCK").status, "PASS");
+});
+
+test("a belt seen in the close-up passes even when an ID card covers part of the waist", () => {
+  // Simhadri, 3 Oct: black belt and silver buckle in plain view, failed as
+  // "not shown" because the close-up called the waist partly obscured.
+  for (const seen of [{ belt_buckle_visible: true }, { belt_strap_visible: true }]) {
+    const rows = passedRows();
+    const result = applyDetailFindings(rows, face({
+      waist_assessable: false,
+      shirt_tucked: "UNCLEAR",
+      waist_observation: "A black belt with a silver buckle; the waistband is partially obscured by the shirt and ID card lanyard.",
+      ...seen,
+    }), REGIONS, CROPPED);
+    const belt = row(rows, "M_BELT");
+    assert.equal(belt.status, "PASS");
+    assert.equal(belt.evidence, undefined);
+    assert.match(belt.reason, /^Confirmed in the close-up: A black belt with a silver buckle/);
+    assert.ok(!result.failed.includes("M_BELT"));
+    assert.ok(!improvementTips(rows).some((tip) => /shows your waist/.test(tip)));
+  }
+
+  // A waist with no belt on it still fails, seen or hidden.
+  const none = passedRows();
+  applyDetailFindings(none, face(), REGIONS, CROPPED);
+  assert.equal(row(none, "M_BELT").status, "FAIL");
+  assert.equal(row(none, "M_BELT").reason, "No belt buckle or belt strap is visible at the waistband in the close-up of the waist.");
+});
+
+test("the close-up is told an ID card above the waistband does not hide it", () => {
+  assert.match(CLOSE_UP_INSTRUCTIONS, /Answer both from whatever part of the waistband you can see, even when something covers another part of it/);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /waist_assessable: false only if the front of the waistband is out of frame, mostly covered \(by hands, an untucked shirt, a kurta, a bag\)/);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /An ID card or lanyard hanging above the waistband, or across only part of it, does not make it unassessable/);
+  assert.doesNotMatch(CLOSE_UP_INSTRUCTIONS, /hidden \(by hands, an ID card/);
 });
 
 test("an untucked shirt fails the tuck; an unclear one does not", () => {

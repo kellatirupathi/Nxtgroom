@@ -32,7 +32,7 @@ import { z } from "zod";
  * report can show it.
  */
 
-export const DETAIL_CHECK_VERSION = "2026-10-03.1";
+export const DETAIL_CHECK_VERSION = "2026-10-03.2";
 
 /** The rows the close-up can overrule, and the region each is read from. */
 const ROW_REGIONS = Object.freeze({
@@ -271,9 +271,10 @@ FACE
 WAIST
 - belt_buckle_visible: true only if you can see a belt buckle - a metal or leather fastening at the front of the waistband.
 - belt_strap_visible: true only if you can see a belt strap - a band of leather or fabric running through the belt loops along the waistband, visibly separate from the trouser fabric.
+- Answer both from whatever part of the waistband you can see, even when something covers another part of it: a buckle or strap visible beside a hand or below an ID card is still visible.
 - The top edge of the trousers, belt loops, a fold of shirt fabric, or a shadow at the waist are NOT a belt. Over dark trousers, look for the buckle and for the edge of a strap lying on top of the waistband; if you see neither, both are false.
 - shirt_tucked: YES if the shirt hem disappears into the waistband; NO if shirt fabric hangs outside or below the waistband; UNCLEAR if you cannot tell. A kurta is not tucked: answer UNCLEAR for it.
-- waist_assessable: false if the waistband is out of frame, hidden (by hands, an ID card, an untucked shirt, a kurta, a bag) or too blurred to judge.
+- waist_assessable: false only if the front of the waistband is out of frame, mostly covered (by hands, an untucked shirt, a kurta, a bag) or too blurred to judge. An ID card or lanyard hanging above the waistband, or across only part of it, does not make it unassessable: judge the part you can see.
 - waist_observation: one sentence naming what you saw at the front of the waistband.
 
 TROUSERS
@@ -446,7 +447,12 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
     const seen = sentence(waist.observation, "The front of the waistband.");
     const belt = findRow(rows, "M_BELT");
     if (belt?.status === "PASS") {
-      if (!waist.assessable) {
+      // A buckle or strap the close-up saw is a belt, however much of the
+      // waistband something else covers: a hanging ID card was failing belts
+      // that were plainly worn as "not shown".
+      if (waist.buckle_visible || waist.belt_strap_visible) {
+        confirmRow(belt, seen);
+      } else if (!waist.assessable) {
         failRow(
           belt,
           `Close-up of the waist: ${seen}`,
@@ -454,15 +460,13 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
           { notShown: true },
         );
         failed.push("M_BELT");
-      } else if (!waist.buckle_visible && !waist.belt_strap_visible) {
+      } else {
         failRow(
           belt,
           `Close-up of the waist: ${seen}`,
           "No belt buckle or belt strap is visible at the waistband in the close-up of the waist.",
         );
         failed.push("M_BELT");
-      } else {
-        confirmRow(belt, seen);
       }
     }
 
