@@ -10,19 +10,27 @@ import {
 
 /**
  * The Escalations page: every run of three or more non-compliant check-ins in
- * a row in one Monday-to-Sunday week, one row per day of the run, with that
- * day's check-in and check-out, their verdicts, and what the page needs to
- * show their photographs and reports.
+ * a row in one Monday-to-Sunday week, one row per failed day of the run, with
+ * that day's check-in and check-out, their verdicts, and what the page needs
+ * to show their photographs and reports. The page groups the rows by person.
  *
  * The runs are found by failedDayStreaks, the function that sends reporting
  * partners the URGENT email, so the page lists exactly who was emailed about.
- * An instructor with two separate runs in a week appears for both.
+ * An instructor with two separate runs appears for both.
+ *
+ * A range other than one week (this month, a custom range) is read week by
+ * week, since a run never crosses a Monday: every week the range touches is
+ * read whole, so a run that began before the range still counts its earlier
+ * days, and only the failed days inside the range are listed.
  */
 
 const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export class EscalationWeekError extends Error {}
+/** The longest range one request may ask for: a quarter, with room for its edges. */
+export const MAX_RANGE_DAYS = 93;
+
+export class EscalationRangeError extends Error {}
 
 /** The weekday of a YYYY-MM-DD key. */
 export function weekdayOf(dayKey) {
@@ -30,15 +38,39 @@ export function weekdayOf(dayKey) {
   return WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
 }
 
+/** A real calendar date as YYYY-MM-DD: not 2026-02-30, not 24-09-2026. */
+function isDayKey(value) {
+  if (typeof value !== "string" || !DAY_KEY.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10) === value;
+}
+
 /** The Monday of the requested week: any day in it, or this week by default. */
 export function requestedWeekStart(week, now = new Date()) {
   if (week === undefined || week === null || week === "") {
     return weekStartKey(localDateKey(now, runtimeConfig().appTimeZone));
   }
-  if (typeof week !== "string" || !DAY_KEY.test(week) || Number.isNaN(Date.parse(`${week}T00:00:00Z`))) {
-    throw new EscalationWeekError("week must be a date as YYYY-MM-DD");
-  }
+  if (!isDayKey(week)) throw new EscalationRangeError("week must be a date as YYYY-MM-DD");
   return weekStartKey(week);
+}
+
+/**
+ * The dates asked for, both ends included: `from` and `to` when given, or
+ * else the week of `week`, or this week.
+ */
+export function requestedRange({ week, from, to } = {}, now = new Date()) {
+  if (from !== undefined || to !== undefined) {
+    if (!isDayKey(from) || !isDayKey(to)) {
+      throw new EscalationRangeError("from and to must both be dates as YYYY-MM-DD");
+    }
+    if (from > to) throw new EscalationRangeError("from must not be after to");
+    if (addDaysToKey(from, MAX_RANGE_DAYS - 1) < to) {
+      throw new EscalationRangeError(`Choose a range of at most ${MAX_RANGE_DAYS} days`);
+    }
+    return { from, to };
+  }
+  const weekStart = requestedWeekStart(week, now);
+  return { from: weekStart, to: addDaysToKey(weekStart, 6) };
 }
 
 /** "compliant", "non_compliant", or the record's own word for anything else. */
@@ -62,13 +94,16 @@ function checkOutVerdict(record) {
 const iso = (value) => (value ? new Date(value).toISOString() : null);
 
 /**
- * The rows for one week. `collegeId` narrows them to one institute. Rows are
- * ordered by instructor, then by day.
+ * The rows for a range of dates (see requestedRange). `collegeId` narrows them
+ * to one institute. Rows are ordered by instructor, then by day.
  */
-export async function escalationReport(db, { week, collegeId = null, now = new Date() } = {}) {
-  const weekStart = requestedWeekStart(week, now);
-  const weekEnd = addDaysToKey(weekStart, 6);
-  const days = Array.from({ length: 7 }, (_, offset) => addDaysToKey(weekStart, offset));
+export async function escalationReport(db, { week, from, to, collegeId = null, now = new Date() } = {}) {
+  const range = requestedRange({ week, from, to }, now);
+  const weekStarts = [];
+  for (let start = weekStartKey(range.from); start <= range.to; start = addDaysToKey(start, 7)) {
+    weekStarts.push(start);
+  }
+  const days = weekStarts.flatMap((start) => Array.from({ length: 7 }, (_, offset) => addDaysToKey(start, offset)));
 
   const records = await db.collection("attendance").find(
     {
@@ -105,12 +140,19 @@ export async function escalationReport(db, { week, collegeId = null, now = new D
 
   const runs = [];
   for (const [instructorId, group] of byInstructor) {
-    for (const streak of failedDayStreaks(group, weekStart)) {
-      if (streak.length >= ESCALATION_THRESHOLD) runs.push({ instructorId, streak });
+    for (const weekStart of weekStarts) {
+      for (const streak of failedDayStreaks(group, weekStart)) {
+        if (streak.length < ESCALATION_THRESHOLD) continue;
+        // Only the failed days inside the range are listed; a run wholly
+        // outside it is not read at all.
+        if (streak.some((record) => record.attendance_day >= range.from && record.attendance_day <= range.to)) {
+          runs.push({ instructorId, streak });
+        }
+      }
     }
   }
   if (!runs.length) {
-    return { week_start: weekStart, week_end: weekEnd, rows: [], institutes: [] };
+    return { from: range.from, to: range.to, rows: [], institutes: [] };
   }
 
   const instructorIds = [...new Set(runs.map((run) => run.instructorId))];
@@ -135,6 +177,7 @@ export async function escalationReport(db, { week, collegeId = null, now = new D
   for (const { instructorId, streak } of runs) {
     const instructor = instructorById.get(instructorId);
     streak.forEach((record, index) => {
+      if (record.attendance_day < range.from || record.attendance_day > range.to) return;
       const college = record.college_id || instructor?.college_id || null;
       if (collegeId && String(college || "") !== String(collegeId)) return;
       rows.push({
@@ -170,5 +213,5 @@ export async function escalationReport(db, { week, collegeId = null, now = new D
     .filter((row) => row.college_id)
     .map((row) => [row.college_id, { id: row.college_id, name: row.institute }])).values()]
     .sort((left, right) => left.name.localeCompare(right.name));
-  return { week_start: weekStart, week_end: weekEnd, rows, institutes };
+  return { from: range.from, to: range.to, rows, institutes };
 }

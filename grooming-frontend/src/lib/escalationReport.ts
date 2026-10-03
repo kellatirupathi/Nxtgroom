@@ -3,14 +3,17 @@ import { formatAttendanceTime, localDateValue, weekStartOf } from '../attendance
 import { publicDayReportPath } from '../routes.ts';
 
 /**
- * The Escalations page, opened from "View all" on the Dashboard: every run of
- * three or more non-compliant check-ins in a row in a week, one row per day.
+ * The Escalations page, opened from "View all" on the Dashboard: everyone
+ * whose check-in was non-compliant three or more times in a row in a week,
+ * one row per person, for this week, last week, this month or a custom range.
  * The server finds the runs (the same rule that emails the reporting
- * partners); this module chooses the week and narrows what it returned.
+ * partners) and returns one row per failed day; this module chooses the dates,
+ * narrows the rows and gathers each person's days together.
  */
 
 export type HalfVerdict = 'compliant' | 'non_compliant' | 'unassessed' | 'error' | 'pending' | 'no_photo';
 
+/** One failed day of an escalated run, as the server returns it. */
 export interface EscalationRow {
   attendance_id: string;
   instructor_id: string;
@@ -38,8 +41,8 @@ export interface EscalationRow {
 }
 
 export interface EscalationReport {
-  week_start: string;
-  week_end: string;
+  from: string;
+  to: string;
   rows: EscalationRow[];
   institutes: Array<{ id: string; name: string }>;
 }
@@ -55,19 +58,25 @@ export const VERDICT_LABELS: Record<string, string> = {
   no_photo: 'No photo',
 };
 
-export type CheckoutFilter = '' | 'compliant' | 'non_compliant' | 'none';
+// ---- The dates -----------------------------------------------------------------
 
-export const CHECKOUT_FILTER_OPTIONS: ReadonlyArray<{ value: Exclude<CheckoutFilter, ''>; label: string }> = [
-  { value: 'compliant', label: 'Check-out compliant' },
-  { value: 'non_compliant', label: 'Check-out non-compliant' },
-  { value: 'none', label: 'No check-out' },
+export type EscalationPeriod = 'this_week' | 'last_week' | 'this_month' | 'custom';
+
+export const ESCALATION_PERIODS: ReadonlyArray<{ value: EscalationPeriod; label: string }> = [
+  { value: 'this_week', label: 'This week' },
+  { value: 'last_week', label: 'Last week' },
+  { value: 'this_month', label: 'This month' },
+  { value: 'custom', label: 'Custom range' },
 ];
 
-export interface EscalationFilters {
-  search?: string;
-  college?: string;
-  weekday?: string;
-  checkout?: CheckoutFilter;
+/** The longest custom range the server will read, in days. */
+export const MAX_RANGE_DAYS = 93;
+
+export interface PeriodRange {
+  /** YYYY-MM-DD, included. */
+  from: string;
+  /** YYYY-MM-DD, included. */
+  to: string;
 }
 
 function shiftDays(dayKey: string, days: number): string {
@@ -75,7 +84,49 @@ function shiftDays(dayKey: string, days: number): string {
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 
+/**
+ * The dates a period covers. Weeks run Monday to Sunday, as escalations do;
+ * a month is the whole calendar month. `custom` is the range chosen.
+ */
+export function periodRange(period: EscalationPeriod, today: string = localDateValue(), custom?: PeriodRange): PeriodRange {
+  switch (period) {
+    case 'last_week': {
+      const start = shiftDays(weekStartOf(today), -7);
+      return { from: start, to: shiftDays(start, 6) };
+    }
+    case 'this_month': {
+      const [year, month] = today.split('-').map(Number);
+      return {
+        from: `${today.slice(0, 7)}-01`,
+        to: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
+      };
+    }
+    case 'custom':
+      if (custom) return custom;
+      return periodRange('this_week', today);
+    case 'this_week':
+    default: {
+      const start = weekStartOf(today);
+      return { from: start, to: shiftDays(start, 6) };
+    }
+  }
+}
+
+/** Why a custom range cannot be shown, or '' when it can. */
+export function rangeProblem({ from, to }: PeriodRange): string {
+  if (!from || !to) return 'Choose both a start and an end date.';
+  if (from > to) return 'The start date must be on or before the end date.';
+  if (shiftDays(from, MAX_RANGE_DAYS - 1) < to) return `Choose a range of at most ${MAX_RANGE_DAYS} days.`;
+  return '';
+}
+
+/** The request for a range of dates. */
+export function escalationsPath({ from, to }: PeriodRange): string {
+  return `/api/v2/dashboard/escalations?${new URLSearchParams({ from, to }).toString()}`;
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const SHORT_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** "21 Sep 2026" from a day key. Spelled out here, as browsers abbreviate months differently. */
 export function dayLabel(dayKey: string): string {
@@ -84,59 +135,94 @@ export function dayLabel(dayKey: string): string {
   return `${Number(match[3])} ${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
 }
 
-/** "21 – 27 Sep 2026", or "29 Sep – 5 Oct 2026" across a month. */
-export function weekRangeLabel(weekStart: string): string {
-  const end = shiftDays(weekStart, 6);
-  const [startDay, startMonth] = dayLabel(weekStart).split(' ');
-  return startMonth === dayLabel(end).split(' ')[1]
-    ? `${startDay} – ${dayLabel(end)}`
-    : `${startDay} ${startMonth} – ${dayLabel(end)}`;
+/** "Tue 29 Sep", for a date inside the table. */
+export function shortDayLabel(dayKey: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dayKey);
+  if (!match || !MONTHS[Number(match[2]) - 1]) return dayKey;
+  const weekday = SHORT_WEEKDAYS[new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))).getUTCDay()];
+  return `${weekday} ${Number(match[3])} ${MONTHS[Number(match[2]) - 1]}`;
 }
 
-/**
- * The weeks to choose from: this week first, then each earlier one. A week
- * chosen by date that is older than these is added so the menu can show it.
- */
-export function weekOptions(today: string = localDateValue(), count = 12, selected?: string): Array<{ value: string; label: string }> {
-  const thisWeek = weekStartOf(today);
-  const options = Array.from({ length: count }, (_, index) => {
-    const value = shiftDays(thisWeek, -7 * index);
-    const prefix = index === 0 ? 'This week · ' : index === 1 ? 'Last week · ' : '';
-    return { value, label: `${prefix}${weekRangeLabel(value)}` };
-  });
-  if (selected && !options.some((option) => option.value === selected)) {
-    options.push({ value: selected, label: weekRangeLabel(selected) });
-  }
-  return options;
+/** "21 – 27 Sep 2026", "29 Sep – 5 Oct 2026", "29 Dec 2025 – 4 Jan 2026" or one day. */
+export function rangeLabel(from: string, to: string): string {
+  if (from === to) return dayLabel(from);
+  const [startDay, startMonth, startYear] = dayLabel(from).split(' ');
+  const [, endMonth, endYear] = dayLabel(to).split(' ');
+  if (startYear !== endYear) return `${dayLabel(from)} – ${dayLabel(to)}`;
+  if (startMonth !== endMonth) return `${startDay} ${startMonth} – ${dayLabel(to)}`;
+  return `${startDay} – ${dayLabel(to)}`;
 }
 
-/** The rows a reader asked for: an instructor or institute name, an institute, a day, a check-out result. */
-export function filterEscalationRows(rows: EscalationRow[], { search = '', college = '', weekday = '', checkout = '' }: EscalationFilters = {}): EscalationRow[] {
+// ---- The rows ------------------------------------------------------------------
+
+export interface EscalationFilters {
+  search?: string;
+  college?: string;
+  weekday?: string;
+}
+
+/** The failed days a reader asked for: an instructor or institute name, an institute, a weekday. */
+export function filterEscalationRows(rows: EscalationRow[], { search = '', college = '', weekday = '' }: EscalationFilters = {}): EscalationRow[] {
   const term = search.trim().toLowerCase();
   return rows.filter((row) => {
     if (college && row.college_id !== college) return false;
     if (weekday && row.weekday !== weekday) return false;
-    if (checkout === 'none' && row.check_out_status) return false;
-    if ((checkout === 'compliant' || checkout === 'non_compliant') && row.check_out_status !== checkout) return false;
     if (term && ![row.name, row.institute, row.role].some((value) => String(value || '').toLowerCase().includes(term))) return false;
     return true;
   });
 }
 
-/** How many different instructors the rows are about. */
-export function escalatedInstructorCount(rows: EscalationRow[]): number {
-  return new Set(rows.map((row) => row.instructor_id)).size;
+/** One escalated person and their failed days, oldest first. */
+export interface EscalatedPerson {
+  instructor_id: string;
+  name: string;
+  role: string | null;
+  institute: string;
+  college_id: string | null;
+  days: EscalationRow[];
 }
 
-/** The public report for one half of a row, or null without a report link. */
+/**
+ * One entry per person, in the order the server sorted them (by name), each
+ * with their days by date. The name, role and institute are the latest day's,
+ * as they are whatever the record said that day.
+ */
+export function groupByPerson(rows: EscalationRow[]): EscalatedPerson[] {
+  const people = new Map<string, EscalatedPerson>();
+  for (const row of rows) {
+    const person = people.get(row.instructor_id);
+    if (person) person.days.push(row);
+    else people.set(row.instructor_id, { instructor_id: row.instructor_id, name: row.name, role: row.role, institute: row.institute, college_id: row.college_id, days: [row] });
+  }
+  return [...people.values()].map((person) => {
+    const days = [...person.days].sort((left, right) => left.date.localeCompare(right.date));
+    const latest = days[days.length - 1];
+    return { ...person, name: latest.name, role: latest.role, institute: latest.institute, college_id: latest.college_id, days };
+  });
+}
+
+/** A person's days split into their runs, each run's days by date. */
+export function runsOf(days: EscalationRow[]): Array<{ run_start: string; run_length: number; days: EscalationRow[] }> {
+  const runs = new Map<string, { run_start: string; run_length: number; days: EscalationRow[] }>();
+  for (const day of days) {
+    const run = runs.get(day.run_start);
+    if (run) run.days.push(day);
+    else runs.set(day.run_start, { run_start: day.run_start, run_length: day.run_length, days: [day] });
+  }
+  return [...runs.values()].sort((left, right) => left.run_start.localeCompare(right.run_start));
+}
+
+/** The public report for one half of a day, or null without a report link. */
 export function rowReportPath(row: EscalationRow, half: 'checkin' | 'checkout'): string | null {
   if (!row.report_token) return null;
   if (half === 'checkout' && !row.check_out_time) return null;
   return publicDayReportPath(row.report_token, row.date, half);
 }
 
+// ---- Export --------------------------------------------------------------------
+
 export const ESCALATION_CSV_COLUMNS = [
-  'Week',
+  'Period',
   'Instructor Name',
   'Role',
   'Institute',
@@ -151,11 +237,11 @@ export const ESCALATION_CSV_COLUMNS = [
   'Check-out Report',
 ] as const;
 
-/** The rows on screen as CSV, report links absolute so they open from a spreadsheet. */
-export function escalationCsv(rows: EscalationRow[], weekStart: string, origin: string): string {
+/** The failed days on screen as CSV, one line each, report links absolute so they open from a spreadsheet. */
+export function escalationCsv(rows: EscalationRow[], range: PeriodRange, origin: string): string {
   const link = (path: string | null) => (path ? `${origin}${path}` : '');
   const lines = rows.map((row) => [
-    weekRangeLabel(weekStart),
+    rangeLabel(range.from, range.to),
     row.name,
     row.role || '',
     row.institute,
@@ -172,6 +258,6 @@ export function escalationCsv(rows: EscalationRow[], weekStart: string, origin: 
   return [ESCALATION_CSV_COLUMNS.join(','), ...lines].join('\r\n');
 }
 
-export function escalationFileName(weekStart: string): string {
-  return `escalations-week-${weekStart}.csv`;
+export function escalationFileName({ from, to }: PeriodRange): string {
+  return from === to ? `escalations-${from}.csv` : `escalations-${from}-to-${to}.csv`;
 }

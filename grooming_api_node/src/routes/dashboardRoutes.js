@@ -6,7 +6,7 @@ import {
   DashboardCollegeNotFound,
   DashboardRangeError,
 } from "../services/dashboardStats.js";
-import { escalationReport, EscalationWeekError } from "../services/escalationReport.js";
+import { escalationReport, EscalationRangeError } from "../services/escalationReport.js";
 import { asyncRoute } from "../utils.js";
 
 export const dashboardRouter = Router();
@@ -64,26 +64,29 @@ dashboardRouter.get(
 
 /**
  * The Escalations page behind "View all" on the Dashboard: every instructor
- * escalated in a Monday-to-Sunday week, one row per failed day of the run.
- * `week` is any date in the week (YYYY-MM-DD), this week when absent;
+ * escalated in a range of dates, one row per failed day of the run. `from`
+ * and `to` (YYYY-MM-DD, both included) choose the range; without them `week`
+ * is any date in one week, and this week when that is absent too.
  * `college_id` narrows it to one institute.
  */
 dashboardRouter.get(
   "/escalations",
   requireSuperAdmin,
   asyncRoute(async (req, res) => {
-    const { week, college_id: rawCollege } = req.query;
-    if (week !== undefined && typeof week !== "string") {
-      return res.status(422).json({ detail: "week must be given once" });
+    const { week, from, to, college_id: rawCollege } = req.query;
+    for (const [name, value] of Object.entries({ week, from, to })) {
+      if (value !== undefined && typeof value !== "string") {
+        return res.status(422).json({ detail: `${name} must be given once` });
+      }
     }
     if (rawCollege !== undefined && (typeof rawCollege !== "string" || rawCollege.length > 100)) {
       return res.status(422).json({ detail: "college_id must be a single institute id" });
     }
     const collegeId = rawCollege && rawCollege !== "all" ? rawCollege.trim() : null;
     try {
-      return res.json(await escalationReport(req.app.locals.db, { week, collegeId }));
+      return res.json(await escalationReport(req.app.locals.db, { week, from, to, collegeId }));
     } catch (error) {
-      if (error instanceof EscalationWeekError) return res.status(422).json({ detail: error.message });
+      if (error instanceof EscalationRangeError) return res.status(422).json({ detail: error.message });
       throw error;
     }
   })

@@ -3,7 +3,9 @@ import { test } from "node:test";
 import { readFile } from "node:fs/promises";
 import {
   escalationReport,
-  EscalationWeekError,
+  EscalationRangeError,
+  MAX_RANGE_DAYS,
+  requestedRange,
   requestedWeekStart,
   weekdayOf,
 } from "../src/services/escalationReport.js";
@@ -92,15 +94,34 @@ test("the week is any day in it, this week by default, and a bad date is refused
   assert.equal(requestedWeekStart("2026-09-21"), "2026-09-21");
   assert.equal(requestedWeekStart("2026-09-27"), "2026-09-21", "Sunday ends the week");
   assert.equal(requestedWeekStart(undefined, new Date("2026-10-03T06:00:00Z")), "2026-09-28");
-  assert.throws(() => requestedWeekStart("24-09-2026"), EscalationWeekError);
-  assert.throws(() => requestedWeekStart("2026-13-40"), EscalationWeekError);
+  assert.throws(() => requestedWeekStart("24-09-2026"), EscalationRangeError);
+  assert.throws(() => requestedWeekStart("2026-13-40"), EscalationRangeError);
   assert.equal(weekdayOf("2026-09-24"), "Thursday");
+});
+
+test("a range is from and to, both included, or else one week, and a bad range is refused", () => {
+  assert.deepEqual(requestedRange({ from: "2026-10-01", to: "2026-10-31" }), { from: "2026-10-01", to: "2026-10-31" });
+  assert.deepEqual(requestedRange({ from: "2026-10-03", to: "2026-10-03" }), { from: "2026-10-03", to: "2026-10-03" });
+  assert.deepEqual(requestedRange({ week: "2026-09-24" }), { from: "2026-09-21", to: "2026-09-27" });
+  assert.deepEqual(requestedRange({}, new Date("2026-10-03T06:00:00Z")), { from: "2026-09-28", to: "2026-10-04" });
+  assert.equal(MAX_RANGE_DAYS, 93);
+  assert.deepEqual(requestedRange({ from: "2026-07-01", to: "2026-10-01" }), { from: "2026-07-01", to: "2026-10-01" }, "93 days");
+  for (const bad of [
+    { from: "2026-10-01" },
+    { to: "2026-10-01" },
+    { from: "2026-10-05", to: "2026-10-01" },
+    { from: "2026-02-30", to: "2026-03-05" },
+    { from: "01-10-2026", to: "2026-10-05" },
+    { from: "2026-07-01", to: "2026-10-02" },
+  ]) {
+    assert.throws(() => requestedRange(bad), EscalationRangeError, JSON.stringify(bad));
+  }
 });
 
 test("one row per failed day of each escalated run, with both halves and their links", async () => {
   const report = await escalationReport(memoryDb(collections()), { week: "2026-09-24" });
-  assert.equal(report.week_start, "2026-09-21");
-  assert.equal(report.week_end, "2026-09-27");
+  assert.equal(report.from, "2026-09-21");
+  assert.equal(report.to, "2026-09-27");
   assert.deepEqual(report.rows.map((row) => `${row.name} ${row.date} ${row.weekday}`), [
     "Asha 2026-09-22 Tuesday",
     "Asha 2026-09-23 Wednesday",
@@ -147,11 +168,39 @@ test("one institute only, and an empty week", async () => {
   assert.deepEqual([...new Set(one.rows.map((row) => row.name))], ["Asha"]);
 
   const empty = await escalationReport(memoryDb(collections()), { week: "2026-09-14" });
-  assert.deepEqual(empty, { week_start: "2026-09-14", week_end: "2026-09-20", rows: [], institutes: [] });
+  assert.deepEqual(empty, { from: "2026-09-14", to: "2026-09-20", rows: [], institutes: [] });
+});
+
+test("a range across weeks reads each week whole and lists only the failed days inside it", async () => {
+  const data = collections();
+  // Kiran fails Monday to Wednesday of the next week: a second week's run.
+  data.attendance.push(
+    day("k-mon2", "i3", "2026-09-28", fail),
+    day("k-tue2", "i3", "2026-09-29", fail),
+    day("k-wed2", "i3", "2026-09-30", fail),
+  );
+  const report = await escalationReport(memoryDb(data), { from: "2026-09-23", to: "2026-09-30" });
+  assert.equal(report.from, "2026-09-23");
+  assert.equal(report.to, "2026-09-30");
+  assert.deepEqual(report.rows.map((row) => `${row.name} ${row.date} ${row.run_day}/${row.run_length} from ${row.run_start}`), [
+    "Asha 2026-09-23 2/3 from 2026-09-22",
+    "Asha 2026-09-24 3/3 from 2026-09-22",
+    "Kiran 2026-09-28 1/3 from 2026-09-28",
+    "Kiran 2026-09-29 2/3 from 2026-09-28",
+    "Kiran 2026-09-30 3/3 from 2026-09-28",
+    // Ravi's run began on the Monday before the range: it still counts that
+    // day, which is not listed.
+    "Ravi Teja 2026-09-23 2/3 from 2026-09-21",
+    "Ravi Teja 2026-09-24 3/3 from 2026-09-21",
+  ]);
+
+  const before = await escalationReport(memoryDb(data), { from: "2026-09-01", to: "2026-09-20" });
+  assert.deepEqual(before.rows, [], "a run wholly after the range is not listed");
 });
 
 test("the page is served to administrators only, under the Dashboard", async () => {
   const source = await readFile(new URL("../src/routes/dashboardRoutes.js", import.meta.url), "utf8");
   assert.match(source, /dashboardRouter\.get\(\s*"\/escalations",\s*requireSuperAdmin,/);
-  assert.match(source, /escalationReport\(req\.app\.locals\.db, \{ week, collegeId \}\)/);
+  assert.match(source, /escalationReport\(req\.app\.locals\.db, \{ week, from, to, collegeId \}\)/);
+  assert.match(source, /const \{ week, from, to, college_id: rawCollege \} = req\.query;/);
 });
