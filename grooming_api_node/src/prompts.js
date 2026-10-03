@@ -1,4 +1,5 @@
 import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
+import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
 
 // Version every material prompt change so stored evaluations remain auditable.
 // 2026-08-18.1 replaced the single free-form prompt with fixed checkpoint sets
@@ -40,7 +41,11 @@ import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 // 2026-10-03.3: for men, curls or waves at the hairline and hair at the
 // temples are not on the forehead, and natural curly or wavy hair is not
 // messy in itself when it is shaped and under control.
-export const PROMPT_VERSION = "2026-10-03.3";
+// 2026-10-03.4 asks every report whether a blazer or suit jacket is worn, in
+// any colour, for men and women (blazer.js): when one is, the shirt and belt
+// rows it covers pass and a Blazer / Suit row is added; a woman's shirt and
+// trousers under one are an accepted suit.
+export const PROMPT_VERSION = "2026-10-03.4";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -354,7 +359,8 @@ is not assessed when she wears one, so no hair checkpoint is given for it.
 Shirt and trousers are not permitted for women. A shirt or blouse worn with
 trousers fails Attire Type however formal, neat and well fitted it is, and the
 check-in is non-compliant. It is still the FORMAL attire family, so identify
-it as FORMAL and judge its other rows as usual.
+it as FORMAL and judge its other rows as usual. The one exception is a blazer
+or suit jacket worn over them, which makes an accepted suit.
 `.trim();
 
 /** Renders one section's checkpoints as a numbered, ordered list. */
@@ -386,6 +392,7 @@ export function buildSystemPrompt(gender, attireType) {
     // hem is read; the classification step is told to judge nothing.
     GARMENT_EVIDENCE_RULES,
     genderRules,
+    BLAZER_INSTRUCTIONS,
     `### CHECKPOINTS
 Return every checkpoint listed below and no others: ${total} in total, each
 exactly once, in the order given, in the section named. Copy each code and
@@ -438,6 +445,7 @@ export function buildMaleReportPrompt() {
     GARMENT_EVIDENCE_RULES,
     MEN_ANALYSIS_RULES,
     MEN_ATTIRE_FAMILY_RULES,
+    BLAZER_INSTRUCTIONS,
     `### CHECKPOINTS
 Return every checkpoint listed below and no others: ${total} in total, each
 exactly once, in the order given, in the section named. Copy each code and
@@ -492,7 +500,8 @@ Choose exactly one attire_type from the photograph:
   missing dupatta is a failed checkpoint; it does not change the garment type.
 - FORMAL: the outfit belongs to the western formal-wear family. Use this family
   for a shirt/blouse-and-trousers outfit, including a visibly casual or
-  non-compliant version of that combination so its formal checkpoints can fail.
+  non-compliant version of that combination so its formal checkpoints can fail,
+  and including one worn under a blazer or suit jacket.
 - ABAYA: an abaya is being worn - a loose outer robe covering the body from
   the shoulders to the ankles - with or without a head scarf (hijab).
 - UNKNOWN: the photograph does not show enough clothing to identify the attire

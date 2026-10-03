@@ -15,6 +15,7 @@ import {
   evidenceBoxes,
   findingsFromCloseUp,
 } from "./detailCheck.js";
+import { applyBlazer, BLAZER_JSON_SCHEMA, blazerWorn } from "./blazer.js";
 
 const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "ABAYA", "UNKNOWN"];
@@ -465,7 +466,7 @@ async function requestGeminiStructured({
  * duplicated, returned under a foreign code, or returned out of order. The
  * previous array schema could express all four, and did.
  */
-function buildReportSchema(sections, { attireType = null, attireTypes = null, closeUp = false, optionalCodes = null } = {}) {
+function buildReportSchema(sections, { attireType = null, attireTypes = null, closeUp = false, optionalCodes = null, blazer = false } = {}) {
   const shape = {
     // Asked directly rather than inferred from the checkpoints. "Nothing was
     // examined" and "nothing was wrong" both produce a report with no
@@ -488,6 +489,8 @@ function buildReportSchema(sections, { attireType = null, attireTypes = null, cl
   // Read separately and leniently (CloseUpAnswer.safeParse): a malformed
   // close-up is ignored, never a reason to lose the report.
   if (closeUp) shape.close_up = z.unknown().optional();
+  // Read leniently too (blazer.js): an unreadable answer means no blazer.
+  if (blazer) shape.blazer = z.unknown().optional();
   for (const key of SECTION_KEYS) {
     // A family with no rows in a section is omitted rather than asked for as
     // an empty object. UNKNOWN attire has no attire_check, and toOrderedRows
@@ -528,7 +531,7 @@ function assertFamilyRows(parsed, sections) {
   }
 }
 
-function buildReportJsonSchema(sections, { attireType = null, attireTypes = null, closeUp = false } = {}) {
+function buildReportJsonSchema(sections, { attireType = null, attireTypes = null, closeUp = false, blazer = false } = {}) {
   const properties = {
     subject_visible: { type: "boolean" },
     image_quality: { type: "string", enum: ["ADEQUATE", "RETAKE_RECOMMENDED"] },
@@ -545,6 +548,7 @@ function buildReportJsonSchema(sections, { attireType = null, attireTypes = null
   if (attireType) properties.attire_type = { type: "string", enum: [attireType] };
   if (attireTypes) properties.attire_type = { type: "string", enum: [...attireTypes] };
   if (closeUp) properties.close_up = CLOSE_UP_JSON_SCHEMA;
+  if (blazer) properties.blazer = BLAZER_JSON_SCHEMA;
   const populatedKeys = SECTION_KEYS.filter((key) => sections[key].length);
   for (const key of populatedKeys) {
     properties[key] = {
@@ -565,6 +569,7 @@ function buildReportJsonSchema(sections, { attireType = null, attireTypes = null
       "visible_regions",
       ...(attireType || attireTypes ? ["attire_type"] : []),
       ...(closeUp ? ["close_up"] : []),
+      ...(blazer ? ["blazer"] : []),
       ...populatedKeys,
     ],
   };
@@ -948,8 +953,8 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
       systemInstruction: buildSystemPrompt("FEMALE", attireType),
       cacheNamespace: `female-${attireType.toLowerCase()}`,
       input: content,
-      jsonSchema: buildReportJsonSchema(femaleSections),
-      validator: buildReportSchema(femaleSections),
+      jsonSchema: buildReportJsonSchema(femaleSections, { blazer: true }),
+      validator: buildReportSchema(femaleSections, { blazer: true }),
       // Covers the JSON report plus the thinking budget, which Gemini counts
       // against the same ceiling: at 6000 a full checkpoint set could stop on
       // MAX_TOKENS once thinking was enabled.
@@ -969,8 +974,8 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
       systemInstruction: `${buildMaleReportPrompt()}\n\n${CLOSE_UP_INSTRUCTIONS}`,
       cacheNamespace: "male-combined-closeup",
       input: [...content, ...closeUps.parts],
-      jsonSchema: buildReportJsonSchema(combinedSections, { attireTypes: MALE_ATTIRE_TYPES, closeUp: true }),
-      validator: buildReportSchema(combinedSections, { attireTypes: MALE_ATTIRE_TYPES, closeUp: true, optionalCodes: maleFamilyOnlyCodes() }),
+      jsonSchema: buildReportJsonSchema(combinedSections, { attireTypes: MALE_ATTIRE_TYPES, closeUp: true, blazer: true }),
+      validator: buildReportSchema(combinedSections, { attireTypes: MALE_ATTIRE_TYPES, closeUp: true, optionalCodes: maleFamilyOnlyCodes(), blazer: true }),
       // Covers the JSON report plus the thinking budget, which Gemini counts
       // against the same ceiling: at 6000 a full checkpoint set could stop on
       // MAX_TOKENS once thinking was enabled. Two families' rows and the
@@ -984,8 +989,8 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
       systemInstruction: buildSystemPrompt("MALE", "FORMAL"),
       cacheNamespace: "male-formal",
       input: content,
-      jsonSchema: buildReportJsonSchema(maleSections),
-      validator: buildReportSchema(maleSections),
+      jsonSchema: buildReportJsonSchema(maleSections, { blazer: true }),
+      validator: buildReportSchema(maleSections, { blazer: true }),
       maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
       limits,
     });
@@ -1019,8 +1024,11 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
 
   const rows = toOrderedRows(sections, parsed);
   resolveIdCardAbstention(rows, parsed.visible_regions);
-  // Shirt and trousers fail for a woman, whatever the model made of them.
-  const womenFormalCorrected = normalizedGender === "FEMALE" && resolveWomenFormalAttire(rows, attireType);
+  // Shirt and trousers fail for a woman, whatever the model made of them -
+  // unless a blazer is worn over them, which makes a suit (applyBlazer below).
+  const womenFormalCorrected = normalizedGender === "FEMALE"
+    && !blazerWorn(parsed.blazer)
+    && resolveWomenFormalAttire(rows, attireType);
   let detailCheck = null;
   if (normalizedGender === "MALE") {
     resolveMaleAttireVisibility(rows, parsed.visible_regions);
@@ -1045,6 +1053,13 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
       incrementMetric("detail_check_unreadable_total");
     }
   }
+  // Last, so it settles what the visibility rules and the close-up failed for
+  // a shirt and a belt the jacket hides. Optional: without a blazer the report
+  // is untouched and has no Blazer / Suit row. See blazer.js.
+  const blazer = applyBlazer(rows, { gender: normalizedGender, attireType, answer: parsed.blazer });
+  if (blazer && detailCheck) {
+    detailCheck.overridden = detailCheck.overridden.filter((code) => !blazer.passed.includes(code));
+  }
   // An unidentified garment cannot be scored against a dress code, however
   // many of the garment-independent rows came back.
   const verdict = attireType === "UNKNOWN"
@@ -1055,8 +1070,9 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
   return {
     ...verdict,
     attire_type: attireType,
-    // A summary written while the outfit was passed must still say why it failed.
-    ai_summary: `${womenFormalCorrected ? `${WOMEN_FORMAL_NOT_PERMITTED} ` : ""}${parsed.ai_summary || ""}`.slice(0, 1500),
+    // A summary written while the outfit was passed must still say why it
+    // failed, and a blazer is named first, as the rows it settled are.
+    ai_summary: `${womenFormalCorrected ? `${WOMEN_FORMAL_NOT_PERMITTED} ` : ""}${blazer ? `${blazer.remark} ` : ""}${parsed.ai_summary || ""}`.slice(0, 1500),
     visible_regions: parsed.visible_regions,
     ...(detailCheck ? { detail_check: detailCheck } : {}),
     ...(attireType === "UNKNOWN" ? { unassessed_reason: "ATTIRE_NOT_IDENTIFIED" } : {}),

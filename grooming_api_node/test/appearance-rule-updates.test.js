@@ -120,7 +120,6 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  // 2026-10-03.3: curls at the hairline are not on the forehead, and shaped
-  // curly hair is not messy.
-  assert.equal(PROMPT_VERSION, "2026-10-03.3");
+  // 2026-10-03.4: the optional blazer or suit, for men and women.
+  assert.equal(PROMPT_VERSION, "2026-10-03.4");
 });
