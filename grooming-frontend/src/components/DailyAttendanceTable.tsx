@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download, X } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import AttendanceFilterDrawer from './AttendanceFilterDrawer';
@@ -17,7 +17,9 @@ import {
   type EscalationFilter,
   escalationLabel,
   filterAttendanceRecords,
+  loadRecordsFilters,
   localDateValue,
+  saveRecordsFilters,
   spreadEscalation,
   uniqueRecordValues,
 } from '../attendanceFilters';
@@ -152,18 +154,33 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [preset, setPreset] = useState<DatePreset>('today');
-  const [range, setRange] = useState<DateRange>(() => rangeForPreset('today'));
-  const [roleFilter, setRoleFilter] = useState('');
-  const [collegeFilter, setCollegeFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState<AttendanceStatus | ''>('');
-  const [escalationFilter, setEscalationFilter] = useState<EscalationFilter>('');
+  // Saved for the tab, so opening a record and coming back keeps the table
+  // as it was left; a new tab starts on today with nothing narrowed.
+  const [savedFilters] = useState(() => loadRecordsFilters(undefined, today));
+  const [preset, setPreset] = useState<DatePreset>(savedFilters.preset);
+  const [range, setRange] = useState<DateRange>(savedFilters.range);
+  const [roleFilter, setRoleFilter] = useState(savedFilters.role);
+  const [collegeFilter, setCollegeFilter] = useState(savedFilters.college);
+  const [statusFilter, setStatusFilter] = useState<AttendanceStatus | ''>(savedFilters.status);
+  const [escalationFilter, setEscalationFilter] = useState<EscalationFilter>(savedFilters.escalation);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(savedFilters.search);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [reloadVersion, setReloadVersion] = useState(0);
+
+  useEffect(() => {
+    saveRecordsFilters({
+      preset,
+      range,
+      search,
+      college: collegeFilter,
+      role: roleFilter,
+      status: statusFilter,
+      escalation: escalationFilter,
+    });
+  }, [preset, range, search, collegeFilter, roleFilter, statusFilter, escalationFilter]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -442,6 +459,22 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               </span>
             )}
           </button>
+          {/* One tap back to today's whole table: every filter and the search. */}
+          {(activeFilterCount > 0 || search) && (
+            <button
+              type="button"
+              onClick={() => {
+                clearAllFilters();
+                setSearch('');
+              }}
+              aria-label="Clear filters"
+              title="Clear all filters and the search"
+              className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500/20 sm:h-9 sm:justify-start sm:rounded-md"
+            >
+              <X size={18} className="sm:size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Clear</span>
+            </button>
+          )}
           {/* Exports the rows on screen - search and every filter applied -
               so what is downloaded is what was being looked at. */}
           <button

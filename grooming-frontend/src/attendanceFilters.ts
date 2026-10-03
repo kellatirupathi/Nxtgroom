@@ -333,3 +333,88 @@ export function filterAttendanceRecords(
     ].some((value) => String(value || '').toLowerCase().includes(term));
   });
 }
+
+/** Everything a Daily Records reader can narrow the table by. */
+export interface SavedRecordsFilters {
+  preset: DatePreset;
+  range: DateRange;
+  search: string;
+  college: string;
+  role: string;
+  status: AttendanceStatus | '';
+  escalation: EscalationFilter;
+}
+
+/**
+ * Remembered for the browser tab, so opening a record and coming back finds
+ * the table as it was left, and a new tab starts on today's records.
+ */
+export const RECORDS_FILTERS_KEY = 'facultytrack:daily-records-filters';
+
+const PRESETS: readonly DatePreset[] = ['today', 'last_week', 'last_month', 'all_time', 'custom'];
+const STATUSES: readonly string[] = ['compliant', 'non_compliant', 'unassessed', 'error', 'pending'];
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+function tabStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
+  try {
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** The filters as they start: today, nothing narrowed. */
+export function defaultRecordsFilters(today: string = localDateValue()): SavedRecordsFilters {
+  return { preset: 'today', range: rangeForPreset('today', today), search: '', college: '', role: '', status: '', escalation: '' };
+}
+
+/**
+ * The filters saved for this tab, or the defaults. A named period is worked
+ * out again from today, so "Last week" still means the last seven days on a
+ * later day; only a custom range keeps its dates. Anything unreadable falls
+ * back to its default rather than to an error.
+ */
+export function loadRecordsFilters(
+  storage: Pick<Storage, 'getItem'> | null = tabStorage(),
+  today: string = localDateValue(),
+): SavedRecordsFilters {
+  const fallback = defaultRecordsFilters(today);
+  let saved: Record<string, unknown>;
+  try {
+    const raw = storage?.getItem(RECORDS_FILTERS_KEY);
+    saved = raw ? JSON.parse(raw) : null;
+  } catch {
+    return fallback;
+  }
+  if (!saved || typeof saved !== 'object') return fallback;
+
+  const text = (value: unknown, max: number) => (typeof value === 'string' ? value.slice(0, max) : '');
+  const preset = PRESETS.includes(saved.preset as DatePreset) ? (saved.preset as DatePreset) : 'today';
+  const savedRange = saved.range as Partial<DateRange> | undefined;
+  const customRange = preset === 'custom'
+    && typeof savedRange?.from === 'string' && DAY_KEY.test(savedRange.from)
+    && typeof savedRange?.to === 'string' && DAY_KEY.test(savedRange.to)
+    ? { from: savedRange.from, to: savedRange.to }
+    : null;
+  return {
+    preset: preset === 'custom' && !customRange ? 'today' : preset,
+    range: customRange || rangeForPreset(preset === 'custom' ? 'today' : preset, today),
+    search: text(saved.search, 120),
+    college: text(saved.college, 200),
+    role: text(saved.role, 200),
+    status: STATUSES.includes(saved.status as string) ? (saved.status as AttendanceStatus) : '',
+    escalation: saved.escalation === 'escalated' || saved.escalation === 'not_escalated' ? saved.escalation : '',
+  };
+}
+
+/** Saves the filters for this tab. A blocked storage only means they are not kept. */
+export function saveRecordsFilters(
+  filters: SavedRecordsFilters,
+  storage: Pick<Storage, 'setItem'> | null = tabStorage(),
+): void {
+  try {
+    storage?.setItem(RECORDS_FILTERS_KEY, JSON.stringify(filters));
+  } catch {
+    // Private mode or a full storage: the table still works, unremembered.
+  }
+}
