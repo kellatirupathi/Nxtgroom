@@ -557,6 +557,11 @@ test("the full-day page lists the whole day, both halves, in check-in order", as
   assert.equal(byName.Kiran.status, "pending");
   assert.equal(byName.Kiran.institute, "Training Institute Bengaluru", "from the instructor when the record has none");
   assert.equal(byName.Anil.status, "compliant", "the check-out's failure does not change the check-in's status");
+  // The check-out's own result, for the Status column; null without a check-out.
+  assert.equal(ravi.checkoutStatus, "compliant");
+  assert.equal(byName.Anil.checkoutStatus, "non_compliant");
+  assert.equal(byName["Asha P"].checkoutStatus, null);
+  assert.equal(byName.Kiran.checkoutStatus, null);
   assert.equal(ravi.hasCheckinPhoto, true);
   assert.equal(ravi.hasCheckoutPhoto, true);
   assert.equal(ravi.checkinReportUrl, "https://nxtgroom-xi.vercel.app/reports/tokRaviTokRaviTokRavi1/day/2026-09-30/check-in");

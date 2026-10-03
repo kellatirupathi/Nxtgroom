@@ -84,7 +84,17 @@ test('the full-day page has the asked-for columns, two photo icons and two repor
   assert.match(page, /apiFetch<DayReportResponse>\(path, \{ auth: false \}\)/);
   assert.match(page, /\/api\/v2\/reports\/daily\/\$\{encodeURIComponent\(date\)\}\/\$\{encodeURIComponent\(token\)\}`/);
   const headers = [...page.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
-  assert.deepEqual(headers, ['Date', 'Instructor Name', 'Institute', 'Check-in Time', 'Check-out Time', 'Feedback', 'Images', 'Reports']);
+  assert.deepEqual(headers, ['Date', 'Instructor Name', 'Institute', 'Check-in Time', 'Check-out Time', 'Status', 'Feedback', 'Images', 'Reports']);
+  // Status shows the check-in's result and the check-out's, in the table and on a phone's card.
+  for (const piece of [
+    '<td className="p-3"><HalfStatuses row={row} /></td>',
+    '<dd><StatusPill status={row.status} /></dd>',
+    '<dd>{row.checkout_status ? <StatusPill status={row.checkout_status} /> : <span className="text-xs text-slate-400">-</span>}</dd>',
+    '<dd className="mt-1"><StatusPill status={row.status} /></dd>',
+    '{row.checkout_status && <dd className="mt-1"><StatusPill status={row.checkout_status} /></dd>}',
+  ]) {
+    assert.ok(page.includes(piece), piece);
+  }
   // Search, institute and status filters, and an export of what they leave.
   assert.match(page, /const rows = filterDayRows\(report\.rows, \{ search, institute, status \}\);/);
   assert.match(page, /aria-label="Search instructor name"/);
@@ -159,8 +169,8 @@ test('Settings has a Reports tab listing each day with its counts and report lin
 });
 
 const dayRows = [
-  { attendance_id: '1', date: '30/09/2026', name: 'Ravi Teja', institute: 'NIAT Hyderabad', status: 'non_compliant', check_in: '09:11 AM', check_out: '06:05 PM', feedback: 'Tuck the shirt in.', has_checkin_photo: true, has_checkout_photo: true, checkin_report_url: 'https://x.test/r/1/check-in', checkout_report_url: 'https://x.test/r/1/check-out' },
-  { attendance_id: '2', date: '30/09/2026', name: 'Asha', institute: 'Training Institute', status: 'compliant', check_in: '09:05 AM', check_out: '-', feedback: 'No improvements needed', has_checkin_photo: true, has_checkout_photo: false, checkin_report_url: 'https://x.test/r/2/check-in', checkout_report_url: null },
+  { attendance_id: '1', date: '30/09/2026', name: 'Ravi Teja', institute: 'NIAT Hyderabad', status: 'non_compliant', checkout_status: 'compliant', check_in: '09:11 AM', check_out: '06:05 PM', feedback: 'Tuck the shirt in.', has_checkin_photo: true, has_checkout_photo: true, checkin_report_url: 'https://x.test/r/1/check-in', checkout_report_url: 'https://x.test/r/1/check-out' },
+  { attendance_id: '2', date: '30/09/2026', name: 'Asha', institute: 'Training Institute', status: 'compliant', checkout_status: null, check_in: '09:05 AM', check_out: '-', feedback: 'No improvements needed', has_checkin_photo: true, has_checkout_photo: false, checkin_report_url: 'https://x.test/r/2/check-in', checkout_report_url: null },
   { attendance_id: '3', date: '30/09/2026', name: '=Evil', institute: 'NIAT Hyderabad', status: 'pending', check_in: '12:58 PM', check_out: '-', feedback: 'Analysis in progress', has_checkin_photo: false, has_checkout_photo: false, checkin_report_url: null, checkout_report_url: null },
 ];
 
@@ -177,9 +187,9 @@ test('the day filters by name, institute and check-in status, together', () => {
 
 test('the day exports as a CSV with its links, safe to open in Excel', () => {
   const [header, first, second, third] = dayReportCsv(dayRows).split('\r\n');
-  assert.equal(header, 'Date,Instructor Name,Institute,Status,Check-in Time,Check-out Time,Feedback,Check-in Report,Check-out Report');
-  assert.equal(first, '30/09/2026,Ravi Teja,NIAT Hyderabad,Non-compliant,09:11 AM,06:05 PM,Tuck the shirt in.,https://x.test/r/1/check-in,https://x.test/r/1/check-out');
-  assert.equal(second, '30/09/2026,Asha,Training Institute,Compliant,09:05 AM,,No improvements needed,https://x.test/r/2/check-in,', 'no check-out is an empty cell');
+  assert.equal(header, 'Date,Instructor Name,Institute,Check-in Status,Check-out Status,Check-in Time,Check-out Time,Feedback,Check-in Report,Check-out Report');
+  assert.equal(first, '30/09/2026,Ravi Teja,NIAT Hyderabad,Non-compliant,Compliant,09:11 AM,06:05 PM,Tuck the shirt in.,https://x.test/r/1/check-in,https://x.test/r/1/check-out');
+  assert.equal(second, '30/09/2026,Asha,Training Institute,Compliant,,09:05 AM,,No improvements needed,https://x.test/r/2/check-in,', 'no check-out is an empty cell');
   assert.match(third, /^30\/09\/2026,'=Evil,/, 'a name that looks like a formula stays text');
   assert.equal(dayReportFileName('30/09/2026'), 'daily-report-2026-09-30.csv');
 });

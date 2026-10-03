@@ -125,6 +125,7 @@ reportRouter.get(
         name: row.name,
         institute: row.institute,
         status: row.status,
+        checkout_status: row.checkoutStatus,
         check_in: row.checkIn,
         check_out: row.checkOut,
         feedback: row.feedback,

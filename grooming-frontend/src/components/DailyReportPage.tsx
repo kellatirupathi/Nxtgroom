@@ -3,6 +3,7 @@ import { Download, FileText, Image as ImageIcon, LogOut, Search, X } from 'lucid
 import { apiFetch } from '../api';
 import { saveCsvFile } from '../attendanceExport';
 import {
+  DAY_STATUS_LABELS,
   DAY_STATUS_OPTIONS,
   dayInstitutes,
   dayReportCsv,
@@ -44,6 +45,36 @@ const CHECKOUT_ICON = `${ICON} border-rose-100 bg-rose-50 text-rose-700 hover:bg
 
 function Empty() {
   return <span className="inline-flex h-8 w-8 items-center justify-center text-slate-300">-</span>;
+}
+
+const STATUS_STYLE: Partial<Record<DayStatus, string>> = {
+  compliant: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  non_compliant: 'border-rose-200 bg-rose-50 text-rose-700',
+};
+
+/** One half's result: green when compliant, red when not, grey otherwise. */
+function StatusPill({ status }: { status: DayStatus }) {
+  return (
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-bold ${STATUS_STYLE[status] || 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+      {DAY_STATUS_LABELS[status] || status}
+    </span>
+  );
+}
+
+/** The Status cell: the check-in's result, then the check-out's. */
+function HalfStatuses({ row }: { row: DayRow }) {
+  return (
+    <dl className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <dt className="w-16 shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-in</dt>
+        <dd><StatusPill status={row.status} /></dd>
+      </div>
+      <div className="flex items-center gap-2">
+        <dt className="w-16 shrink-0 text-[10px] font-bold uppercase tracking-wide text-slate-400">Check-out</dt>
+        <dd>{row.checkout_status ? <StatusPill status={row.checkout_status} /> : <span className="text-xs text-slate-400">-</span>}</dd>
+      </div>
+    </dl>
+  );
 }
 
 /** The two photograph icons: check-in, then check-out. */
@@ -294,7 +325,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
           </button>
         </div>
 
-        {/* Phones: one card per instructor, since eight columns do not fit. */}
+        {/* Phones: one card per instructor, since nine columns do not fit. */}
         <ul className="flex flex-col gap-3 md:hidden">
           {rows.length === 0 ? (
             <li className="rounded-md border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">{empty}</li>
@@ -311,10 +342,12 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
                 <div>
                   <dt className="font-bold uppercase tracking-wide text-slate-400">Check-in Time</dt>
                   <dd className="mt-0.5 font-semibold text-slate-700">{row.check_in}</dd>
+                  <dd className="mt-1"><StatusPill status={row.status} /></dd>
                 </div>
                 <div>
                   <dt className="font-bold uppercase tracking-wide text-slate-400">Check-out Time</dt>
                   <dd className="mt-0.5 font-semibold text-slate-700">{row.check_out}</dd>
+                  {row.checkout_status && <dd className="mt-1"><StatusPill status={row.checkout_status} /></dd>}
                 </div>
               </dl>
               <p className="mt-2 text-sm text-slate-600">{row.feedback}</p>
@@ -334,7 +367,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
 
         <div className="hidden overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[1150px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
                 <tr>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Date</th>
@@ -342,6 +375,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
                   <th scope="col" className="border-b border-slate-200 p-3">Institute</th>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Check-in Time</th>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Check-out Time</th>
+                  <th scope="col" className="border-b border-slate-200 p-3">Status</th>
                   <th scope="col" className="border-b border-slate-200 p-3">Feedback</th>
                   <th scope="col" className="border-b border-slate-200 p-3">Images</th>
                   <th scope="col" className="border-b border-slate-200 p-3">Reports</th>
@@ -349,7 +383,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
               </thead>
               <tbody className="divide-y divide-slate-100 align-top">
                 {rows.length === 0 ? (
-                  <tr><td colSpan={8} className="p-8 text-center text-slate-400">{empty}</td></tr>
+                  <tr><td colSpan={9} className="p-8 text-center text-slate-400">{empty}</td></tr>
                 ) : rows.map((row) => (
                   <tr key={row.attendance_id}>
                     <td className="p-3 whitespace-nowrap text-slate-600">{row.date}</td>
@@ -357,6 +391,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
                     <td className="p-3 text-slate-600">{row.institute || '-'}</td>
                     <td className="p-3 whitespace-nowrap text-slate-700">{row.check_in}</td>
                     <td className="p-3 whitespace-nowrap text-slate-700">{row.check_out}</td>
+                    <td className="p-3"><HalfStatuses row={row} /></td>
                     <td className="p-3 text-slate-600">{row.feedback}</td>
                     <td className="p-3"><PhotoIcons row={row} onOpen={setPhoto} /></td>
                     <td className="p-3"><ReportIcons row={row} /></td>

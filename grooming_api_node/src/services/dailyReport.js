@@ -601,6 +601,8 @@ export async function buildFullDayReport(db, dateKey, { ensureTokens = false } =
       // The check-in's result, which the page filters on:
       // compliant | non_compliant | pending | unassessed | error.
       status: checkinOutcome.state,
+      // The check-out's result in the same words, or null without a check-out.
+      checkoutStatus: checkOut ? halfOutcome(record, "checkout", evaluationFor.get(`${id}|checkout`)).state : null,
       checkIn: clockTime(checkIn, timeZone),
       checkOut: checkOut ? eventTime(checkOut, dateKey, timeZone) : "-",
       feedback,
