@@ -302,19 +302,36 @@ test("a time already past when saved starts tomorrow, and the morning is not los
 
 // -- The report ------------------------------------------------------------------
 
-test("the morning report lists that period's check-ins, failures first", async () => {
+test("the morning report lists that period's check-ins, non-compliant first", async () => {
   const report = await buildDailyReport(fixtureDb(), morningRun);
   assert.equal(report.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
   assert.equal(report.windowLabel, "12:00 AM to 01:00 PM");
-  assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Kiran", "Asha P"]);
-  const [ravi, kiran, asha] = report.rows;
+  // Kiran's check-in is still being analysed: only a finished verdict is reported.
+  assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Asha P"]);
+  const [ravi, asha] = report.rows;
   assert.equal(ravi.checkIn, "09:11 AM");
   assert.equal(ravi.checkOut, "-", "the 6:05 PM check-out had not happened by 1 PM");
+  assert.equal(ravi.status, "non_compliant");
   assert.deepEqual(ravi.points, ["Button the collar properly and tuck the shirt in. Wear your instructor ID card."]);
   assert.equal(ravi.reportUrl, "https://nxtgroom-xi.vercel.app/reports/tokRaviTokRaviTokRavi1/day/2026-09-30/check-in");
-  assert.deepEqual(kiran.points, ["Analysis in progress"]);
-  assert.equal(kiran.reportUrl, null, "no report link exists yet, and the page does not create one");
+  assert.equal(asha.status, "compliant");
   assert.deepEqual(asha.points, ["No improvements needed"]);
+});
+
+test("a check-in still being analysed, not assessed, or failed to analyse is left out of the email", async () => {
+  const db = memoryDb({
+    attendance: [
+      session("s-done", "i-asha", "Asha P", ist(9, 0), { status: "compliant" }),
+      session("s-pending", "i-meena", "Meena", ist(9, 10)),
+      session("s-unassessed", "i-anil", "Anil", ist(9, 20), { status: "unassessed" }),
+      session("s-error", "i-ravi", "Ravi Teja", ist(9, 30), { status: "analysis_error" }),
+    ],
+    instructors,
+    evaluations: [],
+    colleges,
+  });
+  const report = await buildDailyReport(db, morningRun);
+  assert.deepEqual(report.rows.map((row) => [row.name, row.status]), [["Asha P", "compliant"]]);
 });
 
 test("unidentified, deleted and other days' records are left out", async () => {
@@ -324,21 +341,30 @@ test("unidentified, deleted and other days' records are left out", async () => {
   assert.equal(names.filter((name) => name === "Ravi Teja").length, 1, "yesterday's record is not counted");
 });
 
-test("the evening report covers the afternoon, check-outs included", async () => {
+test("the evening report covers the afternoon, check-outs included, judged on the check-in", async () => {
   const report = await buildDailyReport(fixtureDb(), eveningRun);
   const byName = Object.fromEntries(report.rows.map((row) => [row.name, row]));
-  assert.deepEqual(report.rows.map((row) => row.name), ["Anil", "Meena", "Ravi Teja"]);
+  // Meena's check-in is still being analysed, so she is left out.
+  assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Anil"]);
   assert.equal(byName["Ravi Teja"].checkIn, "09:11 AM");
   assert.equal(byName["Ravi Teja"].checkOut, "06:05 PM");
-  assert.deepEqual(byName["Ravi Teja"].points, ["No improvements needed"], "the check-out's result, not the morning's");
-  assert.match(byName["Ravi Teja"].reportUrl, /\/check-out$/);
-  assert.deepEqual(byName.Anil.points, ["Check-in: No improvements needed", "Check-out: Wear your instructor ID card."]);
-  assert.deepEqual(byName.Meena.points, ["Analysis in progress"]);
-  assert.equal(byName.Meena.checkOut, "-");
+  // Listed for his check-out, but the status and feedback are his check-in's.
+  assert.equal(byName["Ravi Teja"].status, "non_compliant");
+  assert.deepEqual(byName["Ravi Teja"].points, ["Button the collar properly and tuck the shirt in. Wear your instructor ID card."]);
+  assert.match(byName["Ravi Teja"].reportUrl, /\/check-in$/);
+  // Anil's check-out failed, but only the check-in is reported.
+  assert.equal(byName.Anil.status, "compliant");
+  assert.deepEqual(byName.Anil.points, ["No improvements needed"]);
 });
 
 test("the email gives every instructor a report link, creating a missing one", async () => {
-  const db = fixtureDb();
+  // Kiran has no report link yet; his check-in is finished here so he is listed.
+  const db = memoryDb({
+    attendance: attendance.map((row) => (row._id === "a-kiran" ? { ...row, status: "compliant" } : row)),
+    instructors,
+    evaluations,
+    colleges,
+  });
   const report = await buildDailyReportForEmail(db, { ...morningRun, _id: "email-test-run" });
   const kiran = report.rows.find((row) => row.name === "Kiran");
   assert.match(kiran.reportUrl, /^https:\/\/nxtgroom-xi\.vercel\.app\/reports\/[A-Za-z0-9_-]{20,}\/day\/2026-09-30\/check-in$/);
@@ -352,14 +378,18 @@ test("the email is the table, with a link to the whole report at the top", async
   const pageUrl = "https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/1-00-pm/secretsecretsecret";
   const email = buildDailyReportEmail({ ...report, pageUrl });
   assert.equal(email.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
-  assert.match(email.html, /<th>Instructor Name<\/th><th>Check-in Time<\/th><th>Check-out Time<\/th><th>Improvement Points<\/th><th>Report<\/th>/);
+  assert.match(email.html, /<th>Instructor Name<\/th><th>Check-in Time<\/th><th>Check-out Time<\/th><th>Status<\/th><th>Feedback<\/th><th>Report<\/th>/);
+  // The status sits between the check-out time and the feedback, red or green.
+  assert.ok(email.html.includes('<td class="t">-</td><td class="t" style="color:#b91c1c;font-weight:700">Non-compliant</td><td>Button the collar properly'));
+  assert.ok(email.html.includes('<td class="t" style="color:#15803d;font-weight:700">Compliant</td><td>No improvements needed</td>'));
+  assert.ok(!email.html.includes("Analysis in progress"), "pending check-ins are not in the email");
   const top = email.html.indexOf("See all reports");
   assert.ok(top > 0 && top < email.html.indexOf("<table"), "the link sits above the table");
   assert.ok(email.html.includes(`<a href="${pageUrl}" style="color:#2563eb">See all reports</a>`));
   assert.ok(email.html.includes('<a href="https://nxtgroom-xi.vercel.app/reports/tokRaviTokRaviTokRavi1/day/2026-09-30/check-in" style="color:#2563eb">Report</a>'));
-  assert.equal((email.html.match(/>Report<\/a>/g) || []).length, 2, "Kiran has no link yet on the non-email build");
+  assert.equal((email.html.match(/>Report<\/a>/g) || []).length, 2, "one per listed instructor");
   assert.ok(email.text.includes(`See all reports: ${pageUrl}`));
-  assert.match(email.text, /Ravi Teja \| Check-in 09:11 AM \| Check-out -/);
+  assert.match(email.text, /Ravi Teja \| Check-in 09:11 AM \| Check-out - \| Non-compliant\n  Feedback: Button the collar/);
 });
 
 test("names are escaped, and an empty period still sends a clear email", () => {

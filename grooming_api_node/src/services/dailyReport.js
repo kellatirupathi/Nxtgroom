@@ -370,12 +370,11 @@ function outcomeText(outcome) {
   return outcome.tips.length ? outcome.tips.join(" ") : "Did not meet the standards: open the report";
 }
 
-/** Failures first, then anything unfinished or unclear, then compliant. */
-function severity(outcomes) {
-  if (outcomes.some((outcome) => outcome.state === "non_compliant")) return 0;
-  if (outcomes.some((outcome) => outcome.state !== "compliant")) return 1;
-  return 2;
-}
+/** The two verdicts the email reports, as they read in its Status column. */
+export const DAILY_STATUS_LABELS = Object.freeze({
+  compliant: "Compliant",
+  non_compliant: "Non-compliant",
+});
 
 function reportLink(token, dayKey, kind) {
   if (!token) return null;
@@ -464,20 +463,26 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
     if (checkOut && checkOut.getTime() >= from.getTime()) halves.push("checkout");
     if (!halves.length) continue;
 
-    const outcomes = halves.map((kind) => halfOutcome(record, kind, evaluationFor.get(`${String(record._id)}|${kind}`)));
-    const points = halves.length === 1
-      ? [outcomeText(outcomes[0])]
-      : halves.map((kind, index) => `${kind === "checkout" ? "Check-out" : "Check-in"}: ${outcomeText(outcomes[index])}`);
+    // Status and feedback are the check-in's, whichever half brought the
+    // person into this period: a later email lists who checked out since,
+    // still judged on how they arrived.
+    const arrival = halfOutcome(record, "checkin", evaluationFor.get(`${String(record._id)}|checkin`));
+    // Only a finished verdict is reported. A check-in still being analysed,
+    // one whose photo could not be assessed, and a failed analysis are left
+    // out; the full-day page still lists everyone.
+    if (!DAILY_STATUS_LABELS[arrival.state]) continue;
     const instructor = instructorById.get(String(record.instructor_id));
     const sessionDay = record.attendance_day || localDateKey(checkIn, timeZone);
     rows.push({
       name: record.instructor_name || instructor?.name || "Instructor",
       checkIn: eventTime(checkIn, run.date, timeZone),
       checkOut: checkOut ? eventTime(checkOut, run.date, timeZone) : "-",
-      points,
-      // The half this period is about: the check-out when it happened now.
-      reportUrl: reportLink(instructor?.report_token, sessionDay, halves.includes("checkout") ? "checkout" : "checkin"),
-      severity: severity(outcomes),
+      status: arrival.state,
+      points: [outcomeText(arrival)],
+      // The check-in's report, which the status and feedback come from.
+      reportUrl: reportLink(instructor?.report_token, sessionDay, "checkin"),
+      // Non-compliant first.
+      severity: arrival.state === "non_compliant" ? 0 : 1,
       sortTime: checkIn.getTime(),
     });
   }
