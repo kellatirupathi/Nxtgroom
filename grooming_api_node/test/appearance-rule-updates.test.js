@@ -76,6 +76,23 @@ test("women: palazzo passes; leggings, jeggings, churidar and gathered salwar fa
   assert.match(prompt, /Leggings, jeggings and other skin-tight bottoms fail, as do churidar/);
 });
 
+test("women: the slim straight pants of a kurti set pass; only cloth that clings fails", () => {
+  const bottom = find("FEMALE", "KURTI_WITH_DUPATTA", "W_BOTTOM_WEAR").rule;
+  assert.match(bottom, /the straight or slim-straight pants of a kurti set - including ankle-length pants that narrow towards the ankle - all pass when the cloth hangs with some ease/);
+  assert.match(bottom, /A slim straight pant is not a legging: a pant that matches the kurti, narrows at the ankle, or shows soft creases and a little extra length resting on the shoe still passes\./);
+  assert.match(bottom, /FAIL leggings, jeggings and any skin-tight bottom that clings to the leg like a second skin, so that the knee and the calf are fully outlined with no slack in the cloth\./);
+  assert.match(bottom, /soft creases at the hem from extra length are not churidar/);
+  assert.match(bottom, /Dark or plain cloth that only looks narrow is not proof of a legging: FAIL only when the cloth visibly clings to the leg\./);
+  assert.doesNotMatch(bottom, /wider than the leg beneath/);
+  assert.doesNotMatch(bottom, /a leg whose shape shows through the cloth, or cloth gathered at the ankle, fails/);
+
+  const prompt = buildSystemPrompt("FEMALE", "KURTI_WITH_DUPATTA");
+  assert.match(prompt, /A slim pant is not a legging: fail only\ncloth that visibly clings to the knee and calf with no slack/);
+  const men =find("MALE", "FORMAL", "M_TROUSERS_TYPE").rule;
+  assert.equal(men, "Formal trousers. FAIL jeans, denim, joggers and obviously casual trousers.");
+  assert.doesNotMatch(buildSystemPrompt("MALE", "FORMAL"), /slim pant is not a legging/);
+});
+
 test("the advice in the report matches the new rules", () => {
   const failing = (gender, attire, codes) => {
     const report = {};
@@ -97,5 +114,5 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  assert.equal(PROMPT_VERSION, "2026-10-03.4");
+  assert.equal(PROMPT_VERSION, "2026-10-05.1");
 });

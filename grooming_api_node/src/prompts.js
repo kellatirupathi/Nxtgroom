@@ -1,7 +1,7 @@
 import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
 
-export const PROMPT_VERSION = "2026-10-03.4";
+export const PROMPT_VERSION = "2026-10-05.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -270,10 +270,13 @@ a cap sleeve and sleeveless are a FAIL; a half sleeve ending at the middle of th
 upper arm or lower passes. Name the sleeve style and where its hem ends. Silence
 on sleeves reads as approval.
 
-Bottom wear must fall loosely and straight: palazzo pants or straight formal
-trousers. Leggings, jeggings and other skin-tight bottoms fail, as do churidar
-and gathered patiala or dhoti salwar. Read the leg from the hip to the ankle and
-say what you saw.
+Bottom wear must hang with some ease: palazzo pants, straight formal trousers,
+or the straight or slim-straight pants of a kurti set, including ankle-length
+pants that narrow at the ankle. Leggings, jeggings and other skin-tight bottoms fail, as do churidar
+and gathered patiala or dhoti salwar. A slim pant is not a legging: fail only
+cloth that visibly clings to the knee and calf with no slack, and soft creases
+where the hem rests on the shoe are not churidar. Read the leg from the hip to
+the ankle and say what you saw.
 
 A dupatta must be worn, not merely present. Fabric visible over one shoulder,
 trailing, or bunched is not a dupatta properly worn.
