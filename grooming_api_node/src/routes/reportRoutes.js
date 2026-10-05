@@ -14,6 +14,10 @@ import {
 } from "../services/instructorReports.js";
 import { getReportRecipients } from "../services/reportRecipients.js";
 import {
+  deliverAttendanceReminders,
+  getAttendanceReminderSettings,
+} from "../services/attendanceReminders.js";
+import {
   buildFullDayReport,
   dailyReportPhotoKey,
   findCampusReportDay,
@@ -483,71 +487,7 @@ reportRouter.post(
   })
 );
 
-export async function deliverAttendanceReminders(db) {
-  const timeZone = runtimeConfig().appTimeZone;
-  const today = localDateKey(new Date(), timeZone);
-  const from = new Date(`${today}T00:00:00.000Z`);
-  from.setUTCDate(from.getUTCDate() - 1);
-  const to = new Date(`${today}T23:59:59.999Z`);
-  to.setUTCDate(to.getUTCDate() + 1);
-
-  const records = await db.collection("attendance")
-    .find({ check_in_time: { $gte: from, $lte: to }, check_out_time: null })
-    .toArray();
-  const todays = records.filter((record) => (
-    localDateKey(new Date(record.check_in_time || record.date), timeZone) === today
-  ));
-
-  const runId = `attendance-reminders:${today}`;
-  await startDeliveryRun(db, runId, { type: "attendance_reminder", date: today });
-  let queued = 0;
-  const failures = [];
-  for (const record of todays) {
-    try {
-      if (record.checkout_reminder_sent_at) continue;
-      const instructor = await db.collection("instructors").findOne({ _id: idMatch(String(record.instructor_id)) });
-      const email = instructor?.email;
-      if (!email) continue;
-
-      await enqueueMailJob(db, {
-        id: `${runId}:${String(record._id)}`,
-        type: "attendance_reminder",
-        toEmail: email,
-        attendanceId: record._id,
-        runId,
-        payload: {
-          name: record.instructor_name || instructor?.name,
-          kind: "checkout",
-          dateLabel: today,
-        },
-      });
-      queued += 1;
-    } catch (error) {
-      failures.push({ attendance: String(record._id), reason: error?.name || "error" });
-    }
-  }
-
-  await saveDeliveryRun(db, runId, {
-    set: {
-      type: "attendance_reminder",
-      date: today,
-      production_finished_at: new Date(),
-      checked: todays.length,
-      queued,
-      producer_failures: failures.slice(0, 20),
-      status: "queued",
-      updated_at: new Date(),
-    },
-    setOnInsert: { sent: 0, failed: 0, terminal: 0, created_at: new Date() },
-  });
-  await completeDeliveryRunIfDone(db, runId, {
-    status: "completed",
-    finished_at: new Date(),
-    updated_at: new Date(),
-  });
-  console.log(`Attendance reminders for ${today}: ${queued} queued of ${todays.length} open check-ins`);
-  return { queued, failures };
-}
+export { deliverAttendanceReminders };
 
 reportRouter.post(
   "/cron/attendance-reminders",
@@ -556,6 +496,15 @@ reportRouter.post(
     const db = req.app.locals.db;
     const today = localDateKey(new Date());
     const runId = `attendance-reminders:${today}`;
+    const { checkout_reminder_enabled: enabled } = await getAttendanceReminderSettings(db);
+    if (!enabled) {
+      return res.status(200).json({
+        date: today,
+        status: "disabled",
+        run_id: runId,
+        note: "Check-out missed emails are switched off in Settings > Notifications.",
+      });
+    }
     const started = startProducer(runId, () => deliverAttendanceReminders(db));
     return res.status(202).json({
       date: today,

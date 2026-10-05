@@ -21,6 +21,12 @@ import {
   validateConfigSettings,
 } from "../services/configSettings.js";
 import {
+  attendanceReminderView,
+  getAttendanceReminderSettings,
+  saveAttendanceReminderSettings,
+  validateAttendanceReminders,
+} from "../services/attendanceReminders.js";
+import {
   addInstructorCategory,
   deleteInstructorCategory,
   listInstructorCategories,
@@ -981,6 +987,24 @@ adminRouter.put(
     const result = validateAccessSettings(req.body);
     if (!result.valid) return res.status(422).json({ detail: result.detail });
     return res.json(await saveAccessSettings(req.app.locals.db, req.body));
+  })
+);
+
+adminRouter.get(
+  "/settings/attendance-reminders",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(attendanceReminderView(await getAttendanceReminderSettings(req.app.locals.db)));
+  })
+);
+
+adminRouter.put(
+  "/settings/attendance-reminders",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = validateAttendanceReminders(req.body);
+    if (!result.valid) return res.status(422).json({ detail: result.detail });
+    return res.json(await saveAttendanceReminderSettings(req.app.locals.db, req.body, req.currentUser?.email || null));
   })
 );
 

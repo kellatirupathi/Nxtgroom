@@ -30,6 +30,7 @@ import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
 import { startMailWorker } from "./src/services/mailWorker.js";
 import { startDailyReportScheduler } from "./src/services/dailyReportScheduler.js";
+import { startAttendanceReminderScheduler } from "./src/services/attendanceReminders.js";
 import { checkPhotoStorageConnection } from "./src/services/photoStorage.js";
 import { getWorkerReadiness } from "./src/services/workerHealth.js";
 import { createDocument } from "./src/utils.js";
@@ -317,6 +318,7 @@ export async function startServer() {
     startStorageCleanupWorker(db),
     startMailWorker(db),
     startDailyReportScheduler(db),
+    startAttendanceReminderScheduler(db),
   ];
   server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
   server.headersTimeout = HTTP_REQUEST_TIMEOUT_MS + 5_000;

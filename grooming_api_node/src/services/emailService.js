@@ -592,7 +592,7 @@ export function buildAttendanceReminderEmail({ name, kind, dateLabel }) {
   const missedCheckout = kind === "checkout";
   const line = missedCheckout
     ? `It looks like you checked in on ${dateLabel} but did not check out.`
-    : `It looks like you checked out on ${dateLabel} without a check-in recorded.`;
+    : `We have not received a check-in from you today (${dateLabel}).`;
   const ask = missedCheckout
     ? "Please remember to check out at the end of the day so your attendance is complete."
     : "Please remember to check in at the start of the day so your attendance is complete.";

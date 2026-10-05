@@ -7,6 +7,7 @@ import InstructorSyncPanel from './InstructorSyncPanel';
 import ReportRecipients from './ReportRecipients';
 import ReportsTab from './ReportsTab';
 import AccessSettingsSection from './AccessSettingsSection';
+import AttendanceReminderSettings from './AttendanceReminderSettings';
 import ConfigSettingsSection from './ConfigSettingsSection';
 import type { NotificationSettings } from '../types';
 import { goToPath, settingsTabFromPath, settingsTabPath, type SettingsTab } from '../routes';
@@ -174,6 +175,8 @@ function NotificationSettings() {
         The non-compliant filter applies only to check-in and check-out reports. Weekly summaries are controlled by
         their own switch.
       </p>
+
+      <AttendanceReminderSettings />
 
       <AccessSettingsSection />
     </div>

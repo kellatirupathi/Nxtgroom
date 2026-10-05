@@ -17,6 +17,7 @@ import {
   ensureDailyReportDay,
 } from "./dailyReport.js";
 import { idMatch } from "../middleware/auth.js";
+import { dateBoundsInTimeZone } from "../utils.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { createIdleBackoff, createWakeSignal } from "./workerPacing.js";
 import { openSecret } from "./secretBox.js";
@@ -32,6 +33,7 @@ const SUPPORTED_TYPES = new Set([
   "grooming_escalation",
   "daily_report",
   "daily_report_campus",
+  "checkin_reminder",
 ]);
 
 export function canonicalReportUrl(reportUrl) {
@@ -161,6 +163,7 @@ async function deliverCampusDailyReport(db, job) {
 async function deliver(db, job) {
   if (job.type === "daily_report") return deliverDailyReport(db, job);
   if (job.type === "daily_report_campus") return deliverCampusDailyReport(db, job);
+  if (job.type === "checkin_reminder") return sendAttendanceReminderEmail(job.to_email, job.payload);
   if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, passwordResetPayload(job.payload));
   if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, deliveryPayload(job));
   if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, deliveryPayload(job));
@@ -175,8 +178,26 @@ export async function recordRunTerminal(db, runId, outcome, now) {
   }
 }
 
+async function checkedInSinceQueued(db, payload) {
+  if (!payload?.instructor_id || !payload?.date) return false;
+  const { start, end } = dateBoundsInTimeZone(payload.date, runtimeConfig().appTimeZone);
+  const record = await db.collection("attendance").findOne(
+    {
+      instructor_id: String(payload.instructor_id),
+      check_in_time: { $gte: start, $lt: end },
+      deleting_at: { $exists: false },
+    },
+    { projection: { _id: 1 } }
+  );
+  return Boolean(record);
+}
+
 async function processMail(db, job) {
   try {
+    if (job.type === "checkin_reminder" && await checkedInSinceQueued(db, job.payload)) {
+      await db.collection("mail_jobs").deleteOne({ _id: job._id, worker_id: WORKER_ID });
+      return;
+    }
     if (job.attendance_id) {
       const checkoutAlert = job.type === "grooming_alert" && job.payload?.kind === "checkout";
       const attendance = await db.collection("attendance").findOne(
