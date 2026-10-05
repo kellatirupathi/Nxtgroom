@@ -21,6 +21,12 @@ import {
   validateConfigSettings,
 } from "../services/configSettings.js";
 import {
+  addInstructorCategory,
+  deleteInstructorCategory,
+  listInstructorCategories,
+  renameInstructorCategory,
+} from "../services/instructorCategories.js";
+import {
   describeCollegeIdentification,
   getIdentificationSettings,
   IDENTIFICATION_MODES,
@@ -992,6 +998,53 @@ adminRouter.put(
     const result = validateConfigSettings(req.body);
     if (!result.valid) return res.status(422).json({ detail: result.detail });
     return res.json(await saveConfigSettings(req.app.locals.db, req.body, req.currentUser?.email || null));
+  })
+);
+
+function categoryFailure(res, result) {
+  if (result.outcome === "invalid") return res.status(422).json({ detail: result.detail });
+  if (result.outcome === "duplicate") return res.status(409).json({ detail: "That category already exists" });
+  if (result.outcome === "not_found") return res.status(404).json({ detail: "Category not found" });
+  if (result.outcome === "in_use") {
+    return res.status(409).json({
+      detail: `${result.count} ${result.count === 1 ? "instructor uses" : "instructors use"} this category. Move them to another category first.`,
+    });
+  }
+  return null;
+}
+
+adminRouter.get(
+  "/settings/config/categories",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(await listInstructorCategories(req.app.locals.db));
+  })
+);
+
+adminRouter.post(
+  "/settings/config/categories",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await addInstructorCategory(req.app.locals.db, req.body?.name, req.currentUser?.email || null);
+    return categoryFailure(res, result) ?? res.status(201).json(result.categories);
+  })
+);
+
+adminRouter.put(
+  "/settings/config/categories/:name",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await renameInstructorCategory(req.app.locals.db, req.params.name, req.body?.name, req.currentUser?.email || null);
+    return categoryFailure(res, result) ?? res.json({ moved: result.moved, categories: result.categories });
+  })
+);
+
+adminRouter.delete(
+  "/settings/config/categories/:name",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await deleteInstructorCategory(req.app.locals.db, req.params.name, req.currentUser?.email || null);
+    return categoryFailure(res, result) ?? res.json(result.categories);
   })
 );
 

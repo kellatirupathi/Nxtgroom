@@ -49,6 +49,10 @@ export const instructorSchema = z.object({
     (value) => (value === "" || value == null ? undefined : value),
     z.string().trim().max(30).regex(/^[+()\-\s\d]*$/, "Invalid phone number").optional()
   ),
+  instructor_category: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+    z.string().trim().max(60).nullable().optional()
+  ),
 });
 
 export const instructorGenderSchema = z.object({
