@@ -19,6 +19,7 @@ import type { LucideIcon } from 'lucide-react';
 import { apiFetch } from '../api';
 import { recordsFiltersForStatus, saveRecordsFilters } from '../attendanceFilters';
 import BrandedLoader from './BrandedLoader';
+import { readQueryParam, writeQueryParams } from '../routes';
 import {
   complianceChange,
   DASHBOARD_REFRESH_MS,
@@ -56,6 +57,12 @@ const STATUS_META: Record<DashboardStatusKey, { label: string; color: string; ba
 
 const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
 const TREND_RANGES = [7, 14, 30] as const;
+const DEFAULT_TREND_DAYS = 14;
+
+function trendDaysFromQuery(): (typeof TREND_RANGES)[number] {
+  const value = Number(readQueryParam('trend'));
+  return TREND_RANGES.find((range) => range === value) ?? DEFAULT_TREND_DAYS;
+}
 
 function useElementWidth<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
@@ -133,9 +140,13 @@ function TileLink({ onClick, children, tone = 'indigo' }: { onClick: () => void;
 }
 
 function TrendChart({ trend }: { trend: DashboardTrendDay[] }) {
-  const [days, setDays] = useState<(typeof TREND_RANGES)[number]>(14);
+  const [days, setDays] = useState<(typeof TREND_RANGES)[number]>(trendDaysFromQuery);
   const [hover, setHover] = useState<number | null>(null);
   const [ref, width] = useElementWidth<HTMLDivElement>();
+
+  useEffect(() => {
+    writeQueryParams({ trend: days === DEFAULT_TREND_DAYS ? null : String(days) });
+  }, [days]);
   const data = trend.slice(-days);
   const height = 256;
   const margin = { top: 12, right: 52, bottom: 26, left: 40 };

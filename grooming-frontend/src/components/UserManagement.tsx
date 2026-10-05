@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import PasswordInput from './PasswordInput';
 import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
@@ -7,6 +7,8 @@ import UserPermissionsModal from './UserPermissionsModal';
 import ConfirmDialog from './ConfirmDialog';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
+import { useLocation } from '../lib/useLocation';
+import { closeChildPath, dialogPath, dialogRouteFromPath, goToPath, openChildPath, type DialogRoute } from '../routes';
 import type { AdminUser, Boa, College, Role } from '../types';
 
 interface CreatedUser {
@@ -17,6 +19,7 @@ interface CreatedUser {
 
 const ADMINS_PATH = '/api/v2/admins';
 const BOAS_PATH = '/api/v2/boas';
+const LIST_PATH = '/users';
 
 interface UserRow {
   id: string;
@@ -82,9 +85,11 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [boas, setBoas] = useState<Boa[]>(Array.isArray(cachedBoas) ? cachedBoas : []);
   const [colleges, setColleges] = useState<College[]>(Array.isArray(cachedColleges) ? cachedColleges : []);
   const [loading, setLoading] = useState(!Array.isArray(cachedBoas));
+  const [fetched, setFetched] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
+  const { pathname } = useLocation();
 
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<UserRow | null>(null);
@@ -115,6 +120,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       }
     } finally {
       setLoading(false);
+      setFetched(true);
     }
   };
 
@@ -156,14 +162,14 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
     return [...adminRows, ...boaRows];
   }, [admins, boas, collegeNames]);
 
-  const openCreate = () => {
+  const prepareCreate = () => {
     setEditing(null);
     setForm({ ...EMPTY_FORM, role: isSuper ? 'ADMIN' : 'BOA' });
     setError('');
     setShowForm(true);
   };
 
-  const openEdit = (row: UserRow) => {
+  const prepareEdit = (row: UserRow) => {
     setEditing(row);
     setForm({
       role: row.kind === 'admin' ? 'ADMIN' : 'BOA',
@@ -177,12 +183,93 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
     setShowForm(true);
   };
 
-  const closeForm = () => {
-    if (submitting) return;
-    setShowForm(false);
-    setEditing(null);
+  const preparePassword = (row: UserRow) => {
+    setPasswordFor(row);
+    setNewPassword('');
+    setConfirmPassword('');
     setError('');
   };
+
+  const resetDialogs = () => {
+    setShowForm(false);
+    setEditing(null);
+    setPasswordFor(null);
+    setPermissionsFor(null);
+  };
+
+  const openDialog = (route: DialogRoute) => openChildPath(dialogPath(LIST_PATH, route));
+
+  const closeDialog = () => {
+    resetDialogs();
+    closeChildPath(LIST_PATH);
+  };
+
+  const openCreate = () => {
+    prepareCreate();
+    openDialog({ view: 'new' });
+  };
+
+  const openEdit = (row: UserRow) => {
+    prepareEdit(row);
+    openDialog({ view: 'edit', id: row.id });
+  };
+
+  const openPassword = (row: UserRow) => {
+    preparePassword(row);
+    openDialog({ view: 'password', id: row.id });
+  };
+
+  const openPermissions = (row: UserRow) => {
+    setPermissionsFor(row);
+    openDialog({ view: 'permissions', id: row.id });
+  };
+
+  const closeForm = () => {
+    if (submitting) return;
+    setError('');
+    closeDialog();
+  };
+
+  const latest = useRef({ showForm, editing, passwordFor, permissionsFor, rows, prepareCreate });
+  useEffect(() => {
+    latest.current = { showForm, editing, passwordFor, permissionsFor, rows, prepareCreate };
+  });
+
+  useEffect(() => {
+    const current = latest.current;
+    const route = dialogRouteFromPath(pathname, LIST_PATH);
+    if (route.view === 'list') {
+      if (current.showForm || current.passwordFor || current.permissionsFor) resetDialogs();
+      return;
+    }
+    if (route.view === 'new') {
+      if (!current.showForm || current.editing) {
+        resetDialogs();
+        current.prepareCreate();
+      }
+      return;
+    }
+    const row = current.rows.find((item) => item.id === route.id);
+    const manageable = row && (row.kind === 'boa' || isSuper);
+    const allowed = route.view === 'permissions' ? row?.kind === 'boa' : manageable;
+    if (!row || !allowed) {
+      if (fetched || (row && !allowed)) {
+        resetDialogs();
+        goToPath(LIST_PATH, { replace: true });
+      }
+      return;
+    }
+    if (route.view === 'edit' && !(current.showForm && current.editing?.id === row.id)) {
+      resetDialogs();
+      prepareEdit(row);
+    } else if (route.view === 'password' && current.passwordFor?.id !== row.id) {
+      resetDialogs();
+      preparePassword(row);
+    } else if (route.view === 'permissions' && current.permissionsFor?.id !== row.id) {
+      resetDialogs();
+      setPermissionsFor(row);
+    }
+  }, [pathname, fetched, isSuper]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -247,8 +334,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
         }
         invalidateCache(BOAS_PATH);
       }
-      setShowForm(false);
-      setEditing(null);
+      closeDialog();
       if (editing) {
         toast.success('User updated', { detail: form.email });
       } else if (delivery && delivery.emailed === false) {
@@ -288,7 +374,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
         method: 'POST',
         body: { new_password: newPassword },
       });
-      setPasswordFor(null);
+      closeDialog();
       setNewPassword('');
       setConfirmPassword('');
       toast.success('Password updated', { detail: 'That user must sign in again.' });
@@ -337,18 +423,13 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
         label: 'Set new password',
         icon: 'password',
         disabled: !manageable,
-        onSelect: () => {
-          setPasswordFor(row);
-          setNewPassword('');
-          setConfirmPassword('');
-          setError('');
-        },
+        onSelect: () => openPassword(row),
       },
       ...(row.kind === 'boa' ? [{
         key: 'permissions',
         label: 'Permissions',
         icon: 'permissions' as const,
-        onSelect: () => setPermissionsFor(row),
+        onSelect: () => openPermissions(row),
       }] : []),
       {
         key: 'delete',
@@ -556,7 +637,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
           <div className="bg-white rounded-md shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-5 border-b border-slate-200 flex justify-between items-center">
               <h3 id="set-password-title" className="text-lg font-bold text-slate-800">Set new password</h3>
-              <button type="button" onClick={() => setPasswordFor(null)} disabled={submitting} className="text-slate-400 hover:text-slate-600 border border-slate-200 px-2 py-1 rounded-md disabled:opacity-50">×</button>
+              <button type="button" onClick={closeDialog} disabled={submitting} className="text-slate-400 hover:text-slate-600 border border-slate-200 px-2 py-1 rounded-md disabled:opacity-50">×</button>
             </div>
             <form onSubmit={handleSetPassword} className="p-5 space-y-4 overflow-y-auto">
               {error && <div role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
@@ -572,7 +653,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
               </div>
               <p className="text-xs text-slate-500">This signs that user out of all devices.</p>
               <div className="pt-1 flex gap-3">
-                <button type="button" onClick={() => setPasswordFor(null)} disabled={submitting} className="flex-1 px-4 py-2.5 rounded-md font-semibold text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50">Cancel</button>
+                <button type="button" onClick={closeDialog} disabled={submitting} className="flex-1 px-4 py-2.5 rounded-md font-semibold text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 disabled:opacity-50">Cancel</button>
                 <button type="submit" disabled={submitting} className="flex-1 px-4 py-2.5 rounded-md font-semibold text-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">{submitting ? 'Saving…' : 'Update Password'}</button>
               </div>
             </form>
@@ -584,7 +665,7 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
         <UserPermissionsModal
           userId={String(permissionsFor.id)}
           email={permissionsFor.email}
-          onClose={() => setPermissionsFor(null)}
+          onClose={closeDialog}
         />
       )}
     </section>

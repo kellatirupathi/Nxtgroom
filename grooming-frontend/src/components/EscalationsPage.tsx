@@ -7,6 +7,8 @@ import {
   dayLabel,
   ESCALATION_PERIODS,
   escalationCsv,
+  escalationPeriodFromParam,
+  escalationQueryParams,
   escalationFileName,
   escalationsPath,
   filterEscalationRows,
@@ -18,6 +20,7 @@ import {
   runsOf,
   shortDayLabel,
   VERDICT_LABELS,
+  weekdayFromParam,
   WEEKDAYS,
   type EscalatedPerson,
   type EscalationPeriod,
@@ -25,6 +28,8 @@ import {
   type EscalationRow,
   type PeriodRange,
 } from '../lib/escalationReport';
+import { useLocation } from '../lib/useLocation';
+import { closeChildPath, currentPathWith, openChildPath, readQueryParam, writeQueryParams } from '../routes';
 import PhotoViewer from './PhotoViewer';
 import { useToast } from './useToast';
 
@@ -190,16 +195,28 @@ function PersonDetail({ person, range, photoOpen, onPhoto, onClose }: {
 export default function EscalationsPage({ onBack }: { onBack: () => void }) {
   const toast = useToast();
   const today = useMemo(() => localDateValue(), []);
-  const [period, setPeriod] = useState<EscalationPeriod>('this_week');
-  const [custom, setCustom] = useState<PeriodRange>(() => periodRange('this_week', today));
+  const [period, setPeriod] = useState<EscalationPeriod>(() => escalationPeriodFromParam(readQueryParam('period')));
+  const [custom, setCustom] = useState<PeriodRange>(() => {
+    const fallback = periodRange('this_week', today);
+    return { from: readQueryParam('from') || fallback.from, to: readQueryParam('to') || fallback.to };
+  });
   const [report, setReport] = useState<EscalationReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [college, setCollege] = useState('');
-  const [weekday, setWeekday] = useState('');
+  const [search, setSearch] = useState(() => readQueryParam('q'));
+  const [college, setCollege] = useState(() => readQueryParam('institute'));
+  const [weekday, setWeekday] = useState(() => weekdayFromParam(readQueryParam('day')));
   const [photo, setPhoto] = useState<PhotoTarget | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const location = useLocation();
+  const openId = new URLSearchParams(location.search).get('person') || null;
+  const setOpenId = (id: string | null) => {
+    if (id) openChildPath(currentPathWith({ person: id }));
+    else closeChildPath(currentPathWith({ person: null }));
+  };
+
+  useEffect(() => {
+    writeQueryParams(escalationQueryParams({ period, custom, search, college, weekday }));
+  }, [period, custom, search, college, weekday]);
 
   const range = periodRange(period, today, custom);
   const problem = period === 'custom' ? rangeProblem(range) : '';

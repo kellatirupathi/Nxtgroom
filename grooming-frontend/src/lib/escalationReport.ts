@@ -90,6 +90,31 @@ export function periodRange(period: EscalationPeriod, today: string = localDateV
   }
 }
 
+export function escalationPeriodFromParam(value: string | null | undefined): EscalationPeriod {
+  return ESCALATION_PERIODS.some((option) => option.value === value) ? value as EscalationPeriod : 'this_week';
+}
+
+export function weekdayFromParam(value: string | null | undefined): string {
+  return (WEEKDAYS as readonly string[]).includes(String(value)) ? String(value) : '';
+}
+
+export function escalationQueryParams({ period, custom, search, college, weekday }: {
+  period: EscalationPeriod;
+  custom: PeriodRange;
+  search: string;
+  college: string;
+  weekday: string;
+}): Record<string, string | null> {
+  return {
+    period: period === 'this_week' ? null : period,
+    from: period === 'custom' ? custom.from || null : null,
+    to: period === 'custom' ? custom.to || null : null,
+    q: search || null,
+    institute: college || null,
+    day: weekday || null,
+  };
+}
+
 export function rangeProblem({ from, to }: PeriodRange): string {
   if (!from || !to) return 'Choose both a start and an end date.';
   if (from > to) return 'The start date must be on or before the end date.';

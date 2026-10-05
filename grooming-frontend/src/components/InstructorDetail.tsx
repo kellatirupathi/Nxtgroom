@@ -9,6 +9,7 @@ import { normalizeAttendanceStatus } from '../status';
 import { formatAttendanceDate, formatAttendanceTime } from '../attendanceFilters';
 import GroomingReport from './GroomingReport';
 import LocationPanel from './LocationPanel';
+import { readQueryParam, writeQueryParams } from '../routes';
 import type { AttendanceRecord, Evaluation } from '../types';
 import {
   aiRemarksForHalf,
@@ -99,7 +100,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const [freshRecord, setFreshRecord] = useState<AttendanceRecord | null>(record);
   const [reportStates, setReportStates] = useState<ReportPanelStates>({});
   const [photoKind, setPhotoKind] = useState<'checkin' | 'checkout' | null>(null);
-  const [tab, setTab] = useState<'checkin' | 'checkout'>('checkin');
+  const [tab, setTab] = useState<'checkin' | 'checkout'>(() => (readQueryParam('half') === 'checkout' ? 'checkout' : 'checkin'));
   const [confirmDelete, setConfirmDelete] = useState<'record' | 'checkout' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reanalysing, setReanalysing] = useState(false);
@@ -107,6 +108,10 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
   const toast = useToast();
   const displayRecord = freshRecord || record;
   const attendanceId = record ? String(record._id) : null;
+  useEffect(() => {
+    writeQueryParams({ half: tab === 'checkout' ? 'checkout' : null });
+  }, [tab]);
+
   const reportState = reportPanelStateForHalf(reportStates, attendanceId, tab);
   const evaluation = evaluationForHalf(reportState, attendanceId, tab);
   const loading = !reportState || reportState.loading;

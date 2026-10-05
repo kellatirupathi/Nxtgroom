@@ -5,11 +5,17 @@ import IconTooltip from './IconTooltip';
 import { preparePhoto } from '../lib/imageCapture';
 import { validatePhoto, validateSourcePhoto } from '../imageValidation';
 import { useToast } from './useToast';
+import { readQueryParam, writeQueryParams } from '../routes';
 import type { Instructor } from '../types';
 
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false&include_photo_url=true';
 
 type EnrolmentFilter = 'all' | 'needs_photo' | 'enrolled';
+
+function filterFromQuery(): EnrolmentFilter {
+  const value = readQueryParam('filter');
+  return value === 'needs_photo' || value === 'enrolled' ? value : 'all';
+}
 
 interface CollegeEnrolmentListProps {
   collegeId: string;
@@ -30,14 +36,18 @@ export default function CollegeEnrolmentList({
   });
   const [loading, setLoading] = useState(() => readStale<Instructor[]>(INSTRUCTORS_PATH) === undefined);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<EnrolmentFilter>('all');
+  const [search, setSearch] = useState(() => readQueryParam('search'));
+  const [filter, setFilter] = useState<EnrolmentFilter>(filterFromQuery);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [photoFor, setPhotoFor] = useState<Instructor | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState('');
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
   const toast = useToast();
+
+  useEffect(() => {
+    writeQueryParams({ search: search || null, filter: filter === 'all' ? null : filter });
+  }, [search, filter]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {

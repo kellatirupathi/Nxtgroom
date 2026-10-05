@@ -1,23 +1,28 @@
-import { useCallback, useState, useEffect, useMemo, type FormEvent } from 'react';
+import { useCallback, useState, useEffect, useMemo, useRef, type FormEvent } from 'react';
 import { Plus, UserCog, Search, Mail, CircleAlert, Upload, X } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
 import InstructorImportDialog from './InstructorImportDialog';
-import InstructorRecordsDialog, { type RecordsInstructor } from './InstructorRecordsDialog';
 import ReferencePhotoField from './ReferencePhotoField';
 import RowActionsMenu from './RowActionsMenu';
 import { instructorRoleOptions } from '../instructorRoles';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
+import { CATEGORIES_PATH, categoryOptions, inUseCategories, type InstructorCategory } from '../lib/instructorCategories';
+import { recordsPagePath } from '../lib/instructorRecords';
+import { useLocation } from '../lib/useLocation';
+import { closeChildPath, dialogPath, dialogRouteFromPath, goToPath, openChildPath, pathWithQuery, readQueryParam, writeQueryParams } from '../routes';
 import type { College, Instructor } from '../types';
 
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
+const LIST_PATH = '/instructors';
 
 interface InstructorForm {
   name: string;
   employee_id: string;
   instructor_user_id: string;
+  instructor_category: string;
   role: string;
   gender: string;
   college_id: string;
@@ -29,6 +34,7 @@ interface InstructorForm {
 export default function InstructorManagement() {
   const cachedInstructors = readStale<Instructor[]>(INSTRUCTORS_PATH);
   const cachedColleges = readStale<College[]>('/api/v2/colleges');
+  const cachedCategories = readStale<InstructorCategory[]>(CATEGORIES_PATH);
   const [instructors, setInstructors] = useState<Instructor[]>(
     Array.isArray(cachedInstructors) ? cachedInstructors : [],
   );
@@ -36,23 +42,28 @@ export default function InstructorManagement() {
     Array.isArray(cachedColleges) ? cachedColleges : [],
   );
   const [loading, setLoading] = useState(!Array.isArray(cachedInstructors));
+  const [fetched, setFetched] = useState(false);
+  const [categories, setCategories] = useState<string[] | null>(
+    Array.isArray(cachedCategories) ? cachedCategories.map((category) => category.name) : null,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => readQueryParam('q'));
   const [confirmTarget, setConfirmTarget] = useState<Instructor | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [showImport, setShowImport] = useState(false);
-  const [recordsFor, setRecordsFor] = useState<RecordsInstructor | null>(null);
   const [userIdLocked, setUserIdLocked] = useState(false);
   const toast = useToast();
+  const { pathname } = useLocation();
 
   const [formData, setFormData] = useState<InstructorForm>({
     name: '',
     employee_id: '',
     instructor_user_id: '',
+    instructor_category: '',
     role: '',
     gender: '',
     college_id: '',
@@ -78,7 +89,10 @@ export default function InstructorManagement() {
     } catch (requestError) {
       if (!signal?.aborted && (requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+        setFetched(true);
+      }
     }
   }, []);
 
@@ -87,6 +101,20 @@ export default function InstructorManagement() {
     fetchData({ signal: controller.signal });
     return () => controller.abort();
   }, [fetchData]);
+
+  useEffect(() => {
+    let disposed = false;
+    apiFetchCached<InstructorCategory[]>(CATEGORIES_PATH)
+      .then((data) => {
+        if (!disposed && Array.isArray(data)) setCategories(data.map((category) => category.name));
+      })
+      .catch(() => undefined);
+    return () => { disposed = true; };
+  }, []);
+
+  useEffect(() => {
+    writeQueryParams({ q: search || null });
+  }, [search]);
 
   const handleCreateOrUpdate = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -172,17 +200,17 @@ export default function InstructorManagement() {
     }
   };
 
-  const openAddModal = () => {
+  const prepareAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
-    setFormData({ name: '', employee_id: '', instructor_user_id: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
+    setFormData({ name: '', employee_id: '', instructor_user_id: '', instructor_category: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
     setUserIdLocked(false);
     setPendingPhoto(null);
     setError('');
     setShowModal(true);
   };
 
-  const openEditModal = (ins: Instructor) => {
+  const prepareEditModal = (ins: Instructor) => {
     setIsEditMode(true);
     setEditingId(ins._id);
     setPendingPhoto(null);
@@ -191,6 +219,7 @@ export default function InstructorManagement() {
       name: ins.name,
       employee_id: ins.employee_id || '',
       instructor_user_id: ins.instructor_user_id || '',
+      instructor_category: ins.instructor_category || '',
       role: ins.instructor_role || ins.role || '',
       gender: ins.gender ? String(ins.gender).toUpperCase() : '',
       college_id: ins.college_id,
@@ -201,12 +230,61 @@ export default function InstructorManagement() {
     setShowModal(true);
   };
 
-  const closeModal = () => {
+  const resetModal = () => {
     setShowModal(false);
     setIsEditMode(false);
     setEditingId(null);
     setPendingPhoto(null);
   };
+
+  const listPath = () => pathWithQuery(LIST_PATH, { q: search });
+
+  const openAddModal = () => {
+    prepareAddModal();
+    openChildPath(dialogPath(LIST_PATH, { view: 'new' }));
+  };
+
+  const openEditModal = (ins: Instructor) => {
+    prepareEditModal(ins);
+    openChildPath(dialogPath(LIST_PATH, { view: 'edit', id: String(ins._id) }));
+  };
+
+  const closeModal = () => {
+    resetModal();
+    closeChildPath(listPath());
+  };
+
+  const latest = useRef({ showModal, isEditMode, editingId, instructors, search });
+  useEffect(() => {
+    latest.current = { showModal, isEditMode, editingId, instructors, search };
+  });
+
+  useEffect(() => {
+    const current = latest.current;
+    const route = dialogRouteFromPath(pathname, LIST_PATH);
+    if (route.view === 'new') {
+      if (!current.showModal || current.isEditMode) prepareAddModal();
+      return;
+    }
+    if (route.view === 'edit') {
+      if (current.showModal && current.isEditMode && current.editingId === route.id) return;
+      const target = current.instructors.find((ins) => String(ins._id) === route.id);
+      if (target) {
+        prepareEditModal(target);
+      } else if (fetched) {
+        resetModal();
+        setError('That instructor was not found. They may have been removed.');
+        goToPath(pathWithQuery(LIST_PATH, { q: current.search }), { replace: true });
+      }
+      return;
+    }
+    if (current.showModal) resetModal();
+  }, [pathname, fetched]);
+
+  const categoryChoices = useMemo(
+    () => categoryOptions(categories ?? inUseCategories(instructors), formData.instructor_category),
+    [categories, instructors, formData.instructor_category],
+  );
 
   const roleOptions = useMemo(
     () => instructorRoleOptions(
@@ -221,12 +299,7 @@ export default function InstructorManagement() {
     || colleges.find((college) => String(college._id) === String(ins.college_id))?.name
     || '';
 
-  const openRecords = (ins: Instructor) => setRecordsFor({
-    id: String(ins._id),
-    name: ins.name,
-    role: ins.instructor_role || ins.role,
-    institute: instituteFor(ins),
-  });
+  const openRecords = (ins: Instructor) => openChildPath(recordsPagePath({ id: String(ins._id), name: ins.name }));
 
   const filteredInstructors = instructors.filter((ins) => {
     const term = search.trim().toLowerCase();
@@ -479,7 +552,7 @@ export default function InstructorManagement() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Role</label>
                   <select required className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})}>
@@ -495,6 +568,15 @@ export default function InstructorManagement() {
                     <option value="" disabled>Select gender...</option>
                     <option value="MALE">Male</option>
                     <option value="FEMALE">Female</option>
+                  </select>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <label htmlFor="instructor-category" className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Category (Optional)</label>
+                  <select id="instructor-category" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all bg-white" value={formData.instructor_category} onChange={e => setFormData({...formData, instructor_category: e.target.value})}>
+                    <option value="">No category</option>
+                    {categoryChoices.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -537,10 +619,6 @@ export default function InstructorManagement() {
             </form>
           </div>
         </div>
-      )}
-
-      {recordsFor && (
-        <InstructorRecordsDialog instructor={recordsFor} onClose={() => setRecordsFor(null)} />
       )}
 
       {showImport && (

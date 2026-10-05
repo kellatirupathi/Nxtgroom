@@ -11,9 +11,10 @@ import { apiFetch } from '../api';
 import DateRangeFilter from './DateRangeFilter';
 import InstituteFormDialog from './InstituteFormDialog';
 import {
+  datePresetFromQuery,
+  datePresetToQuery,
   isCompleteRange,
   localDateValue,
-  rangeForPreset,
   type DatePreset,
   type DateRange,
 } from '../attendanceFilters';
@@ -21,11 +22,15 @@ import {
   DASHBOARD_REFRESH_MS,
   formatCount,
   formatPercent,
+  instituteSortFromQuery,
+  instituteSortToQuery,
   sortInstitutes,
   type InstituteSort,
   type InstituteSortKey,
 } from '../dashboardFormat';
 import type { DashboardInstitutesRange } from '../types';
+import { useLocation } from '../lib/useLocation';
+import { closeChildPath, currentPathWith, openChildPath, writeQueryParams } from '../routes';
 
 const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
 const INSTITUTE_HEADER_HEIGHT = 40;
@@ -40,15 +45,26 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
 ];
 
 export default function InstituteAnalytics() {
-  const [sort, setSort] = useState<InstituteSort>({ key: 'present_percent', direction: 1 });
-  const [preset, setPreset] = useState<DatePreset>('today');
-  const [range, setRange] = useState<DateRange>(() => rangeForPreset('today', localDateValue()));
+  const [initial] = useState(() => datePresetFromQuery(window.location.search, localDateValue()));
+  const [sort, setSort] = useState<InstituteSort>(() => instituteSortFromQuery(window.location.search));
+  const [preset, setPreset] = useState<DatePreset>(initial.preset);
+  const [range, setRange] = useState<DateRange>(initial.range);
   const [result, setResult] = useState<DashboardInstitutesRange | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [adding, setAdding] = useState(false);
+  const { pathname } = useLocation();
+  const adding = pathname.replace(/\/+$/, '') === '/institutes/new';
+  const setAdding = (open: boolean) => {
+    if (open) openChildPath(currentPathWith({}).replace(/^\/institutes(?=[?#]|$)/, '/institutes/new'));
+    else closeChildPath(currentPathWith({}).replace(/^\/institutes\/new(?=[?#]|$)/, '/institutes'));
+  };
   const [reloadKey, setReloadKey] = useState(0);
   const hasResult = useRef(false);
+
+  useEffect(() => {
+    if (adding) return;
+    writeQueryParams({ ...datePresetToQuery(preset, range), ...instituteSortToQuery(sort) });
+  }, [preset, range, sort, adding]);
 
   useEffect(() => {
     if (!isCompleteRange(range, preset)) return undefined;

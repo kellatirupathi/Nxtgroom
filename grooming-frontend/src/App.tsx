@@ -8,6 +8,7 @@ import {
   currentTabFromLocation,
   homeTabForRole,
   dailyReportFromLocation,
+  LOCATION_CHANGE_EVENT,
   publicReportFromLocation,
   pushTabPath,
   recordIdFromLocation,
@@ -31,7 +32,6 @@ import {
   SESSION_EXPIRED_EVENT,
 } from './api';
 import { isElevatedRole, type AttendanceRecord, type CurrentUser, type Instructor, type Role } from './types';
-import type { SettingsTab } from './components/SettingsPage';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const InstituteAnalytics = lazy(() => import('./components/InstituteAnalytics'));
@@ -45,6 +45,7 @@ const SettingsPage = lazy(() => import('./components/SettingsPage'));
 const InstructorManagement = lazy(() => import('./components/InstructorManagement'));
 const AttendanceScreen = lazy(() => import('./components/AttendanceScreen'));
 const EscalationsPage = lazy(() => import('./components/EscalationsPage'));
+const InstructorRecordsPage = lazy(() => import('./components/InstructorRecordsPage'));
 
 interface SessionState {
   token: string | null;
@@ -60,7 +61,7 @@ interface SessionState {
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
-const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management', 'escalations']);
+const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management', 'escalations', 'instructor-records']);
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 
 function initialSession(): SessionState {
@@ -98,7 +99,6 @@ export default function App() {
   const [sessionCheckError, setSessionCheckError] = useState('');
   const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
   const [accountModal, setAccountModal] = useState<AccountModal>(null);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>('notifications');
 
   const handleLogin = (token: string, role: Role) => {
     setSession({ token, role, email: null, collegeId: null, validated: false });
@@ -168,7 +168,6 @@ export default function App() {
   }, [session.token, session.validated, fetchInstructors]);
 
   const navigate = useCallback((tab: string, { replace = false } = {}) => {
-    if (tab === 'settings') setSettingsTab('notifications');
     let target = tab;
     if (ADMIN_TABS.has(tab) && !isElevatedRole(session.role)) target = 'overview';
     else if (tab === 'instructor-detail' && !selectedAttendanceRecord) target = 'daily-records';
@@ -210,7 +209,11 @@ export default function App() {
       );
     };
     window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener(LOCATION_CHANGE_EVENT, onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener(LOCATION_CHANGE_EVENT, onPopState);
+    };
   }, [session.role, publicReport, dailyReport, resetToken]);
 
   useEffect(() => {
@@ -282,10 +285,12 @@ export default function App() {
     return <BrandedLoader label="Verifying your session" />;
   }
 
+  const navTab = activeTab === 'instructor-records' ? 'instructor-management' : activeTab;
+
   return (
     <div className="flex h-[calc(100dvh-var(--shell-offset-top))] bg-[#f8f9fc] font-sans text-gray-800 overflow-hidden relative w-full">
       <Sidebar
-        activeTab={activeTab}
+        activeTab={navTab}
         navigate={navigate}
         role={session.role}
         email={session.email}
@@ -372,18 +377,22 @@ export default function App() {
           )}
 
           {activeTab === 'settings' && isElevatedRole(session.role) && (
-            <div className="w-full h-full"><SettingsPage key={settingsTab} initialTab={settingsTab} /></div>
+            <div className="w-full h-full"><SettingsPage /></div>
           )}
 
           {activeTab === 'instructor-management' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><InstructorManagement /></div>
+          )}
+
+          {activeTab === 'instructor-records' && isElevatedRole(session.role) && (
+            <div className="w-full h-full"><InstructorRecordsPage /></div>
           )}
           </Suspense>
         </div>
       </main>
 
       <BottomNav
-        activeTab={activeTab}
+        activeTab={navTab}
         navigate={navigate}
         role={session.role}
         email={session.email}

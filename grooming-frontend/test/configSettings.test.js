@@ -6,7 +6,7 @@ const read = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 
 
 test('Settings has a Config tab, last, that shows the config section', () => {
   const page = read('components/SettingsPage.tsx');
-  assert.match(page, /export type SettingsTab = [^;]*'config';/);
+  assert.match(read('routes.ts'), /export type SettingsTab = [^;]*'config';/);
   const tabs = [...page.matchAll(/aria-selected=\{tab === '([a-z]+)'\}/g)].map((match) => match[1]);
   assert.deepEqual(tabs, ['notifications', 'identification', 'colleges', 'sync', 'rp', 'reports', 'config']);
   assert.match(page, /<SlidersHorizontal size=\{16\} aria-hidden="true" \/>\s*Config\s*<\/button>/);

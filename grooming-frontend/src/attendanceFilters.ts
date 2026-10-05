@@ -341,6 +341,48 @@ export function loadRecordsFilters(
   };
 }
 
+const RECORDS_QUERY_KEYS = ['period', 'from', 'to', 'q', 'institute', 'role', 'status', 'escalation'] as const;
+
+export function datePresetToQuery(preset: DatePreset, range: DateRange): Record<string, string | null> {
+  const custom = preset === 'custom';
+  return {
+    period: preset === 'today' ? null : preset,
+    from: custom ? range.from || null : null,
+    to: custom ? range.to || null : null,
+  };
+}
+
+export function datePresetFromQuery(search: string, today: string = localDateValue()): { preset: DatePreset; range: DateRange } {
+  const filters = recordsFiltersFromQuery(search, today) ?? defaultRecordsFilters(today);
+  return { preset: filters.preset, range: filters.range };
+}
+
+export function recordsFiltersToQuery(filters: SavedRecordsFilters): Record<string, string | null> {
+  return {
+    ...datePresetToQuery(filters.preset, filters.range),
+    q: filters.search || null,
+    institute: filters.college || null,
+    role: filters.role || null,
+    status: filters.status || null,
+    escalation: filters.escalation || null,
+  };
+}
+
+export function recordsFiltersFromQuery(search: string, today: string = localDateValue()): SavedRecordsFilters | null {
+  const params = new URLSearchParams(search);
+  if (!RECORDS_QUERY_KEYS.some((key) => params.has(key))) return null;
+  const saved = {
+    preset: params.get('period') || 'today',
+    range: { from: params.get('from') || '', to: params.get('to') || '' },
+    search: params.get('q') || '',
+    college: params.get('institute') || '',
+    role: params.get('role') || '',
+    status: params.get('status') || '',
+    escalation: params.get('escalation') || '',
+  };
+  return loadRecordsFilters({ getItem: () => JSON.stringify(saved) }, today);
+}
+
 export function saveRecordsFilters(
   filters: SavedRecordsFilters,
   storage: Pick<Storage, 'setItem'> | null = tabStorage(),

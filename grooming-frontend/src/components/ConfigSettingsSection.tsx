@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SlidersHorizontal } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
+import InstructorCategoriesSection from './InstructorCategoriesSection';
 import { Toggle } from './SettingsPage';
 import { useToast } from './useToast';
 import type { ConfigSettings } from '../types';
@@ -78,6 +79,8 @@ export default function ConfigSettingsSection() {
           />
         </div>
       </div>
+
+      <InstructorCategoriesSection />
     </section>
   );
 }

@@ -92,3 +92,22 @@ export function sortInstitutes(rows: DashboardInstitute[], sort: InstituteSort):
     return ((a as number) - (b as number)) * sort.direction || left.name.localeCompare(right.name);
   });
 }
+
+export const DEFAULT_INSTITUTE_SORT: InstituteSort = { key: 'present_percent', direction: 1 };
+
+const INSTITUTE_SORT_KEYS: readonly InstituteSortKey[] = ['name', 'present_percent', 'compliance_percent', 'non_compliant', 'enrolled_percent'];
+
+export function instituteSortFromQuery(search: string): InstituteSort {
+  const params = new URLSearchParams(search);
+  const key = params.get('sort') as InstituteSortKey | null;
+  if (!key || !INSTITUTE_SORT_KEYS.includes(key)) return DEFAULT_INSTITUTE_SORT;
+  return { key, direction: params.get('order') === 'desc' ? -1 : 1 };
+}
+
+export function instituteSortToQuery(sort: InstituteSort): Record<string, string | null> {
+  const isDefault = sort.key === DEFAULT_INSTITUTE_SORT.key && sort.direction === DEFAULT_INSTITUTE_SORT.direction;
+  return {
+    sort: isDefault ? null : sort.key,
+    order: isDefault ? null : sort.direction === 1 ? 'asc' : 'desc',
+  };
+}

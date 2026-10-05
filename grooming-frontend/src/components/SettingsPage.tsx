@@ -9,6 +9,8 @@ import ReportsTab from './ReportsTab';
 import AccessSettingsSection from './AccessSettingsSection';
 import ConfigSettingsSection from './ConfigSettingsSection';
 import type { NotificationSettings } from '../types';
+import { goToPath, settingsTabFromPath, settingsTabPath, type SettingsTab } from '../routes';
+import { useLocation } from '../lib/useLocation';
 
 export interface ToggleProps {
   id: string;
@@ -178,10 +180,12 @@ function NotificationSettings() {
   );
 }
 
-export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'config';
-
-export default function SettingsPage({ initialTab = 'notifications' }: { initialTab?: SettingsTab }) {
-  const [tab, setTab] = useState<SettingsTab>(initialTab);
+export default function SettingsPage() {
+  const { pathname } = useLocation();
+  const tab = settingsTabFromPath(pathname);
+  const setTab = (next: SettingsTab) => {
+    if (next !== tab) goToPath(settingsTabPath(next));
+  };
 
   const tabClass = (value: string) =>
     `flex items-center gap-2 whitespace-nowrap text-sm font-semibold transition-colors rounded-full border px-3.5 py-2 sm:rounded-none sm:border-0 sm:border-b-2 sm:px-4 sm:py-2.5 ${

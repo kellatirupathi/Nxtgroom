@@ -19,11 +19,13 @@ import {
   filterAttendanceRecords,
   loadRecordsFilters,
   localDateValue,
+  recordsFiltersFromQuery,
+  recordsFiltersToQuery,
   saveRecordsFilters,
   spreadEscalation,
   uniqueRecordValues,
 } from '../attendanceFilters';
-import { publicDayReportPath } from '../routes';
+import { publicDayReportPath, writeQueryParams } from '../routes';
 import { canOpenRecord, formatCoordinates, normalizeAttendanceStatus } from '../status';
 import type { AttendanceEscalation, AttendanceRecord, AttendanceStatus } from '../types';
 
@@ -123,7 +125,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [savedFilters] = useState(() => loadRecordsFilters(undefined, today));
+  const [savedFilters] = useState(() => recordsFiltersFromQuery(window.location.search, today) ?? loadRecordsFilters(undefined, today));
   const [preset, setPreset] = useState<DatePreset>(savedFilters.preset);
   const [range, setRange] = useState<DateRange>(savedFilters.range);
   const [roleFilter, setRoleFilter] = useState(savedFilters.role);
@@ -138,7 +140,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   const [reloadVersion, setReloadVersion] = useState(0);
 
   useEffect(() => {
-    saveRecordsFilters({
+    const filters = {
       preset,
       range,
       search,
@@ -146,7 +148,9 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
       role: roleFilter,
       status: statusFilter,
       escalation: escalationFilter,
-    });
+    };
+    saveRecordsFilters(filters);
+    writeQueryParams(recordsFiltersToQuery(filters));
   }, [preset, range, search, collegeFilter, roleFilter, statusFilter, escalationFilter]);
   const selectAllRef = useRef<HTMLInputElement | null>(null);
 

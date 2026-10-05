@@ -6,6 +6,7 @@ import { dayReportApiPath, dayReportCsv, dayReportFileName, type DayReportRespon
 import DailyReportSettings from './DailyReportSettings';
 import { useToast } from './useToast';
 import { currentIndiaMonth, monthLabel, shiftMonth } from '../lib/reportMonths';
+import { readQueryParam, writeQueryParams } from '../routes';
 
 const DAYS_PATH = '/api/v2/settings/daily-report/days';
 const REFRESH_MS = 60_000;
@@ -68,7 +69,14 @@ function ReportLink({ day, onCopy, onExport, exporting }: ReportLinkProps) {
 
 export default function ReportsTab() {
   const latestMonth = currentIndiaMonth();
-  const [month, setMonth] = useState(latestMonth);
+  const [month, setMonth] = useState(() => {
+    const requested = readQueryParam('month');
+    return /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) && requested <= latestMonth ? requested : latestMonth;
+  });
+
+  useEffect(() => {
+    writeQueryParams({ month: month === latestMonth ? null : month });
+  }, [month, latestMonth]);
   const [days, setDays] = useState<ReportDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

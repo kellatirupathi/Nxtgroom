@@ -80,7 +80,7 @@ test('nothing saved, or anything unreadable, starts on today with nothing narrow
 
 test('Daily Records starts from the saved filters, saves every change, and offers Clear beside Filters', () => {
   const table = source('components/DailyAttendanceTable.tsx');
-  assert.match(table, /const \[savedFilters\] = useState\(\(\) => loadRecordsFilters\(undefined, today\)\);/);
+  assert.match(table, /const \[savedFilters\] = useState\(\(\) => recordsFiltersFromQuery\(window\.location\.search, today\) \?\? loadRecordsFilters\(undefined, today\)\);/);
   for (const piece of [
     'useState<DatePreset>(savedFilters.preset)',
     'useState<DateRange>(savedFilters.range)',
@@ -92,7 +92,7 @@ test('Daily Records starts from the saved filters, saves every change, and offer
   ]) {
     assert.ok(table.includes(piece), piece);
   }
-  assert.match(table, /saveRecordsFilters\(\{[\s\S]*?\}, \[preset, range, search, collegeFilter, roleFilter, statusFilter, escalationFilter\]\);/);
+  assert.match(table, /saveRecordsFilters\(filters\);\s*writeQueryParams\(recordsFiltersToQuery\(filters\)\);\s*\}, \[preset, range, search, collegeFilter, roleFilter, statusFilter, escalationFilter\]\);/);
 
   assert.match(table, /\{\(activeFilterCount > 0 \|\| search\) && \(/);
   assert.match(table, /clearAllFilters\(\);\s*setSearch\(''\);/);

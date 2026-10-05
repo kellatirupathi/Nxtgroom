@@ -3,6 +3,8 @@ import { Search } from 'lucide-react';
 import { apiFetch } from '../api';
 import CollegeEnrolmentList from './CollegeEnrolmentList';
 import { useToast } from './useToast';
+import { useLocation } from '../lib/useLocation';
+import { closeChildPath, currentPathWith, openChildPath, readQueryParam, writeQueryParams } from '../routes';
 import type { IdentificationSettings } from '../types';
 
 const IDENTIFICATION_PATH = '/api/v2/settings/identification';
@@ -10,9 +12,21 @@ const IDENTIFICATION_PATH = '/api/v2/settings/identification';
 export default function IdentificationSettingsSection() {
   const [settings, setSettings] = useState<IdentificationSettings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [openCollege, setOpenCollege] = useState<{ id: string; name: string } | null>(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => readQueryParam('q'));
   const toast = useToast();
+  const location = useLocation();
+  const openCollegeId = new URLSearchParams(location.search).get('college') || '';
+  const openCollege = openCollegeId
+    ? { id: openCollegeId, name: settings?.colleges.find((college) => college.college_id === openCollegeId)?.college_name || 'College' }
+    : null;
+  const setOpenCollege = (college: { id: string; name: string } | null) => {
+    if (college) openChildPath(currentPathWith({ college: college.id }));
+    else closeChildPath(currentPathWith({ college: null, search: null, filter: null }));
+  };
+
+  useEffect(() => {
+    writeQueryParams({ q: search || null });
+  }, [search]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {

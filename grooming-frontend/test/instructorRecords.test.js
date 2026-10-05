@@ -49,14 +49,17 @@ test('each record reads by its day, newest first, with both results and report l
   assert.deepEqual(summarizeRecords([morning, earlier, pending]), { total: 3, compliant: 1, nonCompliant: 1, checkedOut: 1 });
 });
 
-test('Records sits in each instructor\'s action menu, above Edit and Delete', () => {
+test('Records sits in each instructor\'s action menu, above Edit and Delete, and opens its own page', () => {
   const page = read('components/InstructorManagement.tsx');
   assert.equal((page.match(/\{ key: 'records', label: 'Records', icon: 'records', onSelect: \(\) => openRecords\(ins\) \},\s*\{ key: 'edit'/g) || []).length, 2, 'phone and desktop menus');
-  assert.ok(page.includes('<InstructorRecordsDialog instructor={recordsFor} onClose={() => setRecordsFor(null)} />'));
-  const dialog = read('components/InstructorRecordsDialog.tsx');
-  assert.ok(dialog.includes("useState<RecordsPeriod>('last_10')"), 'last 10 days by default');
+  assert.ok(page.includes('const openRecords = (ins: Instructor) => openChildPath(recordsPagePath({ id: String(ins._id), name: ins.name }));'));
+  assert.ok(!page.includes('InstructorRecordsDialog'), 'no longer a modal');
+  const records = read('components/InstructorRecordsPage.tsx');
+  assert.ok(records.includes("recordsPeriodFromParam(new URLSearchParams(window.location.search).get('period'))"), 'the period comes from the address');
+  assert.ok(records.includes('writeQueryParams(recordsPeriodParams(period, custom));'), 'and is kept in it');
+  assert.ok(records.includes("closeChildPath('/instructors')"), 'Back returns to Instructors');
   for (const column of ['Date', 'Check-in', 'Check-out', 'Attire', 'Institute', 'Remarks', 'Photos &amp; reports']) {
-    assert.ok(dialog.includes(`<th scope="col" className="px-3 py-3">${column}</th>`), column);
+    assert.ok(records.includes(`<th scope="col" className="px-3 py-3">${column}</th>`), column);
   }
   const menu = read('components/RowActionsMenu.tsx');
   assert.match(menu, /records: CalendarDays/);

@@ -13,6 +13,34 @@ export const RECORDS_PERIODS: ReadonlyArray<{ value: RecordsPeriod; label: strin
   { value: 'custom', label: 'Custom range' },
 ];
 
+export const RECORDS_PAGE_PATH = '/instructors/records';
+
+export function recordsPeriodFromParam(value: string | null | undefined): RecordsPeriod {
+  return RECORDS_PERIODS.some((option) => option.value === value) ? value as RecordsPeriod : 'last_10';
+}
+
+export function recordsPagePath({ id, name }: { id: string; name: string }): string {
+  const params = new URLSearchParams();
+  if (name) params.set('name', name);
+  if (id) params.set('id', id);
+  const search = params.toString();
+  return search ? `${RECORDS_PAGE_PATH}?${search}` : RECORDS_PAGE_PATH;
+}
+
+export function recordsPeriodParams(period: RecordsPeriod, custom: { from: string; to: string }): Record<string, string | null> {
+  return {
+    period: period === 'last_10' ? null : period,
+    from: period === 'custom' ? custom.from || null : null,
+    to: period === 'custom' ? custom.to || null : null,
+  };
+}
+
+export function matchInstructorsByName<T extends { name?: string | null }>(instructors: T[], name: string): T[] {
+  const wanted = name.trim().replace(/\s+/g, ' ').toLowerCase();
+  if (!wanted) return [];
+  return instructors.filter((instructor) => String(instructor.name ?? '').trim().replace(/\s+/g, ' ').toLowerCase() === wanted);
+}
+
 export interface RecordsRange {
   from: string;
   to: string;

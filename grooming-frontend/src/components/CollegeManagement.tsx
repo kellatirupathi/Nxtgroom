@@ -4,9 +4,12 @@ import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '.
 import ConfirmDialog from './ConfirmDialog';
 import InstituteFormDialog from './InstituteFormDialog';
 import { useToast } from './useToast';
+import { useLocation } from '../lib/useLocation';
+import { closeChildPath, dialogPath, dialogRouteFromPath, goToPath, openChildPath } from '../routes';
 import type { College } from '../types';
 
 const COLLEGES_PATH = '/api/v2/colleges';
+const LIST_PATH = '/settings/institutes';
 
 export default function CollegeManagement() {
   const cachedColleges = readStale<College[]>(COLLEGES_PATH);
@@ -14,6 +17,7 @@ export default function CollegeManagement() {
     Array.isArray(cachedColleges) ? cachedColleges : [],
   );
   const [loading, setLoading] = useState(!Array.isArray(cachedColleges));
+  const [fetched, setFetched] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -22,6 +26,7 @@ export default function CollegeManagement() {
   const [syncing, setSyncing] = useState(false);
   const hasRowsRef = useRef(colleges.length > 0);
   const toast = useToast();
+  const { pathname } = useLocation();
 
   const fetchColleges = useCallback(async () => {
     if (!hasRowsRef.current) setLoading(true);
@@ -35,6 +40,7 @@ export default function CollegeManagement() {
       if ((requestError as { status?: number })?.status !== 401) setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
       setLoading(false);
+      setFetched(true);
     }
   }, []);
 
@@ -42,17 +48,58 @@ export default function CollegeManagement() {
     fetchColleges();
   }, [fetchColleges]);
 
-  const openCreateModal = () => {
+  const prepareCreateModal = () => {
     setEditing(null);
     setError('');
     setShowModal(true);
   };
 
-  const openEditModal = (college: College) => {
+  const prepareEditModal = (college: College) => {
     setEditing(college);
     setError('');
     setShowModal(true);
   };
+
+  const openCreateModal = () => {
+    prepareCreateModal();
+    openChildPath(dialogPath(LIST_PATH, { view: 'new' }));
+  };
+
+  const openEditModal = (college: College) => {
+    prepareEditModal(college);
+    openChildPath(dialogPath(LIST_PATH, { view: 'edit', id: String(college._id) }));
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    closeChildPath(LIST_PATH);
+  };
+
+  const latest = useRef({ showModal, editing, colleges });
+  useEffect(() => {
+    latest.current = { showModal, editing, colleges };
+  });
+
+  useEffect(() => {
+    const current = latest.current;
+    const route = dialogRouteFromPath(pathname, LIST_PATH);
+    if (route.view === 'new') {
+      if (!current.showModal || current.editing) prepareCreateModal();
+      return;
+    }
+    if (route.view === 'edit') {
+      if (current.showModal && String(current.editing?._id) === route.id) return;
+      const target = current.colleges.find((college) => String(college._id) === route.id);
+      if (target) {
+        prepareEditModal(target);
+      } else if (fetched) {
+        setShowModal(false);
+        goToPath(LIST_PATH, { replace: true });
+      }
+      return;
+    }
+    if (current.showModal) setShowModal(false);
+  }, [pathname, fetched]);
 
   const handleSaved = (saved: College, wasEdit: boolean) => {
     if (wasEdit) {
@@ -62,7 +109,7 @@ export default function CollegeManagement() {
     } else if (saved._id) {
       setColleges((current) => [...current, saved]);
     }
-    setShowModal(false);
+    closeModal();
     setEditing(null);
   };
 
@@ -166,7 +213,7 @@ export default function CollegeManagement() {
       <InstituteFormDialog
         open={showModal}
         college={editing}
-        onClose={() => setShowModal(false)}
+        onClose={closeModal}
         onSaved={handleSaved}
       />
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, RefreshCw, Search, TriangleAlert } from 'lucide-react';
 import { apiFetch, apiJson, invalidateCache } from '../api';
 import { useToast } from './useToast';
+import { readQueryParam, writeQueryParams } from '../routes';
 
 const SYNC_PATH = '/api/v2/settings/instructor-sync';
 
@@ -35,7 +36,11 @@ export default function InstructorSyncPanel() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => readQueryParam('q'));
+
+  useEffect(() => {
+    writeQueryParams({ q: search || null });
+  }, [search]);
   const toast = useToast();
 
   const load = useCallback(async () => {

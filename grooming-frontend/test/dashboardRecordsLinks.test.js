@@ -35,5 +35,5 @@ test('the Non-compliant tile and every result row on the Dashboard link to Daily
   assert.ok(dashboard.includes('<StatusCard data={data} onSelect={showInRecords} />'));
   assert.match(dashboard, /<button\s+type="button"\s+onClick=\{\(\) => onSelect\(row\.key\)\}/);
   const table = read('components/DailyAttendanceTable.tsx');
-  assert.ok(table.includes('useState(() => loadRecordsFilters(undefined, today))'), 'Daily Records starts from the saved filters');
+  assert.ok(table.includes('useState(() => recordsFiltersFromQuery(window.location.search, today) ?? loadRecordsFilters(undefined, today))'), 'Daily Records starts from the address, then the saved filters');
 });
