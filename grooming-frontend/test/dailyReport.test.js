@@ -161,7 +161,11 @@ test('Settings has a Reports tab listing each day with its counts and report lin
   assert.match(tab, /return `\$\{DAYS_PATH\}\/\$\{encodeURIComponent\(date\)\}\/campuses`;/);
   assert.equal((tab.match(/<ReportLink url=\{day\.report_url\}/g) || []).length, 2, 'the overall report stays on every day');
   assert.equal((tab.match(/\{day\.report_url && <CampusToggle /g) || []).length, 2, 'with Campuses beside it');
-  assert.ok(tab.includes("writeQueryParams({ month: month === latestMonth ? null : month, campuses: openDay || null });"));
+  assert.ok(tab.includes("const openCampuses = (date: string) => openChildPath(currentPathWith({ campuses: date }));"), 'Campuses opens a popup, kept in the address');
+  assert.ok(tab.includes("const closeCampuses = () => closeChildPath(currentPathWith({ campuses: null }));"));
+  assert.match(tab, /role="dialog"\s*aria-modal="true"\s*aria-labelledby="campus-reports-title"/);
+  assert.match(tab, /\{openDay && \(\s*<CampusReportsModal/);
+  assert.ok(!tab.includes('<Fragment'), 'no longer opens under the row');
 
   const settings = read('src/components/DailyReportSettings.tsx');
   assert.ok(settings.includes("Also send each institute's report"));
