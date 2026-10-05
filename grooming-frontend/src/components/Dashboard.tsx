@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { apiFetch } from '../api';
+import { recordsFiltersForStatus, saveRecordsFilters } from '../attendanceFilters';
 import BrandedLoader from './BrandedLoader';
 import {
   complianceChange,
@@ -304,7 +305,7 @@ function TrendChart({ trend }: { trend: DashboardTrendDay[] }) {
   );
 }
 
-function StatusCard({ data }: { data: DashboardData }) {
+function StatusCard({ data, onSelect }: { data: DashboardData; onSelect: (status: DashboardStatusKey) => void }) {
   const [hover, setHover] = useState<DashboardStatusKey | null>(null);
   const total = data.status_breakdown.reduce((sum, row) => sum + row.count, 0);
   const segments = data.status_breakdown.filter((row) => row.count > 0);
@@ -340,15 +341,23 @@ function StatusCard({ data }: { data: DashboardData }) {
           const meta = STATUS_META[row.key];
           const Icon = meta.icon;
           return (
-            <li key={row.key} className="flex items-center justify-between gap-3 py-2.5">
-              <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold ${meta.badge}`}>
-                <Icon size={12} aria-hidden="true" />{meta.label}
-              </span>
-              <span className="flex items-center gap-2 text-sm tabular-nums">
-                <span aria-hidden="true" className="h-2 w-2 rounded-sm" style={{ background: meta.color }} />
-                <b className="text-slate-800">{formatCount(row.count)}</b>
-                <span className="w-14 text-right text-slate-400">{total ? formatPercent((row.count / total) * 100) : '—'}</span>
-              </span>
+            <li key={row.key}>
+              <button
+                type="button"
+                onClick={() => onSelect(row.key)}
+                title={`Show today's ${meta.label.toLowerCase()} check-ins in Daily Records`}
+                aria-label={`${meta.label}: ${formatCount(row.count)}. Show them in Daily Records`}
+                className="group flex w-full items-center justify-between gap-3 rounded-md px-1 py-2.5 text-left hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-bold group-hover:underline ${meta.badge}`}>
+                  <Icon size={12} aria-hidden="true" />{meta.label}
+                </span>
+                <span className="flex items-center gap-2 text-sm tabular-nums">
+                  <span aria-hidden="true" className="h-2 w-2 rounded-sm" style={{ background: meta.color }} />
+                  <b className="text-slate-800">{formatCount(row.count)}</b>
+                  <span className="w-14 text-right text-slate-400">{total ? formatPercent((row.count / total) * 100) : '—'}</span>
+                </span>
+              </button>
             </li>
           );
         })}
@@ -534,6 +543,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   }
 
   const { summary } = data;
+  const showInRecords = (status: DashboardStatusKey) => {
+    saveRecordsFilters(recordsFiltersForStatus(status));
+    onNavigate('daily-records');
+  };
   return (
     <section className="mx-auto flex w-full max-w-[1400px] flex-col gap-5 pb-2" aria-labelledby="dashboard-title">
       {header}
@@ -569,7 +582,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <p className="mt-2 text-xs text-slate-500 tabular-nums">
             {summary.analysed ? `${formatPercent((summary.non_compliant / summary.analysed) * 100)} of analysed check-ins` : 'Nothing analysed yet today'}
           </p>
-          <TileLink onClick={() => onNavigate('daily-records')}>View in Daily Records</TileLink>
+          <TileLink onClick={() => showInRecords('non_compliant')}>View in Daily Records</TileLink>
         </KpiTile>
 
         <KpiTile label="Checked out" icon={LogOut} iconClass="text-slate-500">
@@ -584,7 +597,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <TrendChart trend={data.trend} />
-        <StatusCard data={data} />
+        <StatusCard data={data} onSelect={showInRecords} />
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">

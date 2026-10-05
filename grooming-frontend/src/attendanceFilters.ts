@@ -304,6 +304,10 @@ export function defaultRecordsFilters(today: string = localDateValue()): SavedRe
   return { preset: 'today', range: rangeForPreset('today', today), search: '', college: '', role: '', status: '', escalation: '' };
 }
 
+export function recordsFiltersForStatus(status: AttendanceStatus, today: string = localDateValue()): SavedRecordsFilters {
+  return { ...defaultRecordsFilters(today), status };
+}
+
 export function loadRecordsFilters(
   storage: Pick<Storage, 'getItem'> | null = tabStorage(),
   today: string = localDateValue(),
