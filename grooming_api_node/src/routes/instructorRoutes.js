@@ -29,6 +29,7 @@ import {
 } from "../services/instructorImport.js";
 import { RemoteFetchError } from "../services/remoteFetch.js";
 import { getConfigSettings } from "../services/configSettings.js";
+import { randomUUID } from "node:crypto";
 
 export const instructorRouter = Router();
 
@@ -131,6 +132,25 @@ export async function loadRecentInstructorFeedbacks(db, instructorIds) {
   ], { allowDiskUse: true }).toArray();
 }
 
+function duplicateKeyDetail(error) {
+  const fields = Object.keys(error?.keyPattern || error?.keyValue || {});
+  return fields.includes("instructor_user_id") || /instructor_user_id/.test(String(error?.message || ""))
+    ? "Instructor User ID exists"
+    : "Instructor Employee ID exists";
+}
+
+export function generateInstructorUserId() {
+  return randomUUID().replace(/-/g, "");
+}
+
+async function newInstructorUserId(db, session) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = generateInstructorUserId();
+    if (!await db.collection("instructors").findOne({ instructor_user_id: candidate }, { session })) return candidate;
+  }
+  throw new Error("Could not generate a unique instructor user ID");
+}
+
 export async function createInstructorGuarded(
   db,
   input,
@@ -148,6 +168,14 @@ export async function createInstructorGuarded(
     )) {
       return { outcome: "duplicate_employee_id" };
     }
+    let userId = input.instructor_user_id;
+    if (userId) {
+      if (await db.collection("instructors").findOne({ instructor_user_id: userId }, { session })) {
+        return { outcome: "duplicate_user_id" };
+      }
+    } else {
+      userId = await newInstructorUserId(db, session);
+    }
     const collegeGuard = await db.collection("colleges").updateOne(
       activeFilter({ _id: college._id }),
       { $inc: { [COLLEGE_ASSIGNMENT_GUARD]: 1 } },
@@ -158,6 +186,7 @@ export async function createInstructorGuarded(
     const now = new Date();
     const instructor = createDocument({
       ...input,
+      instructor_user_id: userId,
       college_id: String(college._id),
       created_at: now,
       updated_at: now,
@@ -206,6 +235,18 @@ export async function updateInstructorGuarded(
     );
     if (duplicate) return { outcome: "duplicate_employee_id" };
 
+    const { instructor_user_id: requestedUserId, ...fields } = input;
+    const userIdUpdate = {};
+    if (requestedUserId && requestedUserId !== existing.instructor_user_id) {
+      if (existing.instructor_user_id) return { outcome: "user_id_locked" };
+      const taken = await db.collection("instructors").findOne(
+        { instructor_user_id: requestedUserId, _id: { $ne: existing._id } },
+        { session }
+      );
+      if (taken) return { outcome: "duplicate_user_id" };
+      userIdUpdate.instructor_user_id = requestedUserId;
+    }
+
     const collegeGuard = await db.collection("colleges").updateOne(
       activeFilter({ _id: college._id }),
       { $inc: { [COLLEGE_ASSIGNMENT_GUARD]: 1 } },
@@ -215,7 +256,7 @@ export async function updateInstructorGuarded(
 
     const result = await db.collection("instructors").updateOne(
       activeFilter({ _id: existing._id }),
-      { $set: { ...input, college_id: String(college._id), updated_at: new Date() } },
+      { $set: { ...fields, ...userIdUpdate, college_id: String(college._id), updated_at: new Date() } },
       { session }
     );
     return result.matchedCount
@@ -265,7 +306,7 @@ instructorRouter.post(
       result = await createInstructorGuarded(db, req.validatedBody);
     } catch (error) {
       if (error.code === 11000) {
-        return res.status(400).json({ detail: "Instructor Employee ID exists" });
+        return res.status(400).json({ detail: duplicateKeyDetail(error) });
       }
       throw error;
     }
@@ -275,9 +316,13 @@ instructorRouter.post(
     if (result.outcome === "duplicate_employee_id") {
       return res.status(400).json({ detail: "Instructor Employee ID exists" });
     }
+    if (result.outcome === "duplicate_user_id") {
+      return res.status(400).json({ detail: "Instructor User ID exists" });
+    }
     return res.status(201).json({
       message: "Instructor created successfully",
       id: result.instructor._id,
+      instructor_user_id: result.instructor.instructor_user_id,
     });
   })
 );
@@ -443,7 +488,7 @@ instructorRouter.put(
       );
     } catch (error) {
       if (error.code === 11000) {
-        return res.status(400).json({ detail: "Instructor Employee ID exists" });
+        return res.status(400).json({ detail: duplicateKeyDetail(error) });
       }
       throw error;
     }
@@ -460,6 +505,12 @@ instructorRouter.put(
     }
     if (result.outcome === "duplicate_employee_id") {
       return res.status(400).json({ detail: "Instructor Employee ID exists" });
+    }
+    if (result.outcome === "duplicate_user_id") {
+      return res.status(400).json({ detail: "Instructor User ID exists" });
+    }
+    if (result.outcome === "user_id_locked") {
+      return res.status(400).json({ detail: "An instructor's User ID cannot be changed once it is set" });
     }
     return res.json({ message: "Instructor updated successfully" });
   })

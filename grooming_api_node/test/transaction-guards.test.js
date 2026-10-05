@@ -209,6 +209,7 @@ test("instructor creation guards its active college assignment transaction", asy
 test("guarded instructor creation without an employee id does not collide with others lacking one", async () => {
   const session = { id: "create-no-id-session" };
   let employeeLookups = 0;
+  let userIdLookups = 0;
   let inserted = null;
   const db = {
     collection(name) {
@@ -217,7 +218,11 @@ test("guarded instructor creation without an employee id does not collide with o
         updateOne: async () => ({ matchedCount: 1, modifiedCount: 1 }),
       };
       if (name === "instructors") return {
-        findOne: async () => {
+        findOne: async (filter) => {
+          if ("instructor_user_id" in filter) {
+            userIdLookups += 1;
+            return null;
+          }
           employeeLookups += 1;
           return { _id: "synced-without-id", employee_id: null };
         },
@@ -244,6 +249,8 @@ test("guarded instructor creation without an employee id does not collide with o
   assert.equal(result.outcome, "created");
   assert.equal(employeeLookups, 0);
   assert.equal(inserted.name, "No Id Instructor");
+  assert.match(inserted.instructor_user_id, /^[0-9a-f]{32}$/);
+  assert.equal(userIdLookups, 1);
 });
 
 test("guarded instructor deletion refuses an open attendance before mutating profile", async () => {

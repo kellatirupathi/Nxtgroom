@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { MoreVertical, Pencil, KeyRound, ShieldCheck, Trash2 } from 'lucide-react';
+import { CalendarDays, MoreVertical, Pencil, KeyRound, ShieldCheck, Trash2 } from 'lucide-react';
 
 export interface RowAction {
   key: string;
   label: string;
-  icon: 'edit' | 'password' | 'permissions' | 'delete';
+  icon: 'records' | 'edit' | 'password' | 'permissions' | 'delete';
   destructive?: boolean;
   disabled?: boolean;
   onSelect: () => void;
 }
 
-const ICONS = { edit: Pencil, password: KeyRound, permissions: ShieldCheck, delete: Trash2 } as const;
+const ICONS = { records: CalendarDays, edit: Pencil, password: KeyRound, permissions: ShieldCheck, delete: Trash2 } as const;
 
 interface RowActionsMenuProps {
   label: string;

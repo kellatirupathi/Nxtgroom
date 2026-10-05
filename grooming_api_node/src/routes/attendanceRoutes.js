@@ -1579,6 +1579,10 @@ attendanceRouter.get(
         defaultLimit: 200,
         maxLimit: 1000,
       });
+      if (req.query.instructor_id !== undefined
+        && (typeof req.query.instructor_id !== "string" || !req.query.instructor_id.trim() || req.query.instructor_id.length > 100)) {
+        throw new RangeError("instructor_id must be a single instructor id");
+      }
       if (req.query.updated_since !== undefined) {
         if (typeof req.query.updated_since !== "string" || req.query.updated_since.length > 40) {
           throw new RangeError("updated_since must be an ISO timestamp");
@@ -1598,6 +1602,7 @@ attendanceRouter.get(
       .find({
         ...(Object.keys(dateFilter).length ? { date: dateFilter } : {}),
         ...(updatedSince ? { updated_at: { $gt: updatedSince } } : {}),
+        ...(req.query.instructor_id ? { instructor_id: idMatch(req.query.instructor_id.trim()) } : {}),
         ...attendanceScope(req.currentUser),
         status: { $ne: "unidentified" },
       })

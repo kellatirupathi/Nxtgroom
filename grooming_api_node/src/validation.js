@@ -32,6 +32,10 @@ export const instructorSchema = z.object({
     (value) => (value === "" || value == null ? undefined : value),
     z.string().trim().max(50).optional()
   ),
+  instructor_user_id: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "") || value == null ? undefined : value,
+    z.string().trim().min(3).max(64).regex(/^[A-Za-z0-9_-]+$/, "User ID may use only letters, numbers, - and _").optional()
+  ),
   name: z.string().trim().min(2).max(120),
   role: z.string().trim().min(1).max(80),
   instructor_role: z.preprocess(

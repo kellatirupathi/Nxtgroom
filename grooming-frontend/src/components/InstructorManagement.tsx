@@ -4,6 +4,7 @@ import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, p
 import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
 import InstructorImportDialog from './InstructorImportDialog';
+import InstructorRecordsDialog, { type RecordsInstructor } from './InstructorRecordsDialog';
 import ReferencePhotoField from './ReferencePhotoField';
 import RowActionsMenu from './RowActionsMenu';
 import { instructorRoleOptions } from '../instructorRoles';
@@ -16,6 +17,7 @@ const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 interface InstructorForm {
   name: string;
   employee_id: string;
+  instructor_user_id: string;
   role: string;
   gender: string;
   college_id: string;
@@ -43,11 +45,14 @@ export default function InstructorManagement() {
   const [confirmTarget, setConfirmTarget] = useState<Instructor | null>(null);
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [recordsFor, setRecordsFor] = useState<RecordsInstructor | null>(null);
+  const [userIdLocked, setUserIdLocked] = useState(false);
   const toast = useToast();
 
   const [formData, setFormData] = useState<InstructorForm>({
     name: '',
     employee_id: '',
+    instructor_user_id: '',
     role: '',
     gender: '',
     college_id: '',
@@ -97,7 +102,7 @@ export default function InstructorManagement() {
     setSaving(true);
     try {
       const path = isEditMode ? `/api/v2/instructors/${encodeURIComponent(editingId as string)}` : '/api/v2/instructors';
-      const saved = await apiJson<{ id?: string }>(path, {
+      const saved = await apiJson<{ id?: string; instructor_user_id?: string }>(path, {
         method: isEditMode ? 'PUT' : 'POST',
         body: { ...formData, instructor_role: formData.role },
       });
@@ -111,7 +116,7 @@ export default function InstructorManagement() {
       } else if (saved?.id) {
         setInstructors((current) => [
           ...current,
-          { _id: saved.id as string, ...formData, daily_feedbacks: [], face_count: 0 },
+          { _id: saved.id as string, ...formData, instructor_user_id: saved.instructor_user_id || formData.instructor_user_id, daily_feedbacks: [], face_count: 0 },
         ]);
       }
 
@@ -170,7 +175,8 @@ export default function InstructorManagement() {
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingId(null);
-    setFormData({ name: '', employee_id: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
+    setFormData({ name: '', employee_id: '', instructor_user_id: '', role: '', gender: '', college_id: '', email: '', phone_no: '' });
+    setUserIdLocked(false);
     setPendingPhoto(null);
     setError('');
     setShowModal(true);
@@ -184,12 +190,14 @@ export default function InstructorManagement() {
     setFormData({
       name: ins.name,
       employee_id: ins.employee_id || '',
+      instructor_user_id: ins.instructor_user_id || '',
       role: ins.instructor_role || ins.role || '',
       gender: ins.gender ? String(ins.gender).toUpperCase() : '',
       college_id: ins.college_id,
       email: ins.email || '',
       phone_no: ins.phone_no || ''
     });
+    setUserIdLocked(Boolean(ins.instructor_user_id));
     setShowModal(true);
   };
 
@@ -212,6 +220,13 @@ export default function InstructorManagement() {
     ins.institute_name
     || colleges.find((college) => String(college._id) === String(ins.college_id))?.name
     || '';
+
+  const openRecords = (ins: Instructor) => setRecordsFor({
+    id: String(ins._id),
+    name: ins.name,
+    role: ins.instructor_role || ins.role,
+    institute: instituteFor(ins),
+  });
 
   const filteredInstructors = instructors.filter((ins) => {
     const term = search.trim().toLowerCase();
@@ -300,6 +315,7 @@ export default function InstructorManagement() {
                     <RowActionsMenu
                       label={`Actions for ${ins.name}`}
                       actions={[
+                        { key: 'records', label: 'Records', icon: 'records', onSelect: () => openRecords(ins) },
                         { key: 'edit', label: 'Edit', icon: 'edit', onSelect: () => openEditModal(ins) },
                         { key: 'delete', label: 'Delete', icon: 'delete', destructive: true, onSelect: () => setConfirmTarget(ins) },
                       ]}
@@ -399,6 +415,7 @@ export default function InstructorManagement() {
                         <RowActionsMenu
                           label={`Actions for ${ins.name}`}
                           actions={[
+                            { key: 'records', label: 'Records', icon: 'records', onSelect: () => openRecords(ins) },
                             { key: 'edit', label: 'Edit', icon: 'edit', onSelect: () => openEditModal(ins) },
                             { key: 'delete', label: 'Delete', icon: 'delete', destructive: true, onSelect: () => setConfirmTarget(ins) },
                           ]}
@@ -415,7 +432,7 @@ export default function InstructorManagement() {
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200" role="dialog" aria-modal="true" aria-labelledby="instructor-dialog-title">
-          <div className="bg-white rounded-md shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-md shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
               <h2 id="instructor-dialog-title" className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
                 <UserCog size={20} className="text-indigo-600" />
@@ -433,7 +450,7 @@ export default function InstructorManagement() {
             </div>
             
             <form onSubmit={handleCreateOrUpdate} className="p-6 overflow-y-auto space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Full Name</label>
                   <input required maxLength={120} placeholder="John Doe" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
@@ -441,6 +458,24 @@ export default function InstructorManagement() {
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Employee ID</label>
                   <input required maxLength={50} placeholder="EMP123" className="w-full rounded-md border border-slate-200 p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all" value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} />
+                </div>
+                <div>
+                  <label htmlFor="instructor-user-id" className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">User ID (Optional)</label>
+                  <input
+                    id="instructor-user-id"
+                    maxLength={64}
+                    pattern="[A-Za-z0-9_\-]{3,64}"
+                    title="3 to 64 letters, numbers, - or _"
+                    placeholder={isEditMode ? 'Not set' : 'Generated if left blank'}
+                    readOnly={userIdLocked}
+                    aria-describedby="instructor-user-id-hint"
+                    className={`w-full rounded-md border border-slate-200 p-3 text-sm outline-none transition-all ${userIdLocked ? 'bg-slate-50 text-slate-500 cursor-not-allowed' : 'focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'}`}
+                    value={formData.instructor_user_id}
+                    onChange={e => setFormData({...formData, instructor_user_id: e.target.value})}
+                  />
+                  <p id="instructor-user-id-hint" className="mt-1 text-[11px] text-slate-400">
+                    {userIdLocked ? 'Set once; it links this instructor to Sync Data.' : isEditMode ? 'Optional. Fixed once saved.' : 'A random User ID is created if left blank.'}
+                  </p>
                 </div>
               </div>
 
@@ -502,6 +537,10 @@ export default function InstructorManagement() {
             </form>
           </div>
         </div>
+      )}
+
+      {recordsFor && (
+        <InstructorRecordsDialog instructor={recordsFor} onClose={() => setRecordsFor(null)} />
       )}
 
       {showImport && (
