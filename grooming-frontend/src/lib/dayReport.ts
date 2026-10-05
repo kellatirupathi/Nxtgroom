@@ -22,6 +22,7 @@ export interface DayReportResponse {
   date_label: string;
   window_label: string;
   expires_at: string;
+  institute?: string | null;
   rows: DayRow[];
 }
 
@@ -72,16 +73,29 @@ export function dayReportCsv(rows: DayRow[]): string {
   return [header, ...rows.map((row) => COLUMNS.map(([, read]) => csvCell(read(row))).join(','))].join('\r\n');
 }
 
-export function dayReportFileName(dateLabel: string): string {
+function fileSlug(text: string): string {
+  return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+export function dayReportFileName(dateLabel: string, institute?: string | null): string {
   const [day, month, year] = String(dateLabel).split('/');
-  return year && month && day ? `daily-report-${year}-${month}-${day}.csv` : 'daily-report.csv';
+  const campus = institute ? fileSlug(institute) : '';
+  const prefix = campus ? `daily-report-${campus}` : 'daily-report';
+  return year && month && day ? `${prefix}-${year}-${month}-${day}.csv` : `${prefix}.csv`;
 }
 
 export function dayReportApiPath(reportUrl: string): string | null {
   try {
-    const match = new URL(reportUrl).pathname.match(/^\/daily-report\/(\d{2}-\d{2}-\d{4})\/([A-Za-z0-9_-]{16,128})\/?$/);
-    return match ? `/api/v2/reports/daily/${match[1]}/${match[2]}` : null;
+    const match = new URL(reportUrl).pathname.match(/^\/daily-report\/(\d{2}-\d{2}-\d{4})\/(?:([a-z0-9-]{1,80})\/)?([A-Za-z0-9_-]{16,128})\/?$/);
+    if (!match) return null;
+    return match[2] ? `/api/v2/reports/daily/${match[1]}/${match[2]}/${match[3]}` : `/api/v2/reports/daily/${match[1]}/${match[3]}`;
   } catch {
     return null;
   }
+}
+
+export function dayReportBasePath(date: string, token: string, campus?: string): string {
+  return campus
+    ? `/api/v2/reports/daily/${encodeURIComponent(date)}/${encodeURIComponent(campus)}/${encodeURIComponent(token)}`
+    : `/api/v2/reports/daily/${encodeURIComponent(date)}/${encodeURIComponent(token)}`;
 }

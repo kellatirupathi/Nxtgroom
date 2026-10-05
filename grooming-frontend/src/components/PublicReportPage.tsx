@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Clock, Image as ImageIcon, TriangleAlert, XCircle } from 'lucide-react';
+import { BadgeCheck, CheckCircle2, Clock, Image as ImageIcon, Mail, TriangleAlert, XCircle } from 'lucide-react';
 import { apiFetch } from '../api';
 import { formatAttendanceTime, localDateValue } from '../attendanceFilters';
 import GroomingReport from './GroomingReport';
@@ -15,8 +15,16 @@ interface PublicReportPageProps {
   half: 'checkin' | 'checkout';
 }
 
+interface ReportInstructor {
+  name: string;
+  role: string | null;
+  institute: string | null;
+  employee_id?: string | null;
+  email?: string | null;
+}
+
 interface DayResponse {
-  instructor: { name: string; role: string | null; institute: string | null };
+  instructor: ReportInstructor;
   date: string;
   attendance: {
     check_in_time: string | null;
@@ -43,7 +51,7 @@ interface WeekDay {
 }
 
 interface WeekResponse {
-  instructor: { name: string; role: string | null; institute: string | null };
+  instructor: ReportInstructor;
   week: {
     week_start: string;
     week_end: string;
@@ -198,6 +206,24 @@ export default function PublicReportPage({ token, kind, date, half }: PublicRepo
           <p className="mt-0.5 text-sm text-slate-500">
             {[instructor?.role, instructor?.institute].filter(Boolean).join(' · ') || '--'}
           </p>
+          {(instructor?.employee_id || instructor?.email) && (
+            <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+              {instructor?.employee_id && (
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <BadgeCheck size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                  <dt className="text-slate-500">Employee ID</dt>
+                  <dd className="font-semibold text-slate-700">{instructor.employee_id}</dd>
+                </div>
+              )}
+              {instructor?.email && (
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <Mail size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                  <dt className="sr-only">Email</dt>
+                  <dd className="min-w-0 break-all font-semibold text-slate-700">{instructor.email}</dd>
+                </div>
+              )}
+            </dl>
+          )}
           <p className="mt-3 text-sm font-semibold text-slate-700">
             {kind === 'day'
               ? formatDay(

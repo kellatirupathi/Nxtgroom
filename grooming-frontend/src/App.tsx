@@ -245,7 +245,7 @@ export default function App() {
   if (dailyReport) {
     return (
       <Suspense fallback={<BrandedLoader label="Loading report" />}>
-        <DailyReportPage date={dailyReport.date} token={dailyReport.token} />
+        <DailyReportPage date={dailyReport.date} token={dailyReport.token} campus={dailyReport.campus} />
       </Suspense>
     );
   }

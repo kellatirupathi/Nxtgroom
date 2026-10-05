@@ -16,6 +16,7 @@ import { getReportRecipients } from "../services/reportRecipients.js";
 import {
   buildFullDayReport,
   dailyReportPhotoKey,
+  findCampusReportDay,
   findDailyReportDay,
 } from "../services/dailyReport.js";
 import { deletePhoto } from "../services/photoStorage.js";
@@ -78,26 +79,67 @@ reportRouter.get(
       return res.status(404).json({ detail: "This report link is invalid or has expired." });
     }
     const report = await buildFullDayReport(db, day.date, { ensureTokens: true });
-    return res.json({
-      title: report.subject,
-      date_label: report.dateLabel,
-      window_label: report.windowLabel,
-      expires_at: day.expires_at,
-      rows: report.rows.map((row) => ({
-        attendance_id: row.attendanceId,
-        date: row.date,
-        name: row.name,
-        institute: row.institute,
-        status: row.status,
-        check_in: row.checkIn,
-        check_out: row.checkOut,
-        feedback: row.feedback,
-        has_checkin_photo: row.hasCheckinPhoto,
-        has_checkout_photo: row.hasCheckoutPhoto,
-        checkin_report_url: row.checkinReportUrl,
-        checkout_report_url: row.checkoutReportUrl,
-      })),
+    return res.json(dayReportResponse(report, day));
+  })
+);
+
+function dayReportResponse(report, link) {
+  return {
+    title: report.subject,
+    date_label: report.dateLabel,
+    window_label: report.windowLabel,
+    expires_at: link.expires_at,
+    ...(report.institute !== undefined ? { institute: report.institute } : {}),
+    rows: report.rows.map((row) => ({
+      attendance_id: row.attendanceId,
+      date: row.date,
+      name: row.name,
+      institute: row.institute,
+      status: row.status,
+      check_in: row.checkIn,
+      check_out: row.checkOut,
+      feedback: row.feedback,
+      has_checkin_photo: row.hasCheckinPhoto,
+      has_checkout_photo: row.hasCheckoutPhoto,
+      checkin_report_url: row.checkinReportUrl,
+      checkout_report_url: row.checkoutReportUrl,
+    })),
+  };
+}
+
+reportRouter.get(
+  "/daily/:date/:campus/:token",
+  publicReportLimiter,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const link = await findCampusReportDay(db, req.params.date, req.params.token);
+    if (!link) {
+      return res.status(404).json({ detail: "This report link is invalid or has expired." });
+    }
+    const report = await buildFullDayReport(db, link.date, { ensureTokens: true, collegeId: link.college_id });
+    return res.json(dayReportResponse(report, link));
+  })
+);
+
+reportRouter.get(
+  "/daily/:date/:campus/:token/photo/:attendanceId/:kind",
+  publicReportLimiter,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const link = await findCampusReportDay(db, req.params.date, req.params.token);
+    if (!link) {
+      return res.status(404).json({ detail: "This report link is invalid or has expired." });
+    }
+    if (!["checkin", "checkout"].includes(req.params.kind)) {
+      return res.status(400).json({ detail: "Invalid photo" });
+    }
+    const key = await dailyReportPhotoKey(db, link.date, req.params.attendanceId, req.params.kind, {
+      collegeId: link.college_id,
     });
+    if (!key) return res.status(404).json({ detail: "No photo was stored for this record." });
+    const url = await getPhotoUrl(key, { expiresIn: 900 });
+    if (!url) return res.status(503).json({ detail: "Photo storage is unavailable right now" });
+    return res.json({ url, expires_in: 900 });
   })
 );
 
@@ -120,6 +162,16 @@ reportRouter.get(
     return res.json({ url, expires_in: 900 });
   })
 );
+
+function reportInstructor(instructor) {
+  return {
+    name: instructor.name,
+    role: instructor.instructor_role || instructor.role || null,
+    institute: instructor.institute_name || null,
+    employee_id: instructor.employee_id || null,
+    email: instructor.email || null,
+  };
+}
 
 function monthKeyOf(dateKey) {
   return dateKey.slice(0, 7);
@@ -197,11 +249,7 @@ reportRouter.get(
     ]);
 
     return res.json({
-      instructor: {
-        name: instructor.name,
-        role: instructor.instructor_role || instructor.role || null,
-        institute: instructor.institute_name || null,
-      },
+      instructor: reportInstructor(instructor),
       week,
       month,
     });
@@ -246,11 +294,7 @@ reportRouter.get(
     );
 
     return res.json({
-      instructor: {
-        name: instructor.name,
-        role: instructor.instructor_role || instructor.role || null,
-        institute: instructor.institute_name || null,
-      },
+      instructor: reportInstructor(instructor),
       date,
       attendance: {
         check_in_time: record.check_in_time,

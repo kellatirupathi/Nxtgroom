@@ -22,6 +22,7 @@ const MINUTES = Array.from({ length: 60 }, (_, index) => index);
 
 interface DailyReportData {
   enabled: boolean;
+  campus_reports?: boolean;
   times: string[];
   emails: string[];
 }
@@ -44,6 +45,7 @@ export default function DailyReportSettings() {
   const [rows, setRows] = useState<TimeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingSwitch, setSavingSwitch] = useState(false);
+  const [savingCampus, setSavingCampus] = useState(false);
   const [savingTimes, setSavingTimes] = useState(false);
   const [email, setEmail] = useState('');
   const [adding, setAdding] = useState(false);
@@ -91,6 +93,28 @@ export default function DailyReportSettings() {
       });
     } finally {
       setSavingSwitch(false);
+    }
+  };
+
+  const setCampusReports = async (value: boolean) => {
+    const previous = data;
+    setData({ ...data, campus_reports: value });
+    setSavingCampus(true);
+    try {
+      const saved = await apiJson<DailyReportData>(PATH, { method: 'PUT', body: { campus_reports: value } });
+      setData((current) => ({ ...current, campus_reports: saved.campus_reports === true }));
+      toast.success(value ? 'Institute reports turned on' : 'Institute reports turned off', {
+        detail: value
+          ? 'Each institute with check-ins in a period also gets its own email at every send time.'
+          : 'Only the overall daily report is emailed.',
+      });
+    } catch (requestError) {
+      setData(previous);
+      toast.error('Could not save the setting', {
+        detail: requestError instanceof Error ? requestError.message : String(requestError),
+      });
+    } finally {
+      setSavingCampus(false);
     }
   };
 
@@ -196,6 +220,23 @@ export default function DailyReportSettings() {
             checked={data.enabled}
             disabled={loading || savingSwitch}
             onChange={(value: boolean) => void setEnabled(value)}
+          />
+        </div>
+
+        <div className="flex items-start justify-between gap-6 p-4">
+          <div className="min-w-0">
+            <label htmlFor="daily_report_campus_reports" className="block text-sm font-semibold text-slate-800">Also send each institute's report</label>
+            <p className="mt-0.5 text-sm text-slate-500">
+              At every send time, each institute with check-ins or check-outs in that period also gets its own email,
+              listing only its instructors and linking its own report. They go to the same recipients below, along with
+              the overall report.
+            </p>
+          </div>
+          <Toggle
+            id="daily_report_campus_reports"
+            checked={data.campus_reports === true}
+            disabled={loading || savingCampus}
+            onChange={(value: boolean) => void setCampusReports(value)}
           />
         </div>
 

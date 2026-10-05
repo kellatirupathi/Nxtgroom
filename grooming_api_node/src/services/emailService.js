@@ -626,10 +626,12 @@ function dailyStatusLabel(status) {
   return status === "non_compliant" ? "Non-compliant" : status === "compliant" ? "Compliant" : "-";
 }
 
-export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = [], pageUrl }) {
+export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = [], pageUrl, institute = "" }) {
   const count = rows.length;
   const countLabel = `${count} ${count === 1 ? "instructor" : "instructors"}`;
-  const intro = `Attendance & grooming check, ${dateLabel}, ${windowLabel}: ${countLabel}.`;
+  const intro = institute
+    ? `Attendance & grooming check, ${institute}, ${dateLabel}, ${windowLabel}: ${countLabel}.`
+    : `Attendance & grooming check, ${dateLabel}, ${windowLabel}: ${countLabel}.`;
   const body = count
     ? rows.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.institute || "-")}</td><td class="t">${escapeHtml(row.checkIn)}</td><td class="t">${escapeHtml(row.checkOut)}</td><td class="t" style="color:${row.status === "non_compliant" ? "#b91c1c" : "#15803d"};font-weight:700">${escapeHtml(dailyStatusLabel(row.status))}</td><td>${row.points.map(escapeHtml).join("<br>")}</td><td>${row.reportUrl ? `<a href="${escapeHtml(row.reportUrl)}" style="color:#2563eb">Report</a>` : "-"}</td></tr>`).join("\n")
     : `<tr><td colspan="7">No check-ins or check-outs between ${escapeHtml(windowLabel)}.</td></tr>`;

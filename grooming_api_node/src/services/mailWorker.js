@@ -8,7 +8,15 @@ import {
   sendPasswordResetEmail,
   sendWeeklyReportEmail,
 } from "./emailService.js";
-import { buildDailyReportForEmail, dailyReportDayUrl, ensureDailyReportDay } from "./dailyReport.js";
+import {
+  buildDailyReportForEmail,
+  campusReportUrl,
+  dailyReportDayUrl,
+  dailyReportSubject,
+  ensureCampusReportDay,
+  ensureDailyReportDay,
+} from "./dailyReport.js";
+import { idMatch } from "../middleware/auth.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { createIdleBackoff, createWakeSignal } from "./workerPacing.js";
 import { openSecret } from "./secretBox.js";
@@ -23,6 +31,7 @@ const SUPPORTED_TYPES = new Set([
   "grooming_alert",
   "grooming_escalation",
   "daily_report",
+  "daily_report_campus",
 ]);
 
 export function canonicalReportUrl(reportUrl) {
@@ -125,8 +134,33 @@ async function deliverDailyReport(db, job) {
   return sendDailyReportEmail(job.to_email, { ...report, pageUrl: dailyReportDayUrl(day) });
 }
 
+async function deliverCampusDailyReport(db, job) {
+  const runId = job.run_id || job.payload?.run_id;
+  const run = runId ? await getDeliveryRun(db, runId) : null;
+  if (!run) {
+    throw Object.assign(new Error("Daily report run not found"), { code: "DAILY_REPORT_RUN_MISSING" });
+  }
+  const collegeId = String(job.payload?.college_id || "");
+  const college = collegeId
+    ? await db.collection("colleges").findOne({ _id: idMatch(collegeId) }, { projection: { name: 1 } })
+    : null;
+  if (!college) {
+    throw Object.assign(new Error("Institute not found"), { code: "DAILY_REPORT_CAMPUS_MISSING" });
+  }
+  const report = await buildDailyReportForEmail(db, run);
+  const link = await ensureCampusReportDay(db, run.date, college);
+  return sendDailyReportEmail(job.to_email, {
+    ...report,
+    subject: dailyReportSubject(run.date, college.name),
+    institute: college.name,
+    rows: report.rows.filter((row) => row.collegeId === String(college._id)),
+    pageUrl: campusReportUrl(link),
+  });
+}
+
 async function deliver(db, job) {
   if (job.type === "daily_report") return deliverDailyReport(db, job);
+  if (job.type === "daily_report_campus") return deliverCampusDailyReport(db, job);
   if (job.type === "password_reset") return sendPasswordResetEmail(job.to_email, passwordResetPayload(job.payload));
   if (job.type === "weekly_report") return sendWeeklyReportEmail(job.to_email, deliveryPayload(job));
   if (job.type === "grooming_alert") return sendGroomingAlertEmail(job.to_email, deliveryPayload(job));

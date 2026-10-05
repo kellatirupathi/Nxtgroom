@@ -10,13 +10,18 @@ const {
   buildDailyReport,
   buildDailyReportForEmail,
   buildFullDayReport,
+  campusReportUrl,
+  campusSlug,
+  dailyReportCampuses,
   dailyReportDayPath,
   dailyReportDays,
   dailyReportPhotoKey,
   dayCountsPipeline,
   dailyReportSubject,
   dueDailyReports,
+  ensureCampusReportDay,
   ensureDailyReportDay,
+  findCampusReportDay,
   findDailyReportDay,
   getDailyReportSettings,
   normaliseTimes,
@@ -382,10 +387,10 @@ test("names are escaped, and an empty period still sends a clear email", () => {
 
 test("the switch, the times and the recipients are saved, and the recipients are their own list", async () => {
   const db = memoryDb({ app_settings: [{ _id: "rp_recipients", emails: ["rp@nxtwave.co.in"] }] });
-  assert.deepEqual(await getDailyReportSettings(db), { enabled: false, times: [], emails: [], schedule_changed_at: null });
+  assert.deepEqual(await getDailyReportSettings(db), { enabled: false, campus_reports: false, times: [], emails: [], schedule_changed_at: null });
 
   const saved = await saveDailyReportSchedule(db, { enabled: true, times: ["18:30", "13:00"] }, "admin@x");
-  assert.deepEqual(saved, { ok: true, settings: { enabled: true, times: ["13:00", "18:30"], emails: [] } });
+  assert.deepEqual(saved, { ok: true, settings: { enabled: true, campus_reports: false, times: ["13:00", "18:30"], emails: [] } });
   const changedAt = (await getDailyReportSettings(db)).schedule_changed_at;
   assert.ok(changedAt instanceof Date);
 
@@ -599,4 +604,138 @@ test("the settings, the public page, the mail worker and the scheduler are wired
   assert.match(mail, /pageUrl: dailyReportDayUrl\(day\)/, "See all reports opens the whole day");
   const server = await readFile(new URL("../server.js", import.meta.url), "utf8");
   assert.match(server, /startMailWorker\(db\),\s*startDailyReportScheduler\(db\),/);
+});
+
+test("each campus has its own link per day, named after the campus, for 30 days", async () => {
+  assert.equal(campusSlug("NIAT Hyderabad"), "niat-hyderabad");
+  assert.equal(campusSlug("Aditya Engineering College (A) – Surampalem"), "aditya-engineering-college-a-surampalem");
+  assert.equal(campusSlug("  "), "campus");
+  const db = fixtureDb();
+  const niat = { _id: "c1", name: "NIAT Hyderabad" };
+  const first = await ensureCampusReportDay(db, "2026-09-30", niat, ist(13, 0));
+  const again = await ensureCampusReportDay(db, "2026-09-30", niat, ist(18, 30));
+  assert.equal(again.link_token, first.link_token, "one link per campus per day");
+  assert.match(first.link_token, UUID);
+  assert.equal(campusReportUrl(first), `https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/niat-hyderabad/${first.link_token}`);
+  const other = await ensureCampusReportDay(db, "2026-09-30", { _id: "c2", name: "Training Institute Bengaluru" }, ist(13, 0));
+  assert.notEqual(other.link_token, first.link_token, "each campus is different");
+
+  const at = ist(20, 0);
+  assert.equal((await findCampusReportDay(db, "30-09-2026", first.link_token, at)).college_id, "c1");
+  assert.equal((await findCampusReportDay(db, "30-09-2026", other.link_token, at)).college_id, "c2");
+  assert.equal(await findCampusReportDay(db, "30-09-2026", `${first.link_token.slice(0, -1)}x`, at), null, "wrong secret");
+  assert.equal(await findCampusReportDay(db, "01-10-2026", first.link_token, at), null, "another day");
+  const day = await ensureDailyReportDay(db, "2026-09-30", ist(13, 0));
+  assert.equal(await findCampusReportDay(db, "30-09-2026", day.link_token, at), null, "the overall link is not a campus link");
+  assert.equal(await findDailyReportDay(db, "30-09-2026", first.link_token, at), null, "nor the other way round");
+  assert.equal(await findCampusReportDay(db, "30-09-2026", first.link_token, ist(0, 1, 31)), null, "expired after 30 days");
+
+  const renamed = await ensureCampusReportDay(db, "2026-09-30", { _id: "c1", name: "NIAT Hyderabad Campus" }, ist(19, 0));
+  assert.equal(renamed.link_token, first.link_token, "a renamed campus keeps its link");
+  assert.match(campusReportUrl(renamed), /\/daily-report\/30-09-2026\/niat-hyderabad-campus\//);
+  assert.ok(await findCampusReportDay(db, "30-09-2026", first.link_token, at));
+});
+
+test("a campus report lists that campus only and names it; the overall report is unchanged", async () => {
+  const db = fixtureDb();
+  const overall = await buildFullDayReport(db, "2026-09-30", { ensureTokens: true });
+  assert.equal(overall.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
+  assert.ok(!("institute" in overall));
+  assert.equal(overall.rows.length, 5);
+
+  const niat = await buildFullDayReport(db, "2026-09-30", { ensureTokens: true, collegeId: "c1" });
+  assert.equal(niat.institute, "NIAT Hyderabad");
+  assert.equal(niat.subject, "Daily report_Attendance & Grooming_Check_NIAT Hyderabad_30/09/2026");
+  assert.deepEqual(niat.rows.map((row) => row.name), ["Asha P", "Ravi Teja", "Meena", "Anil"]);
+  assert.ok(niat.rows.every((row) => row.institute === "NIAT Hyderabad"));
+
+  const bengaluru = await buildFullDayReport(db, "2026-09-30", { collegeId: "c2" });
+  assert.deepEqual(bengaluru.rows.map((row) => row.name), ["Kiran"], "placed by the instructor when the record has no campus");
+  assert.equal(bengaluru.institute, "Training Institute Bengaluru");
+
+  const quiet = await buildFullDayReport(db, "2026-09-30", { collegeId: "c9" });
+  assert.deepEqual(quiet.rows, []);
+});
+
+test("the Reports tab lists each campus that day with its counts and link", async () => {
+  const db = fixtureDb();
+  const campuses = await dailyReportCampuses(db, "2026-09-30", ist(20, 0));
+  assert.deepEqual(campuses.map(({ report_url: url, ...rest }) => rest), [
+    { college_id: "c1", institute: "NIAT Hyderabad", checkins: 4, checkouts: 2, not_checked_out: 2 },
+    { college_id: "c2", institute: "Training Institute Bengaluru", checkins: 1, checkouts: 0, not_checked_out: 1 },
+  ]);
+  assert.match(campuses[0].report_url, /^https:\/\/nxtgroom-xi\.vercel\.app\/daily-report\/30-09-2026\/niat-hyderabad\/[0-9a-f-]{36}$/);
+  const again = await dailyReportCampuses(db, "2026-09-30", ist(20, 5));
+  assert.equal(again[0].report_url, campuses[0].report_url, "the same link on every refresh");
+  assert.deepEqual(await dailyReportCampuses(db, "2026-09-26", ist(20, 0)), [], "a day with no check-ins");
+  await assert.rejects(dailyReportCampuses(db, "30-09-2026", ist(20, 0)), /date must be YYYY-MM-DD/);
+});
+
+test("a campus page's photos are its own campus's sessions only", async () => {
+  const db = fixtureDb();
+  assert.equal(await dailyReportPhotoKey(db, "2026-09-30", "a-ravi", "checkin", { collegeId: "c1" }), "photos/ravi-in.jpg");
+  assert.equal(await dailyReportPhotoKey(db, "2026-09-30", "a-ravi", "checkin", { collegeId: "c2" }), null, "another campus's photo");
+  assert.equal(await dailyReportPhotoKey(db, "2026-09-30", "a-ravi", "checkout"), "photos/ravi-out.jpg", "the overall page sees every campus");
+});
+
+test("with the campus switch on, each campus in the period also gets its own email to every recipient", async () => {
+  const db = schedulerDb();
+  db.docs("colleges").push(...colleges.map((college) => ({ ...college })));
+  db.docs("app_settings")[0].campus_reports = true;
+  assert.deepEqual(await runDueDailyReports(db, ist(13, 0)), ["daily-report:2026-09-30:13:00"]);
+  const run = db.docs("report_delivery_runs").find((doc) => doc.type === "daily_report");
+  assert.deepEqual(run.campus_ids, ["c1"], "only campuses with someone in the email that period");
+  assert.equal(run.queued, 4, "two overall and two campus emails");
+  const jobs = db.docs("mail_jobs");
+  assert.equal(jobs.filter((job) => job.type === "daily_report").length, 2, "the overall email is unchanged");
+  const campusJobs = jobs.filter((job) => job.type === "daily_report_campus");
+  assert.deepEqual(campusJobs.map((job) => job.to_email).sort(), ["head@nxtwave.co.in", "ops@nxtwave.co.in"]);
+  assert.ok(campusJobs.every((job) => job.payload.college_id === "c1" && job.payload.run_id === run._id && job.run_id === run._id));
+
+  delete run.jobs_queued_at;
+  await runDueDailyReports(db, ist(13, 5));
+  assert.equal(db.docs("mail_jobs").length, 4, "a restart does not send twice");
+
+  const off = schedulerDb();
+  await runDueDailyReports(off, ist(13, 0));
+  assert.ok(off.docs("mail_jobs").every((job) => job.type === "daily_report"), "off by default");
+  assert.ok(!("campus_ids" in off.docs("report_delivery_runs").find((doc) => doc.type === "daily_report")));
+});
+
+test("the campus switch is saved with the schedule and does not move the send times", async () => {
+  const db = memoryDb();
+  await saveDailyReportSchedule(db, { enabled: true, times: ["13:00"] }, "admin@x");
+  const changedAt = (await getDailyReportSettings(db)).schedule_changed_at;
+  const saved = await saveDailyReportSchedule(db, { campus_reports: true }, "admin@x");
+  assert.equal(saved.settings.campus_reports, true);
+  assert.equal((await getDailyReportSettings(db)).schedule_changed_at.getTime(), changedAt.getTime());
+  assert.equal((await saveDailyReportSchedule(db, { campus_reports: "yes" })).ok, false);
+});
+
+test("a campus email names the campus and links its own page", () => {
+  const email = buildDailyReportEmail({
+    subject: "Daily report_Attendance & Grooming_Check_NIAT Hyderabad_30/09/2026",
+    institute: "NIAT Hyderabad",
+    dateLabel: "30/09/2026",
+    windowLabel: "12:00 AM to 01:00 PM",
+    rows: [],
+    pageUrl: "https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/niat-hyderabad/abc",
+  });
+  assert.match(email.text, /^Attendance & grooming check, NIAT Hyderabad, 30\/09\/2026, 12:00 AM to 01:00 PM: 0 instructors\./);
+  assert.ok(email.html.includes('href="https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/niat-hyderabad/abc"'));
+});
+
+test("the campus page, its photos, the campus list and the campus emails are wired in", async () => {
+  const reports = (await readFile(new URL("../src/routes/reportRoutes.js", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
+  assert.ok(reports.includes('"/daily/:date/:campus/:token",\n  publicReportLimiter,'));
+  assert.ok(reports.includes('"/daily/:date/:campus/:token/photo/:attendanceId/:kind",\n  publicReportLimiter,'));
+  assert.ok(reports.includes("employee_id: instructor.employee_id || null,"), "the instructor report shows the employee ID");
+  assert.ok(reports.includes("email: instructor.email || null,"), "and the email");
+  const admin = (await readFile(new URL("../src/routes/adminRoutes.js", import.meta.url), "utf8")).replaceAll("\r\n", "\n");
+  assert.ok(admin.includes('adminRouter.get(\n  "/settings/daily-report/days/:date/campuses",\n  requireSuperAdmin'));
+  const mail = await readFile(new URL("../src/services/mailWorker.js", import.meta.url), "utf8");
+  assert.match(mail, /"daily_report_campus",/);
+  assert.match(mail, /if \(job\.type === "daily_report_campus"\) return deliverCampusDailyReport\(db, job\);/);
+  assert.match(mail, /rows: report\.rows\.filter\(\(row\) => row\.collegeId === String\(college\._id\)\),/);
+  assert.match(mail, /pageUrl: campusReportUrl\(link\),/);
 });

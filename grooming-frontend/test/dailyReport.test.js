@@ -15,6 +15,7 @@ import {
   DAY_STATUS_OPTIONS,
   dayInstitutes,
   dayReportApiPath,
+  dayReportBasePath,
   dayReportCsv,
   dayReportFileName,
   filterDayRows,
@@ -60,7 +61,13 @@ test('the full-day link is recognised, and nothing else is', () => {
   assert.equal(at('/daily-report/30-09-2026/Abc123Abc123Abc123/')?.date, '30-09-2026');
   assert.equal(at('/daily-report/30-09-2026/short'), null);
   assert.equal(at('/daily-report/2026-09-30/Abc123Abc123Abc123'), null);
-  assert.equal(at('/daily-report/30-09-2026/1-00-pm/Abc123Abc123Abc123'), null);
+  assert.deepEqual(at('/daily-report/30-09-2026/niat-hyderabad/Abc123Abc123Abc123'), {
+    date: '30-09-2026',
+    campus: 'niat-hyderabad',
+    token: 'Abc123Abc123Abc123',
+  }, 'a campus report carries the campus name');
+  assert.equal(at('/daily-report/30-09-2026/NIAT Hyderabad/Abc123Abc123Abc123'), null);
+  assert.equal(at('/daily-report/30-09-2026/a/b/Abc123Abc123Abc123'), null);
   assert.equal(at('/daily-records'), null);
 });
 
@@ -70,13 +77,15 @@ test('the page opens before the sign-in gate and never rewrites its own address'
   assert.equal((app.match(/publicReport, dailyReport, resetToken\]\);/g) || []).length, 3);
   const page = app.indexOf('if (dailyReport) {');
   assert.ok(page > 0 && page < app.indexOf('if (!session.token)'), 'rendered before the sign-in screen');
-  assert.match(app, /<DailyReportPage date=\{dailyReport\.date\} token=\{dailyReport\.token\} \/>/);
+  assert.match(app, /<DailyReportPage date=\{dailyReport\.date\} token=\{dailyReport\.token\} campus=\{dailyReport\.campus\} \/>/);
 });
 
 test('the full-day page has the asked-for columns, two photo icons and two report icons', () => {
   const page = read('src/components/DailyReportPage.tsx');
-  assert.match(page, /apiFetch<DayReportResponse>\(path, \{ auth: false \}\)/);
-  assert.match(page, /\/api\/v2\/reports\/daily\/\$\{encodeURIComponent\(date\)\}\/\$\{encodeURIComponent\(token\)\}`/);
+  assert.match(page, /apiFetch<DayReportResponse>\(basePath, \{ auth: false \}\)/);
+  assert.match(page, /const basePath = dayReportBasePath\(date, token, campus\);/);
+  assert.equal(dayReportBasePath('30-09-2026', 'Abc123Abc123Abc123'), '/api/v2/reports/daily/30-09-2026/Abc123Abc123Abc123');
+  assert.equal(dayReportBasePath('30-09-2026', 'Abc123Abc123Abc123', 'niat-hyderabad'), '/api/v2/reports/daily/30-09-2026/niat-hyderabad/Abc123Abc123Abc123');
   const headers = [...page.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
   assert.deepEqual(headers, ['Date', 'Instructor Name', 'Institute', 'Check-in Time', 'Check-out Time', 'Status', 'Feedback', 'Images', 'Reports']);
   assert.ok(page.includes('<td className="p-3"><StatusPill status={row.status} /></td>'));
@@ -88,7 +97,7 @@ test('the full-day page has the asked-for columns, two photo icons and two repor
   assert.match(page, /aria-label="Search instructor name"/);
   assert.match(page, /<option value="">All institutes<\/option>/);
   assert.match(page, /<option value="">All statuses<\/option>/);
-  assert.match(page, /saveCsvFile\(dayReportFileName\(report\.date_label\), dayReportCsv\(rows\)\)/);
+  assert.match(page, /saveCsvFile\(dayReportFileName\(report\.date_label, report\.institute\), dayReportCsv\(rows\)\)/);
   assert.match(page, /Export CSV/);
   assert.match(page, /title="Check-in photo"[\s\S]*onOpen\(\{ row, kind: 'checkin' \}\)/);
   assert.match(page, /title="Check-out photo"[\s\S]*onOpen\(\{ row, kind: 'checkout' \}\)/);
@@ -141,13 +150,23 @@ test('Settings has a Reports tab listing each day with its counts and report lin
   const tab = read('src/components/ReportsTab.tsx');
   assert.match(tab, /const DAYS_PATH = '\/api\/v2\/settings\/daily-report\/days';/);
   const headers = [...tab.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
-  assert.deepEqual(headers, ['Date', 'Check-ins', 'Check-outs', 'Checked in, not checked out', 'Report']);
+  assert.deepEqual(headers.slice(0, 5), ['Institute', 'Check-ins', 'Check-outs', 'Not checked out', 'Report'], 'each campus of a day');
+  assert.deepEqual(headers.slice(5), ['Date', 'Check-ins', 'Check-outs', 'Checked in, not checked out', 'Report'], 'the days');
   assert.match(tab, /href=\{url\}\s*target="_blank"\s*rel="noopener noreferrer"/);
   assert.match(tab, /navigator\.clipboard\.writeText\(url\)/);
   assert.match(tab, /const REFRESH_MS = 60_000;/, 'the counts stay current');
   assert.match(tab, /max=\{latestMonth\}/, 'no future months');
-  assert.match(tab, /const path = day\.report_url \? dayReportApiPath\(day\.report_url\) : null;/);
-  assert.match(tab, /saveCsvFile\(dayReportFileName\(report\.date_label\), dayReportCsv\(report\.rows\)\)/);
+  assert.match(tab, /const path = dayReportApiPath\(url\);/);
+  assert.match(tab, /saveCsvFile\(dayReportFileName\(report\.date_label, report\.institute\), dayReportCsv\(report\.rows\)\)/);
+  assert.match(tab, /return `\$\{DAYS_PATH\}\/\$\{encodeURIComponent\(date\)\}\/campuses`;/);
+  assert.equal((tab.match(/<ReportLink url=\{day\.report_url\}/g) || []).length, 2, 'the overall report stays on every day');
+  assert.equal((tab.match(/\{day\.report_url && <CampusToggle /g) || []).length, 2, 'with Campuses beside it');
+  assert.ok(tab.includes("writeQueryParams({ month: month === latestMonth ? null : month, campuses: openDay || null });"));
+
+  const settings = read('src/components/DailyReportSettings.tsx');
+  assert.ok(settings.includes("Also send each institute's report"));
+  assert.ok(settings.includes("body: { campus_reports: value }"));
+  assert.ok(settings.includes('checked={data.campus_reports === true}'), 'off until turned on');
 });
 
 const dayRows = [
@@ -190,4 +209,29 @@ test('the reporting partner text says they receive every report', () => {
   assert.ok(!partners.includes('copied when an instructor\'s appearance report is non-compliant'));
   assert.ok(partners.includes('Sent for every check-in report, compliant or not.'));
   assert.ok(partners.includes('Sent for every check-out report, compliant or not.'));
+});
+
+test('a campus report link turns into its API path, and its export is named after the campus', () => {
+  assert.equal(
+    dayReportApiPath('https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/niat-hyderabad/3f6c1a2e-7b4d-4c1e-9a55-000000000030'),
+    '/api/v2/reports/daily/30-09-2026/niat-hyderabad/3f6c1a2e-7b4d-4c1e-9a55-000000000030'
+  );
+  assert.equal(dayReportFileName('30/09/2026', 'NIAT Hyderabad'), 'daily-report-niat-hyderabad-2026-09-30.csv');
+  assert.equal(dayReportFileName('30/09/2026', null), 'daily-report-2026-09-30.csv');
+});
+
+test('a campus page names its institute and drops the institute filter; the overall page keeps it', () => {
+  const page = read('src/components/DailyReportPage.tsx');
+  assert.ok(page.includes("const campusReport = typeof report.institute === 'string';"));
+  assert.match(page, /\{campusReport && \(\s*<p className="mt-1 flex items-center gap-1\.5 text-base font-bold text-indigo-700">/);
+  assert.match(page, /\{!campusReport && \(\s*<select aria-label="Institute"/);
+  assert.ok(page.includes('const path = `${basePath}/photo/${encodeURIComponent(target.row.attendance_id)}/${target.kind}`;'));
+});
+
+test('the instructor report shows the employee ID and email under the name', () => {
+  const page = read('src/components/PublicReportPage.tsx');
+  assert.ok(page.includes('employee_id?: string | null;'));
+  assert.ok(page.includes('<dt className="text-slate-500">Employee ID</dt>'));
+  assert.ok(page.includes('<dd className="font-semibold text-slate-700">{instructor.employee_id}</dd>'));
+  assert.ok(page.includes('<dd className="min-w-0 break-all font-semibold text-slate-700">{instructor.email}</dd>'));
 });

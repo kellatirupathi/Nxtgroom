@@ -64,6 +64,7 @@ import {
 } from "../services/reportRecipients.js";
 import {
   addDailyReportRecipient,
+  dailyReportCampuses,
   dailyReportDays,
   dailyReportSettingsView,
   getDailyReportSettings,
@@ -78,7 +79,7 @@ import {
   runInstituteSync,
 } from "../services/instructorSync.js";
 import { appUrl } from "../config/env.js";
-import { localDateKey } from "../services/instructorReports.js";
+import { isValidDateKey, localDateKey } from "../services/instructorReports.js";
 import { rateLimit } from "express-rate-limit";
 
 const COLLEGE_ASSIGNMENT_GUARD = "_private_assignment_guard_version";
@@ -1126,6 +1127,17 @@ adminRouter.get(
       return res.status(422).json({ detail: "Choose this month or an earlier one." });
     }
     return res.json({ month, days: await dailyReportDays(req.app.locals.db, month) });
+  })
+);
+
+adminRouter.get(
+  "/settings/daily-report/days/:date/campuses",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const date = String(req.params.date || "");
+    if (!isValidDateKey(date)) return res.status(422).json({ detail: "Choose a valid date." });
+    if (date > localDateKey(new Date())) return res.status(422).json({ detail: "Choose today or an earlier day." });
+    return res.json({ date, campuses: await dailyReportCampuses(req.app.locals.db, date) });
   })
 );
 

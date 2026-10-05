@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Copy, Download, ExternalLink, FileChartColumn } from 'lucide-react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Building2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, Download, ExternalLink, FileChartColumn } from 'lucide-react';
 import { apiFetch } from '../api';
 import { saveCsvFile } from '../attendanceExport';
 import { dayReportApiPath, dayReportCsv, dayReportFileName, type DayReportResponse } from '../lib/dayReport';
@@ -20,18 +20,36 @@ export interface ReportDay {
   report_url: string | null;
 }
 
+export interface ReportCampus {
+  college_id: string;
+  institute: string;
+  checkins: number;
+  checkouts: number;
+  not_checked_out: number;
+  report_url: string | null;
+}
+
+interface CampusState {
+  campuses?: ReportCampus[];
+  error?: string;
+}
+
 const numberFormat = new Intl.NumberFormat('en-IN');
 
+function campusesPath(date: string): string {
+  return `${DAYS_PATH}/${encodeURIComponent(date)}/campuses`;
+}
+
 interface ReportLinkProps {
-  day: ReportDay;
+  url: string | null;
+  label: string;
   onCopy: (url: string) => void;
-  onExport: (day: ReportDay) => void;
+  onExport: (url: string) => void;
   exporting: boolean;
 }
 
-function ReportLink({ day, onCopy, onExport, exporting }: ReportLinkProps) {
-  if (!day.report_url) return <span className="text-slate-400">No check-ins</span>;
-  const url = day.report_url;
+function ReportLink({ url, label, onCopy, onExport, exporting }: ReportLinkProps) {
+  if (!url) return <span className="text-slate-400">No check-ins</span>;
   return (
     <div className="flex flex-wrap items-center gap-2">
       <a
@@ -47,17 +65,17 @@ function ReportLink({ day, onCopy, onExport, exporting }: ReportLinkProps) {
         type="button"
         onClick={() => onCopy(url)}
         title="Copy link"
-        aria-label={`Copy the report link for ${day.date_label}`}
+        aria-label={`Copy the report link for ${label}`}
         className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
       >
         <Copy size={14} aria-hidden="true" />
       </button>
       <button
         type="button"
-        onClick={() => onExport(day)}
+        onClick={() => onExport(url)}
         disabled={exporting}
-        title="Export this day as CSV"
-        aria-label={`Export the report for ${day.date_label} as CSV`}
+        title="Export as CSV"
+        aria-label={`Export the report for ${label} as CSV`}
         className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
       >
         <Download size={14} aria-hidden="true" />
@@ -67,21 +85,114 @@ function ReportLink({ day, onCopy, onExport, exporting }: ReportLinkProps) {
   );
 }
 
+function CampusToggle({ day, open, controls, onToggle }: { day: ReportDay; open: boolean; controls: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls={controls}
+      aria-label={`${open ? 'Hide' : 'Show'} each campus's report for ${day.date_label}`}
+      className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 transition-colors hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+    >
+      <Building2 size={14} aria-hidden="true" />
+      Campuses
+      {open ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
+    </button>
+  );
+}
+
+interface CampusListProps {
+  state: CampusState | undefined;
+  dateLabel: string;
+  layout: 'cards' | 'table';
+  onCopy: (url: string) => void;
+  onExport: (url: string) => void;
+  exportingUrl: string | null;
+}
+
+function CampusList({ state, dateLabel, layout, onCopy, onExport, exportingUrl }: CampusListProps) {
+  if (state?.error) {
+    return <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{state.error}</p>;
+  }
+  if (!state?.campuses) return <p className="p-3 text-sm text-slate-400">Loading campuses…</p>;
+  if (!state.campuses.length) return <p className="p-3 text-sm text-slate-400">No campus had check-ins on {dateLabel}.</p>;
+
+  const link = (campus: ReportCampus) => (
+    <ReportLink
+      url={campus.report_url}
+      label={`${campus.institute} on ${dateLabel}`}
+      onCopy={onCopy}
+      onExport={onExport}
+      exporting={exportingUrl === campus.report_url}
+    />
+  );
+
+  if (layout === 'cards') {
+    return (
+      <ul className="flex flex-col gap-2" aria-label={`Campus reports for ${dateLabel}`}>
+        {state.campuses.map((campus) => (
+          <li key={campus.college_id} className="rounded-md border border-slate-200 bg-white p-3">
+            <p className="flex items-start gap-1.5 text-sm font-bold text-slate-800">
+              <Building2 size={15} className="mt-0.5 shrink-0 text-indigo-600" aria-hidden="true" />
+              <span className="min-w-0">{campus.institute}</span>
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {campus.checkins} check-ins · {campus.checkouts} check-outs · <span className={campus.not_checked_out ? 'font-semibold text-amber-700' : ''}>{campus.not_checked_out} not checked out</span>
+            </p>
+            <div className="mt-2 text-sm">{link(campus)}</div>
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  return (
+    <table className="w-full border-collapse text-left text-sm" aria-label={`Campus reports for ${dateLabel}`}>
+      <thead className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+        <tr>
+          <th scope="col" className="border-b border-slate-200 px-3 py-2">Institute</th>
+          <th scope="col" className="border-b border-slate-200 px-3 py-2">Check-ins</th>
+          <th scope="col" className="border-b border-slate-200 px-3 py-2">Check-outs</th>
+          <th scope="col" className="border-b border-slate-200 px-3 py-2">Not checked out</th>
+          <th scope="col" className="border-b border-slate-200 px-3 py-2">Report</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+        {state.campuses.map((campus) => (
+          <tr key={campus.college_id}>
+            <td className="px-3 py-2 font-semibold text-slate-800">{campus.institute}</td>
+            <td className="px-3 py-2 font-semibold">{campus.checkins}</td>
+            <td className="px-3 py-2 font-semibold">{campus.checkouts}</td>
+            <td className={`px-3 py-2 font-semibold ${campus.not_checked_out ? 'text-amber-700' : ''}`}>{campus.not_checked_out}</td>
+            <td className="px-3 py-2">{link(campus)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 export default function ReportsTab() {
   const latestMonth = currentIndiaMonth();
   const [month, setMonth] = useState(() => {
     const requested = readQueryParam('month');
     return /^\d{4}-(0[1-9]|1[0-2])$/.test(requested) && requested <= latestMonth ? requested : latestMonth;
   });
+  const [openDay, setOpenDay] = useState(() => {
+    const requested = readQueryParam('campuses');
+    return /^\d{4}-\d{2}-\d{2}$/.test(requested) ? requested : '';
+  });
 
   useEffect(() => {
-    writeQueryParams({ month: month === latestMonth ? null : month });
-  }, [month, latestMonth]);
+    writeQueryParams({ month: month === latestMonth ? null : month, campuses: openDay || null });
+  }, [month, latestMonth, openDay]);
   const [days, setDays] = useState<ReportDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
-  const [exportingDate, setExportingDate] = useState<string | null>(null);
+  const [exportingUrl, setExportingUrl] = useState<string | null>(null);
+  const [campusData, setCampusData] = useState<Record<string, CampusState>>({});
   const requestId = useRef(0);
   const toast = useToast();
 
@@ -117,6 +228,31 @@ export default function ReportsTab() {
     };
   }, [load]);
 
+  useEffect(() => {
+    if (!openDay) return undefined;
+    let disposed = false;
+    setCampusData((current) => ({ ...current, [openDay]: { campuses: current[openDay]?.campuses } }));
+    apiFetch<{ campuses: ReportCampus[] }>(campusesPath(openDay))
+      .then((data) => {
+        if (!disposed) setCampusData((current) => ({ ...current, [openDay]: { campuses: Array.isArray(data?.campuses) ? data.campuses : [] } }));
+      })
+      .catch((requestError) => {
+        if (disposed || (requestError as { status?: number })?.status === 401) return;
+        setCampusData((current) => ({
+          ...current,
+          [openDay]: { error: requestError instanceof Error ? requestError.message : 'The campus reports could not be loaded.' },
+        }));
+      });
+    return () => { disposed = true; };
+  }, [openDay]);
+
+  const changeMonth = (next: string) => {
+    setMonth(next);
+    setOpenDay('');
+  };
+
+  const toggleDay = (date: string) => setOpenDay((current) => (current === date ? '' : date));
+
   const copyLink = async (url: string) => {
     try {
       await navigator.clipboard.writeText(url);
@@ -126,21 +262,24 @@ export default function ReportsTab() {
     }
   };
 
-  const exportDay = async (day: ReportDay) => {
-    const path = day.report_url ? dayReportApiPath(day.report_url) : null;
+  const exportReport = async (url: string) => {
+    const path = dayReportApiPath(url);
     if (!path) return;
-    setExportingDate(day.date);
+    setExportingUrl(url);
     try {
       const report = await apiFetch<DayReportResponse>(path, { auth: false });
-      await saveCsvFile(dayReportFileName(report.date_label), dayReportCsv(report.rows));
+      await saveCsvFile(dayReportFileName(report.date_label, report.institute), dayReportCsv(report.rows));
     } catch (exportError) {
       toast.error('Could not export the report', {
         detail: exportError instanceof Error ? exportError.message : String(exportError),
       });
     } finally {
-      setExportingDate(null);
+      setExportingUrl(null);
     }
   };
+
+  const onCopy = (url: string) => void copyLink(url);
+  const onExport = (url: string) => void exportReport(url);
 
   const totals = days.reduce(
     (sum, day) => ({
@@ -163,12 +302,15 @@ export default function ReportsTab() {
           12:00 AM to 11:59 PM - and always shows the latest data. It is the same link that day's daily
           report emails carry, and works for 30 days.
         </p>
+        <p className="mt-1 text-sm text-slate-500">
+          Open Campuses on a day for each institute's own report, with its own link named after the institute.
+        </p>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={() => setMonth((current) => shiftMonth(current, -1))}
+          onClick={() => changeMonth(shiftMonth(month, -1))}
           aria-label="Previous month"
           className="rounded-md border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
         >
@@ -179,12 +321,12 @@ export default function ReportsTab() {
           aria-label="Month"
           value={month}
           max={latestMonth}
-          onChange={(event) => { if (event.target.value) setMonth(event.target.value); }}
+          onChange={(event) => { if (event.target.value) changeMonth(event.target.value); }}
           className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
         />
         <button
           type="button"
-          onClick={() => setMonth((current) => shiftMonth(current, 1))}
+          onClick={() => changeMonth(shiftMonth(month, 1))}
           disabled={month >= latestMonth}
           aria-label="Next month"
           className="rounded-md border border-slate-200 bg-white p-2 text-slate-600 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40"
@@ -222,7 +364,15 @@ export default function ReportsTab() {
               <div><dt className="font-bold uppercase tracking-wide text-slate-400">Check-outs</dt><dd className="mt-0.5 text-sm font-bold text-slate-800">{day.checkouts}</dd></div>
               <div><dt className="font-bold uppercase tracking-wide text-slate-400">Not checked out</dt><dd className="mt-0.5 text-sm font-bold text-amber-700">{day.not_checked_out}</dd></div>
             </dl>
-            <div className="mt-3 text-sm"><ReportLink day={day} onCopy={(url) => void copyLink(url)} onExport={(target) => void exportDay(target)} exporting={exportingDate === day.date} /></div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+              <ReportLink url={day.report_url} label={day.date_label} onCopy={onCopy} onExport={onExport} exporting={exportingUrl === day.report_url} />
+              {day.report_url && <CampusToggle day={day} open={openDay === day.date} controls={`campuses-card-${day.date}`} onToggle={() => toggleDay(day.date)} />}
+            </div>
+            {openDay === day.date && (
+              <div id={`campuses-card-${day.date}`} className="mt-3 rounded-md bg-slate-50 p-2">
+                <CampusList state={campusData[day.date]} dateLabel={day.date_label} layout="cards" onCopy={onCopy} onExport={onExport} exportingUrl={exportingUrl} />
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -244,13 +394,29 @@ export default function ReportsTab() {
             ) : days.length === 0 ? (
               <tr><td colSpan={5} className="p-8 text-center text-slate-400">No days to show for {monthLabel(month)}.</td></tr>
             ) : days.map((day) => (
-              <tr key={day.date} className={day.checkins ? undefined : 'text-slate-400'}>
-                <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">{day.date_label}</td>
-                <td className="p-3 font-semibold">{day.checkins}</td>
-                <td className="p-3 font-semibold">{day.checkouts}</td>
-                <td className={`p-3 font-semibold ${day.not_checked_out ? 'text-amber-700' : ''}`}>{day.not_checked_out}</td>
-                <td className="p-3"><ReportLink day={day} onCopy={(url) => void copyLink(url)} onExport={(target) => void exportDay(target)} exporting={exportingDate === day.date} /></td>
-              </tr>
+              <Fragment key={day.date}>
+                <tr className={day.checkins ? undefined : 'text-slate-400'}>
+                  <td className="p-3 font-semibold text-slate-800 whitespace-nowrap">{day.date_label}</td>
+                  <td className="p-3 font-semibold">{day.checkins}</td>
+                  <td className="p-3 font-semibold">{day.checkouts}</td>
+                  <td className={`p-3 font-semibold ${day.not_checked_out ? 'text-amber-700' : ''}`}>{day.not_checked_out}</td>
+                  <td className="p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ReportLink url={day.report_url} label={day.date_label} onCopy={onCopy} onExport={onExport} exporting={exportingUrl === day.report_url} />
+                      {day.report_url && <CampusToggle day={day} open={openDay === day.date} controls={`campuses-row-${day.date}`} onToggle={() => toggleDay(day.date)} />}
+                    </div>
+                  </td>
+                </tr>
+                {openDay === day.date && (
+                  <tr id={`campuses-row-${day.date}`}>
+                    <td colSpan={5} className="bg-slate-50/70 px-4 pb-4 pt-2">
+                      <div className="rounded-md border border-slate-200 bg-white">
+                        <CampusList state={campusData[day.date]} dateLabel={day.date_label} layout="table" onCopy={onCopy} onExport={onExport} exportingUrl={exportingUrl} />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

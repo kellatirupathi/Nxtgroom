@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Download, FileText, Image as ImageIcon, LogOut, Search, X } from 'lucide-react';
+import { Building2, Download, FileText, Image as ImageIcon, LogOut, Search, X } from 'lucide-react';
 import { apiFetch } from '../api';
 import { saveCsvFile } from '../attendanceExport';
 import {
   DAY_STATUS_LABELS,
   DAY_STATUS_OPTIONS,
   dayInstitutes,
+  dayReportBasePath,
   dayReportCsv,
   dayReportFileName,
   filterDayRows,
@@ -19,6 +20,7 @@ import { useToast } from './useToast';
 interface DailyReportPageProps {
   date: string;
   token: string;
+  campus?: string;
 }
 
 type Kind = 'checkin' | 'checkout';
@@ -118,18 +120,18 @@ function ReportIcons({ row }: { row: DayRow }) {
   );
 }
 
-function PhotoModal({ date, token, target, onClose }: { date: string; token: string; target: PhotoTarget; onClose: () => void }) {
+function PhotoModal({ basePath, target, onClose }: { basePath: string; target: PhotoTarget; onClose: () => void }) {
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     let disposed = false;
-    const path = `/api/v2/reports/daily/${encodeURIComponent(date)}/${encodeURIComponent(token)}/photo/${encodeURIComponent(target.row.attendance_id)}/${target.kind}`;
+    const path = `${basePath}/photo/${encodeURIComponent(target.row.attendance_id)}/${target.kind}`;
     apiFetch<{ url: string }>(path, { auth: false })
       .then((data) => { if (!disposed) setUrl(data?.url || ''); })
       .catch(() => { if (!disposed) setError('This photo is no longer available.'); });
     return () => { disposed = true; };
-  }, [date, token, target]);
+  }, [basePath, target]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -167,7 +169,8 @@ function PhotoModal({ date, token, target, onClose }: { date: string; token: str
   );
 }
 
-export default function DailyReportPage({ date, token }: DailyReportPageProps) {
+export default function DailyReportPage({ date, token, campus }: DailyReportPageProps) {
+  const basePath = dayReportBasePath(date, token, campus);
   const [report, setReport] = useState<DayReportResponse | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -180,8 +183,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
   useEffect(() => {
     let disposed = false;
     let loaded = false;
-    const path = `/api/v2/reports/daily/${encodeURIComponent(date)}/${encodeURIComponent(token)}`;
-    const load = () => apiFetch<DayReportResponse>(path, { auth: false })
+    const load = () => apiFetch<DayReportResponse>(basePath, { auth: false })
       .then((data) => {
         if (disposed) return;
         loaded = true;
@@ -207,7 +209,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
       disposed = true;
       clearInterval(timer);
     };
-  }, [date, token]);
+  }, [basePath]);
 
   if (loading) return <BrandedLoader label="Loading report" />;
 
@@ -227,11 +229,12 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
   const count = report.rows.length;
   const rows = filterDayRows(report.rows, { search, institute, status });
   const institutes = dayInstitutes(report.rows);
+  const campusReport = typeof report.institute === 'string';
   const filtered = Boolean(search.trim() || institute || status);
   const empty = count ? 'No instructors match these filters.' : `No check-ins on ${report.date_label}.`;
 
   const exportCsv = () => {
-    saveCsvFile(dayReportFileName(report.date_label), dayReportCsv(rows)).catch((exportError) => {
+    saveCsvFile(dayReportFileName(report.date_label, report.institute), dayReportCsv(rows)).catch((exportError) => {
       toast.error('Could not export the report', {
         detail: exportError instanceof Error ? exportError.message : String(exportError),
       });
@@ -252,6 +255,12 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
 
         <section className="mb-4">
           <h1 className="text-xl font-extrabold text-slate-800">Attendance &amp; Grooming Check</h1>
+          {campusReport && (
+            <p className="mt-1 flex items-center gap-1.5 text-base font-bold text-indigo-700">
+              <Building2 size={18} className="shrink-0" aria-hidden="true" />
+              <span className="min-w-0">{report.institute || 'Institute'}</span>
+            </p>
+          )}
           <p className="mt-1 text-sm text-slate-500">
             {report.date_label} · Full day, {report.window_label} · {count} {count === 1 ? 'instructor' : 'instructors'}
             {filtered && ` · showing ${rows.length}`}
@@ -270,10 +279,12 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
               className={`${FIELD} w-full pl-9 sm:w-64`}
             />
           </span>
-          <select aria-label="Institute" value={institute} onChange={(event) => setInstitute(event.target.value)} className={`${FIELD} min-w-0 flex-1 sm:flex-none`}>
-            <option value="">All institutes</option>
-            {institutes.map((value) => <option key={value} value={value}>{value}</option>)}
-          </select>
+          {!campusReport && (
+            <select aria-label="Institute" value={institute} onChange={(event) => setInstitute(event.target.value)} className={`${FIELD} min-w-0 flex-1 sm:flex-none`}>
+              <option value="">All institutes</option>
+              {institutes.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+          )}
           <select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value as DayStatus | '')} className={`${FIELD} min-w-0 flex-1 sm:flex-none`}>
             <option value="">All statuses</option>
             {DAY_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -372,7 +383,7 @@ export default function DailyReportPage({ date, token }: DailyReportPageProps) {
         </p>
       </div>
 
-      {photo && <PhotoModal date={date} token={token} target={photo} onClose={() => setPhoto(null)} />}
+      {photo && <PhotoModal basePath={basePath} target={photo} onClose={() => setPhoto(null)} />}
     </main>
   );
 }

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { enqueueMailJob } from "./mailWorker.js";
 import { localDateKey } from "./instructorReports.js";
 import {
+  buildDailyReportForEmail,
+  campusIdsInReport,
   dailyReportRunId,
   dueDailyReports,
   ensureDailyReportDay,
@@ -35,6 +37,11 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
     }
 
     await ensureDailyReportDay(db, due.dateKey, now);
+    let campusIds = [];
+    if (!existing && settings.campus_reports) {
+      const draft = { _id: runId, date: due.dateKey, slot: due.slot, window_from: due.from, window_to: due.to };
+      campusIds = campusIdsInReport(await buildDailyReportForEmail(db, draft, now.getTime()));
+    }
     try {
       await saveDeliveryRun(db, runId, {
         set: { updated_at: now },
@@ -46,7 +53,8 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
           window_from: due.from,
           window_to: due.to,
           status: "sending",
-          queued: settings.emails.length,
+          ...(settings.campus_reports ? { campus_ids: campusIds } : {}),
+          queued: settings.emails.length * (1 + campusIds.length),
           sent: 0,
           failed: 0,
           terminal: 0,
@@ -68,10 +76,22 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
         runId,
       });
     }
+    const runCampuses = Array.isArray(run.campus_ids) ? run.campus_ids : [];
+    for (const collegeId of runCampuses) {
+      for (const email of settings.emails) {
+        await enqueueMailJob(db, {
+          id: `${runId}:campus:${collegeId}:${recipientKey(email)}`,
+          type: "daily_report_campus",
+          toEmail: email,
+          payload: { run_id: runId, college_id: collegeId },
+          runId,
+        });
+      }
+    }
     await saveDeliveryRun(db, runId, { set: { jobs_queued_at: now, updated_at: now } });
     queuedRuns.add(runId);
     queued.push(runId);
-    console.log(`Daily report ${runId} queued for ${settings.emails.length} recipient(s).`);
+    console.log(`Daily report ${runId} queued for ${settings.emails.length} recipient(s)${runCampuses.length ? `, with ${runCampuses.length} institute report(s)` : ""}.`);
   }
   return queued;
 }

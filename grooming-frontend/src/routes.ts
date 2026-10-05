@@ -64,15 +64,16 @@ export function publicReportFromLocation(): PublicReportRoute | null {
 export interface DailyReportRoute {
   date: string;
   token: string;
+  campus?: string;
 }
 
 export function dailyReportFromLocation(): DailyReportRoute | null {
   if (typeof window === 'undefined') return null;
   const match = window.location.pathname.match(
-    /^\/daily-report\/(\d{2}-\d{2}-\d{4})\/([A-Za-z0-9_-]{16,128})\/?$/,
+    /^\/daily-report\/(\d{2}-\d{2}-\d{4})\/(?:([a-z0-9-]{1,80})\/)?([A-Za-z0-9_-]{16,128})\/?$/,
   );
   if (!match) return null;
-  return { date: match[1], token: match[2] };
+  return match[2] ? { date: match[1], campus: match[2], token: match[3] } : { date: match[1], token: match[3] };
 }
 
 export function pathForTab(tab: string, recordId?: string): string {

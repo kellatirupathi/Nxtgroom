@@ -36,6 +36,7 @@ export async function getDailyReportSettings(db) {
     : [];
   return {
     enabled: document?.enabled === true,
+    campus_reports: document?.campus_reports === true,
     times: [...new Set(times)].sort(),
     emails: (Array.isArray(document?.emails) ? document.emails : []).filter(isValidRecipient),
     schedule_changed_at: toDate(document?.schedule_changed_at),
@@ -43,7 +44,12 @@ export async function getDailyReportSettings(db) {
 }
 
 export function dailyReportSettingsView(settings) {
-  return { enabled: settings.enabled, times: settings.times, emails: settings.emails };
+  return {
+    enabled: settings.enabled,
+    campus_reports: settings.campus_reports,
+    times: settings.times,
+    emails: settings.emails,
+  };
 }
 
 export function normaliseTimes(values) {
@@ -64,10 +70,14 @@ export function normaliseTimes(values) {
 
 export async function saveDailyReportSchedule(db, body, updatedBy) {
   const current = await getDailyReportSettings(db);
-  let { enabled, times } = current;
+  let { enabled, times, campus_reports: campusReports } = current;
   if (body && "enabled" in body) {
     if (typeof body.enabled !== "boolean") return { ok: false, detail: "enabled must be true or false." };
     enabled = body.enabled;
+  }
+  if (body && "campus_reports" in body) {
+    if (typeof body.campus_reports !== "boolean") return { ok: false, detail: "campus_reports must be true or false." };
+    campusReports = body.campus_reports;
   }
   if (body && "times" in body) {
     const result = normaliseTimes(body.times);
@@ -79,6 +89,7 @@ export async function saveDailyReportSchedule(db, body, updatedBy) {
   await saveSetting(db, DAILY_REPORT_SETTINGS_ID, {
     set: {
       enabled,
+      campus_reports: campusReports,
       times,
       updated_at: now,
       updated_by: updatedBy || null,
@@ -134,8 +145,22 @@ export function displayDate(dateKey) {
   return dateSegment(dateKey).replaceAll("-", "/");
 }
 
-export function dailyReportSubject(dateKey) {
-  return `Daily report_Attendance & Grooming_Check_${displayDate(dateKey)}`;
+export function dailyReportSubject(dateKey, institute = "") {
+  return institute
+    ? `Daily report_Attendance & Grooming_Check_${institute}_${displayDate(dateKey)}`
+    : `Daily report_Attendance & Grooming_Check_${displayDate(dateKey)}`;
+}
+
+export function campusSlug(name) {
+  const slug = String(name || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    .replace(/-+$/g, "");
+  return slug || "campus";
 }
 
 export function slotInstant(dateKey, slot, timeZone = runtimeConfig().appTimeZone) {
@@ -185,15 +210,82 @@ function isDuplicateKey(error) {
   return error?.code === 11000;
 }
 
+function linkExpiry(dateKey, now) {
+  const dayEnd = dateBoundsInTimeZone(dateKey, runtimeConfig().appTimeZone).end;
+  return new Date(Math.max(dayEnd.getTime(), now.getTime()) + DAILY_REPORT_LINK_DAYS * 24 * 60 * 60 * 1000);
+}
+
+export function campusReportDayId(dateKey, collegeId) {
+  return `daily-report-campus:${dateKey}:${collegeId}`;
+}
+
+function campusReportLinkId(dateKey, token) {
+  return `daily-report-campus-link:${dateKey}:${token}`;
+}
+
+export function campusReportPath(dateKey, slug, token) {
+  return `/daily-report/${dateSegment(dateKey)}/${slug}/${token}`;
+}
+
+export function campusReportUrl(link) {
+  return `${appUrl()}${campusReportPath(link.date, link.slug || "campus", link.link_token)}`;
+}
+
+export async function ensureCampusReportDay(db, dateKey, college, now = new Date()) {
+  const collegeId = String(college._id);
+  const id = campusReportDayId(dateKey, collegeId);
+  const slug = campusSlug(college.name);
+  const existing = await getDeliveryRun(db, id);
+  const currentExpiry = toDate(existing?.expires_at);
+  if (existing?.link_token && currentExpiry && currentExpiry.getTime() > now.getTime()) {
+    if (existing.slug === slug) return existing;
+    await saveDeliveryRun(db, id, { set: { slug, updated_at: now } });
+    return { ...existing, slug };
+  }
+  const expiresAt = linkExpiry(dateKey, now);
+  const token = newLinkToken();
+  await saveDeliveryRun(db, campusReportLinkId(dateKey, token), {
+    set: { updated_at: now },
+    setOnInsert: {
+      _id: campusReportLinkId(dateKey, token),
+      type: "daily_report_campus_link",
+      date: dateKey,
+      college_id: collegeId,
+      expires_at: expiresAt,
+      created_at: now,
+    },
+  });
+  if (existing?.link_token) {
+    await saveDeliveryRun(db, id, { set: { link_token: token, slug, expires_at: expiresAt, updated_at: now } });
+  } else {
+    try {
+      await saveDeliveryRun(db, id, {
+        set: { slug, updated_at: now },
+        setOnInsert: {
+          _id: id,
+          type: "daily_report_campus",
+          date: dateKey,
+          college_id: collegeId,
+          link_token: token,
+          expires_at: expiresAt,
+          created_at: now,
+        },
+      });
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
+    }
+  }
+  const link = await getDeliveryRun(db, id);
+  if (!link?.link_token) throw new Error(`Campus report page for ${dateKey} could not be read back`);
+  return link;
+}
+
 export async function ensureDailyReportDay(db, dateKey, now = new Date()) {
   const id = dailyReportDayId(dateKey);
   const existing = await getDeliveryRun(db, id);
   const currentExpiry = toDate(existing?.expires_at);
   if (existing?.link_token && currentExpiry && currentExpiry.getTime() > now.getTime()) return existing;
-  const dayEnd = dateBoundsInTimeZone(dateKey, runtimeConfig().appTimeZone).end;
-  const expiresAt = new Date(
-    Math.max(dayEnd.getTime(), now.getTime()) + DAILY_REPORT_LINK_DAYS * 24 * 60 * 60 * 1000
-  );
+  const expiresAt = linkExpiry(dateKey, now);
   if (existing?.link_token) {
     await saveDeliveryRun(db, id, { set: { link_token: newLinkToken(), expires_at: expiresAt, updated_at: now } });
   } else {
@@ -233,6 +325,19 @@ export async function findDailyReportDay(db, dateValue, token, now = new Date())
   const expiresAt = toDate(day.expires_at);
   if (!expiresAt || expiresAt.getTime() <= now.getTime()) return null;
   return day;
+}
+
+export async function findCampusReportDay(db, dateValue, token, now = new Date()) {
+  const dateKey = parseDateSegment(dateValue);
+  if (!dateKey || typeof token !== "string" || !LINK_TOKEN_PATTERN.test(token)) return null;
+  const pointer = await getDeliveryRun(db, campusReportLinkId(dateKey, token));
+  if (!pointer || pointer.type !== "daily_report_campus_link" || !pointer.college_id) return null;
+  const link = await getDeliveryRun(db, campusReportDayId(dateKey, pointer.college_id));
+  if (!link || link.type !== "daily_report_campus" || typeof link.link_token !== "string") return null;
+  if (!sameSecret(link.link_token, token)) return null;
+  const expiresAt = toDate(link.expires_at);
+  if (!expiresAt || expiresAt.getTime() <= now.getTime()) return null;
+  return link;
 }
 
 function clockTime(value, timeZone) {
@@ -380,6 +485,7 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
     rows.push({
       name: record.instructor_name || instructor?.name || "Instructor",
       institute: (college && collegeName.get(String(college))) || "",
+      collegeId: college ? String(college) : null,
       checkIn: eventTime(checkIn, run.date, timeZone),
       checkOut: checkOut ? eventTime(checkOut, run.date, timeZone) : "-",
       status: arrival.state,
@@ -401,7 +507,7 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
   };
 }
 
-export async function buildFullDayReport(db, dateKey, { ensureTokens = false } = {}) {
+export async function buildFullDayReport(db, dateKey, { ensureTokens = false, collegeId = null } = {}) {
   const timeZone = runtimeConfig().appTimeZone;
   const { start, end } = dateBoundsInTimeZone(dateKey, timeZone);
   const records = await db.collection("attendance")
@@ -451,20 +557,33 @@ export async function buildFullDayReport(db, dateKey, { ensureTokens = false } =
       .toArray()
     : [];
   const collegeName = new Map(colleges.map((college) => [String(college._id), college.name]));
+  const scoped = collegeId
+    ? records.filter((record) => String(collegeOf(record) || "") === String(collegeId))
+    : records;
   if (ensureTokens) {
+    const listed = new Set(scoped.map((record) => String(record.instructor_id)));
     for (const instructor of instructors) {
+      if (!listed.has(String(instructor._id))) continue;
       if (!instructor.report_token) instructor.report_token = await ensureReportToken(db, instructor);
     }
   }
 
-  const evaluations = await evaluationsForSessions(db, records.map((record) => String(record._id)));
+  const evaluations = await evaluationsForSessions(db, scoped.map((record) => String(record._id)));
   const evaluationFor = new Map(evaluations.map((evaluation) => [
     `${String(evaluation.attendance_id)}|${evaluation.kind === "checkout" ? "checkout" : "checkin"}`,
     evaluation,
   ]));
 
+  let institute = null;
+  if (collegeId) {
+    institute = collegeName.get(String(collegeId)) || (await db.collection("colleges").findOne(
+      { _id: idMatch(String(collegeId)) },
+      { projection: { name: 1 } }
+    ))?.name || "";
+  }
+
   const rows = [];
-  for (const record of records) {
+  for (const record of scoped) {
     const checkIn = toDate(record.check_in_time);
     if (!checkIn) continue;
     const checkOut = record.checkout_deleting_at ? null : toDate(record.check_out_time);
@@ -494,12 +613,13 @@ export async function buildFullDayReport(db, dateKey, { ensureTokens = false } =
     date: dateKey,
     dateLabel: displayDate(dateKey),
     windowLabel: "12:00 AM to 11:59 PM",
-    subject: dailyReportSubject(dateKey),
+    subject: dailyReportSubject(dateKey, institute || ""),
+    ...(collegeId ? { institute } : {}),
     rows,
   };
 }
 
-export async function dailyReportPhotoKey(db, dateKey, attendanceId, kind) {
+export async function dailyReportPhotoKey(db, dateKey, attendanceId, kind, { collegeId = null } = {}) {
   if (typeof attendanceId !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(attendanceId)) return null;
   const { start, end } = dateBoundsInTimeZone(dateKey, runtimeConfig().appTimeZone);
   const record = await db.collection("attendance").findOne(
@@ -510,24 +630,36 @@ export async function dailyReportPhotoKey(db, dateKey, attendanceId, kind) {
       instructor_id: { $nin: [null, ""] },
       status: { $ne: "unidentified" },
     },
-    { projection: { check_in_photo_key: 1, check_out_photo_key: 1, checkout_deleting_at: 1 } }
+    { projection: { check_in_photo_key: 1, check_out_photo_key: 1, checkout_deleting_at: 1, college_id: 1, instructor_id: 1 } }
   );
   if (!record) return null;
+  if (collegeId) {
+    let recordCollege = record.college_id;
+    if (!recordCollege) {
+      recordCollege = (await db.collection("instructors").findOne(
+        { _id: idMatch(String(record.instructor_id)) },
+        { projection: { college_id: 1 } }
+      ))?.college_id;
+    }
+    if (String(recordCollege || "") !== String(collegeId)) return null;
+  }
   if (kind === "checkout") return record.checkout_deleting_at ? null : record.check_out_photo_key || null;
   return record.check_in_photo_key || null;
 }
 
+function dayMatch(start, end) {
+  return {
+    date: { $gte: start, $lt: end },
+    check_in_time: { $gte: start, $lt: end },
+    deleting_at: { $exists: false },
+    instructor_id: { $nin: [null, ""] },
+    status: { $ne: "unidentified" },
+  };
+}
+
 export function dayCountsPipeline(start, end, timeZone = runtimeConfig().appTimeZone) {
   return [
-    {
-      $match: {
-        date: { $gte: start, $lt: end },
-        check_in_time: { $gte: start, $lt: end },
-        deleting_at: { $exists: false },
-        instructor_id: { $nin: [null, ""] },
-        status: { $ne: "unidentified" },
-      },
-    },
+    { $match: dayMatch(start, end) },
     {
       $group: {
         _id: { $dateToString: { format: "%Y-%m-%d", date: "$check_in_time", timezone: timeZone } },
@@ -597,6 +729,77 @@ export async function dailyReportDays(db, month, now = new Date()) {
     });
   }
   return days;
+}
+
+const campusLinkCache = new Map();
+
+async function campusLinkFor(db, dateKey, college, now) {
+  const key = `${dateKey}:${String(college._id)}`;
+  const cached = campusLinkCache.get(key);
+  if (cached && now.getTime() - cached.at < DAY_LINK_CACHE_MS && toDate(cached.link.expires_at) > now
+    && cached.link.slug === campusSlug(college.name)) {
+    return cached.link;
+  }
+  const link = await ensureCampusReportDay(db, dateKey, college, now);
+  campusLinkCache.set(key, { at: now.getTime(), link });
+  return link;
+}
+
+export async function dailyReportCampuses(db, dateKey, now = new Date()) {
+  const timeZone = runtimeConfig().appTimeZone;
+  if (!isValidDateKey(dateKey)) throw new RangeError("date must be YYYY-MM-DD");
+  const { start, end } = dateBoundsInTimeZone(dateKey, timeZone);
+  const records = await db.collection("attendance")
+    .find(dayMatch(start, end), {
+      projection: { college_id: 1, instructor_id: 1, check_out_time: 1, checkout_deleting_at: 1 },
+    })
+    .limit(MAX_REPORT_ROWS)
+    .toArray();
+
+  const missing = [...new Set(records.filter((record) => !record.college_id).map((record) => String(record.instructor_id)))];
+  const instructors = missing.length
+    ? await db.collection("instructors")
+      .find({ _id: { $in: missing.flatMap((id) => idMatch(id).$in) } }, { projection: { college_id: 1 } })
+      .toArray()
+    : [];
+  const instructorCollege = new Map(instructors.map((instructor) => [String(instructor._id), instructor.college_id]));
+
+  const counts = new Map();
+  for (const record of records) {
+    const college = record.college_id || instructorCollege.get(String(record.instructor_id));
+    if (!college) continue;
+    const entry = counts.get(String(college)) || { checkins: 0, checkouts: 0 };
+    entry.checkins += 1;
+    if (record.check_out_time && !record.checkout_deleting_at) entry.checkouts += 1;
+    counts.set(String(college), entry);
+  }
+  const ids = [...counts.keys()];
+  const colleges = ids.length
+    ? await db.collection("colleges")
+      .find({ _id: { $in: ids.flatMap((id) => idMatch(id).$in) } }, { projection: { name: 1 } })
+      .toArray()
+    : [];
+
+  const campuses = [];
+  for (const college of colleges) {
+    const entry = counts.get(String(college._id));
+    if (!entry) continue;
+    const checkouts = Math.min(entry.checkins, entry.checkouts);
+    const link = await campusLinkFor(db, dateKey, college, now);
+    campuses.push({
+      college_id: String(college._id),
+      institute: college.name || "",
+      checkins: entry.checkins,
+      checkouts,
+      not_checked_out: entry.checkins - checkouts,
+      report_url: campusReportUrl(link),
+    });
+  }
+  return campuses.sort((left, right) => left.institute.localeCompare(right.institute));
+}
+
+export function campusIdsInReport(report) {
+  return [...new Set(report.rows.map((row) => row.collegeId).filter(Boolean))].sort();
 }
 
 const reportCache = new Map();

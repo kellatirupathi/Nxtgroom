@@ -142,7 +142,7 @@ test('pages read their filters from the address and write changes back', () => {
   assert.ok(read('components/InstituteAnalytics.tsx').includes('writeQueryParams({ ...datePresetToQuery(preset, range), ...instituteSortToQuery(sort) });'));
   assert.ok(read('components/Dashboard.tsx').includes("writeQueryParams({ trend: days === DEFAULT_TREND_DAYS ? null : String(days) });"));
   assert.ok(read('components/InstructorDetail.tsx').includes("writeQueryParams({ half: tab === 'checkout' ? 'checkout' : null });"));
-  assert.ok(read('components/ReportsTab.tsx').includes('writeQueryParams({ month: month === latestMonth ? null : month });'));
+  assert.ok(read('components/ReportsTab.tsx').includes('writeQueryParams({ month: month === latestMonth ? null : month, campuses: openDay || null });'));
   assert.ok(read('components/InstructorSyncPanel.tsx').includes('writeQueryParams({ q: search || null });'));
   assert.ok(read('components/IdentificationSettingsSection.tsx').includes('writeQueryParams({ q: search || null });'));
   assert.ok(!read('components/DailyReportPage.tsx').includes('writeQueryParams'), 'the emailed daily report address is unchanged');
