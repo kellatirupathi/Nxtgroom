@@ -28,6 +28,7 @@ import {
   previewImportRows,
 } from "../services/instructorImport.js";
 import { RemoteFetchError } from "../services/remoteFetch.js";
+import { getConfigSettings } from "../services/configSettings.js";
 
 export const instructorRouter = Router();
 
@@ -171,7 +172,8 @@ export async function updateInstructorGuarded(
   db,
   instructorId,
   input,
-  runTransaction = withMongoTransaction
+  runTransaction = withMongoTransaction,
+  { allowMoveWhileCheckedIn = false } = {}
 ) {
   return runTransaction(async (session) => {
     const existing = await db.collection("instructors").findOne(
@@ -181,7 +183,7 @@ export async function updateInstructorGuarded(
     if (!existing) return { outcome: "not_found" };
 
     const movingCollege = String(existing.college_id) !== String(input.college_id);
-    if (movingCollege) {
+    if (movingCollege && !allowMoveWhileCheckedIn) {
       const activeAttendance = await db.collection("attendance").findOne(
         openCheckInTodayFilter(existing._id),
         { session }
@@ -316,9 +318,17 @@ instructorRouter.post(
     if (!isFaceRecognitionConfigured()) {
       return res.status(503).json({ detail: FACE_REASON_MESSAGES.NOT_CONFIGURED });
     }
-    const results = await commitImportRows(req.app.locals.db, req.validatedBody.rows, {
+    const db = req.app.locals.db;
+    const { allow_move_while_checked_in: allowMoveWhileCheckedIn } = await getConfigSettings(db);
+    const results = await commitImportRows(db, req.validatedBody.rows, {
       createInstructor: createInstructorGuarded,
-      updateInstructor: updateInstructorGuarded,
+      updateInstructor: (database, instructorId, fields) => updateInstructorGuarded(
+        database,
+        instructorId,
+        fields,
+        withMongoTransaction,
+        { allowMoveWhileCheckedIn },
+      ),
     });
     return res.json({ results });
   })
@@ -421,12 +431,15 @@ instructorRouter.put(
   validate(instructorSchema),
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
+    const { allow_move_while_checked_in: allowMoveWhileCheckedIn } = await getConfigSettings(db);
     let result;
     try {
       result = await updateInstructorGuarded(
         db,
         req.params.instructorId,
-        req.validatedBody
+        req.validatedBody,
+        withMongoTransaction,
+        { allowMoveWhileCheckedIn }
       );
     } catch (error) {
       if (error.code === 11000) {

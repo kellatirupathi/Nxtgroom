@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, Database, FileChartColumn, ScanFace, Users } from 'lucide-react';
+import { Bell, Building2, Database, FileChartColumn, ScanFace, SlidersHorizontal, Users } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import IdentificationSettingsSection from './IdentificationSettingsSection';
@@ -7,6 +7,7 @@ import InstructorSyncPanel from './InstructorSyncPanel';
 import ReportRecipients from './ReportRecipients';
 import ReportsTab from './ReportsTab';
 import AccessSettingsSection from './AccessSettingsSection';
+import ConfigSettingsSection from './ConfigSettingsSection';
 import type { NotificationSettings } from '../types';
 
 export interface ToggleProps {
@@ -177,7 +178,7 @@ function NotificationSettings() {
   );
 }
 
-export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports';
+export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'config';
 
 export default function SettingsPage({ initialTab = 'notifications' }: { initialTab?: SettingsTab }) {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
@@ -193,7 +194,7 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
       <div className="mb-5 shrink-0">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners and daily reports.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners, daily reports and configuration.</p>
       </div>
 
       <div
@@ -265,6 +266,16 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
             <FileChartColumn size={16} aria-hidden="true" />
             Reports
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'config'}
+            onClick={() => setTab('config')}
+            className={tabClass('config')}
+          >
+            <SlidersHorizontal size={16} aria-hidden="true" />
+            Config
+          </button>
         </div>
       </div>
 
@@ -275,6 +286,7 @@ export default function SettingsPage({ initialTab = 'notifications' }: { initial
         {tab === 'sync' && <InstructorSyncPanel />}
         {tab === 'rp' && <ReportRecipients />}
         {tab === 'reports' && <ReportsTab />}
+        {tab === 'config' && <ConfigSettingsSection />}
       </div>
     </section>
   );

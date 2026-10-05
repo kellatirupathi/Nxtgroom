@@ -183,6 +183,10 @@ export interface AccessSettings {
   boa_can_delete_checkout: boolean;
 }
 
+export interface ConfigSettings {
+  allow_move_while_checked_in: boolean;
+}
+
 export type IdentificationMode = 'FACE_ONLY' | 'SELECTOR';
 
 export interface CollegeIdentification {

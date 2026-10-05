@@ -16,6 +16,11 @@ import {
   validateAccessSettings,
 } from "../services/accessSettings.js";
 import {
+  getConfigSettings,
+  saveConfigSettings,
+  validateConfigSettings,
+} from "../services/configSettings.js";
+import {
   describeCollegeIdentification,
   getIdentificationSettings,
   IDENTIFICATION_MODES,
@@ -969,6 +974,24 @@ adminRouter.put(
     const result = validateAccessSettings(req.body);
     if (!result.valid) return res.status(422).json({ detail: result.detail });
     return res.json(await saveAccessSettings(req.app.locals.db, req.body));
+  })
+);
+
+adminRouter.get(
+  "/settings/config",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(await getConfigSettings(req.app.locals.db));
+  })
+);
+
+adminRouter.put(
+  "/settings/config",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = validateConfigSettings(req.body);
+    if (!result.valid) return res.status(422).json({ detail: result.detail });
+    return res.json(await saveConfigSettings(req.app.locals.db, req.body, req.currentUser?.email || null));
   })
 );
 
