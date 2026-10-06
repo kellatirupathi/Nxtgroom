@@ -5,7 +5,6 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadBucketCommand,
-  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { runtimeConfig } from "../config/env.js";
@@ -144,19 +143,3 @@ export async function deletePhoto(key) {
   }
 }
 
-export async function listPhotoObjects({ continuationToken, maxKeys = 200 } = {}) {
-  if (!isPhotoStorageConfigured()) return { objects: [], nextToken: null };
-  const response = await getClient().send(new ListObjectsV2Command({
-    Bucket: config().bucket,
-    Prefix: "attendance/",
-    MaxKeys: Math.max(1, Math.min(1000, maxKeys)),
-    ...(continuationToken ? { ContinuationToken: continuationToken } : {}),
-  }));
-  return {
-    objects: (response.Contents || []).map((item) => ({
-      key: item.Key,
-      lastModified: item.LastModified || null,
-    })).filter((item) => item.key),
-    nextToken: response.IsTruncated ? response.NextContinuationToken || null : null,
-  };
-}

@@ -1,15 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { deletePhoto, listPhotoObjects } from "./photoStorage.js";
+import { deletePhoto } from "./photoStorage.js";
 import { runtimeConfig } from "../config/env.js";
 import { createWorkerMonitor } from "./workerHealth.js";
 import { createIdleBackoff } from "./workerPacing.js";
-import { getSetting, saveSetting } from "../stores/settingsStore.js";
 
 const WORKER_ID = randomUUID();
 const LEASE_MS = 60_000;
 const MAX_ATTEMPTS = 10;
-const ORPHAN_GRACE_MS = 60 * 60 * 1000;
-const SCAN_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 async function claimCleanup(db) {
   const now = new Date();
@@ -60,47 +57,6 @@ async function processCleanup(db, job) {
   );
 }
 
-export async function reconcileOrphanPhotos(db, now = new Date()) {
-  const stateId = "storage_orphan_scan";
-  const state = await getSetting(db, stateId);
-  if (state?.next_scan_at && new Date(state.next_scan_at) > now) return 0;
-
-  const page = await listPhotoObjects({ continuationToken: state?.continuation_token || null });
-  let queued = 0;
-  for (const object of page.objects) {
-    if (!object.lastModified || now.getTime() - new Date(object.lastModified).getTime() < ORPHAN_GRACE_MS) continue;
-    const referenced = await db.collection("attendance").findOne(
-      { $or: [{ check_in_photo_key: object.key }, { check_out_photo_key: object.key }] },
-      { projection: { _id: 1 } }
-    );
-    if (referenced) continue;
-    await db.collection("storage_cleanup_jobs").updateOne(
-      { _id: object.key },
-      {
-        $setOnInsert: {
-          _id: object.key,
-          key: object.key,
-          reason: "orphan_reconciliation",
-          status: "queued",
-          attempts: 0,
-          available_at: now,
-          created_at: now,
-        },
-        $set: { updated_at: now },
-      },
-      { upsert: true }
-    );
-    queued += 1;
-  }
-
-  await saveSetting(db, stateId, {
-    set: page.nextToken
-      ? { continuation_token: page.nextToken, next_scan_at: now, updated_at: now }
-      : { continuation_token: null, next_scan_at: new Date(now.getTime() + SCAN_INTERVAL_MS), updated_at: now },
-  });
-  return queued;
-}
-
 export function startStorageCleanupWorker(db) {
   let stopped = false;
   let timer = null;
@@ -111,10 +67,8 @@ export function startStorageCleanupWorker(db) {
     monitor.cycleStarted();
     let loopError = null;
     let job = null;
-    let orphansQueued = 0;
     inFlight = (async () => {
       try {
-        orphansQueued = await reconcileOrphanPhotos(db);
         job = await claimCleanup(db);
         monitor.progress(job ? "job_claimed" : "queue_idle");
         if (job) await processCleanup(db, job);
@@ -123,7 +77,7 @@ export function startStorageCleanupWorker(db) {
         console.error(`Storage cleanup worker error (${loopError})`);
       } finally {
         monitor.cycleCompleted(loopError);
-        const delay = backoff.afterCycle(Boolean(job) || orphansQueued > 0);
+        const delay = backoff.afterCycle(Boolean(job));
         if (!stopped) timer = setTimeout(tick, loopError ? Math.max(10_000, delay) : delay);
       }
     })();

@@ -17,7 +17,6 @@ import { getDeliveryRun, saveDeliveryRun } from "../stores/deliveryRunStore.js";
 export const DAILY_REPORT_SETTINGS_ID = "daily_report";
 export const MAX_DAILY_REPORT_TIMES = 8;
 export const MAX_DAILY_REPORT_RECIPIENTS = 50;
-export const DAILY_REPORT_LINK_DAYS = 30;
 const MAX_REPORT_ROWS = 5000;
 const REPORT_CACHE_MS = 60_000;
 const TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -210,11 +209,6 @@ function isDuplicateKey(error) {
   return error?.code === 11000;
 }
 
-function linkExpiry(dateKey, now) {
-  const dayEnd = dateBoundsInTimeZone(dateKey, runtimeConfig().appTimeZone).end;
-  return new Date(Math.max(dayEnd.getTime(), now.getTime()) + DAILY_REPORT_LINK_DAYS * 24 * 60 * 60 * 1000);
-}
-
 export function campusReportDayId(dateKey, collegeId) {
   return `daily-report-campus:${dateKey}:${collegeId}`;
 }
@@ -236,13 +230,11 @@ export async function ensureCampusReportDay(db, dateKey, college, now = new Date
   const id = campusReportDayId(dateKey, collegeId);
   const slug = campusSlug(college.name);
   const existing = await getDeliveryRun(db, id);
-  const currentExpiry = toDate(existing?.expires_at);
-  if (existing?.link_token && currentExpiry && currentExpiry.getTime() > now.getTime()) {
+  if (existing?.link_token) {
     if (existing.slug === slug) return existing;
     await saveDeliveryRun(db, id, { set: { slug, updated_at: now } });
     return { ...existing, slug };
   }
-  const expiresAt = linkExpiry(dateKey, now);
   const token = newLinkToken();
   await saveDeliveryRun(db, campusReportLinkId(dateKey, token), {
     set: { updated_at: now },
@@ -251,29 +243,23 @@ export async function ensureCampusReportDay(db, dateKey, college, now = new Date
       type: "daily_report_campus_link",
       date: dateKey,
       college_id: collegeId,
-      expires_at: expiresAt,
       created_at: now,
     },
   });
-  if (existing?.link_token) {
-    await saveDeliveryRun(db, id, { set: { link_token: token, slug, expires_at: expiresAt, updated_at: now } });
-  } else {
-    try {
-      await saveDeliveryRun(db, id, {
-        set: { slug, updated_at: now },
-        setOnInsert: {
-          _id: id,
-          type: "daily_report_campus",
-          date: dateKey,
-          college_id: collegeId,
-          link_token: token,
-          expires_at: expiresAt,
-          created_at: now,
-        },
-      });
-    } catch (error) {
-      if (!isDuplicateKey(error)) throw error;
-    }
+  try {
+    await saveDeliveryRun(db, id, {
+      set: { slug, updated_at: now },
+      setOnInsert: {
+        _id: id,
+        type: "daily_report_campus",
+        date: dateKey,
+        college_id: collegeId,
+        link_token: token,
+        created_at: now,
+      },
+    });
+  } catch (error) {
+    if (!isDuplicateKey(error)) throw error;
   }
   const link = await getDeliveryRun(db, id);
   if (!link?.link_token) throw new Error(`Campus report page for ${dateKey} could not be read back`);
@@ -283,27 +269,20 @@ export async function ensureCampusReportDay(db, dateKey, college, now = new Date
 export async function ensureDailyReportDay(db, dateKey, now = new Date()) {
   const id = dailyReportDayId(dateKey);
   const existing = await getDeliveryRun(db, id);
-  const currentExpiry = toDate(existing?.expires_at);
-  if (existing?.link_token && currentExpiry && currentExpiry.getTime() > now.getTime()) return existing;
-  const expiresAt = linkExpiry(dateKey, now);
-  if (existing?.link_token) {
-    await saveDeliveryRun(db, id, { set: { link_token: newLinkToken(), expires_at: expiresAt, updated_at: now } });
-  } else {
-    try {
-      await saveDeliveryRun(db, id, {
-        set: { updated_at: now },
-        setOnInsert: {
-          _id: id,
-          type: "daily_report_day",
-          date: dateKey,
-          link_token: newLinkToken(),
-          expires_at: expiresAt,
-          created_at: now,
-        },
-      });
-    } catch (error) {
-      if (!isDuplicateKey(error)) throw error;
-    }
+  if (existing?.link_token) return existing;
+  try {
+    await saveDeliveryRun(db, id, {
+      set: { updated_at: now },
+      setOnInsert: {
+        _id: id,
+        type: "daily_report_day",
+        date: dateKey,
+        link_token: newLinkToken(),
+        created_at: now,
+      },
+    });
+  } catch (error) {
+    if (!isDuplicateKey(error)) throw error;
   }
   const day = await getDeliveryRun(db, id);
   if (!day?.link_token) throw new Error(`Daily report page for ${dateKey} could not be read back`);
@@ -316,18 +295,16 @@ function sameSecret(expected, given) {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 }
 
-export async function findDailyReportDay(db, dateValue, token, now = new Date()) {
+export async function findDailyReportDay(db, dateValue, token) {
   const dateKey = parseDateSegment(dateValue);
   if (!dateKey || typeof token !== "string" || !LINK_TOKEN_PATTERN.test(token)) return null;
   const day = await getDeliveryRun(db, dailyReportDayId(dateKey));
   if (!day || day.type !== "daily_report_day" || typeof day.link_token !== "string") return null;
   if (!sameSecret(day.link_token, token)) return null;
-  const expiresAt = toDate(day.expires_at);
-  if (!expiresAt || expiresAt.getTime() <= now.getTime()) return null;
   return day;
 }
 
-export async function findCampusReportDay(db, dateValue, token, now = new Date()) {
+export async function findCampusReportDay(db, dateValue, token) {
   const dateKey = parseDateSegment(dateValue);
   if (!dateKey || typeof token !== "string" || !LINK_TOKEN_PATTERN.test(token)) return null;
   const pointer = await getDeliveryRun(db, campusReportLinkId(dateKey, token));
@@ -335,8 +312,6 @@ export async function findCampusReportDay(db, dateValue, token, now = new Date()
   const link = await getDeliveryRun(db, campusReportDayId(dateKey, pointer.college_id));
   if (!link || link.type !== "daily_report_campus" || typeof link.link_token !== "string") return null;
   if (!sameSecret(link.link_token, token)) return null;
-  const expiresAt = toDate(link.expires_at);
-  if (!expiresAt || expiresAt.getTime() <= now.getTime()) return null;
   return link;
 }
 
@@ -690,7 +665,7 @@ const DAY_LINK_CACHE_MS = 10 * 60 * 1000;
 
 async function dayLinkFor(db, dateKey, now) {
   const cached = dayLinkCache.get(dateKey);
-  if (cached && now.getTime() - cached.at < DAY_LINK_CACHE_MS && toDate(cached.day.expires_at) > now) {
+  if (cached && now.getTime() - cached.at < DAY_LINK_CACHE_MS) {
     return cached.day;
   }
   const day = await ensureDailyReportDay(db, dateKey, now);
@@ -736,8 +711,7 @@ const campusLinkCache = new Map();
 async function campusLinkFor(db, dateKey, college, now) {
   const key = `${dateKey}:${String(college._id)}`;
   const cached = campusLinkCache.get(key);
-  if (cached && now.getTime() - cached.at < DAY_LINK_CACHE_MS && toDate(cached.link.expires_at) > now
-    && cached.link.slug === campusSlug(college.name)) {
+  if (cached && now.getTime() - cached.at < DAY_LINK_CACHE_MS && cached.link.slug === campusSlug(college.name)) {
     return cached.link;
   }
   const link = await ensureCampusReportDay(db, dateKey, college, now);

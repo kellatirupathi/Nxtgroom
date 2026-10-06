@@ -235,7 +235,22 @@ test('a campus page names its institute and drops the institute filter; the over
 test('the instructor report shows the employee ID and email under the name', () => {
   const page = read('src/components/PublicReportPage.tsx');
   assert.ok(page.includes('employee_id?: string | null;'));
-  assert.ok(page.includes('<dt className="text-slate-500">Employee ID</dt>'));
+  assert.ok(page.includes('<dt className="sr-only">Employee ID</dt>'), 'only the icon and the ID are shown');
   assert.ok(page.includes('<dd className="font-semibold text-slate-700">{instructor.employee_id}</dd>'));
   assert.ok(page.includes('<dd className="min-w-0 break-all font-semibold text-slate-700">{instructor.email}</dd>'));
+});
+
+test('report pages and Settings no longer say the daily report links expire', () => {
+  const page = read('src/components/DailyReportPage.tsx');
+  assert.ok(!page.includes('works until'));
+  assert.ok(!page.includes('stop working 30 days'));
+  assert.ok(!read('src/lib/dayReport.ts').includes('expires_at'));
+  assert.ok(read('src/components/ReportsTab.tsx').includes('and it never expires.'));
+});
+
+test('the instructor report shows both the check-in and the check-out time', () => {
+  const page = read('src/components/PublicReportPage.tsx');
+  assert.ok(page.includes('>Check-in time</dt>'));
+  assert.ok(page.includes('>Check-out time</dt>'));
+  assert.ok(page.includes("day.attendance.check_out_time ? formatAttendanceTime(day.attendance.check_out_time) : 'Not checked out'"));
 });

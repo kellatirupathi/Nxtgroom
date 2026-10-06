@@ -372,7 +372,7 @@ export default function ReportsTab() {
         <p className="mt-1 text-sm text-slate-500">
           One row per day. Each day's report link opens its full report - every check-in and check-out,
           12:00 AM to 11:59 PM - and always shows the latest data. It is the same link that day's daily
-          report emails carry, and works for 30 days.
+          report emails carry, and it never expires.
         </p>
         <p className="mt-1 text-sm text-slate-500">
           Click Campuses on a day for each institute's own report, with its own link named after the institute.

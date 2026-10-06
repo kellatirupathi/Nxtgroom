@@ -435,7 +435,7 @@ test("a due report is queued once per recipient, and never twice", async () => {
   const day = db.docs("report_delivery_runs").find((doc) => doc._id === "daily-report-day:2026-09-30");
   assert.equal(day.type, "daily_report_day");
   assert.match(day.link_token, UUID, "a random UUID");
-  assert.equal(day.expires_at.getTime(), ist(24).getTime() + 30 * 24 * 60 * 60 * 1000, "30 days after the day ends");
+  assert.ok(!("expires_at" in day), "the day's link never expires");
   assert.ok(run.jobs_queued_at);
   const jobs = db.docs("mail_jobs");
   assert.deepEqual(jobs.map((job) => job.to_email).sort(), ["head@nxtwave.co.in", "ops@nxtwave.co.in"]);
@@ -477,29 +477,26 @@ test("nothing is sent while switched off or with nobody to send to", async () =>
   assert.equal(nobody.docs("mail_jobs").length, 0);
 });
 
-test("one link per day opens that day only, and only for 30 days after it", async () => {
+test("one link per day opens that day only, and never expires or changes", async () => {
   const db = schedulerDb();
   const first = await ensureDailyReportDay(db, "2026-09-30", ist(13, 0));
   const again = await ensureDailyReportDay(db, "2026-09-30", ist(18, 30));
   assert.equal(again.link_token, first.link_token, "the 1 PM and 6:30 PM emails carry the same link");
   const token = first.link_token;
-  const at = ist(20, 0);
-  assert.ok(await findDailyReportDay(db, "30-09-2026", token, at));
-  assert.equal(await findDailyReportDay(db, "30-09-2026", `${token.slice(0, -1)}x`, at), null, "wrong secret");
-  assert.equal(await findDailyReportDay(db, "01-10-2026", token, at), null, "another day");
-  assert.equal(await findDailyReportDay(db, "2026-09-30", token, at), null, "malformed date");
-  assert.equal(await findDailyReportDay(db, "30-09-2026", "short", at), null);
-  assert.ok(await findDailyReportDay(db, "30-09-2026", token, ist(23, 0, 30)), "still open on day 30");
-  assert.equal(await findDailyReportDay(db, "30-09-2026", token, ist(0, 1, 31)), null, "expired after 30 days");
+  assert.ok(await findDailyReportDay(db, "30-09-2026", token));
+  assert.equal(await findDailyReportDay(db, "30-09-2026", `${token.slice(0, -1)}x`), null, "wrong secret");
+  assert.equal(await findDailyReportDay(db, "01-10-2026", token), null, "another day");
+  assert.equal(await findDailyReportDay(db, "2026-09-30", token), null, "malformed date");
+  assert.equal(await findDailyReportDay(db, "30-09-2026", "short"), null);
+  assert.ok(!("expires_at" in first), "no expiry is stored");
 
-  const renewed = await ensureDailyReportDay(db, "2026-09-30", ist(9, 0, 40));
-  assert.notEqual(renewed.link_token, token);
-  assert.match(renewed.link_token, UUID);
-  assert.ok(await findDailyReportDay(db, "30-09-2026", renewed.link_token, ist(10, 0, 40)));
-  assert.equal(await findDailyReportDay(db, "30-09-2026", token, ist(10, 0, 40)), null);
+  const yearLater = await ensureDailyReportDay(db, "2026-09-30", ist(9, 0, 400));
+  assert.equal(yearLater.link_token, token, "the same link a year later");
+  assert.ok(await findDailyReportDay(db, "30-09-2026", token), "and it still opens");
 
-  const late = await ensureDailyReportDay(db, "2026-08-01", ist(10, 0));
-  assert.equal(late.expires_at.getTime(), ist(10, 0).getTime() + 30 * 24 * 60 * 60 * 1000);
+  const oldLink = db.docs("report_delivery_runs").find((doc) => doc._id === "daily-report-day:2026-09-30");
+  oldLink.expires_at = ist(0, 0, -10);
+  assert.ok(await findDailyReportDay(db, "30-09-2026", token), "a link that once had an expiry opens again");
 });
 
 test("the full-day page lists the whole day, both halves, in check-in order", async () => {
@@ -606,7 +603,7 @@ test("the settings, the public page, the mail worker and the scheduler are wired
   assert.match(server, /startMailWorker\(db\),\s*startDailyReportScheduler\(db\),/);
 });
 
-test("each campus has its own link per day, named after the campus, for 30 days", async () => {
+test("each campus has its own link per day, named after the campus, that never expires", async () => {
   assert.equal(campusSlug("NIAT Hyderabad"), "niat-hyderabad");
   assert.equal(campusSlug("Aditya Engineering College (A) – Surampalem"), "aditya-engineering-college-a-surampalem");
   assert.equal(campusSlug("  "), "campus");
@@ -628,7 +625,10 @@ test("each campus has its own link per day, named after the campus, for 30 days"
   const day = await ensureDailyReportDay(db, "2026-09-30", ist(13, 0));
   assert.equal(await findCampusReportDay(db, "30-09-2026", day.link_token, at), null, "the overall link is not a campus link");
   assert.equal(await findDailyReportDay(db, "30-09-2026", first.link_token, at), null, "nor the other way round");
-  assert.equal(await findCampusReportDay(db, "30-09-2026", first.link_token, ist(0, 1, 31)), null, "expired after 30 days");
+  assert.ok(!("expires_at" in first), "no expiry is stored");
+  const yearLater = await ensureCampusReportDay(db, "2026-09-30", niat, ist(10, 0, 400));
+  assert.equal(yearLater.link_token, first.link_token, "the same link a year later");
+  assert.ok(await findCampusReportDay(db, "30-09-2026", first.link_token), "and it still opens");
 
   const renamed = await ensureCampusReportDay(db, "2026-09-30", { _id: "c1", name: "NIAT Hyderabad Campus" }, ist(19, 0));
   assert.equal(renamed.link_token, first.link_token, "a renamed campus keeps its link");

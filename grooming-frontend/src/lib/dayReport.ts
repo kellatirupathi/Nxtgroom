@@ -21,7 +21,6 @@ export interface DayReportResponse {
   title: string;
   date_label: string;
   window_label: string;
-  expires_at: string;
   institute?: string | null;
   rows: DayRow[];
 }

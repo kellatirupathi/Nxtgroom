@@ -209,9 +209,9 @@ export default function PublicReportPage({ token, kind, date, half }: PublicRepo
           {(instructor?.employee_id || instructor?.email) && (
             <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-sm">
               {instructor?.employee_id && (
-                <div className="flex min-w-0 items-center gap-1.5">
+                <div className="flex min-w-0 items-center gap-1.5" title="Employee ID">
                   <BadgeCheck size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
-                  <dt className="text-slate-500">Employee ID</dt>
+                  <dt className="sr-only">Employee ID</dt>
                   <dd className="font-semibold text-slate-700">{instructor.employee_id}</dd>
                 </div>
               )}
@@ -251,11 +251,13 @@ export default function PublicReportPage({ token, kind, date, half }: PublicRepo
               </div>
               <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                 <div>
-                  <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                    {half === 'checkout' ? 'Check-out' : 'Check-in'}
-                  </dt>
+                  <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Check-in time</dt>
+                  <dd className="mt-0.5 font-semibold text-slate-700">{formatAttendanceTime(day.attendance.check_in_time)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Check-out time</dt>
                   <dd className="mt-0.5 font-semibold text-slate-700">
-                    {formatAttendanceTime(half === 'checkout' ? day.attendance.check_out_time : day.attendance.check_in_time)}
+                    {day.attendance.check_out_time ? formatAttendanceTime(day.attendance.check_out_time) : 'Not checked out'}
                   </dd>
                 </div>
                 {day.attendance.location_address && (

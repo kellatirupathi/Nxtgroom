@@ -32,13 +32,6 @@ interface PhotoTarget {
   kind: Kind;
 }
 
-function expiryLabel(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? ''
-    : date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Kolkata' });
-}
-
 const ICON = 'inline-flex h-8 w-8 items-center justify-center rounded-md border focus:outline-none focus:ring-2';
 const CHECKIN_ICON = `${ICON} border-indigo-100 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 focus:ring-indigo-500`;
 const CHECKOUT_ICON = `${ICON} border-rose-100 bg-rose-50 text-rose-700 hover:bg-rose-100 focus:ring-rose-500`;
@@ -220,7 +213,6 @@ export default function DailyReportPage({ date, token, campus }: DailyReportPage
           <img src="/logo.png" alt="" className="mx-auto mb-4 h-12 w-12 object-contain" />
           <h1 className="text-lg font-extrabold text-slate-800">Report unavailable</h1>
           <p className="mt-2 text-sm text-slate-600">{error || 'The report could not be loaded.'}</p>
-          <p className="mt-4 text-xs text-slate-400">Daily report links stop working 30 days after the day.</p>
         </div>
       </main>
     );
@@ -379,7 +371,6 @@ export default function DailyReportPage({ date, token, campus }: DailyReportPage
         <p className="mt-3 text-xs text-slate-400">
           Images: <span className="text-indigo-600">check-in</span> and <span className="text-rose-600">check-out</span> photos.
           Reports: <span className="text-indigo-600">check-in</span> and <span className="text-rose-600">check-out</span> reports.
-          {report.expires_at ? ` This link works until ${expiryLabel(report.expires_at)}.` : ''}
         </p>
       </div>
 

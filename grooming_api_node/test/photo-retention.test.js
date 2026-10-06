@@ -1,56 +1,64 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { readFile } from "node:fs/promises";
+import express from "express";
+import { reportRouter } from "../src/routes/reportRoutes.js";
 
-function cutoffFor(months, now) {
-  const cutoff = new Date(now);
-  cutoff.setUTCMonth(cutoff.getUTCMonth() - months);
-  return cutoff;
+const CRON_SECRET = "test-cron-secret-value";
+
+function untouchableDb() {
+  return {
+    collection(name) {
+      throw new Error(`the photo purge must not read or change ${name}`);
+    },
+  };
 }
 
-test("two months is the window, counted in calendar months", () => {
-  const now = new Date("2026-08-19T00:00:00.000Z");
-  assert.equal(cutoffFor(2, now).toISOString(), "2026-06-19T00:00:00.000Z");
-  assert.equal(cutoffFor(2, new Date("2026-01-15T00:00:00.000Z")).toISOString(), "2025-11-15T00:00:00.000Z");
-});
+const servers = [];
+after(() => servers.forEach((server) => server.close()));
 
-test("only records older than the cutoff are selected", () => {
-  const cutoff = cutoffFor(2, new Date("2026-08-19T00:00:00.000Z"));
-  const olderThanCutoff = (date) => new Date(date) < cutoff;
-
-  assert.equal(olderThanCutoff("2026-05-01T00:00:00.000Z"), true, "three months old expires");
-  assert.equal(olderThanCutoff("2026-06-18T23:59:00.000Z"), true, "just past two months expires");
-  assert.equal(olderThanCutoff("2026-06-20T00:00:00.000Z"), false, "inside two months is kept");
-  assert.equal(olderThanCutoff("2026-08-18T00:00:00.000Z"), false, "yesterday is kept");
-});
-
-test("a key is cleared only when its object was really deleted", () => {
-  const applyResult = (record, field, result) => (
-    result.deleted ? { ...record, [field]: null } : record
+function openServer() {
+  const app = express();
+  app.locals.db = untouchableDb();
+  app.use("/api/v2/reports", reportRouter);
+  const server = app.listen(0);
+  servers.push(server);
+  const { port } = server.address();
+  return (query = "", headers = { "x-cron-secret": CRON_SECRET }) => fetch(
+    `http://127.0.0.1:${port}/api/v2/reports/cron/purge-photos${query}`,
+    { method: "POST", headers }
   );
+}
 
-  const record = { check_in_photo_key: "attendance/2026/05/01/x-checkin-ab.jpg" };
-  assert.equal(applyResult(record, "check_in_photo_key", { deleted: true }).check_in_photo_key, null);
-  assert.equal(
-    applyResult(record, "check_in_photo_key", { deleted: false, reason: "TimeoutError" }).check_in_photo_key,
-    record.check_in_photo_key
-  );
-});
-
-test("a record keeps everything except its photographs", () => {
-  const purged = (record) => ({ ...record, check_in_photo_key: null, check_out_photo_key: null });
-  const before = {
-    _id: "a1",
-    status: "non_compliant",
-    remarks: "The shirt is not full-sleeve.",
-    attire_type: "FORMAL",
-    location_address: "Brigade Towers, Hyderabad",
-    check_in_photo_key: "attendance/2026/05/01/x-checkin-ab.jpg",
-    check_out_photo_key: "attendance/2026/05/01/x-checkout-cd.jpg",
-  };
-  const after = purged(before);
-  for (const field of ["status", "remarks", "attire_type", "location_address"]) {
-    assert.equal(after[field], before[field], `${field} must survive the purge`);
+test("the old photo purge call deletes nothing: photos are kept permanently", async (t) => {
+  t.after(() => { delete process.env.CRON_SECRET; });
+  process.env.CRON_SECRET = CRON_SECRET;
+  const purge = openServer();
+  for (const query of ["", "?months=1", "?dry=1"]) {
+    const response = await purge(query);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      status: "disabled",
+      photos_deleted: 0,
+      note: "Photos are kept permanently. Nothing is deleted.",
+    });
   }
-  assert.equal(after.check_in_photo_key, null);
-  assert.equal(after.check_out_photo_key, null);
+});
+
+test("the purge call still refuses a caller without the shared secret", async (t) => {
+  t.after(() => { delete process.env.CRON_SECRET; });
+  process.env.CRON_SECRET = CRON_SECRET;
+  const purge = openServer();
+  assert.equal((await purge("", {})).status, 401);
+});
+
+test("no worker scans storage to delete photos it cannot match", async () => {
+  const worker = await readFile(new URL("../src/services/storageCleanupWorker.js", import.meta.url), "utf8");
+  assert.ok(!worker.includes("reconcileOrphanPhotos"));
+  assert.ok(!worker.includes("listPhotoObjects"));
+  const storage = await readFile(new URL("../src/services/photoStorage.js", import.meta.url), "utf8");
+  assert.ok(!storage.includes("ListObjectsV2Command"), "storage is never listed for deletion");
+  const routes = await readFile(new URL("../src/routes/reportRoutes.js", import.meta.url), "utf8");
+  assert.ok(!routes.includes("PHOTO_RETENTION_MONTHS"));
+  assert.ok(!routes.includes("deletePhoto("), "reports never delete photos");
 });
