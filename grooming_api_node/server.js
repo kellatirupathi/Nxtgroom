@@ -35,6 +35,7 @@ import { checkPhotoStorageConnection } from "./src/services/photoStorage.js";
 import { getWorkerReadiness } from "./src/services/workerHealth.js";
 import { createDocument } from "./src/utils.js";
 import { telemetrySnapshot } from "./src/services/telemetry.js";
+import { auditTrail } from "./src/services/auditLog.js";
 
 const config = runtimeConfig();
 
@@ -169,6 +170,7 @@ async function readinessHandler(_req, res) {
 app.get("/health/ready", readinessHandler);
 app.get("/health", readinessHandler);
 
+app.use("/api/v2", auditTrail);
 app.use("/api/v2/auth/login", loginLimiter);
 app.use("/api/v2/auth", requireDatabase, authRouter);
 app.use("/api/v2/reports", requireDatabase, reportRouter);

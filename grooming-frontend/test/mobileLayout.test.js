@@ -91,8 +91,10 @@ test('panels pinned to the screen edges clear the system bars in the app', () =>
   assert.match(read('src/components/Toast.tsx'), /pt-\[max\(0\.75rem,var\(--inset-top\)\)\]/);
 });
 
-test('Settings sections are swipeable chips on a phone and underlined tabs from sm', () => {
+test('Settings sections are swipeable chips on a phone and a left-side menu from md', () => {
   const settings = read('src/components/SettingsPage.tsx');
-  assert.match(settings, /rounded-full border px-3\.5 py-2 sm:rounded-none sm:border-0 sm:border-b-2/);
+  assert.match(settings, /rounded-full border px-3\.5 py-2 md:w-full md:rounded-md md:border-0/);
+  assert.match(settings, /md:w-52 md:overflow-visible md:border-r/, 'a left-side menu on wider screens');
+  assert.ok(settings.includes('aria-orientation="vertical"'));
   assert.match(settings, /scrollIntoView\(\{ behavior: 'smooth', inline: 'center', block: 'nearest' \}\)/);
 });

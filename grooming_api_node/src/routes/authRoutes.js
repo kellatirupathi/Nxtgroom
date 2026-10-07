@@ -1,3 +1,4 @@
+import { auditRequest } from "../services/auditLog.js";
 import { Router } from "express";
 import { appUrl, runtimeConfig } from "../config/env.js";
 import {
@@ -122,8 +123,10 @@ authRouter.post(
     const user = await req.app.locals.db.collection("users").findOne({ email });
     const passwordMatches = await verifyPassword(password, user?.password_hash);
     if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role) || !passwordMatches) {
+      void auditRequest(req, { action: "Failed login (password)", category: "login", actor: { email, role: user?.role || null }, status: 401 });
       return res.status(401).json({ detail: "Incorrect email or password" });
     }
+    void auditRequest(req, { action: "Logged in (password)", category: "login", actor: { email: user.email, role: user.role }, status: 200 });
 
     const accessToken = createAccessToken({
         sub: user.email,
@@ -318,10 +321,12 @@ authRouter.post(
       .findOne({ email: verification.email });
 
     if (!user || user.disabled_at || !Object.values(ROLES).includes(user.role)) {
+      void auditRequest(req, { action: "Failed login (Google)", category: "login", actor: { email: verification.email, role: user?.role || null }, status: 403 });
       return res.status(403).json({
         detail: "This Google account is not authorised. Ask an administrator to add it first.",
       });
     }
+    void auditRequest(req, { action: "Logged in (Google)", category: "login", actor: { email: user.email, role: user.role }, status: 200 });
 
     const accessToken = createAccessToken({
         sub: user.email,

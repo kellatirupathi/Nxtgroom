@@ -136,7 +136,7 @@ test('pages read their filters from the address and write changes back', () => {
   }
   assert.ok(read('components/CollegeManagement.tsx').includes("const LIST_PATH = '/settings/institutes';"));
   const settings = read('components/SettingsPage.tsx');
-  assert.ok(settings.includes('const tab = settingsTabFromPath(pathname);'));
+  assert.ok(settings.includes('const requested = settingsTabFromPath(pathname);'));
   assert.ok(settings.includes('goToPath(settingsTabPath(next))'));
   assert.ok(read('components/EscalationsPage.tsx').includes('writeQueryParams(escalationQueryParams({ period, custom, search, college, weekday }));'));
   assert.ok(read('components/InstituteAnalytics.tsx').includes('writeQueryParams({ ...datePresetToQuery(preset, range), ...instituteSortToQuery(sort) });'));

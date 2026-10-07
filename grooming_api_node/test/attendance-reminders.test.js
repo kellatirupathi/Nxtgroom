@@ -218,7 +218,7 @@ test("Settings serves the switches, the scheduler runs, the cron call obeys the 
   const server = await readFile(new URL("../server.js", import.meta.url), "utf8");
   assert.match(server, /startDailyReportScheduler\(db\),\s*startAttendanceReminderScheduler\(db\),/);
   const reports = await readFile(new URL("../src/routes/reportRoutes.js", import.meta.url), "utf8");
-  assert.match(reports, /const \{ checkout_reminder_enabled: enabled \} = await getAttendanceReminderSettings\(db\);\s*if \(!enabled\) \{/);
+  assert.match(reports, /const \{ checkout_reminder_enabled: enabled \} = await getAttendanceReminderSettings\(db\);\s*if \(await isHoliday\(db, today\)\) \{[\s\S]*?if \(!enabled\) \{/);
   const mail = await readFile(new URL("../src/services/mailWorker.js", import.meta.url), "utf8");
   assert.match(mail, /"checkin_reminder",/);
   assert.match(mail, /if \(job\.type === "checkin_reminder" && await checkedInSinceQueued\(db, job\.payload\)\) \{/);

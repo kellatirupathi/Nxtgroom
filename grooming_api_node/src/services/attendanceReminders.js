@@ -2,6 +2,7 @@ import { runtimeConfig } from "../config/env.js";
 import { idMatch } from "../middleware/auth.js";
 import { dateBoundsInTimeZone } from "../utils.js";
 import { localDateKey } from "./instructorReports.js";
+import { isHoliday } from "./holidays.js";
 import { enqueueMailJob } from "./mailWorker.js";
 import { getSetting, saveSetting } from "../stores/settingsStore.js";
 import { completeDeliveryRunIfDone, getDeliveryRun, saveDeliveryRun } from "../stores/deliveryRunStore.js";
@@ -249,6 +250,10 @@ export async function runDueAttendanceReminders(db, now = new Date(), { done = n
   for (const due of dueAttendanceReminders(settings, now)) {
     const runId = reminderRunId(due.kind, due.dateKey);
     if (done.has(runId)) continue;
+    if (await isHoliday(db, due.dateKey)) {
+      done.add(runId);
+      continue;
+    }
     const existing = await getDeliveryRun(db, runId);
     if (existing?.production_finished_at) {
       done.add(runId);

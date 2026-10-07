@@ -20,6 +20,8 @@ import {
   saveConfigSettings,
   validateConfigSettings,
 } from "../services/configSettings.js";
+import { addHoliday, listHolidays, removeHoliday } from "../services/holidays.js";
+import { listAuditLog } from "../services/auditLog.js";
 import {
   attendanceReminderView,
   getAttendanceReminderSettings,
@@ -1005,6 +1007,47 @@ adminRouter.put(
     const result = validateAttendanceReminders(req.body);
     if (!result.valid) return res.status(422).json({ detail: result.detail });
     return res.json(await saveAttendanceReminderSettings(req.app.locals.db, req.body, req.currentUser?.email || null));
+  })
+);
+
+adminRouter.get(
+  "/settings/holidays",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    return res.json(await listHolidays(req.app.locals.db));
+  })
+);
+
+adminRouter.post(
+  "/settings/holidays",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await addHoliday(req.app.locals.db, req.body, req.currentUser?.email || null);
+    if (!result.ok) return res.status(422).json({ detail: result.detail });
+    return res.status(201).json(result.holidays);
+  })
+);
+
+adminRouter.delete(
+  "/settings/holidays/:date",
+  requireSuperAdmin,
+  asyncRoute(async (req, res) => {
+    const result = await removeHoliday(req.app.locals.db, String(req.params.date || ""), req.currentUser?.email || null);
+    if (!result.ok) return res.status(404).json({ detail: result.detail });
+    return res.json(result.holidays);
+  })
+);
+
+adminRouter.get(
+  "/settings/audit-log",
+  requireRootAdmin,
+  asyncRoute(async (req, res) => {
+    const { q, category, from, to, limit, offset } = req.query;
+    return res.json(await listAuditLog(
+      req.app.locals.db,
+      { q: String(q || ""), category: String(category || ""), from: String(from || ""), to: String(to || "") },
+      { limit, offset },
+    ));
   })
 );
 

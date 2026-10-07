@@ -1,3 +1,4 @@
+import { holidayDates } from "./holidays.js";
 import { createHash, randomUUID } from "node:crypto";
 import { runtimeConfig } from "../config/env.js";
 import { PROMPT_VERSION } from "../prompts.js";
@@ -240,7 +241,7 @@ export function nonCompliantOccurrences(records) {
 
 const RUN_BREAKING_STATUSES = new Set(["compliant", "done", "needs_review", "review_required"]);
 
-export function failedDayStreaks(records, weekStart) {
+export function failedDayStreaks(records, weekStart, holidays = null) {
   const byDay = new Map();
   for (const record of records || []) {
     if (record?.deleting_at || !record?.attendance_day) continue;
@@ -252,7 +253,9 @@ export function failedDayStreaks(records, weekStart) {
   const streaks = [];
   let current = [];
   for (let offset = 0; offset < 7; offset += 1) {
-    const record = byDay.get(addDaysToKey(weekStart, offset));
+    const dayKey = addDaysToKey(weekStart, offset);
+    if (holidays?.has(dayKey)) continue;
+    const record = byDay.get(dayKey);
     const status = String(record?.status || "").toLowerCase();
     if (record && NON_COMPLIANT_STATUSES.has(status)) {
       current.push(record);
@@ -265,8 +268,8 @@ export function failedDayStreaks(records, weekStart) {
   return streaks;
 }
 
-export function longestFailedStreak(records, weekStart) {
-  return failedDayStreaks(records, weekStart)
+export function longestFailedStreak(records, weekStart, holidays = null) {
+  return failedDayStreaks(records, weekStart, holidays)
     .reduce((longest, streak) => (streak.length >= longest.length ? streak : longest), []);
 }
 
@@ -279,6 +282,8 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
   );
   const dayKey = attendance?.attendance_day
     || localDateKey(new Date(attendance?.check_in_time || Date.now()));
+  const holidays = await holidayDates(db);
+  if (holidays.has(dayKey)) return 0;
   const weekStart = weekStartKey(dayKey);
   const weekEnd = addDaysToKey(weekStart, 6);
 
@@ -301,7 +306,7 @@ async function escalateRepeatedNonCompliance(db, { attendanceId, instructorId, k
       },
     }
   ).toArray();
-  const streak = failedDayStreaks(records, weekStart)
+  const streak = failedDayStreaks(records, weekStart, holidays)
     .find((days) => days.some((record) => record.attendance_day === dayKey)) || [];
   if (streak.length < ESCALATION_THRESHOLD) return 0;
   const occurrences = streak.map((record) => ({

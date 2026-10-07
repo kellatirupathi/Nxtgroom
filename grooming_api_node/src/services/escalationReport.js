@@ -1,3 +1,4 @@
+import { holidayDates } from "./holidays.js";
 import { runtimeConfig } from "../config/env.js";
 import { idMatch } from "../middleware/auth.js";
 import { localDateKey } from "./instructorReports.js";
@@ -109,10 +110,11 @@ export async function escalationReport(db, { week, from, to, collegeId = null, n
     byInstructor.get(id).push(record);
   }
 
+  const holidays = await holidayDates(db);
   const runs = [];
   for (const [instructorId, group] of byInstructor) {
     for (const weekStart of weekStarts) {
-      for (const streak of failedDayStreaks(group, weekStart)) {
+      for (const streak of failedDayStreaks(group, weekStart, holidays)) {
         if (streak.length < ESCALATION_THRESHOLD) continue;
         if (streak.some((record) => record.attendance_day >= range.from && record.attendance_day <= range.to)) {
           runs.push({ instructorId, streak });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, Database, FileChartColumn, ScanFace, SlidersHorizontal, Users } from 'lucide-react';
+import { Bell, Building2, CalendarOff, Database, FileChartColumn, History, ScanFace, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import IdentificationSettingsSection from './IdentificationSettingsSection';
@@ -9,6 +9,8 @@ import ReportsTab from './ReportsTab';
 import AccessSettingsSection from './AccessSettingsSection';
 import AttendanceReminderSettings from './AttendanceReminderSettings';
 import ConfigSettingsSection from './ConfigSettingsSection';
+import HolidaySettings from './HolidaySettings';
+import AuditLogSection from './AuditLogSection';
 import type { NotificationSettings } from '../types';
 import { goToPath, settingsTabFromPath, settingsTabPath, type SettingsTab } from '../routes';
 import { useLocation } from '../lib/useLocation';
@@ -183,117 +185,79 @@ function NotificationSettings() {
   );
 }
 
-export default function SettingsPage() {
+const SECTIONS: ReadonlyArray<{ tab: SettingsTab; label: string; icon: LucideIcon; rootOnly?: boolean }> = [
+  { tab: 'notifications', label: 'Notifications', icon: Bell },
+  { tab: 'identification', label: 'Identification', icon: ScanFace },
+  { tab: 'colleges', label: 'Institutes', icon: Building2 },
+  { tab: 'sync', label: 'Sync Data', icon: Database },
+  { tab: 'rp', label: 'RP', icon: Users },
+  { tab: 'reports', label: 'Reports', icon: FileChartColumn },
+  { tab: 'holidays', label: 'Holidays', icon: CalendarOff },
+  { tab: 'config', label: 'Config', icon: SlidersHorizontal },
+  { tab: 'audit', label: 'Audit log', icon: History, rootOnly: true },
+];
+
+export default function SettingsPage({ role = null }: { role?: string | null }) {
   const { pathname } = useLocation();
-  const tab = settingsTabFromPath(pathname);
+  const sections = SECTIONS.filter((section) => !section.rootOnly || role === 'SUPER_ADMIN');
+  const requested = settingsTabFromPath(pathname);
+  const tab = sections.some((section) => section.tab === requested) ? requested : 'notifications';
   const setTab = (next: SettingsTab) => {
     if (next !== tab) goToPath(settingsTabPath(next));
   };
 
-  const tabClass = (value: string) =>
-    `flex items-center gap-2 whitespace-nowrap text-sm font-semibold transition-colors rounded-full border px-3.5 py-2 sm:rounded-none sm:border-0 sm:border-b-2 sm:px-4 sm:py-2.5 ${
+  const tabClass = (value: SettingsTab) =>
+    `flex shrink-0 items-center gap-2.5 whitespace-nowrap text-sm font-semibold transition-colors rounded-full border px-3.5 py-2 md:w-full md:rounded-md md:border-0 md:px-3 md:py-2.5 ${
       tab === value
-        ? 'border-indigo-600 bg-indigo-600 text-white sm:bg-transparent sm:text-indigo-700'
-        : 'border-slate-200 bg-white text-slate-600 hover:text-slate-800 sm:border-transparent sm:bg-transparent sm:text-slate-500'
+        ? 'border-indigo-600 bg-indigo-600 text-white md:bg-indigo-50 md:text-indigo-700'
+        : 'border-slate-200 bg-white text-slate-600 hover:text-slate-800 md:bg-transparent md:text-slate-600 md:hover:bg-slate-100'
     }`;
 
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
       <div className="mb-5 shrink-0">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners, daily reports and configuration.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners, reports, holidays, configuration and the audit log.</p>
       </div>
 
-      <div
-        className="-mx-4 mb-5 shrink-0 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:mb-6 sm:border-b sm:border-slate-200 sm:px-0 sm:pb-0"
-        role="tablist"
-        aria-label="Settings sections"
-      >
-        <div
-          className="flex gap-2 w-max min-w-full [&>button]:shrink-0"
-          onClick={(event) => (event.target as HTMLElement).closest('button')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row md:gap-6">
+        <nav
+          className="-mx-4 mb-5 shrink-0 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] md:mx-0 md:mb-0 md:w-52 md:overflow-visible md:border-r md:border-slate-200 md:px-0 md:pb-0 md:pr-4"
+          aria-label="Settings sections"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'notifications'}
-            onClick={() => setTab('notifications')}
-            className={tabClass('notifications')}
+          <div
+            className="flex w-max gap-2 md:w-full md:flex-col md:gap-1"
+            role="tablist"
+            aria-orientation="vertical"
+            onClick={(event) => (event.target as HTMLElement).closest('button')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })}
           >
-            <Bell size={16} aria-hidden="true" />
-            Notifications
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'identification'}
-            onClick={() => setTab('identification')}
-            className={tabClass('identification')}
-          >
-            <ScanFace size={16} aria-hidden="true" />
-            Identification
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'colleges'}
-            onClick={() => setTab('colleges')}
-            className={tabClass('colleges')}
-          >
-            <Building2 size={16} aria-hidden="true" />
-            Institutes
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'sync'}
-            onClick={() => setTab('sync')}
-            className={tabClass('sync')}
-          >
-            <Database size={16} aria-hidden="true" />
-            Sync Data
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'rp'}
-            onClick={() => setTab('rp')}
-            className={tabClass('rp')}
-          >
-            <Users size={16} aria-hidden="true" />
-            RP
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'reports'}
-            onClick={() => setTab('reports')}
-            className={tabClass('reports')}
-          >
-            <FileChartColumn size={16} aria-hidden="true" />
-            Reports
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === 'config'}
-            onClick={() => setTab('config')}
-            className={tabClass('config')}
-          >
-            <SlidersHorizontal size={16} aria-hidden="true" />
-            Config
-          </button>
-        </div>
-      </div>
+            {sections.map(({ tab: value, label, icon: Icon }) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={tab === value}
+                onClick={() => setTab(value)}
+                className={tabClass(value)}
+              >
+                <Icon size={16} aria-hidden="true" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
 
-      <div className="flex-1 min-h-0 overflow-auto">
-        {tab === 'notifications' && <NotificationSettings />}
-        {tab === 'identification' && <IdentificationSettingsSection />}
-        {tab === 'colleges' && <CollegeManagement />}
-        {tab === 'sync' && <InstructorSyncPanel />}
-        {tab === 'rp' && <ReportRecipients />}
-        {tab === 'reports' && <ReportsTab />}
-        {tab === 'config' && <ConfigSettingsSection />}
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+          {tab === 'notifications' && <NotificationSettings />}
+          {tab === 'identification' && <IdentificationSettingsSection />}
+          {tab === 'colleges' && <CollegeManagement />}
+          {tab === 'sync' && <InstructorSyncPanel />}
+          {tab === 'rp' && <ReportRecipients />}
+          {tab === 'reports' && <ReportsTab />}
+          {tab === 'holidays' && <HolidaySettings />}
+          {tab === 'config' && <ConfigSettingsSection />}
+          {tab === 'audit' && <AuditLogSection />}
+        </div>
       </div>
     </section>
   );

@@ -377,7 +377,7 @@ export default function App() {
           )}
 
           {activeTab === 'settings' && isElevatedRole(session.role) && (
-            <div className="w-full h-full"><SettingsPage /></div>
+            <div className="w-full h-full"><SettingsPage role={session.role} /></div>
           )}
 
           {activeTab === 'instructor-management' && isElevatedRole(session.role) && (

@@ -17,6 +17,7 @@ import {
   deliverAttendanceReminders,
   getAttendanceReminderSettings,
 } from "../services/attendanceReminders.js";
+import { isHoliday } from "../services/holidays.js";
 import {
   buildFullDayReport,
   dailyReportPhotoKey,
@@ -491,6 +492,9 @@ reportRouter.post(
     const today = localDateKey(new Date());
     const runId = `attendance-reminders:${today}`;
     const { checkout_reminder_enabled: enabled } = await getAttendanceReminderSettings(db);
+    if (await isHoliday(db, today)) {
+      return res.status(200).json({ date: today, status: "holiday", run_id: runId, note: "Today is a holiday; no reminders are sent." });
+    }
     if (!enabled) {
       return res.status(200).json({
         date: today,

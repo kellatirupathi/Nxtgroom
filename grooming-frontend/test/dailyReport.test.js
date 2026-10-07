@@ -143,8 +143,8 @@ test('months step in India time, across year ends', () => {
 
 test('Settings has a Reports tab listing each day with its counts and report link', () => {
   const settingsPage = read('src/components/SettingsPage.tsx');
-  assert.match(read('src/routes.ts'), /'rp' \| 'reports'( \| 'config')?;/);
-  assert.match(settingsPage, /onClick=\{\(\) => setTab\('reports'\)\}[\s\S]*?Reports\n\s*<\/button>/);
+  assert.match(read('src/routes.ts'), /'rp' \| 'reports' \|/);
+  assert.ok(settingsPage.includes("{ tab: 'reports', label: 'Reports', icon: FileChartColumn }"));
   assert.match(settingsPage, /\{tab === 'reports' && <ReportsTab \/>\}/);
 
   const tab = read('src/components/ReportsTab.tsx');

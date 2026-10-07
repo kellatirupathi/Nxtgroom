@@ -4,6 +4,7 @@ import {
   longestFailedStreak,
   weekStartKey,
 } from "./evaluationWorker.js";
+import { holidayDates } from "./holidays.js";
 
 export async function weeklyEscalations(db, rows, scope = {}) {
   const weeksByInstructor = new Map();
@@ -45,10 +46,11 @@ export async function weeklyEscalations(db, rows, scope = {}) {
     groups.get(key).push(record);
   }
 
+  const holidays = await holidayDates(db);
   const escalated = new Map();
   for (const [key, group] of groups) {
     const weekStart = key.slice(key.lastIndexOf("|") + 1);
-    const streak = longestFailedStreak(group, weekStart);
+    const streak = longestFailedStreak(group, weekStart, holidays);
     if (streak.length < ESCALATION_THRESHOLD) continue;
     escalated.set(key, {
       week_start: weekStart,

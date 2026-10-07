@@ -90,9 +90,9 @@ export function recordIdFromLocation(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export const SETTINGS_SECTIONS = ['notifications', 'identification', 'institutes', 'sync', 'rp', 'reports', 'config'] as const;
+export const SETTINGS_SECTIONS = ['notifications', 'identification', 'institutes', 'sync', 'rp', 'reports', 'holidays', 'config', 'audit'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
-export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'config';
+export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'holidays' | 'config' | 'audit';
 
 const SETTINGS_TAB_SECTIONS: Record<SettingsTab, SettingsSection> = {
   notifications: 'notifications',
@@ -101,7 +101,9 @@ const SETTINGS_TAB_SECTIONS: Record<SettingsTab, SettingsSection> = {
   sync: 'sync',
   rp: 'rp',
   reports: 'reports',
+  holidays: 'holidays',
   config: 'config',
+  audit: 'audit',
 };
 
 const SUB_ROUTES: ReadonlyArray<[RegExp, Tab]> = [
