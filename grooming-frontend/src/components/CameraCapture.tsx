@@ -19,7 +19,7 @@ import {
 import FaceBoxOverlay from './FaceBoxOverlay';
 import type { FaceBox } from '../lib/faceBoxes';
 import { bodyGuideSourceRect } from '../lib/cameraGeometry';
-import { openCameraStream } from '../lib/cameraStream';
+import { cameraVideoConstraints, openCameraStream, tuneCameraTrack } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 import type { BodyRegions, CaptureDetails } from '../lib/bodyRegions';
 import { PHOTO_JPEG_QUALITY } from '../lib/photoEncoding';
@@ -107,7 +107,7 @@ export default function CameraCapture({
       openingRef.current = true;
       try {
         const stream = await openCameraStream({
-          video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: cameraVideoConstraints(facing),
           audio: false,
         }, { isCancelled: () => disposed });
         if (disposed) {
@@ -115,6 +115,7 @@ export default function CameraCapture({
           return;
         }
         streamRef.current = stream;
+        void tuneCameraTrack(stream.getVideoTracks()[0]);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});

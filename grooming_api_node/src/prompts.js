@@ -1,7 +1,7 @@
 import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
 
-export const PROMPT_VERSION = "2026-10-05.1";
+export const PROMPT_VERSION = "2026-10-08.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -242,10 +242,20 @@ or kurti standards, and do not comment on makeup.
 ### HAIR ON THE FOREHEAD
 Hair must be set back or up on top of the head with the whole forehead clear.
 Any fringe or strands resting on or hanging over the forehead fail Hair Position,
-however neat or deliberately styled they are. Curls or waves whose front edge
-sits at the hairline, and hair at the temples, are not on the forehead. Messy
+however neat or deliberately styled they are. Curls, waves or a quiff whose
+front edge comes down past the hairline onto the forehead skin fail too, even
+by a few strands; only hair that stops at or above the hairline passes, and hair
+at the temples is not on the forehead. Before passing, look at the band of skin
+between the hairline and the eyebrows: any hair inside it is a FAIL. Messy
 or unset hair fails Hair Neatness; natural curls or waves that are shaped and
 under control are not messy. Say where the front of the hair sits.
+
+### BELT
+A belt is a PASS only when you can see it. Name its colour and its buckle; if
+you cannot, no belt was seen and Belt is a FAIL. A shirt hem hanging over the
+front of the waistband hides the belt, so an untucked shirt fails Belt too
+unless a buckle is plainly visible. Never assume a belt because the rest of the
+outfit is formal.
 `.trim();
 
 const WOMEN_ANALYSIS_RULES = `
@@ -268,7 +278,11 @@ Sleeves must reach at least halfway from the shoulder to the elbow - on a
 kurti, a saree blouse and a western top alike. A sleeve ending above that point,
 a cap sleeve and sleeveless are a FAIL; a half sleeve ending at the middle of the
 upper arm or lower passes. Name the sleeve style and where its hem ends. Silence
-on sleeves reads as approval.
+on sleeves reads as approval. Measure before failing: find the shoulder point
+and the elbow, then see where the hem ends between them. A puffed or gathered
+sleeve is judged by its hem, not by its fullness at the shoulder. FAIL only a
+hem that clearly ends well short of the halfway point; a hem at or close to it,
+or one the angle, the pose or the pallu stops you placing precisely, passes.
 
 Bottom wear must hang with some ease: palazzo pants, straight formal trousers,
 or the straight or slim-straight pants of a kurti set, including ankle-length

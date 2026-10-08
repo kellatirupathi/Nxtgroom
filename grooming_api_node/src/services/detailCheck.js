@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { z } from "zod";
 
-export const DETAIL_CHECK_VERSION = "2026-10-03.3";
+export const DETAIL_CHECK_VERSION = "2026-10-08.1";
 
 const ROW_REGIONS = Object.freeze({
   M_HAIR_NEATNESS: "head",
@@ -203,7 +203,7 @@ Answer close_up from the close-up crops when the request includes them (labelled
 
 FACE
 - hair_messy: YES if the hair is uncombed, dishevelled, sticking out or visibly unset at the crown, sides or front hairline; NO if it is combed and set; UNCLEAR if you cannot tell (for example under a cap). Natural curly or wavy hair that is shaped and under control is NO; curly hair that is uncombed or sticking out is YES.
-- hair_on_forehead: YES if any fringe, strands or locks rest on or hang over the forehead, eyebrows or eyes; NO if the forehead is clear from the hairline to the eyebrows; UNCLEAR if you cannot tell. Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead.
+- hair_on_forehead: YES if any fringe, strands, curls or locks come down past the natural hairline onto the forehead skin, the eyebrows or the eyes, even a few strands; NO only if the band of skin from the hairline to the eyebrows is clear of hair; UNCLEAR if you cannot tell. Curls, waves or a quiff whose front edge stops at or above the hairline are not on the forehead, and neither is hair at the temples or beside the ears.
 - facial_hair: CLEAN_SHAVEN; LIGHT_STUBBLE for short, even stubble or a negligible beard too short to have a shaped edge; TRIMMED_BEARD for a short, close-cropped beard of even length - even when its cheek line and neckline follow natural growth rather than a shaved edge - or a longer beard with defined, shaped edges at the cheek and neck; UNTRIMMED_BEARD only for a grown-out beard (long, bushy or full enough to stand away from the face), one of clearly uneven length, with straggly long hairs or visibly patchy, unkempt growth, or growth reaching well down the neck; UNCLEAR if you cannot tell. A short, even beard is TRIMMED_BEARD, never UNTRIMMED_BEARD, because its edges are natural. Light stubble and a trimmed beard are groomed.
 - moustache: NONE; TRIMMED_CLEAR_OF_LIP for a moustache that stays above the lip line, however thin or light; OVER_LIP for one growing down over the lip line; UNCLEAR if you cannot tell.
 - face_assessable: false if the face is out of frame, turned away, covered or too blurred to judge.
@@ -214,6 +214,8 @@ WAIST
 - belt_strap_visible: true only if you can see a belt strap - a band of leather or fabric running through the belt loops along the waistband, visibly separate from the trouser fabric.
 - Answer both from whatever part of the waistband you can see, even when something covers another part of it: a buckle or strap visible beside a hand or below an ID card is still visible.
 - The top edge of the trousers, belt loops, a fold of shirt fabric, or a shadow at the waist are NOT a belt. Over dark trousers, look for the buckle and for the edge of a strap lying on top of the waistband; if you see neither, both are false.
+- When shirt fabric hangs over the front of the waistband, the belt is covered: report a buckle or strap only where you actually see it below or beside that fabric, never because a belt is usually worn.
+- Whenever you report a buckle or strap, name the belt's colour and the buckle in waist_observation. If you cannot name them, you have not seen a belt and both are false.
 - shirt_tucked: YES if the shirt hem disappears into the waistband; NO if shirt fabric hangs outside or below the waistband; UNCLEAR if you cannot tell. A kurta is not tucked: answer UNCLEAR for it.
 - waist_assessable: false only if the front of the waistband is out of frame, mostly covered (by hands, an untucked shirt, a kurta, a bag) or too blurred to judge. An ID card or lanyard hanging above the waistband, or across only part of it, does not make it unassessable: judge the part you can see.
 - waist_observation: one sentence naming what you saw at the front of the waistband.
@@ -378,9 +380,17 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
   if (waist) {
     const seen = sentence(waist.observation, "The front of the waistband.");
     const belt = findRow(rows, "M_BELT");
+    const beltSeen = waist.buckle_visible || (waist.belt_strap_visible && waist.shirt_tucked !== "NO");
     if (belt?.status === "PASS") {
-      if (waist.buckle_visible || waist.belt_strap_visible) {
+      if (beltSeen) {
         confirmRow(belt, seen);
+      } else if (waist.shirt_tucked === "NO") {
+        failRow(
+          belt,
+          `Close-up of the waist: ${seen}`,
+          "The shirt hangs over the front of the waistband and no belt buckle is visible in the close-up of the waist.",
+        );
+        failed.push("M_BELT");
       } else if (!waist.assessable) {
         failRow(
           belt,

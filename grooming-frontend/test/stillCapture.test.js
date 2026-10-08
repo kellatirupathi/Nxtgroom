@@ -10,6 +10,7 @@ import {
   MAX_STILL_MISSES,
   recordStillOutcome,
   SINGLE_UPLOAD_MAX_DIMENSION,
+  STILL_RETRY_AFTER_MS,
 } from '../src/lib/stillCapture.ts';
 import { applyTransform, drawTransform, expectedScale, orientedSize } from '../src/lib/stillRegistration.ts';
 
@@ -293,6 +294,55 @@ test('a camera whose stills keep failing stops being asked, until it is reopened
 
   await capture(liveTrack('camera-2'));
   assert.equal(browser.calls.takePhoto.length, asked + 1);
+});
+
+test('a kiosk camera whose stills were switched off is tried again after a pause, not left on video all day', async () => {
+  const raw = { width: 4000, height: 3000 };
+  const still = { raw, rotation: 0, truth: centred(raw) };
+  const browser = fakeBrowser({ scene: makeScene(12), still, takePhoto: 'reject' });
+  let clock = 1_000_000;
+  browser.env.now = () => clock;
+  const state = createStillCaptureState();
+  const capture = () => capturePhoto(
+    { video: VIDEO, track: liveTrack(), region: SINGLE, maxDimension: SINGLE_UPLOAD_MAX_DIMENSION, quality: 0.92, state },
+    browser.env,
+  );
+
+  for (let i = 0; i < MAX_STILL_FAILURES; i += 1) await capture();
+  assert.equal(state.disabled, true);
+  assert.equal(state.retryAt, 1_000_000 + STILL_RETRY_AFTER_MS);
+  const asked = browser.calls.takePhoto.length;
+
+  clock += STILL_RETRY_AFTER_MS - 1;
+  await capture();
+  assert.equal(browser.calls.takePhoto.length, asked, 'still paused just before the retry time');
+
+  clock += 1;
+  await capture();
+  assert.equal(browser.calls.takePhoto.length, asked + 1, 'asked again once the pause is over');
+});
+
+test('a camera that cannot take a bigger still is never retried', async () => {
+  const raw = { width: 1920, height: 1080 };
+  const browser = fakeBrowser({
+    scene: makeScene(13),
+    still: { raw, rotation: 0, truth: centred(raw) },
+    capabilities: { imageWidth: { max: 1920 }, imageHeight: { max: 1080 } },
+  });
+  let clock = 5_000;
+  browser.env.now = () => clock;
+  const state = createStillCaptureState();
+  const capture = () => capturePhoto(
+    { video: VIDEO, track: liveTrack(), region: SINGLE, maxDimension: SINGLE_UPLOAD_MAX_DIMENSION, quality: 0.92, state },
+    browser.env,
+  );
+  await capture();
+  assert.equal(state.disabled, true);
+  assert.equal(state.retryAt, null);
+  clock += STILL_RETRY_AFTER_MS * 3;
+  await capture();
+  assert.equal(state.disabled, true);
+  assert.equal(browser.calls.takePhoto.length, 0);
 });
 
 test('a still that never arrives is abandoned for the video frame', async () => {

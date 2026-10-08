@@ -26,16 +26,39 @@ test("men: any hair on the forehead fails, and the forehead must be clear", () =
   assert.match(prompt, /Any fringe or strands resting on or hanging over the forehead fail Hair Position/);
 });
 
-test("men: curls at the hairline are not on the forehead, and shaped curly hair is not messy", () => {
+test("men: curls past the hairline fail like any hair on the forehead, and shaped curly hair is not messy", () => {
   const position = find("MALE", "FORMAL", "M_HAIR_POSITION").rule;
-  assert.match(position, /Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead: FAIL only hair that lies over the forehead skin or the eyebrows\./);
+  assert.match(position, /Curls, waves or a quiff are judged the same way: FAIL when their front edge comes down past the natural hairline onto the forehead skin, even by a few strands\./);
+  assert.match(position, /any hair lying inside that band is a FAIL/);
+  assert.doesNotMatch(position, /FAIL only hair that lies over the forehead skin/);
   const neatness = find("MALE", "FORMAL", "M_HAIR_NEATNESS").rule;
   assert.match(neatness, /Natural curly or wavy hair is not messy in itself: judge whether it is combed or shaped and kept under control, and FAIL it on the same terms when it is not\./);
 
   const prompt = buildSystemPrompt("MALE", "FORMAL");
-  assert.match(prompt, /Curls or waves whose front edge\nsits at the hairline, and hair at the temples, are not on the forehead\./);
+  assert.match(prompt, /front edge comes down past the hairline onto the forehead skin fail too, even\nby a few strands/);
   assert.match(prompt, /natural curls or waves that are shaped and\nunder control are not messy/);
-  assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /Curls or waves/);
+  assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /Curls, waves or a quiff/);
+});
+
+test("men: a belt passes only when it is seen and named, and an untucked shirt hides it", () => {
+  const belt = find("MALE", "FORMAL", "M_BELT").rule;
+  assert.match(belt, /name its colour and its buckle in the observation, and if you cannot, no belt was seen and the answer is FAIL/);
+  assert.match(belt, /An untucked shirt whose hem hangs over the front of the waistband hides the belt/);
+  const prompt = buildSystemPrompt("MALE", "FORMAL");
+  assert.match(prompt, /### BELT/);
+  assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /### BELT/);
+});
+
+test("women: a sleeve is measured before it fails, and a puffed sleeve is judged by its hem", () => {
+  for (const [attire, code] of [
+    ["KURTI_WITH_DUPATTA", "W_KURTI_NECKLINE_SLEEVES"],
+    ["SAREE", "W_SAREE_BLOUSE"],
+    ["FORMAL", "W_FORMAL_TOP"],
+  ]) {
+    assert.match(find("FEMALE", attire, code).rule, /Measure before failing/, `${code} must measure before failing`);
+  }
+  assert.match(find("FEMALE", "SAREE", "W_SAREE_BLOUSE").rule, /A puffed or gathered sleeve is judged by where its hem ends on the arm/);
+  assert.match(buildSystemPrompt("FEMALE", "SAREE"), /A puffed or gathered\nsleeve is judged by its hem/);
 });
 
 test("women: sleeves must reach halfway to the elbow on every outfit", () => {
@@ -114,5 +137,5 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  assert.equal(PROMPT_VERSION, "2026-10-05.1");
+  assert.equal(PROMPT_VERSION, "2026-10-08.1");
 });

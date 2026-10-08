@@ -25,6 +25,7 @@ export const MAX_STILL_LONG_SIDE = 4032;
 export const STILL_TIMEOUT_MS = 3000;
 export const MAX_STILL_FAILURES = 2;
 export const MAX_STILL_MISSES = 4;
+export const STILL_RETRY_AFTER_MS = 10 * 60 * 1000;
 
 interface PhotoSettingsLike {
   imageWidth?: number;
@@ -69,6 +70,7 @@ export interface CaptureEnvironment {
   createImageBitmap: (blob: Blob) => Promise<BitmapLike>;
   ImageCapture: ImageCaptureConstructor | null;
   timeoutMs?: number;
+  now?: () => number;
 }
 
 function browserEnvironment(): CaptureEnvironment {
@@ -93,6 +95,7 @@ export interface StillCaptureState {
   failures: number;
   misses: number;
   disabled: boolean;
+  retryAt: number | null;
   lastSource: 'still' | 'video' | null;
 }
 
@@ -104,13 +107,14 @@ export function createStillCaptureState(): StillCaptureState {
     failures: 0,
     misses: 0,
     disabled: false,
+    retryAt: null,
     lastSource: null,
   };
 }
 
 export type StillOutcome = 'used' | 'miss' | 'failure';
 
-export function recordStillOutcome(state: StillCaptureState, outcome: StillOutcome): void {
+export function recordStillOutcome(state: StillCaptureState, outcome: StillOutcome, now = Date.now()): void {
   if (outcome === 'used') {
     state.failures = 0;
     state.misses = 0;
@@ -122,7 +126,23 @@ export function recordStillOutcome(state: StillCaptureState, outcome: StillOutco
   } else {
     state.failures += 1;
   }
-  if (state.failures >= MAX_STILL_FAILURES || state.misses >= MAX_STILL_MISSES) state.disabled = true;
+  if (state.failures >= MAX_STILL_FAILURES || state.misses >= MAX_STILL_MISSES) {
+    state.disabled = true;
+    state.retryAt = now + STILL_RETRY_AFTER_MS;
+  }
+}
+
+function disablePermanently(state: StillCaptureState): void {
+  state.disabled = true;
+  state.retryAt = null;
+}
+
+export function resumeStillsIfDue(state: StillCaptureState, now = Date.now()): void {
+  if (!state.disabled || state.retryAt === null || now < state.retryAt) return;
+  state.disabled = false;
+  state.retryAt = null;
+  state.failures = 0;
+  state.misses = 0;
 }
 
 export function decidePhotoSettings(
@@ -223,8 +243,9 @@ async function takeStill({
   state,
 }: StillAttempt): Promise<CapturedPhoto | null> {
   const ImageCapture = env.ImageCapture;
+  const now = env.now ?? Date.now;
   if (!ImageCapture) {
-    state.disabled = true;
+    disablePermanently(state);
     return null;
   }
   let bitmap: BitmapLike | null = null;
@@ -244,7 +265,7 @@ async function takeStill({
       }
       const decision = decidePhotoSettings(capabilities, videoSize);
       if (!decision.usable) {
-        state.disabled = true;
+        disablePermanently(state);
         return null;
       }
       state.settings = decision.settings;
@@ -288,7 +309,7 @@ async function takeStill({
       || !regionFits(stillRegion, oriented)
       || !worthUsing(stillRegion, region, maxDimension)
     ) {
-      recordStillOutcome(state, 'miss');
+      recordStillOutcome(state, 'miss', now());
       return null;
     }
 
@@ -298,10 +319,10 @@ async function takeStill({
     output.context.setTransform(...drawTransform(raw, chosen.rotation, drawn, outputSize));
     output.context.drawImage(source, 0, 0);
     const photo = await encode(output.canvas, quality);
-    recordStillOutcome(state, 'used');
+    recordStillOutcome(state, 'used', now());
     return { blob: photo, source: 'still', width: outputSize.width, height: outputSize.height };
   } catch {
-    recordStillOutcome(state, 'failure');
+    recordStillOutcome(state, 'failure', now());
     return null;
   } finally {
     bitmap?.close?.();
@@ -317,6 +338,7 @@ export async function capturePhoto(
   if (track && state.trackId !== null && state.trackId !== track.id) {
     Object.assign(state, createStillCaptureState());
   }
+  resumeStillsIfDue(state, (env.now ?? Date.now)());
 
   const frameSize = fitWithin(region, maxDimension);
   const frame = canvas2d(env, frameSize);

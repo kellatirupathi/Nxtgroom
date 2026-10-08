@@ -23,7 +23,7 @@ import {
 import FaceBoxOverlay from './FaceBoxOverlay';
 import { stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
 import { coverSourceRect } from '../lib/cameraGeometry';
-import { openCameraStream } from '../lib/cameraStream';
+import { cameraVideoConstraints, openCameraStream, tuneCameraTrack } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 
 interface GroupCameraCaptureProps {
@@ -90,7 +90,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
       openingRef.current = true;
       try {
         const stream = await openCameraStream({
-          video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+          video: cameraVideoConstraints(facing),
           audio: false,
         }, { isCancelled: () => disposed });
         if (disposed) {
@@ -98,6 +98,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
           return;
         }
         streamRef.current = stream;
+        void tuneCameraTrack(stream.getVideoTracks()[0]);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});

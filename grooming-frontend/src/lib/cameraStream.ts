@@ -6,6 +6,37 @@ export const CAMERA_BUSY_ERRORS: ReadonlySet<string> = new Set([
 
 export const CAMERA_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1000, 1500];
 
+export function cameraVideoConstraints(facing: 'user' | 'environment'): MediaTrackConstraints {
+  return {
+    facingMode: { ideal: facing },
+    width: { ideal: 2560 },
+    height: { ideal: 1440 },
+    frameRate: { ideal: 30 },
+  };
+}
+
+const CONTINUOUS_MODES = ['focusMode', 'exposureMode', 'whiteBalanceMode'] as const;
+
+type TunableTrack = {
+  getCapabilities?: () => object;
+  applyConstraints?: (constraints: MediaTrackConstraints) => Promise<void>;
+};
+
+export async function tuneCameraTrack(track: TunableTrack | null | undefined): Promise<void> {
+  if (!track || typeof track.getCapabilities !== 'function' || typeof track.applyConstraints !== 'function') return;
+  let capabilities: Record<string, unknown>;
+  try {
+    capabilities = track.getCapabilities() as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const advanced = CONTINUOUS_MODES
+    .filter((mode) => Array.isArray(capabilities[mode]) && (capabilities[mode] as unknown[]).includes('continuous'))
+    .map((mode) => ({ [mode]: 'continuous' }));
+  if (!advanced.length) return;
+  await track.applyConstraints({ advanced } as MediaTrackConstraints).catch(() => {});
+}
+
 export interface OpenCameraOptions {
   isCancelled?: () => boolean;
   delays?: readonly number[];

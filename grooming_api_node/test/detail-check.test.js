@@ -189,6 +189,30 @@ test("the close-up is told an ID card above the waistband does not hide it", () 
   assert.doesNotMatch(CLOSE_UP_INSTRUCTIONS, /hidden \(by hands, an ID card/);
 });
 
+test("a shirt hanging over the waistband fails the belt unless a buckle is plainly visible", () => {
+  const strapOnly = passedRows();
+  const result = applyDetailFindings(strapOnly, face({ belt_strap_visible: true, shirt_tucked: "NO" }));
+  assert.equal(row(strapOnly, "M_BELT").status, "FAIL");
+  assert.equal(
+    row(strapOnly, "M_BELT").reason,
+    "The shirt hangs over the front of the waistband and no belt buckle is visible in the close-up of the waist.",
+  );
+  assert.ok(result.failed.includes("M_BELT"));
+
+  const nothing = passedRows();
+  applyDetailFindings(nothing, face({ shirt_tucked: "NO" }));
+  assert.equal(row(nothing, "M_BELT").status, "FAIL");
+
+  const buckle = passedRows();
+  applyDetailFindings(buckle, face({ belt_buckle_visible: true, shirt_tucked: "NO" }));
+  assert.equal(row(buckle, "M_BELT").status, "PASS");
+});
+
+test("the waist close-up must name the belt it reports, and not see one through an untucked shirt", () => {
+  assert.match(CLOSE_UP_INSTRUCTIONS, /When shirt fabric hangs over the front of the waistband, the belt is covered/);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /If you cannot name them, you have not seen a belt and both are false\./);
+});
+
 test("an untucked shirt fails the tuck; an unclear one does not", () => {
   const untucked = passedRows();
   applyDetailFindings(untucked, face({ belt_buckle_visible: true, shirt_tucked: "NO" }));
@@ -256,7 +280,8 @@ test("a forehead the full-length read failed passes on a real face close-up that
 });
 
 test("the face close-up is told curls at the hairline are not on the forehead, and shaped curls are not messy", () => {
-  assert.match(CLOSE_UP_INSTRUCTIONS, /Curls or waves whose front edge sits at the hairline, and hair at the temples or beside the ears, are not on the forehead\./);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /YES if any fringe, strands, curls or locks come down past the natural hairline onto the forehead skin, the eyebrows or the eyes, even a few strands/);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /Curls, waves or a quiff whose front edge stops at or above the hairline are not on the forehead/);
   assert.match(CLOSE_UP_INSTRUCTIONS, /Natural curly or wavy hair that is shaped and under control is NO; curly hair that is uncombed or sticking out is YES\./);
 });
 
