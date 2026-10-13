@@ -71,6 +71,7 @@ import {
   dateRangeBoundsInTimeZone,
 } from "../utils.js";
 import { checkoutSchema, parseCoordinates, validate } from "../validation.js";
+import { parseCaptureInfo } from "../services/captureInfo.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -326,6 +327,7 @@ export async function commitGuardedCheckIn(
     capturedAt = null,
     identification = null,
     bodyRegions = null,
+    captureInfo = null,
     now = new Date(),
   },
   runTransaction = withMongoTransaction
@@ -381,6 +383,7 @@ export async function commitGuardedCheckIn(
       check_in_photo_key: photoKey,
       check_in_photo_captured_at: capturedAt || now,
       ...(bodyRegions ? { check_in_body_regions: bodyRegions } : {}),
+      ...(captureInfo ? { check_in_capture: captureInfo } : {}),
       check_out_photo_key: null,
       status: "pending",
       compliance_status: null,
@@ -431,6 +434,7 @@ attendanceRouter.post(
       return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
     }
     const bodyRegions = parseBodyRegions(req.body?.body_regions);
+    const captureInfo = parseCaptureInfo(req.body?.capture_info);
     const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
 
     let normalizedImage;
@@ -584,6 +588,7 @@ attendanceRouter.post(
           capturedAt: now,
           identification,
           bodyRegions,
+          captureInfo,
           now,
         });
       } catch (error) {
@@ -641,6 +646,7 @@ attendanceRouter.post(
           check_out_photo_key: stored.key,
           check_out_photo_captured_at: now,
           ...(bodyRegions ? { check_out_body_regions: bodyRegions } : {}),
+          ...(captureInfo ? { check_out_capture: captureInfo } : {}),
           ...(coordinates ? { check_out_coordinates: coordinates } : {}),
           ...(accuracyMetres != null ? { check_out_location_accuracy_m: accuracyMetres } : {}),
           checkout_identification: identification,

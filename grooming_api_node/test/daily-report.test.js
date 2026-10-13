@@ -30,7 +30,8 @@ const {
   saveDailyReportSchedule,
   slotLabel,
 } = await import("../src/services/dailyReport.js");
-const { runDueDailyReports } = await import("../src/services/dailyReportScheduler.js");
+const { dailyReportSkipped, isSunday, runDueDailyReports } = await import("../src/services/dailyReportScheduler.js");
+const { clearHolidayCache } = await import("../src/services/holidays.js");
 const { buildDailyReportEmail } = await import("../src/services/emailService.js");
 
 const MIDNIGHT = Date.UTC(2026, 8, 29, 18, 30);
@@ -475,6 +476,32 @@ test("nothing is sent while switched off or with nobody to send to", async () =>
   nobody.docs("app_settings")[0].emails = [];
   assert.deepEqual(await runDueDailyReports(nobody, ist(19, 0)), []);
   assert.equal(nobody.docs("mail_jobs").length, 0);
+});
+
+test("no daily report is sent on a Sunday, at any send time", async () => {
+  clearHolidayCache();
+  assert.equal(isSunday("2026-10-04"), true);
+  assert.equal(isSunday("2026-10-05"), false);
+  const db = schedulerDb();
+  assert.deepEqual(await runDueDailyReports(db, ist(13, 0, 4)), [], "4 Oct 2026 is a Sunday");
+  assert.deepEqual(await runDueDailyReports(db, ist(18, 30, 4)), []);
+  assert.equal(db.docs("mail_jobs").length, 0);
+  assert.equal(db.docs("report_delivery_runs").length, 0, "no run and no day page is created");
+  assert.deepEqual(await runDueDailyReports(db, ist(13, 0, 5)), ["daily-report:2026-10-05:13:00"], "Monday sends as usual");
+});
+
+test("no daily report or institute report is sent on a holiday, and the next working day sends as usual", async () => {
+  clearHolidayCache();
+  const db = schedulerDb();
+  db.docs("app_settings")[0].campus_reports = true;
+  db.docs("app_settings").push({ _id: "holiday_settings", holidays: [{ date: "2026-09-30", name: "Festival" }] });
+  assert.equal(await dailyReportSkipped(db, "2026-09-30"), true);
+  assert.deepEqual(await runDueDailyReports(db, ist(13, 0)), []);
+  assert.deepEqual(await runDueDailyReports(db, ist(18, 30)), []);
+  assert.equal(db.docs("mail_jobs").length, 0);
+  assert.equal(await dailyReportSkipped(db, "2026-10-01"), false);
+  assert.deepEqual(await runDueDailyReports(db, ist(13, 0, 1)), ["daily-report:2026-10-01:13:00"]);
+  clearHolidayCache();
 });
 
 test("one link per day opens that day only, and never expires or changes", async () => {

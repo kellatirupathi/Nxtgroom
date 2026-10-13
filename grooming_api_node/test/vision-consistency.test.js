@@ -324,7 +324,7 @@ test("female attire is classified first, then reported against that family alone
     }
     assert.deepEqual(
       Object.keys(classify.properties).sort(),
-      ["attire_type", "image_quality", "subject_visible", "visible_regions"],
+      ["attire_type", "image_quality", "region_boxes", "subject_visible", "visible_regions"],
       "the classification step must not ask for checkpoints",
     );
     assert.deepEqual(

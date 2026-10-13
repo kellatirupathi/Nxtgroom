@@ -10,6 +10,7 @@ import {
   getDailyReportSettings,
 } from "./dailyReport.js";
 import { getDeliveryRun, saveDeliveryRun } from "../stores/deliveryRunStore.js";
+import { isHoliday } from "./holidays.js";
 
 const TICK_MS = 30_000;
 const FIRST_TICK_MS = 5_000;
@@ -22,6 +23,14 @@ function isDuplicateKey(error) {
   return error?.code === 11000;
 }
 
+export function isSunday(dateKey) {
+  return new Date(`${dateKey}T12:00:00.000Z`).getUTCDay() === 0;
+}
+
+export async function dailyReportSkipped(db, dateKey) {
+  return isSunday(dateKey) || await isHoliday(db, dateKey);
+}
+
 export async function runDueDailyReports(db, now = new Date(), { queuedRuns = new Set() } = {}) {
   const settings = await getDailyReportSettings(db);
   if (!settings.enabled || !settings.emails.length) return [];
@@ -30,6 +39,10 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
   for (const due of dueDailyReports(settings, now)) {
     const runId = dailyReportRunId(due.dateKey, due.slot);
     if (queuedRuns.has(runId)) continue;
+    if (await dailyReportSkipped(db, due.dateKey)) {
+      queuedRuns.add(runId);
+      continue;
+    }
     const existing = await getDeliveryRun(db, runId);
     if (existing?.jobs_queued_at) {
       queuedRuns.add(runId);

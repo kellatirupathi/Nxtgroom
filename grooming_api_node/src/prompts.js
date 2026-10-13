@@ -1,7 +1,8 @@
 import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
+import { REGION_BOX_INSTRUCTIONS } from "./services/womenDetailCheck.js";
 
-export const PROMPT_VERSION = "2026-10-08.1";
+export const PROMPT_VERSION = "2026-10-13.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -292,8 +293,21 @@ cloth that visibly clings to the knee and calf with no slack, and soft creases
 where the hem rests on the shoe are not churidar. Read the leg from the hip to
 the ankle and say what you saw.
 
-A dupatta must be worn, not merely present. Fabric visible over one shoulder,
-trailing, or bunched is not a dupatta properly worn.
+A dupatta must be worn, not merely present, and it must cover both shoulders.
+Fabric over only one shoulder, hanging only around the neck, trailing, or
+bunched is not a dupatta properly worn.
+
+Footwear must be closed-toe. Look at the toes: if they can be seen, the footwear
+is open-toe and fails, however formal the sandal and whatever its straps. Never
+describe footwear as closed-toe when the toes are visible.
+
+A kurti must be a plain, solid colour. A noticeable print - floral, botanical,
+abstract, geometric or block - fails; only a tiny pattern that reads as plain at
+a glance passes. A kurti that hangs far off the body, whose shoulder seam drops
+down the arm or whose sleeves cover the hands is oversized and fails its fit.
+
+Never pass a row while describing the very thing its standard fails: a kurti
+you call floral, footwear you call sandals or leggings you name are FAIL.
 
 Thin, sheer or see-through fabric fails, on a kurti and on bottom wear alike.
 If skin or an underlayer reads through the cloth, say so.
@@ -416,5 +430,6 @@ Choose exactly one attire_type from the photograph:
 
 Identify clothing only from visible evidence. Do not infer it from the person's
 gender.`,
+    REGION_BOX_INSTRUCTIONS,
   ].join("\n\n");
 }

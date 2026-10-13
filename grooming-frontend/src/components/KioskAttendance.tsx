@@ -5,7 +5,7 @@ import CameraCapture from './CameraCapture';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
-import { BODY_REGIONS_FIELD, type CaptureDetails } from '../lib/bodyRegions';
+import { BODY_REGIONS_FIELD, CAPTURE_INFO_FIELD, type CaptureDetails } from '../lib/bodyRegions';
 
 const RESULT_VISIBLE_MS = 1_200;
 
@@ -66,6 +66,7 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
       const form = new FormData();
       form.append('file', file);
       if (details?.bodyRegions) form.append(BODY_REGIONS_FIELD, JSON.stringify(details.bodyRegions));
+      if (details?.capture) form.append(CAPTURE_INFO_FIELD, JSON.stringify(details.capture).slice(0, 1500));
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) {

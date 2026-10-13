@@ -104,7 +104,7 @@ export const SAREE_ATTIRE_CHECKS = [
 
 export const KURTI_ATTIRE_CHECKS = [
   { code: "W_KURTI_ATTIRE_TYPE", name: "Attire Type", rule: "Confirms a professional kurti is the visible garment. FAIL a t-shirt, crop top, one-piece dress, jeans-based casual outfit or another clearly non-kurti casual garment." },
-  { code: "W_KURTI_FIT_LENGTH", name: "Kurti Fit & Length", rule: "Covers fit, length and side slit height together." },
+  { code: "W_KURTI_FIT_LENGTH", name: "Kurti Fit & Length", rule: "Covers fit, length and side slit height together. The kurti should follow the body with normal ease: the shoulder seam sits on the shoulder, the sleeves end at or above the wrist, and the side seams fall straight. FAIL a loose or oversized kurti - one that hangs far off the body like a tent, whose shoulder seam drops down the upper arm, or whose sleeves cover the hands - and FAIL one so tight that it pulls across the chest or hips. Say where the shoulder seam sits and how the side seams fall." },
   {
     code: "W_KURTI_NECKLINE_SLEEVES",
     name: "Kurti Neckline & Sleeves",
@@ -113,12 +113,12 @@ export const KURTI_ATTIRE_CHECKS = [
   {
     code: "W_KURTI_MATERIAL",
     name: "Kurti Material / Fabric",
-    rule: "The fabric must be opaque and professional. FAIL a thin, sheer, see-through or translucent material through which the skin or an underlayer is visible. The kurti should also be a solid plain colour: FAIL a loud or noticeable print or pattern.",
+    rule: "The fabric must be opaque and professional. FAIL a thin, sheer, see-through or translucent material through which the skin or an underlayer is visible. The kurti should also be a solid plain colour: FAIL a loud or noticeable print or pattern - floral, botanical, abstract, geometric, block or any print you can see from across the room. A tiny, subtle pattern (small dots or buttis that read as plain at a glance) passes. Never PASS a kurti you have described as printed or floral.",
   },
   {
     code: "W_DUPATTA",
     name: "Dupatta",
-    rule: "A dupatta is required and must be properly worn — draped and settled deliberately, secured or pinned where the style calls for it. Do not PASS merely because some dupatta fabric is visible. FAIL a dupatta slung loosely over one shoulder, trailing, bunched or clearly not worn as intended, and FAIL when none is present.",
+    rule: "A dupatta is required and must be properly worn — draped and settled deliberately, secured or pinned where the style calls for it. Do not PASS merely because some dupatta fabric is visible. FAIL a dupatta slung loosely over one shoulder, trailing, bunched or clearly not worn as intended, and FAIL when none is present. The dupatta must cover both shoulders: a dupatta over only one shoulder, or hanging only around the neck, is a FAIL. Say which shoulders it covers.",
   },
   { code: "W_KURTI_CONDITION", name: "Kurti Condition", rule: "Covers cleanliness, stains, tears, pilling, fading and heavy creasing together. Read pressing from the front panel, the placket or button line and the sleeves: pressed cloth lies flat there, while unpressed cloth shows branching wrinkles across the chest and upper sleeve that hold their shape. Pilling and fading show best at the cuffs, the shoulders and any seam. Creases picked up from sitting are the day's wear and not a failing. Name where your evidence was seen in the observation, and report cleanliness and pressing separately, since one can be met while the other is not." },
   {
@@ -141,7 +141,7 @@ export const WOMEN_ACCESSORIES_CHECKS = [
   {
     code: "W_EARRINGS",
     name: "Earrings",
-    rule: "Simple studs or small earrings up to about 2 cm in visible size. FAIL anything clearly larger than 2 cm or visibly oversized. Also FAIL multi-coloured, multi-gem or strongly decorative earrings even when they are within the size limit, whenever that is clearly identifiable.",
+    rule: "Simple studs or small earrings up to about 2 cm in visible size. FAIL anything clearly larger than 2 cm or visibly oversized. Measure a drop, dangling or jhumka earring from the earlobe to its lowest point against the ear itself, which is about 6 cm tall: an earring longer than a third of the ear is larger than 2 cm. Describe the earring as it is - never call a drop or jhumka a stud. Also FAIL multi-coloured, multi-gem or strongly decorative earrings even when they are within the size limit, whenever that is clearly identifiable.",
   },
   { code: "W_BANGLES", name: "Bangles", rule: "Judge the number and prominence of visible bangles against a modest limit. Bangles are cultural wear and are never a violation merely by existing; FAIL only a clearly excessive or distracting quantity." },
   { code: "W_BINDI", name: "Bindi", rule: "A small, plain bindi passes. Wearing none is not a violation." },
@@ -156,7 +156,7 @@ export const WOMEN_ACCESSORIES_CHECKS = [
 ];
 
 export const WOMEN_FOOTWEAR_CHECKS = [
-  { code: "W_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Neutral professional closed-toe pumps, modest low heels, ballet flats, loafers and formal open-toe sandals with a back or ankle strap all pass. FAIL flip-flops, slippers, sneakers, sports shoes, wedges, platforms, casual open-toe or strappy styles, clearly excessive high heels, and flashy or heavily decorated footwear. Do not estimate an exact heel height from the photograph." },
+  { code: "W_FOOTWEAR_TYPE", name: "Footwear Type", rule: "Only closed-toe formal footwear passes: closed-toe pumps, modest low heels, ballet flats, bellies, loafers and formal closed shoes or boots. FAIL every open-toe style - all sandals, including formal sandals with a back or ankle strap, strap sandals, chappals, kolhapuris, slippers and flip-flops - and FAIL sneakers, sports shoes, wedges, platforms, clearly excessive high heels, and flashy or heavily decorated footwear. Look at the toes: if the toes are visible, it is open-toe and a FAIL. Never call footwear closed-toe when the toes can be seen. Do not estimate an exact heel height from the photograph." },
   { code: "W_FOOTWEAR_CONDITION", name: "Footwear Condition", rule: "Covers cleanliness, upkeep and visible damage together." },
 ];
 
@@ -281,10 +281,10 @@ export const IMPROVEMENT_TIPS = {
   W_SAREE_FABRIC: "Wear a clean, pressed, opaque saree.",
   W_SAREE_PRESENTATION: "Check the overall drape and presentation before the session.",
   W_KURTI_ATTIRE_TYPE: "Wear a saree or a kurti with dupatta.",
-  W_KURTI_FIT_LENGTH: "Wear a kurti of appropriate length and fit.",
+  W_KURTI_FIT_LENGTH: "Wear a kurti of appropriate length that fits with normal ease, neither oversized nor tight.",
   W_KURTI_NECKLINE_SLEEVES: "Wear a kurti with sleeves reaching at least halfway to the elbow and an appropriate neckline.",
-  W_KURTI_MATERIAL: "Wear a plain kurti in an opaque, non-transparent fabric.",
-  W_DUPATTA: "Wear the dupatta properly draped and secured, not loosely placed.",
+  W_KURTI_MATERIAL: "Wear a plain, solid-colour kurti in an opaque fabric; noticeable or floral prints are not permitted.",
+  W_DUPATTA: "Wear the dupatta properly draped over both shoulders and secured, not loosely placed.",
   W_KURTI_CONDITION: "Wear a clean, pressed, undamaged kurti.",
   W_BOTTOM_WEAR: "Wear palazzo pants or straight formal trousers in an opaque fabric. Leggings, churidar and gathered salwar are not permitted.",
   W_FORMAL_ATTIRE_TYPE: "Shirt and trousers are not permitted for women. Wear a saree or a kurti with dupatta.",
@@ -301,7 +301,7 @@ export const IMPROVEMENT_TIPS = {
   W_BINDI: "Wear a small, plain bindi.",
   W_DISTRACTING_ACCESSORIES: "Remove statement accessories.",
   W_HEADWEAR: "Remove the cap or hat before checking in.",
-  W_FOOTWEAR_TYPE: "Wear formal footwear instead of casual or sports shoes.",
+  W_FOOTWEAR_TYPE: "Wear closed-toe formal footwear such as pumps, bellies or loafers; sandals and slippers are not permitted.",
   W_FOOTWEAR_CONDITION: "Wear clean, well-maintained footwear.",
 };
 

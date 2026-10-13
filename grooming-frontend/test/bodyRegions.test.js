@@ -61,7 +61,8 @@ test('the camera hands the areas of the photographed frame to the screens, which
   const camera = source('components/CameraCapture.tsx');
   assert.match(camera, /bodyRegionsRef\.current = reading\.verdict === 'FULL_BODY' \? \(reading\.bodyRegions \?\? null\) : null;/);
   assert.ok(camera.indexOf('const bodyRegions = bodyRegionsRef.current;') < camera.indexOf('const photo = await capturePhoto('));
-  assert.match(camera, /\{ type: 'image\/jpeg' \}\), \{ bodyRegions \}\);/);
+  assert.match(camera, /\{ type: 'image\/jpeg' \}\), \{\n\s+bodyRegions,\n\s+capture: describeCapture\(photo, streamRef\.current\?\.getVideoTracks\(\)\[0\] \?\? null\),/);
+  assert.match(source('components/KioskAttendance.tsx'), /if \(details\?\.capture\) form\.append\(CAPTURE_INFO_FIELD, JSON\.stringify\(details\.capture\)\.slice\(0, 1500\)\);/);
   assert.match(source('components/KioskAttendance.tsx'), /if \(details\?\.bodyRegions\) form\.append\(BODY_REGIONS_FIELD, JSON\.stringify\(details\.bodyRegions\)\);/);
   const form = source('components/EvaluateCard.tsx');
   assert.equal((form.match(/formData\.append\(BODY_REGIONS_FIELD, JSON\.stringify\(bodyRegions\)\)/g) || []).length, 2, 'check-in and check-out');

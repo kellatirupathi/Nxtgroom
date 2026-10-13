@@ -16,6 +16,23 @@ import {
   findingsFromCloseUp,
 } from "./detailCheck.js";
 import { applyBlazer, BLAZER_JSON_SCHEMA, blazerWorn } from "./blazer.js";
+import {
+  applyWomenContradictions,
+  applyWomenFindings,
+  buildWomenCloseUps,
+  passSleeves,
+  REGION_BOXES_JSON_SCHEMA,
+  SLEEVE_SECOND_LOOK_INSTRUCTIONS,
+  SLEEVE_SECOND_LOOK_JSON_SCHEMA,
+  SLEEVE_SECOND_LOOK_PROMPT,
+  SleeveSecondLook,
+  sleeveRowToConfirm,
+  sleeveVerdict,
+  WOMEN_CLOSE_UP_INSTRUCTIONS,
+  WOMEN_CLOSE_UP_JSON_SCHEMA,
+  WOMEN_DETAIL_CHECK_VERSION,
+  WomenCloseUpAnswer,
+} from "./womenDetailCheck.js";
 
 const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com";
 const FEMALE_ATTIRE_TYPES = ["SAREE", "KURTI_WITH_DUPATTA", "FORMAL", "ABAYA", "UNKNOWN"];
@@ -273,6 +290,7 @@ async function requestGeminiStructured({
   maxOutputTokens,
   thinkingBudget,
   limits,
+  cacheable = true,
 }) {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) throw createGeminiError("GEMINI_API_KEY is not configured", "GEMINI_AUTH_ERROR");
@@ -288,12 +306,14 @@ async function requestGeminiStructured({
   }
   const timeoutMs = Math.max(1, Math.min(ceiling, remaining));
   const endpoint = `${GEMINI_API_ORIGIN}/v1beta/models/${encodeURIComponent(config.geminiModel)}:generateContent`;
-  let cacheReference = await ensureGeminiPromptCache({
-    apiKey,
-    config,
-    namespace: cacheNamespace,
-    systemInstruction,
-  });
+  let cacheReference = cacheable
+    ? await ensureGeminiPromptCache({
+      apiKey,
+      config,
+      namespace: cacheNamespace,
+      systemInstruction,
+    })
+    : null;
   let requestBody = buildGeminiRequestBody({
     systemInstruction,
     input,
@@ -399,7 +419,7 @@ async function requestGeminiStructured({
   throw createGeminiError("Gemini evaluation failed", "GEMINI_REQUEST_ERROR");
 }
 
-function buildReportSchema(sections, { attireType = null, attireTypes = null, closeUp = false, optionalCodes = null, blazer = false } = {}) {
+function buildReportSchema(sections, { attireType = null, attireTypes = null, closeUp = false, optionalCodes = null, blazer = false, womenCloseUp = false } = {}) {
   const shape = {
     subject_visible: z.boolean(),
     image_quality: z.enum(["ADEQUATE", "RETAKE_RECOMMENDED"]),
@@ -417,6 +437,7 @@ function buildReportSchema(sections, { attireType = null, attireTypes = null, cl
   if (attireTypes) shape.attire_type = z.enum(attireTypes).optional();
   if (closeUp) shape.close_up = z.unknown().optional();
   if (blazer) shape.blazer = z.unknown().optional();
+  if (womenCloseUp) shape.women_close_up = z.unknown().optional();
   for (const key of SECTION_KEYS) {
     if (!sections[key].length) continue;
     shape[key] = z.object(
@@ -445,7 +466,7 @@ function assertFamilyRows(parsed, sections) {
   }
 }
 
-function buildReportJsonSchema(sections, { attireType = null, attireTypes = null, closeUp = false, blazer = false } = {}) {
+function buildReportJsonSchema(sections, { attireType = null, attireTypes = null, closeUp = false, blazer = false, womenCloseUp = false } = {}) {
   const properties = {
     subject_visible: { type: "boolean" },
     image_quality: { type: "string", enum: ["ADEQUATE", "RETAKE_RECOMMENDED"] },
@@ -463,6 +484,7 @@ function buildReportJsonSchema(sections, { attireType = null, attireTypes = null
   if (attireTypes) properties.attire_type = { type: "string", enum: [...attireTypes] };
   if (closeUp) properties.close_up = CLOSE_UP_JSON_SCHEMA;
   if (blazer) properties.blazer = BLAZER_JSON_SCHEMA;
+  if (womenCloseUp) properties.women_close_up = WOMEN_CLOSE_UP_JSON_SCHEMA;
   const populatedKeys = SECTION_KEYS.filter((key) => sections[key].length);
   for (const key of populatedKeys) {
     properties[key] = {
@@ -484,6 +506,7 @@ function buildReportJsonSchema(sections, { attireType = null, attireTypes = null
       ...(attireType || attireTypes ? ["attire_type"] : []),
       ...(closeUp ? ["close_up"] : []),
       ...(blazer ? ["blazer"] : []),
+      ...(womenCloseUp ? ["women_close_up"] : []),
       ...populatedKeys,
     ],
   };
@@ -502,6 +525,7 @@ function buildFemaleAttireSchema() {
       id_card: VISIBILITY,
       hands: VISIBILITY,
     }),
+    region_boxes: z.unknown().optional(),
   });
 }
 
@@ -521,8 +545,9 @@ function buildFemaleAttireJsonSchema() {
         ].map((key) => [key, { type: "string", enum: ["VISIBLE", "PARTIAL", "NOT_VISIBLE"] }])),
         required: ["face", "upper_body", "lower_body", "footwear", "id_card", "hands"],
       },
+      region_boxes: REGION_BOXES_JSON_SCHEMA,
     },
-    required: ["subject_visible", "attire_type", "image_quality", "visible_regions"],
+    required: ["subject_visible", "attire_type", "image_quality", "visible_regions", "region_boxes"],
   };
 }
 
@@ -676,6 +701,70 @@ export function unknownGenderEvaluation() {
   );
 }
 
+async function sleeveSecondLook(armImage, limits) {
+  return requestGeminiStructured({
+    systemInstruction: SLEEVE_SECOND_LOOK_INSTRUCTIONS,
+    cacheNamespace: "female-sleeve-second-look",
+    cacheable: false,
+    input: [
+      { type: "input_text", text: SLEEVE_SECOND_LOOK_PROMPT },
+      { type: "input_image", mimeType: "image/jpeg", data: armImage.toString("base64") },
+    ],
+    jsonSchema: SLEEVE_SECOND_LOOK_JSON_SCHEMA,
+    validator: SleeveSecondLook,
+    maxOutputTokens: 512 + CLASSIFICATION_THINKING_BUDGET,
+    thinkingBudget: CLASSIFICATION_THINKING_BUDGET,
+    limits,
+  });
+}
+
+async function checkWomenDetails(rows, parsed, { attireType, closeUps, limits }) {
+  const failed = applyWomenContradictions(rows);
+  const passed = [];
+  const answer = WomenCloseUpAnswer.safeParse(parsed.women_close_up);
+  if (answer.success) {
+    const found = applyWomenFindings(rows, answer.data, { attireType, boxes: closeUps.boxes });
+    failed.push(...found.failed);
+    passed.push(...found.passed);
+  } else if (parsed.women_close_up !== undefined) {
+    incrementMetric("detail_check_unreadable_total");
+  }
+
+  let secondLook = null;
+  if (closeUps.armImage && sleeveRowToConfirm(rows, attireType)) {
+    try {
+      const look = await sleeveSecondLook(closeUps.armImage, limits);
+      const verdict = sleeveVerdict(look.sleeve_left, look.sleeve_right);
+      secondLook = verdict || "UNCLEAR";
+      if (verdict === "PASS") {
+        const cleared = passSleeves(
+          rows,
+          attireType,
+          `Second look at the close-up of the shoulders and arms: ${String(look.observation || "").trim() || "The sleeves."}`,
+          "A second look at the close-up of the arms shows the sleeve reaching at least halfway from the shoulder to the elbow.",
+        );
+        passed.push(...cleared);
+        for (const code of cleared) {
+          const index = failed.indexOf(code);
+          if (index >= 0) failed.splice(index, 1);
+        }
+      }
+    } catch (error) {
+      incrementMetric("detail_check_second_look_failures_total");
+      console.warn(`Sleeve second look skipped: ${error?.message || error}`);
+    }
+  }
+
+  if (failed.length || passed.length) incrementMetric("detail_check_overrides_total");
+  return {
+    version: WOMEN_DETAIL_CHECK_VERSION,
+    crops: Object.keys(closeUps.boxes),
+    overridden: failed,
+    ...(passed.length ? { passed } : {}),
+    ...(secondLook ? { sleeve_second_look: secondLook } : {}),
+  };
+}
+
 function sharedDeadline(limits) {
   if (!limits || limits.deadlineAt) return limits;
   const config = runtimeConfig();
@@ -703,6 +792,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
   let attireType = "FORMAL";
   let parsed;
   let closeUps = { parts: [], boxes: {} };
+  let womenCloseUps = { parts: [], boxes: {}, armImage: null };
   if (normalizedGender === "FEMALE") {
     const classification = await requestGeminiStructured({
       systemInstruction: buildFemaleAttirePrompt(),
@@ -726,15 +816,27 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
     }
 
     const femaleSections = checkpointSet("FEMALE", attireType);
-    parsed = await requestGeminiStructured({
-      systemInstruction: buildSystemPrompt("FEMALE", attireType),
-      cacheNamespace: `female-${attireType.toLowerCase()}`,
-      input: content,
-      jsonSchema: buildReportJsonSchema(femaleSections, { blazer: true }),
-      validator: buildReportSchema(femaleSections, { blazer: true }),
-      maxOutputTokens: 6000 + DEFAULT_THINKING_BUDGET,
+    womenCloseUps = await buildWomenCloseUps(imageBuffer, classification.region_boxes);
+    const femaleRequest = (withCloseUp) => requestGeminiStructured({
+      systemInstruction: withCloseUp
+        ? `${buildSystemPrompt("FEMALE", attireType)}\n\n${WOMEN_CLOSE_UP_INSTRUCTIONS}`
+        : buildSystemPrompt("FEMALE", attireType),
+      cacheNamespace: `female-${attireType.toLowerCase()}${withCloseUp ? "-closeup" : ""}`,
+      input: withCloseUp ? [...content, ...womenCloseUps.parts] : content,
+      jsonSchema: buildReportJsonSchema(femaleSections, { blazer: true, womenCloseUp: withCloseUp }),
+      validator: buildReportSchema(femaleSections, { blazer: true, womenCloseUp: withCloseUp }),
+      maxOutputTokens: (withCloseUp ? 7000 : 6000) + DEFAULT_THINKING_BUDGET,
       limits,
     });
+    try {
+      parsed = await femaleRequest(true);
+    } catch (error) {
+      if (error?.code !== "GEMINI_REQUEST_ERROR") throw error;
+      incrementMetric("detail_check_fallbacks_total");
+      console.warn(`Women's close-up request refused by the provider; reporting without it: ${error.message}`);
+      womenCloseUps = { parts: [], boxes: {}, armImage: null };
+      parsed = await femaleRequest(false);
+    }
   } else {
     const maleSections = checkpointSet("MALE", attireType);
     closeUps = await buildCloseUps(imageBuffer, options.bodyRegions);
@@ -786,6 +888,9 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
     && !blazerWorn(parsed.blazer)
     && resolveWomenFormalAttire(rows, attireType);
   let detailCheck = null;
+  if (normalizedGender === "FEMALE") {
+    detailCheck = await checkWomenDetails(rows, parsed, { attireType, closeUps: womenCloseUps, limits });
+  }
   if (normalizedGender === "MALE") {
     resolveMaleAttireVisibility(rows, parsed.visible_regions);
     const closeUp = CloseUpAnswer.safeParse(parsed.close_up);

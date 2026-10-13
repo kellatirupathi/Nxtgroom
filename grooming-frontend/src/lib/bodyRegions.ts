@@ -9,11 +9,24 @@ export interface BodyRegions {
   feet?: RegionBox;
 }
 
+export interface CaptureInfo {
+  source: string;
+  video: string;
+  region: string;
+  output: string;
+  bytes: number;
+  still: Record<string, string | number | undefined>;
+  camera?: Record<string, string | number | undefined>;
+  device?: string;
+}
+
 export interface CaptureDetails {
   bodyRegions?: BodyRegions | null;
+  capture?: CaptureInfo | null;
 }
 
 export const BODY_REGIONS_FIELD = 'body_regions';
+export const CAPTURE_INFO_FIELD = 'capture_info';
 
 const MIN_SCORE = 0.35;
 

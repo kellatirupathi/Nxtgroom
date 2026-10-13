@@ -96,6 +96,7 @@ export interface StillCaptureState {
   misses: number;
   disabled: boolean;
   retryAt: number | null;
+  capabilities?: string | null;
   lastSource: 'still' | 'video' | null;
 }
 
@@ -205,11 +206,30 @@ function clampRegion(region: Rect, size: Size): Rect {
   };
 }
 
+export interface StillDiagnostics {
+  outcome: string;
+  capabilities?: string;
+  requested?: string;
+  raw?: string;
+  score?: number;
+  rotation?: number;
+  error?: string;
+}
+
+export interface CaptureDiagnostics {
+  source: 'still' | 'video';
+  video: string;
+  region: string;
+  output: string;
+  still: StillDiagnostics;
+}
+
 export interface CapturedPhoto {
   blob: Blob;
   source: 'still' | 'video';
   width: number;
   height: number;
+  diagnostics?: CaptureDiagnostics;
 }
 
 export interface CaptureOptions {
@@ -230,7 +250,10 @@ interface StillAttempt {
   maxDimension: number;
   quality: number;
   state: StillCaptureState;
+  diag: StillDiagnostics;
 }
+
+const sizeText = (size: { width: number; height: number }) => `${Math.round(size.width)}x${Math.round(size.height)}`;
 
 async function takeStill({
   env,
@@ -241,11 +264,13 @@ async function takeStill({
   maxDimension,
   quality,
   state,
+  diag,
 }: StillAttempt): Promise<CapturedPhoto | null> {
   const ImageCapture = env.ImageCapture;
   const now = env.now ?? Date.now;
   if (!ImageCapture) {
     disablePermanently(state);
+    diag.outcome = 'unsupported';
     return null;
   }
   let bitmap: BitmapLike | null = null;
@@ -264,11 +289,20 @@ async function takeStill({
         capabilities = await withTimeout(camera.getPhotoCapabilities(), 2000).catch(() => null);
       }
       const decision = decidePhotoSettings(capabilities, videoSize);
+      state.capabilities = capabilities?.imageWidth?.max && capabilities?.imageHeight?.max
+        ? `${capabilities.imageWidth.max}x${capabilities.imageHeight.max}`
+        : 'unknown';
       if (!decision.usable) {
         disablePermanently(state);
+        diag.outcome = 'too-small';
+        diag.capabilities = state.capabilities;
         return null;
       }
       state.settings = decision.settings;
+    }
+    diag.capabilities = state.capabilities ?? undefined;
+    if (state.settings?.imageWidth && state.settings?.imageHeight) {
+      diag.requested = `${state.settings.imageWidth}x${state.settings.imageHeight}`;
     }
 
     const blob = await withTimeout(
@@ -277,6 +311,7 @@ async function takeStill({
     );
     bitmap = await env.createImageBitmap(blob);
     const raw = { width: bitmap.width, height: bitmap.height };
+    diag.raw = sizeText(raw);
     const source = bitmap;
 
     const candidates = candidateRotations(raw, videoSize).map((rotation: Rotation) => {
@@ -299,6 +334,13 @@ async function takeStill({
       return { rotation, oriented, mapping };
     });
 
+    const bestCandidate = candidates
+      .filter((candidate) => candidate.mapping)
+      .sort((a, b) => (b.mapping?.score ?? 0) - (a.mapping?.score ?? 0))[0];
+    if (bestCandidate?.mapping) {
+      diag.score = Math.round(bestCandidate.mapping.score * 1000) / 1000;
+      diag.rotation = bestCandidate.rotation;
+    }
     const chosen = chooseMapping(candidates);
     const oriented = chosen ? candidates.find((candidate) => candidate.rotation === chosen.rotation)?.oriented : null;
     const stillRegion = chosen ? mapRegion(region, chosen.mapping) : null;
@@ -309,6 +351,9 @@ async function takeStill({
       || !regionFits(stillRegion, oriented)
       || !worthUsing(stillRegion, region, maxDimension)
     ) {
+      diag.outcome = !chosen || !oriented || !stillRegion
+        ? 'no-match'
+        : !regionFits(stillRegion, oriented) ? 'out-of-frame' : 'not-sharper';
       recordStillOutcome(state, 'miss', now());
       return null;
     }
@@ -320,8 +365,11 @@ async function takeStill({
     output.context.drawImage(source, 0, 0);
     const photo = await encode(output.canvas, quality);
     recordStillOutcome(state, 'used', now());
+    diag.outcome = 'used';
     return { blob: photo, source: 'still', width: outputSize.width, height: outputSize.height };
-  } catch {
+  } catch (error) {
+    diag.outcome = (error as Error)?.message === 'timed out' ? 'timeout' : 'error';
+    diag.error = `${(error as Error)?.name || 'Error'}: ${String((error as Error)?.message || '').slice(0, 120)}`;
     recordStillOutcome(state, 'failure', now());
     return null;
   } finally {
@@ -354,6 +402,22 @@ export async function capturePhoto(
     frameSize.height,
   );
 
+  const diag: StillDiagnostics = {
+    outcome: !env.ImageCapture
+      ? 'unsupported'
+      : track?.readyState !== 'live'
+        ? 'no-live-track'
+        : state.disabled ? (state.retryAt === null ? 'off' : 'paused') : 'not-tried',
+    ...(state.capabilities ? { capabilities: state.capabilities } : {}),
+  };
+  const describe = (source: 'still' | 'video', output: { width: number; height: number }): CaptureDiagnostics => ({
+    source,
+    video: sizeText(videoSize),
+    region: sizeText(region),
+    output: sizeText(output),
+    still: diag,
+  });
+
   const stillsPossible = !state.disabled && Boolean(env.ImageCapture) && track?.readyState === 'live';
   if (stillsPossible && track) {
     const grid = referenceGridSize(region);
@@ -370,14 +434,15 @@ export async function capturePhoto(
       maxDimension,
       quality,
       state,
+      diag,
     });
     if (still) {
       state.lastSource = 'still';
-      return still;
+      return { ...still, diagnostics: describe('still', still) };
     }
   }
 
   state.lastSource = 'video';
   const blob = await encode(frame.canvas, quality);
-  return { blob, source: 'video', width: frameSize.width, height: frameSize.height };
+  return { blob, source: 'video', width: frameSize.width, height: frameSize.height, diagnostics: describe('video', frameSize) };
 }

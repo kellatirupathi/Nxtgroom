@@ -425,3 +425,46 @@ test('both cameras take their photograph through the still capture, at their own
   assert.match(single, /bodyGuideSourceRect\(/);
   assert.match(group, /coverSourceRect\(/);
 });
+
+test('every photo reports which capture was used and why a still was not', async () => {
+  const run = async (options, state = createStillCaptureState()) => capturePhoto(
+    { video: VIDEO, track: liveTrack(), region: SINGLE, maxDimension: SINGLE_UPLOAD_MAX_DIMENSION, quality: 0.92, state },
+    fakeBrowser(options).env,
+  );
+  const raw = { width: 4000, height: 3000 };
+
+  const used = await run({ scene: makeScene(21), still: { raw, rotation: 0, truth: centred(raw) } });
+  assert.equal(used.diagnostics.source, 'still');
+  assert.equal(used.diagnostics.still.outcome, 'used');
+  assert.equal(used.diagnostics.still.raw, '4000x3000');
+  assert.equal(used.diagnostics.still.requested, '4000x3000');
+  assert.equal(used.diagnostics.output, `${used.width}x${used.height}`);
+  assert.equal(used.diagnostics.video, `${VIDEO.videoWidth}x${VIDEO.videoHeight}`);
+
+  const unsupported = await run({ scene: makeScene(22) });
+  assert.equal(unsupported.diagnostics.source, 'video');
+  assert.equal(unsupported.diagnostics.still.outcome, 'unsupported');
+
+  const mismatch = await run({ scene: makeScene(23), stillScene: makeScene(24), still: { raw, rotation: 0, truth: centred(raw) } });
+  assert.equal(mismatch.diagnostics.still.outcome, 'no-match');
+  assert.equal(mismatch.diagnostics.still.raw, '4000x3000');
+
+  const failing = await run({ scene: makeScene(25), still: { raw, rotation: 0, truth: centred(raw) }, takePhoto: 'reject' });
+  assert.equal(failing.diagnostics.still.outcome, 'error');
+  assert.match(failing.diagnostics.still.error, /: /);
+
+  const small = { width: 1920, height: 1080 };
+  const tooSmall = await run({
+    scene: makeScene(26),
+    still: { raw: small, rotation: 0, truth: centred(small) },
+    capabilities: { imageWidth: { max: 1920 }, imageHeight: { max: 1080 } },
+  });
+  assert.equal(tooSmall.diagnostics.still.outcome, 'too-small');
+  assert.equal(tooSmall.diagnostics.still.capabilities, '1920x1080');
+
+  const offState = createStillCaptureState();
+  offState.disabled = true;
+  offState.retryAt = null;
+  const off = await run({ scene: makeScene(27), still: { raw, rotation: 0, truth: centred(raw) } }, offState);
+  assert.equal(off.diagnostics.still.outcome, 'off');
+});

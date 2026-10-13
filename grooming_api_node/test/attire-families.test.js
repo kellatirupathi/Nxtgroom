@@ -13,6 +13,7 @@ import {
 } from "../src/checkpoints.js";
 import { buildFemaleAttirePrompt, buildMaleReportPrompt, buildSystemPrompt } from "../src/prompts.js";
 import { weeklyRotation } from "../src/services/instructorReports.js";
+import { WOMEN_DETAIL_CHECK_VERSION } from "../src/services/womenDetailCheck.js";
 
 const codes = (sections) => SECTION_KEYS.flatMap((key) => sections[key].map((item) => item.code));
 
@@ -252,7 +253,8 @@ test("a woman in an abaya is classified, then reported without any hair row", as
     assert.equal(result.attire_type, "ABAYA");
     assert.equal(result.overall_status, "COMPLIANT");
     assert.deepEqual(result.grooming_check.map((item) => item.code), ["W_MAKEUP", "W_NAILS"]);
-    assert.equal(result.detail_check, undefined, "the close-up is a men's check");
+    assert.equal(result.detail_check.version, WOMEN_DETAIL_CHECK_VERSION, "women now get their own close-up check");
+    assert.deepEqual(result.detail_check.crops, [], "no region boxes, so no crops");
   } finally {
     stub.restore();
   }

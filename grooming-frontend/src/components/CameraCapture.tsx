@@ -22,6 +22,7 @@ import { bodyGuideSourceRect } from '../lib/cameraGeometry';
 import { cameraVideoConstraints, openCameraStream, tuneCameraTrack } from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 import type { BodyRegions, CaptureDetails } from '../lib/bodyRegions';
+import { describeCapture } from '../lib/captureInfo';
 import { PHOTO_JPEG_QUALITY } from '../lib/photoEncoding';
 import { postureHoldComplete, postureHoldStart } from '../lib/capturePosture';
 
@@ -257,7 +258,10 @@ export default function CameraCapture({
         quality: PHOTO_JPEG_QUALITY,
         state: stillStateRef.current,
       });
-      await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }), { bodyRegions });
+      await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }), {
+        bodyRegions,
+        capture: describeCapture(photo, streamRef.current?.getVideoTracks()[0] ?? null),
+      });
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {
