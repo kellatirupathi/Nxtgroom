@@ -2,7 +2,7 @@ import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
 import { REGION_BOX_INSTRUCTIONS } from "./services/womenDetailCheck.js";
 
-export const PROMPT_VERSION = "2026-10-13.1";
+export const PROMPT_VERSION = "2026-10-14.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -308,6 +308,18 @@ down the arm or whose sleeves cover the hands is oversized and fails its fit.
 
 Never pass a row while describing the very thing its standard fails: a kurti
 you call floral, footwear you call sandals or leggings you name are FAIL.
+
+### BOTTOM WEAR
+Decide bottom wear from one question: does the cloth hang with some ease, or
+does it cling to the leg? Read the leg from the knee to the ankle.
+- PASS straight, slim-straight, ankle-length or palazzo pants and formal
+  trousers whose cloth falls with some slack - even when they are dark, narrow
+  at the ankle or match the kurti.
+- FAIL leggings, jeggings and any bottom so tight that the knee and the calf
+  are fully outlined like a second skin; FAIL churidar (tight rings of fabric up
+  the lower leg), patiala or dhoti salwar, and jeans.
+In the observation, name only what she is wearing and how it fits. Do not list
+the items she is not wearing.
 
 Thin, sheer or see-through fabric fails, on a kurti and on bottom wear alike.
 If skin or an underlayer reads through the cloth, say so.

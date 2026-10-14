@@ -1,7 +1,7 @@
 const MAX_RAW_LENGTH = 1500;
 const TOP_FIELDS = ["source", "video", "region", "output", "bytes", "device"];
 const STILL_FIELDS = ["outcome", "capabilities", "requested", "raw", "score", "rotation", "error"];
-const CAMERA_FIELDS = ["width", "height", "frameRate", "facingMode", "focusMode"];
+const CAMERA_FIELDS = ["width", "height", "maxWidth", "maxHeight", "frameRate", "facingMode", "focusMode"];
 
 function clean(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;

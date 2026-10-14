@@ -286,14 +286,20 @@ export function sleeveRowToConfirm(rows, attireType) {
   return row && sleeveFailIsAboutSleeves(row) ? row : null;
 }
 
-const NEGATED = /\b(?:no|not|without|nor|neither|never|instead\s+of|rather\s+than|free\s+of|isn't|aren't|is\s+not|are\s+not)\b[^.;:]{0,25}$/i;
+const NEGATION = /\b(?:no|not|without|nor|neither|never|none|instead\s+of|rather\s+than|free\s+of|isn't|aren't|absence\s+of|ruled\s+out)\b/i;
+const CLAUSE_BREAK = /[.;:!?]|\bbut\b|\bhowever\b|\bwhereas\b|\balthough\b/gi;
 
-function unnegatedMention(text, pattern) {
+function clauseBefore(text, index) {
+  let start = 0;
+  for (const match of text.slice(0, index).matchAll(CLAUSE_BREAK)) start = match.index + match[0].length;
+  return text.slice(start, index);
+}
+
+export function unnegatedMention(text, pattern) {
   const regex = new RegExp(pattern.source, "gi");
   let match;
   while ((match = regex.exec(text)) !== null) {
-    const before = text.slice(Math.max(0, match.index - 40), match.index);
-    if (!NEGATED.test(before)) return match[0];
+    if (!NEGATION.test(clauseBefore(text, match.index))) return match[0];
   }
   return null;
 }
@@ -312,8 +318,8 @@ const CONTRADICTIONS = [
   },
   {
     code: "W_BOTTOM_WEAR",
-    pattern: /\b(?:leggings?|jeggings?|churidars?|jeans|denim|patiala)\b/,
-    reason: (word) => `The report itself describes ${word}, which are not permitted.`,
+    pattern: /\b(?:leggings?|jeggings?|churidars?|jeans|denim|patiala|skin[-\s]?tight|cling(?:s|ing)?\s+to\s+the\s+legs?)\b/,
+    reason: (word) => `The report itself describes ${word} bottom wear, which is not permitted.`,
   },
   {
     code: "W_DUPATTA",
@@ -337,7 +343,7 @@ export function applyWomenContradictions(rows) {
   for (const rule of CONTRADICTIONS) {
     const row = findRow(rows, rule.code);
     if (row?.status !== "PASS") continue;
-    const text = rowText(row);
+    const text = String(row.observation || "");
     if (rule.unless?.test(text)) continue;
     const word = unnegatedMention(text, rule.pattern);
     if (!word) continue;

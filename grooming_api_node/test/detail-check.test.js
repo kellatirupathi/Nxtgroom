@@ -12,7 +12,7 @@ import {
   paddedBox,
   parseBodyRegions,
 } from "../src/services/detailCheck.js";
-import { checkpointSet, improvementTips, SECTION_KEYS } from "../src/checkpoints.js";
+import { checkpointSet, improvementTips, MEN_GROOMING_CHECKS, SECTION_KEYS } from "../src/checkpoints.js";
 
 const HEAD = [40, 400, 160, 600];
 const WAIST = [480, 330, 560, 640];
@@ -264,9 +264,8 @@ test("a forehead the full-length read failed passes on a real face close-up that
   assert.equal(position.observation, "Close-up of the face: Curly hair set up and back; the forehead is clear from the hairline to the eyebrows.");
   assert.equal(position.reason, "The close-up of the face shows the forehead clear of hair from the hairline to the eyebrows.");
   assert.ok(!improvementTips(rows).includes("Set your hair back or up so your forehead is fully clear."));
-  assert.equal(row(rows, "M_HAIR_NEATNESS").status, "FAIL");
-  assert.equal(row(rows, "M_HAIR_NEATNESS").reason, "Dishevelled at the crown.");
-  assert.ok(!result.passed.includes("M_HAIR_NEATNESS"));
+  assert.equal(row(rows, "M_HAIR_NEATNESS").status, "PASS", "the face close-up shows the hair neat too");
+  assert.ok(result.passed.includes("M_HAIR_NEATNESS"));
 
   for (const [findings, options] of [
     [clear, { croppedRegions: ["waist", "legs", "feet"] }],
@@ -467,4 +466,39 @@ test("a malformed close-up is ignored and the report stands", async () => {
   } finally {
     stub.restore();
   }
+});
+
+test("hair the full photo failed as dishevelled passes when the face close-up shows it neat, and stays failed otherwise", () => {
+  const failedNeatness = () => {
+    const rows = passedRows();
+    Object.assign(row(rows, "M_HAIR_NEATNESS"), {
+      status: "FAIL",
+      observation: "The hair at the crown and sides appears dishevelled and not deliberately maintained.",
+      reason: "The hair is not neatly combed or controlled.",
+    });
+    return rows;
+  };
+  const rows = failedNeatness();
+  const result = applyDetailFindings(rows, face({ hair_messy: "NO", face_observation: "Short curly hair kept close to the head in an even shape." }), REGIONS, CROPPED);
+  assert.equal(row(rows, "M_HAIR_NEATNESS").status, "PASS");
+  assert.equal(row(rows, "M_HAIR_NEATNESS").reason, "The close-up of the face shows the hair combed and kept in an even, controlled shape.");
+  assert.ok(result.passed.includes("M_HAIR_NEATNESS"));
+
+  for (const [findings, options] of [
+    [face({ hair_messy: "YES" }), CROPPED],
+    [face({ hair_messy: "UNCLEAR" }), CROPPED],
+    [face({ hair_messy: "NO" }), { croppedRegions: ["waist", "legs", "feet"] }],
+  ]) {
+    const kept = failedNeatness();
+    applyDetailFindings(kept, findings, REGIONS, options);
+    assert.equal(row(kept, "M_HAIR_NEATNESS").status, "FAIL");
+  }
+});
+
+test("the hair neatness standard says short curly hair in an even outline is neat, and fails only visible evidence", () => {
+  const rule = MEN_GROOMING_CHECKS.find((item) => item.code === "M_HAIR_NEATNESS").rule;
+  assert.match(rule, /short curly or wavy hair that sits close to the head in an even, rounded outline, is neat/);
+  assert.match(rule, /FAIL only clear evidence you can point to/);
+  assert.match(rule, /an even outline is a PASS/);
+  assert.match(CLOSE_UP_INSTRUCTIONS, /short curly hair sitting close to the head in an even outline, is NO/);
 });

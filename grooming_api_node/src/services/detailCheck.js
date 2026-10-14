@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { z } from "zod";
 
-export const DETAIL_CHECK_VERSION = "2026-10-08.1";
+export const DETAIL_CHECK_VERSION = "2026-10-14.1";
 
 const ROW_REGIONS = Object.freeze({
   M_HAIR_NEATNESS: "head",
@@ -202,7 +202,7 @@ Answer close_up from the close-up crops when the request includes them (labelled
 - head_box, waist_box, legs_box, feet_box: where in the full photograph you looked, as [ymin, xmin, ymax, xmax], integers from 0 to 1000 scaled to the photograph's height and width. head: the head and face, from the top of the hair to the chin. waist: the band around the trouser waistband where a belt is worn, hip to hip. legs: both trouser legs, waistband to hem. feet: both shoes. Use [0, 0, 0, 0] for an area that is not in the photograph.
 
 FACE
-- hair_messy: YES if the hair is uncombed, dishevelled, sticking out or visibly unset at the crown, sides or front hairline; NO if it is combed and set; UNCLEAR if you cannot tell (for example under a cap). Natural curly or wavy hair that is shaped and under control is NO; curly hair that is uncombed or sticking out is YES.
+- hair_messy: YES if the hair is uncombed, dishevelled, sticking out or visibly unset at the crown, sides or front hairline; NO if it is combed and set; UNCLEAR if you cannot tell (for example under a cap). Natural curly or wavy hair that is shaped and under control is NO; curly hair that is uncombed or sticking out is YES. Short hair, or short curly hair sitting close to the head in an even outline, is NO even when its texture looks uneven; answer YES only for strands or tufts you can see sticking out beyond the outline, bed-head, or a visibly uneven or overgrown shape.
 - hair_on_forehead: YES if any fringe, strands, curls or locks come down past the natural hairline onto the forehead skin, the eyebrows or the eyes, even a few strands; NO only if the band of skin from the hairline to the eyebrows is clear of hair; UNCLEAR if you cannot tell. Curls, waves or a quiff whose front edge stops at or above the hairline are not on the forehead, and neither is hair at the temples or beside the ears.
 - facial_hair: CLEAN_SHAVEN; LIGHT_STUBBLE for short, even stubble or a negligible beard too short to have a shaped edge; TRIMMED_BEARD for a short, close-cropped beard of even length - even when its cheek line and neckline follow natural growth rather than a shaved edge - or a longer beard with defined, shaped edges at the cheek and neck; UNTRIMMED_BEARD only for a grown-out beard (long, bushy or full enough to stand away from the face), one of clearly uneven length, with straggly long hairs or visibly patchy, unkempt growth, or growth reaching well down the neck; UNCLEAR if you cannot tell. A short, even beard is TRIMMED_BEARD, never UNTRIMMED_BEARD, because its edges are natural. Light stubble and a trimmed beard are groomed.
 - moustache: NONE; TRIMMED_CLEAR_OF_LIP for a moustache that stays above the lip line, however thin or light; OVER_LIP for one growing down over the lip line; UNCLEAR if you cannot tell.
@@ -320,6 +320,13 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
     if (neatness?.status === "PASS" && face.hair_messy === "YES") {
       failRow(neatness, `Close-up of the face: ${seen}`, "The close-up of the face shows messy, unset hair.");
       failed.push("M_HAIR_NEATNESS");
+    } else if (neatness?.status === "FAIL" && faceCropped && face.hair_messy === "NO") {
+      passRow(
+        neatness,
+        `Close-up of the face: ${seen}`,
+        "The close-up of the face shows the hair combed and kept in an even, controlled shape.",
+      );
+      passed.push("M_HAIR_NEATNESS");
     }
 
     const position = findRow(rows, "M_HAIR_POSITION");

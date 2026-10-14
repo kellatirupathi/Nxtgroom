@@ -1,7 +1,7 @@
 import type { CaptureInfo } from './bodyRegions.ts';
 import type { CapturedPhoto } from './stillCapture.ts';
 
-type SettingsTrack = { getSettings?: () => MediaTrackSettings } | null;
+type SettingsTrack = { getSettings?: () => MediaTrackSettings; getCapabilities?: () => object } | null;
 
 const text = (value: unknown, max = 60) => (value === undefined || value === null ? undefined : String(value).slice(0, max));
 
@@ -10,6 +10,17 @@ export function deviceModel(userAgent: string | undefined): string | undefined {
   const android = /Android [\d.]+;\s*([^;)]+?)(?:\s+Build\/[^;)]*)?[;)]/.exec(userAgent);
   if (android) return `Android: ${android[1].trim()}`.slice(0, 80);
   return userAgent.slice(0, 80);
+}
+
+function maxSize(track: SettingsTrack): { maxWidth?: number; maxHeight?: number } {
+  try {
+    const caps = track?.getCapabilities?.() as { width?: { max?: number }; height?: { max?: number } } | undefined;
+    const maxWidth = caps?.width?.max;
+    const maxHeight = caps?.height?.max;
+    return typeof maxWidth === 'number' && typeof maxHeight === 'number' ? { maxWidth, maxHeight } : {};
+  } catch {
+    return {};
+  }
 }
 
 export function describeCapture(photo: CapturedPhoto, track: SettingsTrack, userAgent = globalThis.navigator?.userAgent): CaptureInfo | null {
@@ -28,6 +39,7 @@ export function describeCapture(photo: CapturedPhoto, track: SettingsTrack, user
         frameRate: typeof settings.frameRate === 'number' ? Math.round(settings.frameRate) : undefined,
         facingMode: text(settings.facingMode, 20),
         focusMode: text(settings.focusMode, 20),
+        ...maxSize(track),
       }
     : undefined;
   return {

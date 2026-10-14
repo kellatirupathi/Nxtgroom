@@ -137,5 +137,5 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  assert.equal(PROMPT_VERSION, "2026-10-13.1");
+  assert.equal(PROMPT_VERSION, "2026-10-14.1");
 });

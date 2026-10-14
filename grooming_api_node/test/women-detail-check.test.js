@@ -297,3 +297,36 @@ test("a refused women's close-up request falls back to the report used before", 
     stub.restore();
   }
 });
+
+test("the 14 Oct check-out: straight pants are not failed by the items the report says she is NOT wearing", () => {
+  const passing = [
+    ["The instructor is wearing black pants that appear to be straight-leg or slim-straight and are not skin-tight.", "The bottom wear is not skin-tight, churidar, or patiala."],
+    ["The instructor is wearing dark, straight-leg trousers that hang with ease and do not cling to the legs.", "There is no evidence of leggings, jeggings, churidar or patiala salwar."],
+    ["The instructor is wearing plain, loose-fitting trousers that hang straight.", "Jeans and leggings are not permitted; these are formal trousers."],
+    ["The instructor is wearing white, straight-leg pants that hang with ease, not leggings, churidar or patiala.", "Seen."],
+  ];
+  for (const [observation, reason] of passing) {
+    const rows = rowsFor("KURTI_WITH_DUPATTA", { W_BOTTOM_WEAR: { observation, reason } });
+    assert.deepEqual(applyWomenContradictions(rows), [], observation);
+    assert.equal(row(rows, "W_BOTTOM_WEAR").status, "PASS");
+  }
+});
+
+test("bottom wear the report itself describes as leggings or skin-tight still fails", () => {
+  for (const observation of [
+    "The instructor is wearing white leggings.",
+    "The instructor is wearing black leggings that appear opaque.",
+    "The pants are skin-tight and outline the knee and calf.",
+    "Straight pants were expected, but she is wearing churidar.",
+  ]) {
+    const rows = rowsFor("KURTI_WITH_DUPATTA", { W_BOTTOM_WEAR: { observation } });
+    assert.deepEqual(applyWomenContradictions(rows), ["W_BOTTOM_WEAR"], observation);
+  }
+});
+
+test("the women's prompt says straight pants pass, clinging bottoms fail, and not to list what she is not wearing", () => {
+  const prompt = buildSystemPrompt("FEMALE", "KURTI_WITH_DUPATTA");
+  assert.match(prompt, /### BOTTOM WEAR/);
+  assert.match(prompt, /PASS straight, slim-straight, ankle-length or palazzo pants/);
+  assert.match(prompt, /Do not list\nthe items she is not wearing\./);
+});
