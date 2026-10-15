@@ -939,6 +939,7 @@ async function markEvaluationFailed(db, job, error, ownedStatus = "processing") 
         status: "failed",
         last_error: errorCode(error),
         error_code: errorCode(error, "ANALYSIS_ERROR"),
+        ...(error?.blockReason ? { block_reason: String(error.blockReason).slice(0, 40) } : {}),
         failed_at: now,
         ...(failureNotification ? { failure_notification: failureNotification } : {}),
       },

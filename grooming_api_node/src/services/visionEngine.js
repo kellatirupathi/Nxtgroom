@@ -63,13 +63,25 @@ const ENTRY_JSON_SCHEMA = {
   required: ["status", "observation", "reason"],
 };
 
-function createGeminiError(message, code, { retryable = false } = {}) {
+function createGeminiError(message, code, { retryable = false, blockReason = null } = {}) {
   const error = new Error(message);
   error.name = code;
   error.code = code;
   error.retryable = retryable;
+  if (blockReason) error.blockReason = String(blockReason).slice(0, 40);
   return error;
 }
+
+export const GEMINI_SAFETY_SETTINGS = Object.freeze([
+  "HARM_CATEGORY_HARASSMENT",
+  "HARM_CATEGORY_HATE_SPEECH",
+  "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+  "HARM_CATEGORY_DANGEROUS_CONTENT",
+].map((category) => Object.freeze({ category, threshold: "BLOCK_NONE" })));
+
+const FALLBACK_ERRORS = new Set(["GEMINI_REQUEST_ERROR", "GEMINI_BLOCKED_RESPONSE"]);
+
+const SAFETY_FINISH_REASONS = new Set(["SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"]);
 
 function geminiHttpError(status, providerMessage = "") {
   const safeMessage = String(providerMessage).replace(/\s+/g, " ").slice(0, 300);
@@ -270,6 +282,7 @@ function buildGeminiRequestBody({
       role: "user",
       parts: input.map(geminiPart),
     }],
+    safetySettings: GEMINI_SAFETY_SETTINGS,
     generationConfig: {
       responseMimeType: "application/json",
       responseJsonSchema: jsonSchema,
@@ -386,6 +399,14 @@ async function requestGeminiStructured({
     }
     recordGeminiUsage(body);
     const finishReason = body?.candidates?.[0]?.finishReason;
+    if (finishReason && SAFETY_FINISH_REASONS.has(finishReason)) {
+      incrementMetric("gemini_blocked_responses_total");
+      throw createGeminiError(
+        `Gemini blocked the evaluation (${finishReason})`,
+        "GEMINI_BLOCKED_RESPONSE",
+        { blockReason: finishReason },
+      );
+    }
     if (finishReason && finishReason !== "STOP") {
       incrementMetric(finishReason === "MAX_TOKENS"
         ? "gemini_max_output_tokens_total"
@@ -403,7 +424,8 @@ async function requestGeminiStructured({
         blockReason
           ? `Gemini blocked the evaluation (${blockReason})`
           : "Gemini returned no structured evaluation",
-        blockReason ? "GEMINI_BLOCKED_RESPONSE" : "GEMINI_INVALID_RESPONSE"
+        blockReason ? "GEMINI_BLOCKED_RESPONSE" : "GEMINI_INVALID_RESPONSE",
+        { blockReason },
       );
     }
     let parsed;
@@ -831,7 +853,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
     try {
       parsed = await femaleRequest(true);
     } catch (error) {
-      if (error?.code !== "GEMINI_REQUEST_ERROR") throw error;
+      if (!FALLBACK_ERRORS.has(error?.code)) throw error;
       incrementMetric("detail_check_fallbacks_total");
       console.warn(`Women's close-up request refused by the provider; reporting without it: ${error.message}`);
       womenCloseUps = { parts: [], boxes: {}, armImage: null };
@@ -862,7 +884,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
     try {
       parsed = await combinedRequest();
     } catch (error) {
-      if (error?.code !== "GEMINI_REQUEST_ERROR") throw error;
+      if (!FALLBACK_ERRORS.has(error?.code)) throw error;
       incrementMetric("detail_check_fallbacks_total");
       console.warn(`Combined request refused by the provider; reporting formal rows only: ${error.message}`);
       closeUps = { parts: [], boxes: {} };

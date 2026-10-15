@@ -330,3 +330,63 @@ test("the women's prompt says straight pants pass, clinging bottoms fail, and no
   assert.match(prompt, /PASS straight, slim-straight, ankle-length or palazzo pants/);
   assert.match(prompt, /Do not list\nthe items she is not wearing\./);
 });
+
+test("every Gemini request turns the adjustable safety filters off", async () => {
+  const { GEMINI_SAFETY_SETTINGS } = await import("../src/services/visionEngine.js");
+  assert.deepEqual(GEMINI_SAFETY_SETTINGS.map((item) => item.category).sort(), [
+    "HARM_CATEGORY_DANGEROUS_CONTENT",
+    "HARM_CATEGORY_HARASSMENT",
+    "HARM_CATEGORY_HATE_SPEECH",
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+  ]);
+  assert.ok(GEMINI_SAFETY_SETTINGS.every((item) => item.threshold === "BLOCK_NONE"));
+  const stub = stubGemini([
+    { subject_visible: true, attire_type: "SAREE", image_quality: "ADEQUATE", visible_regions: VISIBLE, region_boxes: BOXES },
+    sareeReport({ women_close_up: { ...ANSWER } }),
+  ]);
+  try {
+    const { evaluateImage } = await import("../src/services/visionEngine.js");
+    await evaluateImage(await photo(), "image/jpeg", "FEMALE");
+    for (const body of stub.bodies) assert.deepEqual(body.safetySettings, JSON.parse(JSON.stringify(GEMINI_SAFETY_SETTINGS)));
+  } finally {
+    stub.restore();
+  }
+});
+
+function blockedReply(where) {
+  return where === "prompt"
+    ? { promptFeedback: { blockReason: "SAFETY" } }
+    : { candidates: [{ content: { role: "model", parts: [] }, finishReason: "IMAGE_SAFETY" }] };
+}
+
+test("a photo Google blocks with the close-ups is analysed again without them, instead of failing", async () => {
+  for (const where of ["prompt", "finish"]) {
+    const NAMES = ["GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES", "GEMINI_EXPLICIT_CACHE"];
+    const original = Object.fromEntries(NAMES.map((name) => [name, process.env[name]]));
+    const originalFetch = globalThis.fetch;
+    Object.assign(process.env, { GEMINI_API_KEY: "test-only-gemini-key", GEMINI_MODEL: "gemini-2.5-flash-lite", GEMINI_TIMEOUT_MS: "120000", GEMINI_MAX_RETRIES: "0", GEMINI_EXPLICIT_CACHE: "false" });
+    const replies = [
+      { candidates: [{ content: { role: "model", parts: [{ text: JSON.stringify({ subject_visible: true, attire_type: "SAREE", image_quality: "ADEQUATE", visible_regions: VISIBLE, region_boxes: BOXES }) }] }, finishReason: "STOP" }] },
+      blockedReply(where),
+      { candidates: [{ content: { role: "model", parts: [{ text: JSON.stringify(sareeReport()) }] }, finishReason: "STOP" }] },
+    ];
+    const bodies = [];
+    globalThis.fetch = async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return new Response(JSON.stringify(replies[bodies.length - 1]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    try {
+      const { evaluateImage } = await import("../src/services/visionEngine.js");
+      const result = await evaluateImage(await photo(), "image/jpeg", "FEMALE");
+      assert.equal(bodies.length, 3, where);
+      assert.equal(bodies[2].contents[0].parts.filter((part) => part.inlineData).length, 1, "the retry sends only the photo");
+      assert.ok(result.attire_check.length > 0, "a report is produced");
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const [name, value] of Object.entries(original)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  }
+});
