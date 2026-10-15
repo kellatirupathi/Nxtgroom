@@ -98,6 +98,8 @@ function dayReportResponse(report, link) {
       check_in: row.checkIn,
       check_out: row.checkOut,
       feedback: row.feedback,
+      checkout_status: row.checkoutStatus,
+      checkout_feedback: row.checkoutFeedback,
       has_checkin_photo: row.hasCheckinPhoto,
       has_checkout_photo: row.hasCheckoutPhoto,
       checkin_report_url: row.checkinReportUrl,

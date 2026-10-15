@@ -28,15 +28,31 @@ function toDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+export const SLOT_KINDS = Object.freeze(["checkin", "checkout"]);
+
+export function defaultSlotKind(slot) {
+  return String(slot) < "14:00" ? "checkin" : "checkout";
+}
+
+function kindsFor(times, stored) {
+  const source = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+  return Object.fromEntries(times.map((time) => [
+    time,
+    SLOT_KINDS.includes(source[time]) ? source[time] : defaultSlotKind(time),
+  ]));
+}
+
 export async function getDailyReportSettings(db) {
   const document = await getSetting(db, DAILY_REPORT_SETTINGS_ID);
   const times = Array.isArray(document?.times)
     ? document.times.filter((time) => typeof time === "string" && TIME_PATTERN.test(time))
     : [];
+  const sorted = [...new Set(times)].sort();
   return {
     enabled: document?.enabled === true,
     campus_reports: document?.campus_reports === true,
-    times: [...new Set(times)].sort(),
+    times: sorted,
+    kinds: kindsFor(sorted, document?.kinds),
     emails: (Array.isArray(document?.emails) ? document.emails : []).filter(isValidRecipient),
     schedule_changed_at: toDate(document?.schedule_changed_at),
   };
@@ -47,8 +63,21 @@ export function dailyReportSettingsView(settings) {
     enabled: settings.enabled,
     campus_reports: settings.campus_reports,
     times: settings.times,
+    kinds: settings.kinds,
     emails: settings.emails,
   };
+}
+
+export function normaliseKinds(values, times) {
+  if (values === undefined) return { ok: true, kinds: null };
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    return { ok: false, detail: "kinds must map each send time to checkin or checkout." };
+  }
+  for (const [time, kind] of Object.entries(values)) {
+    if (!times.includes(time)) continue;
+    if (!SLOT_KINDS.includes(kind)) return { ok: false, detail: `${slotLabel(time)} must be a check-in or a check-out report.` };
+  }
+  return { ok: true, kinds: kindsFor(times, values) };
 }
 
 export function normaliseTimes(values) {
@@ -69,7 +98,7 @@ export function normaliseTimes(values) {
 
 export async function saveDailyReportSchedule(db, body, updatedBy) {
   const current = await getDailyReportSettings(db);
-  let { enabled, times, campus_reports: campusReports } = current;
+  let { enabled, times, campus_reports: campusReports, kinds } = current;
   if (body && "enabled" in body) {
     if (typeof body.enabled !== "boolean") return { ok: false, detail: "enabled must be true or false." };
     enabled = body.enabled;
@@ -83,13 +112,18 @@ export async function saveDailyReportSchedule(db, body, updatedBy) {
     if (!result.ok) return result;
     times = result.times;
   }
-  const changed = enabled !== current.enabled || times.join(",") !== current.times.join(",");
+  const kindResult = normaliseKinds(body?.kinds, times);
+  if (!kindResult.ok) return kindResult;
+  kinds = kindResult.kinds || kindsFor(times, kinds);
+  const kindsChanged = JSON.stringify(kinds) !== JSON.stringify(current.kinds);
+  const changed = enabled !== current.enabled || times.join(",") !== current.times.join(",") || kindsChanged;
   const now = new Date();
   await saveSetting(db, DAILY_REPORT_SETTINGS_ID, {
     set: {
       enabled,
       campus_reports: campusReports,
       times,
+      kinds,
       updated_at: now,
       updated_by: updatedBy || null,
       ...(changed ? { schedule_changed_at: now } : {}),
@@ -178,13 +212,14 @@ export function dueDailyReports(settings, now = new Date(), timeZone = runtimeCo
   const dayStart = dateBoundsInTimeZone(dateKey, timeZone).start;
   const changedAt = toDate(settings.schedule_changed_at)?.getTime() ?? Number.NEGATIVE_INFINITY;
   const due = [];
-  let previous = dayStart;
+  const previous = { checkin: dayStart, checkout: dayStart };
   for (const slot of [...settings.times].sort()) {
+    const kind = SLOT_KINDS.includes(settings.kinds?.[slot]) ? settings.kinds[slot] : defaultSlotKind(slot);
     const at = slotInstant(dateKey, slot, timeZone);
     if (at.getTime() < changedAt) continue;
     if (at.getTime() > now.getTime()) break;
-    due.push({ dateKey, slot, from: previous, to: at });
-    previous = at;
+    due.push({ dateKey, slot, kind, from: previous[kind], to: at });
+    previous[kind] = at;
   }
   return due;
 }
@@ -441,19 +476,22 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
     evaluation,
   ]));
 
+  const kind = SLOT_KINDS.includes(run.kind) ? run.kind : defaultSlotKind(run.slot);
   const rows = [];
   for (const record of records) {
     const checkIn = toDate(record.check_in_time);
     if (!checkIn) continue;
     const rawCheckOut = record.checkout_deleting_at ? null : toDate(record.check_out_time);
     const checkOut = rawCheckOut && rawCheckOut.getTime() < to.getTime() ? rawCheckOut : null;
-    const halves = [];
-    if (checkIn.getTime() >= from.getTime() && checkIn.getTime() < to.getTime()) halves.push("checkin");
-    if (checkOut && checkOut.getTime() >= from.getTime()) halves.push("checkout");
-    if (!halves.length) continue;
+    const inWindow = (time) => Boolean(time) && time.getTime() >= from.getTime() && time.getTime() < to.getTime();
+    if (kind === "checkout" ? !inWindow(checkOut) : !inWindow(checkIn)) continue;
 
     const arrival = halfOutcome(record, "checkin", evaluationFor.get(`${String(record._id)}|checkin`));
-    if (!DAILY_STATUS_LABELS[arrival.state]) continue;
+    const departure = kind === "checkout"
+      ? halfOutcome(record, "checkout", evaluationFor.get(`${String(record._id)}|checkout`))
+      : null;
+    const listed = departure || arrival;
+    if (!DAILY_STATUS_LABELS[listed.state]) continue;
     const instructor = instructorById.get(String(record.instructor_id));
     const sessionDay = record.attendance_day || localDateKey(checkIn, timeZone);
     const college = collegeOf(record);
@@ -463,11 +501,12 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
       collegeId: college ? String(college) : null,
       checkIn: eventTime(checkIn, run.date, timeZone),
       checkOut: checkOut ? eventTime(checkOut, run.date, timeZone) : "-",
-      status: arrival.state,
-      points: [outcomeText(arrival)],
-      reportUrl: reportLink(instructor?.report_token, sessionDay, "checkin"),
-      severity: arrival.state === "non_compliant" ? 0 : 1,
-      sortTime: checkIn.getTime(),
+      status: listed.state,
+      ...(departure ? { checkinStatus: arrival.state } : {}),
+      points: [outcomeText(listed)],
+      reportUrl: reportLink(instructor?.report_token, sessionDay, kind),
+      severity: listed.state === "non_compliant" ? 0 : 1,
+      sortTime: (departure ? checkOut : checkIn).getTime(),
     });
   }
   rows.sort((left, right) => left.severity - right.severity || left.sortTime - right.sortTime);
@@ -475,6 +514,7 @@ export async function buildDailyReport(db, run, { ensureTokens = false } = {}) {
   return {
     date: run.date,
     slot: run.slot,
+    kind,
     dateLabel: displayDate(run.date),
     windowLabel: `${clockTime(from, timeZone)} to ${clockTime(to, timeZone)}`,
     subject: dailyReportSubject(run.date),
@@ -567,6 +607,7 @@ export async function buildFullDayReport(db, dateKey, { ensureTokens = false, co
     const sessionDay = record.attendance_day || dateKey;
     const checkinOutcome = halfOutcome(record, "checkin", evaluationFor.get(`${id}|checkin`));
     const feedback = outcomeText(checkinOutcome);
+    const checkoutOutcome = checkOut ? halfOutcome(record, "checkout", evaluationFor.get(`${id}|checkout`)) : null;
     const college = collegeOf(record);
     rows.push({
       attendanceId: id,
@@ -577,6 +618,8 @@ export async function buildFullDayReport(db, dateKey, { ensureTokens = false, co
       checkIn: clockTime(checkIn, timeZone),
       checkOut: checkOut ? eventTime(checkOut, dateKey, timeZone) : "-",
       feedback,
+      checkoutStatus: checkoutOutcome ? checkoutOutcome.state : null,
+      checkoutFeedback: checkoutOutcome ? outcomeText(checkoutOutcome) : null,
       hasCheckinPhoto: Boolean(record.check_in_photo_key),
       hasCheckoutPhoto: Boolean(checkOut && record.check_out_photo_key),
       checkinReportUrl: reportLink(token, sessionDay, "checkin"),

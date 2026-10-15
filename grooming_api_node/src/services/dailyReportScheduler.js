@@ -52,7 +52,7 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
     await ensureDailyReportDay(db, due.dateKey, now);
     let campusIds = [];
     if (!existing && settings.campus_reports) {
-      const draft = { _id: runId, date: due.dateKey, slot: due.slot, window_from: due.from, window_to: due.to };
+      const draft = { _id: runId, date: due.dateKey, slot: due.slot, kind: due.kind, window_from: due.from, window_to: due.to };
       campusIds = campusIdsInReport(await buildDailyReportForEmail(db, draft, now.getTime()));
     }
     try {
@@ -63,6 +63,7 @@ export async function runDueDailyReports(db, now = new Date(), { queuedRuns = ne
           type: "daily_report",
           date: due.dateKey,
           slot: due.slot,
+          kind: due.kind,
           window_from: due.from,
           window_to: due.to,
           status: "sending",

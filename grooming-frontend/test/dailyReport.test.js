@@ -87,10 +87,15 @@ test('the full-day page has the asked-for columns, two photo icons and two repor
   assert.equal(dayReportBasePath('30-09-2026', 'Abc123Abc123Abc123'), '/api/v2/reports/daily/30-09-2026/Abc123Abc123Abc123');
   assert.equal(dayReportBasePath('30-09-2026', 'Abc123Abc123Abc123', 'niat-hyderabad'), '/api/v2/reports/daily/30-09-2026/niat-hyderabad/Abc123Abc123Abc123');
   const headers = [...page.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
-  assert.deepEqual(headers, ['Date', 'Instructor Name', 'Institute', 'Check-in Time', 'Check-out Time', 'Status', 'Feedback', 'Images', 'Reports']);
+  assert.deepEqual(headers, [
+    'Date', 'Instructor Name', 'Institute', 'Check-in Time', 'Check-out Time',
+    'Check-in Status', 'Check-out Status', 'Check-in Feedback', 'Check-out Feedback', 'Images', 'Reports',
+  ]);
   assert.ok(page.includes('<td className="p-3"><StatusPill status={row.status} /></td>'));
+  assert.ok(page.includes('{row.checkout_status ? <StatusPill status={row.checkout_status} /> : <span className="text-slate-300">-</span>}'));
   assert.ok(page.includes('<dd className="mt-1"><StatusPill status={row.status} /></dd>'));
-  for (const gone of ['HalfStatuses', 'checkout_status', '>Check-in</dt>', '>Check-out</dt>']) {
+  assert.ok(page.includes('{row.checkout_feedback || <span className="text-slate-300">-</span>}'));
+  for (const gone of ['HalfStatuses', '>Check-in</dt>', '>Check-out</dt>']) {
     assert.ok(!page.includes(gone), gone);
   }
   assert.match(page, /const rows = filterDayRows\(report\.rows, \{ search, institute, status \}\);/);
@@ -125,7 +130,9 @@ test('the daily report settings live in the Reports tab, with their own recipien
   assert.match(settings, /const HOURS = Array\.from\(\{ length: 12 \}, \(_, index\) => index \+ 1\);/);
   assert.match(settings, /<option value="AM">AM<\/option>\s*<option value="PM">PM<\/option>/);
   assert.match(settings, /Add time/);
-  assert.match(settings, /method: 'PUT', body: \{ times: values \}/);
+  assert.match(settings, /method: 'PUT', body: \{ times: values, kinds: kindsOf\(rows\) \}/);
+  assert.match(settings, /<option value="checkin">\{KIND_LABELS\.checkin\}<\/option>\s*<option value="checkout">\{KIND_LABELS\.checkout\}<\/option>/);
+  assert.match(settings, /checkin: 'Check-in report', checkout: 'Check-out report'/);
   assert.match(settings, /method: 'PUT', body: \{ enabled \}/);
   assert.match(settings, /disabled=\{loading \|\| savingTimes \|\| !dirty \|\| Boolean\(repeated\)\}/);
   assert.ok(!settings.includes('day-link'));
@@ -174,7 +181,7 @@ test('Settings has a Reports tab listing each day with its counts and report lin
 });
 
 const dayRows = [
-  { attendance_id: '1', date: '30/09/2026', name: 'Ravi Teja', institute: 'NIAT Hyderabad', status: 'non_compliant', check_in: '09:11 AM', check_out: '06:05 PM', feedback: 'Tuck the shirt in.', has_checkin_photo: true, has_checkout_photo: true, checkin_report_url: 'https://x.test/r/1/check-in', checkout_report_url: 'https://x.test/r/1/check-out' },
+  { attendance_id: '1', date: '30/09/2026', name: 'Ravi Teja', institute: 'NIAT Hyderabad', status: 'non_compliant', check_in: '09:11 AM', check_out: '06:05 PM', feedback: 'Tuck the shirt in.', checkout_status: 'compliant', checkout_feedback: 'No improvements needed', has_checkin_photo: true, has_checkout_photo: true, checkin_report_url: 'https://x.test/r/1/check-in', checkout_report_url: 'https://x.test/r/1/check-out' },
   { attendance_id: '2', date: '30/09/2026', name: 'Asha', institute: 'Training Institute', status: 'compliant', check_in: '09:05 AM', check_out: '-', feedback: 'No improvements needed', has_checkin_photo: true, has_checkout_photo: false, checkin_report_url: 'https://x.test/r/2/check-in', checkout_report_url: null },
   { attendance_id: '3', date: '30/09/2026', name: '=Evil', institute: 'NIAT Hyderabad', status: 'pending', check_in: '12:58 PM', check_out: '-', feedback: 'Analysis in progress', has_checkin_photo: false, has_checkout_photo: false, checkin_report_url: null, checkout_report_url: null },
 ];
@@ -183,7 +190,8 @@ test('the day filters by name, institute and check-in status, together', () => {
   const ids = (rows) => rows.map((row) => row.attendance_id);
   assert.deepEqual(ids(filterDayRows(dayRows, { search: 'ravi' })), ['1']);
   assert.deepEqual(ids(filterDayRows(dayRows, { institute: 'NIAT Hyderabad' })), ['1', '3']);
-  assert.deepEqual(ids(filterDayRows(dayRows, { status: 'compliant' })), ['2']);
+  assert.deepEqual(ids(filterDayRows(dayRows, { status: 'compliant' })), ['1', '2'], 'a status matches either the check-in or the check-out');
+  assert.deepEqual(ids(filterDayRows(dayRows, { status: 'non_compliant' })), ['1']);
   assert.deepEqual(ids(filterDayRows(dayRows, { institute: 'NIAT Hyderabad', status: 'pending' })), ['3']);
   assert.equal(filterDayRows(dayRows, {}).length, 3);
   assert.deepEqual(dayInstitutes(dayRows), ['NIAT Hyderabad', 'Training Institute']);
@@ -192,9 +200,9 @@ test('the day filters by name, institute and check-in status, together', () => {
 
 test('the day exports as a CSV with its links, safe to open in Excel', () => {
   const [header, first, second, third] = dayReportCsv(dayRows).split('\r\n');
-  assert.equal(header, 'Date,Instructor Name,Institute,Status,Check-in Time,Check-out Time,Feedback,Check-in Report,Check-out Report');
-  assert.equal(first, '30/09/2026,Ravi Teja,NIAT Hyderabad,Non-compliant,09:11 AM,06:05 PM,Tuck the shirt in.,https://x.test/r/1/check-in,https://x.test/r/1/check-out');
-  assert.equal(second, '30/09/2026,Asha,Training Institute,Compliant,09:05 AM,,No improvements needed,https://x.test/r/2/check-in,', 'no check-out is an empty cell');
+  assert.equal(header, 'Date,Instructor Name,Institute,Check-in Time,Check-out Time,Check-in Status,Check-out Status,Check-in Feedback,Check-out Feedback,Check-in Report,Check-out Report');
+  assert.equal(first, '30/09/2026,Ravi Teja,NIAT Hyderabad,09:11 AM,06:05 PM,Non-compliant,Compliant,Tuck the shirt in.,No improvements needed,https://x.test/r/1/check-in,https://x.test/r/1/check-out');
+  assert.equal(second, '30/09/2026,Asha,Training Institute,09:05 AM,,Compliant,,No improvements needed,,https://x.test/r/2/check-in,', 'no check-out is an empty cell');
   assert.match(third, /^30\/09\/2026,'=Evil,/, 'a name that looks like a formula stays text');
   assert.equal(dayReportFileName('30/09/2026'), 'daily-report-2026-09-30.csv');
 });

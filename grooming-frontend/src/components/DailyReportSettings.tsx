@@ -20,22 +20,35 @@ const MAX_TIMES = 8;
 const HOURS = Array.from({ length: 12 }, (_, index) => index + 1);
 const MINUTES = Array.from({ length: 60 }, (_, index) => index);
 
+type SlotKind = 'checkin' | 'checkout';
+
 interface DailyReportData {
   enabled: boolean;
   campus_reports?: boolean;
   times: string[];
+  kinds?: Record<string, SlotKind>;
   emails: string[];
 }
 
 interface TimeRow {
   key: number;
   value: string;
+  kind: SlotKind;
 }
+
+function defaultSlotKind(value: string): SlotKind {
+  return value < '14:00' ? 'checkin' : 'checkout';
+}
+
+const KIND_LABELS: Record<SlotKind, string> = { checkin: 'Check-in report', checkout: 'Check-out report' };
 
 const SELECT = 'h-10 rounded-md border border-slate-200 bg-white px-2 text-sm font-semibold text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60';
 
-function listLabel(times: string[]): string {
-  const labels = times.map(sendTimeLabel);
+function listLabel(times: string[], kinds?: Record<string, 'checkin' | 'checkout'>): string {
+  const labels = times.map((time) => {
+    const kind = kinds?.[time] ?? (time < '14:00' ? 'checkin' : 'checkout');
+    return `${sendTimeLabel(time)} (${kind === 'checkin' ? 'check-in' : 'check-out'})`;
+  });
   if (labels.length <= 1) return labels.join('');
   return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
 }
@@ -55,7 +68,11 @@ export default function DailyReportSettings() {
   const nextKey = useRef(0);
   const toast = useToast();
 
-  const rowsFor = (times: string[]) => times.map((value) => ({ key: nextKey.current++, value }));
+  const rowsFor = (times: string[], kinds?: Record<string, SlotKind>) => times.map((value) => ({
+    key: nextKey.current++,
+    value,
+    kind: kinds?.[value] ?? defaultSlotKind(value),
+  }));
 
   useEffect(() => {
     let disposed = false;
@@ -63,7 +80,7 @@ export default function DailyReportSettings() {
       .then((response) => {
         if (disposed || !response) return;
         setData(response);
-        setRows(response.times.map((value) => ({ key: nextKey.current++, value })));
+        setRows(rowsFor(response.times, response.kinds));
       })
       .catch((requestError) => {
         if (!disposed && (requestError as { status?: number })?.status !== 401) {
@@ -76,7 +93,12 @@ export default function DailyReportSettings() {
 
   const values = rows.map((row) => row.value);
   const repeated = repeatedSendTime(values);
-  const dirty = sortedSendTimes(values).join(',') !== sortedSendTimes(data.times).join(',');
+  const kindsOf = (list: TimeRow[]) => Object.fromEntries(list.map((row) => [row.value, row.kind]));
+  const savedKinds = (times: string[], kinds?: Record<string, SlotKind>) => Object.fromEntries(
+    times.map((value) => [value, kinds?.[value] ?? defaultSlotKind(value)]),
+  );
+  const dirty = sortedSendTimes(values).join(',') !== sortedSendTimes(data.times).join(',')
+    || JSON.stringify(Object.entries(kindsOf(rows)).sort()) !== JSON.stringify(Object.entries(savedKinds(data.times, data.kinds)).sort());
 
   const setEnabled = async (enabled: boolean) => {
     const previous = data;
@@ -84,7 +106,7 @@ export default function DailyReportSettings() {
     setSavingSwitch(true);
     try {
       const saved = await apiJson<DailyReportData>(PATH, { method: 'PUT', body: { enabled } });
-      setData((current) => ({ ...current, enabled: saved.enabled, times: saved.times }));
+      setData((current) => ({ ...current, enabled: saved.enabled, times: saved.times, kinds: saved.kinds }));
       toast.success(enabled ? 'Daily reports turned on' : 'Daily reports turned off');
     } catch (requestError) {
       setData(previous);
@@ -125,7 +147,14 @@ export default function DailyReportSettings() {
   };
 
   const addRow = () => {
-    setRows((current) => [...current, { key: nextKey.current++, value: suggestedSendTime(current.map((row) => row.value)) }]);
+    setRows((current) => {
+      const value = suggestedSendTime(current.map((row) => row.value));
+      return [...current, { key: nextKey.current++, value, kind: defaultSlotKind(value) }];
+    });
+  };
+
+  const setRowKind = (key: number, kind: SlotKind) => {
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, kind } : row)));
   };
 
   const removeRow = (key: number) => setRows((current) => current.filter((row) => row.key !== key));
@@ -134,11 +163,11 @@ export default function DailyReportSettings() {
     if (repeated) return;
     setSavingTimes(true);
     try {
-      const saved = await apiJson<DailyReportData>(PATH, { method: 'PUT', body: { times: values } });
-      setData((current) => ({ ...current, enabled: saved.enabled, times: saved.times }));
-      setRows(rowsFor(saved.times));
+      const saved = await apiJson<DailyReportData>(PATH, { method: 'PUT', body: { times: values, kinds: kindsOf(rows) } });
+      setData((current) => ({ ...current, enabled: saved.enabled, times: saved.times, kinds: saved.kinds }));
+      setRows(rowsFor(saved.times, saved.kinds));
       toast.success('Send times saved', {
-        detail: saved.times.length ? `Daily reports go out at ${listLabel(saved.times)}.` : 'No send times are set.',
+        detail: saved.times.length ? `Daily reports go out at ${listLabel(saved.times, saved.kinds)}.` : 'No send times are set.',
       });
     } catch (requestError) {
       toast.error('Could not save the send times', {
@@ -211,7 +240,7 @@ export default function DailyReportSettings() {
             <label htmlFor="daily_report_enabled" className="block text-sm font-semibold text-slate-800">Send daily reports</label>
             <p className="mt-0.5 text-sm text-slate-500">
               {data.enabled && data.times.length
-                ? `Sent at ${listLabel(data.times)} (India time).`
+                ? `Sent at ${listLabel(data.times, data.kinds)} (India time).`
                 : 'Sent at the times below (India time).'}
             </p>
           </div>
@@ -243,7 +272,9 @@ export default function DailyReportSettings() {
         <div className="p-4">
           <p className="text-sm font-semibold text-slate-800">Send times</p>
           <p className="mt-0.5 mb-3 text-sm text-slate-500">
-            For example 1:00 PM for the morning's check-ins and 6:30 PM for the afternoon.
+            Choose for each time whether it sends the check-in report or the check-out report. For example
+            11:00 AM for the morning's check-ins and 7:00 PM for the day's check-outs. Each report covers
+            everything of its kind since the previous one of that kind, the first from midnight.
           </p>
 
           {rows.length === 0 ? (
@@ -282,6 +313,16 @@ export default function DailyReportSettings() {
                     >
                       <option value="AM">AM</option>
                       <option value="PM">PM</option>
+                    </select>
+                    <select
+                      aria-label={`Send time ${index + 1}: report`}
+                      value={row.kind}
+                      onChange={(event) => setRowKind(row.key, event.target.value as SlotKind)}
+                      disabled={savingTimes}
+                      className={`${SELECT} ${row.kind === 'checkin' ? 'text-indigo-700' : 'text-rose-700'}`}
+                    >
+                      <option value="checkin">{KIND_LABELS.checkin}</option>
+                      <option value="checkout">{KIND_LABELS.checkout}</option>
                     </select>
                     <button
                       type="button"

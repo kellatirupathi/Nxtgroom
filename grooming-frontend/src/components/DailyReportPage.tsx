@@ -314,9 +314,13 @@ export default function DailyReportPage({ date, token, campus }: DailyReportPage
                 <div>
                   <dt className="font-bold uppercase tracking-wide text-slate-400">Check-out Time</dt>
                   <dd className="mt-0.5 font-semibold text-slate-700">{row.check_out}</dd>
+                  {row.checkout_status && <dd className="mt-1"><StatusPill status={row.checkout_status} /></dd>}
                 </div>
               </dl>
-              <p className="mt-2 text-sm text-slate-600">{row.feedback}</p>
+              <p className="mt-2 text-sm text-slate-600"><span className="font-semibold text-slate-500">Check-in: </span>{row.feedback}</p>
+              {row.checkout_feedback && (
+                <p className="mt-1 text-sm text-slate-600"><span className="font-semibold text-slate-500">Check-out: </span>{row.checkout_feedback}</p>
+              )}
               <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
                 <div className="flex items-center gap-2">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Images</span>
@@ -333,7 +337,7 @@ export default function DailyReportPage({ date, token, campus }: DailyReportPage
 
         <div className="hidden overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm md:block">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[1400px] border-collapse text-left text-sm">
               <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500">
                 <tr>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Date</th>
@@ -341,15 +345,17 @@ export default function DailyReportPage({ date, token, campus }: DailyReportPage
                   <th scope="col" className="border-b border-slate-200 p-3">Institute</th>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Check-in Time</th>
                   <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Check-out Time</th>
-                  <th scope="col" className="border-b border-slate-200 p-3">Status</th>
-                  <th scope="col" className="border-b border-slate-200 p-3">Feedback</th>
+                  <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Check-in Status</th>
+                  <th scope="col" className="border-b border-slate-200 p-3 whitespace-nowrap">Check-out Status</th>
+                  <th scope="col" className="border-b border-slate-200 p-3">Check-in Feedback</th>
+                  <th scope="col" className="border-b border-slate-200 p-3">Check-out Feedback</th>
                   <th scope="col" className="border-b border-slate-200 p-3">Images</th>
                   <th scope="col" className="border-b border-slate-200 p-3">Reports</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 align-top">
                 {rows.length === 0 ? (
-                  <tr><td colSpan={9} className="p-8 text-center text-slate-400">{empty}</td></tr>
+                  <tr><td colSpan={11} className="p-8 text-center text-slate-400">{empty}</td></tr>
                 ) : rows.map((row) => (
                   <tr key={row.attendance_id}>
                     <td className="p-3 whitespace-nowrap text-slate-600">{row.date}</td>
@@ -358,7 +364,9 @@ export default function DailyReportPage({ date, token, campus }: DailyReportPage
                     <td className="p-3 whitespace-nowrap text-slate-700">{row.check_in}</td>
                     <td className="p-3 whitespace-nowrap text-slate-700">{row.check_out}</td>
                     <td className="p-3"><StatusPill status={row.status} /></td>
+                    <td className="p-3">{row.checkout_status ? <StatusPill status={row.checkout_status} /> : <span className="text-slate-300">-</span>}</td>
                     <td className="p-3 text-slate-600">{row.feedback}</td>
+                    <td className="p-3 text-slate-600">{row.checkout_feedback || <span className="text-slate-300">-</span>}</td>
                     <td className="p-3"><PhotoIcons row={row} onOpen={setPhoto} /></td>
                     <td className="p-3"><ReportIcons row={row} /></td>
                   </tr>

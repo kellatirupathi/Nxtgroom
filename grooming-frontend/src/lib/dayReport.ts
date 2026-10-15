@@ -11,6 +11,8 @@ export interface DayRow {
   check_in: string;
   check_out: string;
   feedback: string;
+  checkout_status?: DayStatus | null;
+  checkout_feedback?: string | null;
   has_checkin_photo: boolean;
   has_checkout_photo: boolean;
   checkin_report_url: string | null;
@@ -47,7 +49,7 @@ export function filterDayRows(rows: DayRow[], { search = '', institute = '', sta
   return rows.filter((row) => (
     (!term || row.name.toLowerCase().includes(term))
     && (!institute || row.institute === institute)
-    && (!status || row.status === status)
+    && (!status || row.status === status || row.checkout_status === status)
   ));
 }
 
@@ -59,10 +61,12 @@ const COLUMNS: ReadonlyArray<[string, (row: DayRow) => unknown]> = [
   ['Date', (row) => row.date],
   ['Instructor Name', (row) => row.name],
   ['Institute', (row) => row.institute],
-  ['Status', (row) => DAY_STATUS_LABELS[row.status] ?? ''],
   ['Check-in Time', (row) => (row.check_in === '-' ? '' : row.check_in)],
   ['Check-out Time', (row) => (row.check_out === '-' ? '' : row.check_out)],
-  ['Feedback', (row) => row.feedback],
+  ['Check-in Status', (row) => DAY_STATUS_LABELS[row.status] ?? ''],
+  ['Check-out Status', (row) => (row.checkout_status ? DAY_STATUS_LABELS[row.checkout_status] ?? '' : '')],
+  ['Check-in Feedback', (row) => row.feedback],
+  ['Check-out Feedback', (row) => row.checkout_feedback ?? ''],
   ['Check-in Report', (row) => row.checkin_report_url],
   ['Check-out Report', (row) => row.checkout_report_url],
 ];

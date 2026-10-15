@@ -271,12 +271,23 @@ test("send times must be valid, distinct and few", () => {
 
 const schedule = (extra = {}) => ({ enabled: true, times: ["13:00", "18:30"], schedule_changed_at: ist(9, 0, -1), ...extra });
 
-test("each report covers the time since the previous one, the first from midnight", () => {
+test("each report covers its own kind since the previous one of that kind, the first from midnight", () => {
   assert.deepEqual(dueDailyReports(schedule(), ist(12, 59)), []);
   const evening = dueDailyReports(schedule(), ist(19, 0));
-  assert.deepEqual(evening.map((due) => [due.slot, due.from.toISOString(), due.to.toISOString()]), [
-    ["13:00", ist(0).toISOString(), ist(13).toISOString()],
-    ["18:30", ist(13).toISOString(), ist(18, 30).toISOString()],
+  assert.deepEqual(evening.map((due) => [due.slot, due.kind, due.from.toISOString(), due.to.toISOString()]), [
+    ["13:00", "checkin", ist(0).toISOString(), ist(13).toISOString()],
+    ["18:30", "checkout", ist(0).toISOString(), ist(18, 30).toISOString()],
+  ]);
+  const twoMornings = dueDailyReports(schedule({ times: ["10:00", "13:00", "18:30"] }), ist(19, 0));
+  assert.deepEqual(twoMornings.map((due) => [due.slot, due.kind, due.from.toISOString()]), [
+    ["10:00", "checkin", ist(0).toISOString()],
+    ["13:00", "checkin", ist(10).toISOString()],
+    ["18:30", "checkout", ist(0).toISOString()],
+  ]);
+  const chosen = dueDailyReports(schedule({ kinds: { "13:00": "checkout", "18:30": "checkout" } }), ist(19, 0));
+  assert.deepEqual(chosen.map((due) => [due.slot, due.kind, due.from.toISOString()]), [
+    ["13:00", "checkout", ist(0).toISOString()],
+    ["18:30", "checkout", ist(13).toISOString()],
   ]);
   assert.equal(evening[0].dateKey, "2026-09-30");
 });
@@ -327,17 +338,23 @@ test("unidentified, deleted and other days' records are left out", async () => {
   assert.equal(names.filter((name) => name === "Ravi Teja").length, 1, "yesterday's record is not counted");
 });
 
-test("the evening report covers the afternoon, check-outs included, judged on the check-in", async () => {
+test("the evening check-out report lists only check-outs, judged on the check-out, with the check-in status too", async () => {
   const report = await buildDailyReport(fixtureDb(), eveningRun);
+  assert.equal(report.kind, "checkout");
   const byName = Object.fromEntries(report.rows.map((row) => [row.name, row]));
-  assert.deepEqual(report.rows.map((row) => row.name), ["Ravi Teja", "Anil"]);
-  assert.equal(byName["Ravi Teja"].checkIn, "09:11 AM");
+  assert.deepEqual(report.rows.map((row) => row.name), ["Anil", "Ravi Teja"], "non-compliant check-outs first");
   assert.equal(byName["Ravi Teja"].checkOut, "06:05 PM");
-  assert.equal(byName["Ravi Teja"].status, "non_compliant");
-  assert.deepEqual(byName["Ravi Teja"].points, ["Button the collar properly and tuck the shirt in. Wear your instructor ID card."]);
-  assert.match(byName["Ravi Teja"].reportUrl, /\/check-in$/);
-  assert.equal(byName.Anil.status, "compliant");
-  assert.deepEqual(byName.Anil.points, ["No improvements needed"]);
+  assert.equal(byName["Ravi Teja"].status, "compliant", "judged on the check-out photo");
+  assert.equal(byName["Ravi Teja"].checkinStatus, "non_compliant");
+  assert.deepEqual(byName["Ravi Teja"].points, ["No improvements needed"]);
+  assert.match(byName["Ravi Teja"].reportUrl, /\/check-out$/);
+  assert.equal(byName.Anil.status, "non_compliant");
+  assert.equal(byName.Anil.checkinStatus, "compliant");
+  assert.ok(!byName.Meena, "a check-in without a check-out is not in the check-out report");
+
+  const morning = await buildDailyReport(fixtureDb(), morningRun);
+  assert.equal(morning.kind, "checkin");
+  assert.ok(morning.rows.every((row) => row.checkinStatus === undefined));
 });
 
 test("the email gives every instructor a report link, creating a missing one", async () => {
@@ -359,9 +376,9 @@ test("the email is the table, with a link to the whole report at the top", async
   const pageUrl = "https://nxtgroom-xi.vercel.app/daily-report/30-09-2026/1-00-pm/secretsecretsecret";
   const email = buildDailyReportEmail({ ...report, pageUrl });
   assert.equal(email.subject, "Daily report_Attendance & Grooming_Check_30/09/2026");
-  assert.match(email.html, /<th>Instructor Name<\/th><th>Institute Name<\/th><th>Check-in Time<\/th><th>Check-out Time<\/th><th>Status<\/th><th>Feedback<\/th><th>Report<\/th>/);
-  assert.ok(email.html.includes('<tr><td>Ravi Teja</td><td>NIAT Hyderabad</td><td class="t">09:11 AM</td>'));
-  assert.ok(email.html.includes('<td class="t">-</td><td class="t" style="color:#b91c1c;font-weight:700">Non-compliant</td><td>Button the collar properly'));
+  assert.match(email.html, /<th>Instructor Name<\/th><th>Institute Name<\/th><th>Check-in Time<\/th><th>Status<\/th><th>Feedback<\/th><th>Report<\/th>/);
+  assert.ok(!email.html.includes("Check-out Time"), "the morning email has no check-out column");
+  assert.ok(email.html.includes('<tr><td>Ravi Teja</td><td>NIAT Hyderabad</td><td class="t">09:11 AM</td><td class="t" style="color:#b91c1c;font-weight:700">Non-compliant</td><td>Button the collar properly'));
   assert.ok(email.html.includes('<td class="t" style="color:#15803d;font-weight:700">Compliant</td><td>No improvements needed</td>'));
   assert.ok(!email.html.includes("Analysis in progress"), "pending check-ins are not in the email");
   const top = email.html.indexOf("See all reports");
@@ -370,7 +387,18 @@ test("the email is the table, with a link to the whole report at the top", async
   assert.ok(email.html.includes('<a href="https://nxtgroom-xi.vercel.app/reports/tokRaviTokRaviTokRavi1/day/2026-09-30/check-in" style="color:#2563eb">Report</a>'));
   assert.equal((email.html.match(/>Report<\/a>/g) || []).length, 2, "one per listed instructor");
   assert.ok(email.text.includes(`See all reports: ${pageUrl}`));
-  assert.match(email.text, /Ravi Teja \| NIAT Hyderabad \| Check-in 09:11 AM \| Check-out - \| Non-compliant\n  Feedback: Button the collar/);
+  assert.match(email.text, /Ravi Teja \| NIAT Hyderabad \| Check-in 09:11 AM \| Non-compliant\n  Feedback: Button the collar/);
+});
+
+test("the evening email shows check-out time, both statuses, check-out feedback and the check-out report", async () => {
+  const report = await buildDailyReport(fixtureDb(), eveningRun);
+  const email = buildDailyReportEmail({ ...report, pageUrl: "https://x.test/p" });
+  assert.match(email.html, /<th>Instructor Name<\/th><th>Institute Name<\/th><th>Check-out Time<\/th><th>Check-out Status<\/th><th>Check-in Status<\/th><th>Check-out Feedback<\/th><th>Check-out Report<\/th>/);
+  assert.ok(email.html.includes('<tr><td>Ravi Teja</td><td>NIAT Hyderabad</td><td class="t">06:05 PM</td><td class="t" style="color:#15803d;font-weight:700">Compliant</td><td class="t" style="color:#b91c1c;font-weight:700">Non-compliant</td><td>No improvements needed</td>'));
+  assert.ok(email.html.includes("/day/2026-09-30/check-out"));
+  assert.match(email.text, /Ravi Teja \| NIAT Hyderabad \| Check-out 06:05 PM \| Check-out Compliant \| Check-in Non-compliant/);
+  const empty = buildDailyReportEmail({ subject: "s", dateLabel: "30/09/2026", windowLabel: "12:00 AM to 07:00 PM", rows: [], pageUrl: "https://x.test/p", kind: "checkout" });
+  assert.match(empty.html, /No check-outs between 12:00 AM to 07:00 PM/);
 });
 
 test("names are escaped, and an empty period still sends a clear email", () => {
@@ -382,16 +410,20 @@ test("names are escaped, and an empty period still sends a clear email", () => {
   assert.ok(email.html.includes("a &amp; b"));
   assert.ok(email.html.includes("<td>&lt;b&gt;Evil&lt;/b&gt;</td><td>-</td>"), "no institute reads as a dash");
   const empty = buildDailyReportEmail({ subject: "s", dateLabel: "30/09/2026", windowLabel: "12:00 AM to 01:00 PM", rows: [], pageUrl: "https://x.test/p" });
-  assert.match(empty.html, /No check-ins or check-outs between 12:00 AM to 01:00 PM/);
+  assert.match(empty.html, /No check-ins between 12:00 AM to 01:00 PM/);
   assert.match(empty.html, /0 instructors/);
 });
 
 test("the switch, the times and the recipients are saved, and the recipients are their own list", async () => {
   const db = memoryDb({ app_settings: [{ _id: "rp_recipients", emails: ["rp@nxtwave.co.in"] }] });
-  assert.deepEqual(await getDailyReportSettings(db), { enabled: false, campus_reports: false, times: [], emails: [], schedule_changed_at: null });
+  assert.deepEqual(await getDailyReportSettings(db), { enabled: false, campus_reports: false, times: [], kinds: {}, emails: [], schedule_changed_at: null });
 
   const saved = await saveDailyReportSchedule(db, { enabled: true, times: ["18:30", "13:00"] }, "admin@x");
-  assert.deepEqual(saved, { ok: true, settings: { enabled: true, campus_reports: false, times: ["13:00", "18:30"], emails: [] } });
+  assert.deepEqual(saved, { ok: true, settings: { enabled: true, campus_reports: false, times: ["13:00", "18:30"], kinds: { "13:00": "checkin", "18:30": "checkout" }, emails: [] } });
+  const chosen = await saveDailyReportSchedule(db, { times: ["13:00", "18:30"], kinds: { "13:00": "checkout" } }, "admin@x");
+  assert.deepEqual(chosen.settings.kinds, { "13:00": "checkout", "18:30": "checkout" });
+  assert.equal((await saveDailyReportSchedule(db, { kinds: { "13:00": "lunch" } })).ok, false);
+  await saveDailyReportSchedule(db, { times: ["13:00", "18:30"], kinds: { "13:00": "checkin", "18:30": "checkout" } }, "admin@x");
   const changedAt = (await getDailyReportSettings(db)).schedule_changed_at;
   assert.ok(changedAt instanceof Date);
 
@@ -448,7 +480,9 @@ test("a due report is queued once per recipient, and never twice", async () => {
   assert.deepEqual(await runDueDailyReports(db, ist(18, 30)), ["daily-report:2026-09-30:18:30"]);
   assert.equal(db.docs("mail_jobs").length, 4);
   const evening = db.docs("report_delivery_runs").find((doc) => doc._id.endsWith("18:30"));
-  assert.equal(evening.window_from.getTime(), ist(13).getTime());
+  assert.equal(evening.kind, "checkout");
+  assert.equal(evening.window_from.getTime(), ist(0).getTime(), "the first check-out report covers from midnight");
+  assert.equal(db.docs("report_delivery_runs").find((doc) => doc._id.endsWith("13:00")).kind, "checkin");
   assert.equal(
     db.docs("report_delivery_runs").filter((doc) => doc.type === "daily_report_day").length,
     1,

@@ -626,15 +626,29 @@ function dailyStatusLabel(status) {
   return status === "non_compliant" ? "Non-compliant" : status === "compliant" ? "Compliant" : "-";
 }
 
-export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = [], pageUrl, institute = "" }) {
+function statusCell(status) {
+  const color = status === "non_compliant" ? "#b91c1c" : status === "compliant" ? "#15803d" : "#64748b";
+  return `<td class="t" style="color:${color};font-weight:700">${escapeHtml(dailyStatusLabel(status))}</td>`;
+}
+
+export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = [], pageUrl, institute = "", kind = "checkin" }) {
+  const checkout = kind === "checkout";
   const count = rows.length;
   const countLabel = `${count} ${count === 1 ? "instructor" : "instructors"}`;
   const intro = institute
     ? `Attendance & grooming check, ${institute}, ${dateLabel}, ${windowLabel}: ${countLabel}.`
     : `Attendance & grooming check, ${dateLabel}, ${windowLabel}: ${countLabel}.`;
+  const empty = checkout ? `No check-outs between ${windowLabel}.` : `No check-ins between ${windowLabel}.`;
+  const reportCell = (row) => `<td>${row.reportUrl ? `<a href="${escapeHtml(row.reportUrl)}" style="color:#2563eb">Report</a>` : "-"}</td>`;
+  const headerRow = checkout
+    ? "<tr><th>Instructor Name</th><th>Institute Name</th><th>Check-out Time</th><th>Check-out Status</th><th>Check-in Status</th><th>Check-out Feedback</th><th>Check-out Report</th></tr>"
+    : "<tr><th>Instructor Name</th><th>Institute Name</th><th>Check-in Time</th><th>Status</th><th>Feedback</th><th>Report</th></tr>";
+  const columns = checkout ? 7 : 6;
   const body = count
-    ? rows.map((row) => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.institute || "-")}</td><td class="t">${escapeHtml(row.checkIn)}</td><td class="t">${escapeHtml(row.checkOut)}</td><td class="t" style="color:${row.status === "non_compliant" ? "#b91c1c" : "#15803d"};font-weight:700">${escapeHtml(dailyStatusLabel(row.status))}</td><td>${row.points.map(escapeHtml).join("<br>")}</td><td>${row.reportUrl ? `<a href="${escapeHtml(row.reportUrl)}" style="color:#2563eb">Report</a>` : "-"}</td></tr>`).join("\n")
-    : `<tr><td colspan="7">No check-ins or check-outs between ${escapeHtml(windowLabel)}.</td></tr>`;
+    ? rows.map((row) => (checkout
+      ? `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.institute || "-")}</td><td class="t">${escapeHtml(row.checkOut)}</td>${statusCell(row.status)}${statusCell(row.checkinStatus)}<td>${row.points.map(escapeHtml).join("<br>")}</td>${reportCell(row)}</tr>`
+      : `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.institute || "-")}</td><td class="t">${escapeHtml(row.checkIn)}</td>${statusCell(row.status)}<td>${row.points.map(escapeHtml).join("<br>")}</td>${reportCell(row)}</tr>`)).join("\n")
+    : `<tr><td colspan="${columns}">${escapeHtml(empty)}</td></tr>`;
 
   return {
     subject,
@@ -644,11 +658,13 @@ export function buildDailyReportEmail({ subject, dateLabel, windowLabel, rows = 
       "",
       ...(count
         ? rows.map((row) => [
-          `${row.name} | ${row.institute || "-"} | Check-in ${row.checkIn} | Check-out ${row.checkOut} | ${dailyStatusLabel(row.status)}`,
+          checkout
+            ? `${row.name} | ${row.institute || "-"} | Check-out ${row.checkOut} | Check-out ${dailyStatusLabel(row.status)} | Check-in ${dailyStatusLabel(row.checkinStatus)}`
+            : `${row.name} | ${row.institute || "-"} | Check-in ${row.checkIn} | ${dailyStatusLabel(row.status)}`,
           `  Feedback: ${row.points.join(" / ")}`,
           row.reportUrl ? `  Report: ${row.reportUrl}` : null,
         ].filter(Boolean).join("\n"))
-        : [`No check-ins or check-outs between ${windowLabel}.`]),
+        : [empty]),
     ].join("\n"),
     html: `<!doctype html><html><head><meta charset="utf-8"><style>
 body{font-family:Arial,Helvetica,sans-serif;color:#0f172a}
@@ -660,7 +676,7 @@ a{color:#2563eb;font-weight:600;text-decoration:none}
 </style></head><body>
 <p style="margin:0 0 12px;font-size:12px;color:#475569">${escapeHtml(intro)} <a href="${escapeHtml(pageUrl)}" style="color:#2563eb">See all reports</a></p>
 <table cellpadding="6" cellspacing="0">
-<tr><th>Instructor Name</th><th>Institute Name</th><th>Check-in Time</th><th>Check-out Time</th><th>Status</th><th>Feedback</th><th>Report</th></tr>
+${headerRow}
 ${body}
 </table>
 </body></html>`,
