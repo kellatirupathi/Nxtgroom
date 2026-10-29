@@ -148,19 +148,20 @@ Answer women_close_up from the close-up crops when the request includes them (la
 
 SLEEVES
 - sleeve_left, sleeve_right: ${SLEEVE_SCALE}
-- sleeve_observation: one sentence naming the sleeve colour or print and where its hem ends on each arm.
+- sleeve_observation: one sentence stating where the hem ends on each arm, then naming the sleeve colour or print.
+
 
 KURTI PRINT
 - print: PLAIN for a solid colour; TINY_SUBTLE_PATTERN for small dots or buttis that read as plain at a glance; NOTICEABLE_PRINT for any print you can see from across the room - floral, botanical, abstract, geometric or block; UNCLEAR when you cannot tell. Answer about the kurti, or about the saree or top she wears.
-- print_observation: one sentence naming the colour and the print you saw.
+- print_observation: one complete sentence naming the colour and the print you saw.
 
 DUPATTA
 - dupatta: BOTH_SHOULDERS when it covers both shoulders; ONE_SHOULDER when it lies over only one; AROUND_NECK_ONLY when it hangs from the neck without covering the shoulders; NONE when there is no dupatta; UNCLEAR when you cannot tell. For a saree or other outfit without a dupatta, answer NONE.
-- dupatta_observation: one sentence naming which shoulders it covers.
+- dupatta_observation: one complete sentence stating which shoulders the dupatta covers.
 
 FOOTWEAR
 - footwear: look at the toes first. CLOSED_TOE only when the toes are covered (pumps, bellies, ballet flats, loafers, closed shoes or boots); OPEN_TOE_SANDALS for any sandal with the toes showing, including formal strap sandals and kolhapuris; SLIPPERS_OR_FLIP_FLOPS for slippers, chappals and flip-flops; SNEAKERS_OR_SPORTS for sneakers or sports shoes; BAREFOOT; NOT_VISIBLE when the feet are out of frame or hidden.
-- footwear_observation: one sentence naming the footwear and whether the toes are visible.
+- footwear_observation: one complete sentence naming the footwear and stating whether the toes are visible.
 
 EARRINGS
 - earrings: NONE; UP_TO_2CM for studs or small earrings no longer than about a third of the ear; LARGER_THAN_2CM for drops, dangling or jhumka earrings longer than that; NOT_VISIBLE when the ears are hidden. Never call a drop or jhumka a stud.
@@ -168,7 +169,7 @@ EARRINGS
 
 KURTI FIT
 - fit: NORMAL_EASE when the kurti follows the body with normal ease; LOOSE_OVERSIZED when it hangs far off the body, its shoulder seam drops down the upper arm or its sleeves cover the hands; TOO_TIGHT when it pulls across the chest or hips; UNCLEAR when you cannot tell or she is not wearing a kurti.
-- fit_observation: one sentence naming where the shoulder seam sits and how the kurti falls.`;
+- fit_observation: one complete sentence stating where the shoulder seam sits and how the kurti falls.`;
 
 export const SleeveSecondLook = z.object({
   sleeve_left: z.enum(SLEEVE),
@@ -191,8 +192,7 @@ export const SLEEVE_SECOND_LOOK_INSTRUCTIONS = `You are shown a close-up of a wo
 
 ${SLEEVE_SCALE}
 
-observation: one sentence naming the sleeve colour or print and where its hem ends on each arm. Judge only what the close-up shows.`;
-
+observation: one sentence stating where the hem ends on each arm, then naming the sleeve colour or print. Judge only what the close-up shows.`;
 export const SLEEVE_SECOND_LOOK_PROMPT = "Where does the hem of each sleeve end on the arm in this close-up?";
 
 const LONG_ENOUGH = new Set(["MIDDLE_OF_UPPER_ARM", "ABOVE_ELBOW", "AT_ELBOW", "BELOW_ELBOW"]);
