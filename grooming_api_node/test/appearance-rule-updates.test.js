@@ -49,26 +49,27 @@ test("men: a belt passes only when it is seen and named, and an untucked shirt h
   assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /### BELT/);
 });
 
-test("women: a sleeve is measured before it fails, and a puffed sleeve is judged by its hem", () => {
+test("women: a sleeve is judged by style first, and a puffed or dark sleeve is judged by its hem rather than a guessed pixel boundary", () => {
   for (const [attire, code] of [
     ["KURTI_WITH_DUPATTA", "W_KURTI_NECKLINE_SLEEVES"],
     ["SAREE", "W_SAREE_BLOUSE"],
     ["FORMAL", "W_FORMAL_TOP"],
   ]) {
-    assert.match(find("FEMALE", attire, code).rule, /Measure before failing/, `${code} must measure before failing`);
+    assert.match(find("FEMALE", attire, code).rule, /The shoulder-to-elbow midpoint is a secondary check only/, `${code} must treat the midpoint as secondary`);
+    assert.match(find("FEMALE", attire, code).rule, /FAIL only when the hem is clearly, unmistakably a cap or short sleeve/, `${code} must measure before failing`);
   }
-  assert.match(find("FEMALE", "SAREE", "W_SAREE_BLOUSE").rule, /A puffed or gathered sleeve is judged by where its hem ends on the arm/);
-  assert.match(buildSystemPrompt("FEMALE", "SAREE"), /A puffed or gathered\nsleeve is judged by its hem/);
+  assert.match(find("FEMALE", "SAREE", "W_SAREE_BLOUSE").rule, /A puffed or gathered sleeve bunches fabric at the shoulder - judge it by its hem and cuff line/);
+  assert.match(buildSystemPrompt("FEMALE", "SAREE"), /A puffed or gathered sleeve bunches its fabric near the shoulder - judge it\n  by where its hem and cuff line sit on the arm/);
 });
 
-test("women: sleeves must reach halfway to the elbow on every outfit", () => {
+test("women: a cap or short sleeve fails on every outfit, and sleeveless always fails", () => {
   for (const [attire, code] of [
     ["KURTI_WITH_DUPATTA", "W_KURTI_NECKLINE_SLEEVES"],
     ["SAREE", "W_SAREE_BLOUSE"],
     ["FORMAL", "W_FORMAL_TOP"],
   ]) {
     const rule = find("FEMALE", attire, code).rule;
-    assert.match(rule, /at least halfway from the shoulder to the elbow/i, `${code} lacks the halfway rule`);
+    assert.match(rule, /would you call it a cap sleeve or short sleeve, or a half sleeve, elbow-length, three-quarter or full sleeve/i, `${code} lacks the style question`);
     assert.match(rule, /cap sleeve/i, `${code} must fail cap sleeves`);
   }
   assert.match(find("FEMALE", "SAREE", "W_SAREE_BLOUSE").rule, /SLEEVELESS BLOUSE IS NOT PERMITTED/);
@@ -76,13 +77,13 @@ test("women: sleeves must reach halfway to the elbow on every outfit", () => {
 
 test("women: a half sleeve on a kurti now passes, where it used to fail", () => {
   const rule = find("FEMALE", "KURTI_WITH_DUPATTA", "W_KURTI_NECKLINE_SLEEVES").rule;
-  assert.match(rule, /a half sleeve ending at the middle of the upper arm or lower/i);
+  assert.match(rule, /half sleeve, elbow-length, three-quarter or full sleeve\? FAIL only the first group/i);
   assert.doesNotMatch(rule, /half sleeves, cap sleeves and sleeveless are all a FAIL/i);
   assert.doesNotMatch(rule, /requires full or three-quarter length/i);
 
   const prompt = buildSystemPrompt("FEMALE", "KURTI_WITH_DUPATTA");
   assert.doesNotMatch(prompt, /short, half, cap or sleeveless sleeves is a FAIL/);
-  assert.match(prompt, /Sleeves must reach at least halfway from the shoulder to the elbow/);
+  assert.match(prompt, /Decide sleeve length from one question: would you call this a cap sleeve/);
 });
 
 test("women: palazzo passes; leggings, jeggings, churidar and gathered salwar fail", () => {

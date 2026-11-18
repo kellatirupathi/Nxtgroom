@@ -275,15 +275,9 @@ Look for these specifically rather than assuming compliance:
 A sleeveless saree blouse is never permitted. Say so explicitly when you see
 one, rather than describing the fit and moving on.
 
-Sleeves must reach at least halfway from the shoulder to the elbow - on a
-kurti, a saree blouse and a western top alike. A sleeve ending above that point,
-a cap sleeve and sleeveless are a FAIL; a half sleeve ending at the middle of the
-upper arm or lower passes. Name the sleeve style and where its hem ends. Silence
-on sleeves reads as approval. Measure before failing: find the shoulder point
-and the elbow, then see where the hem ends between them. A puffed or gathered
-sleeve is judged by its hem, not by its fullness at the shoulder. FAIL only a
-hem that clearly ends well short of the halfway point; a hem at or close to it,
-or one the angle, the pose or the pallu stops you placing precisely, passes.
+Sleeve length is a FAIL only for a true cap sleeve or short sleeve - see the
+dedicated SLEEVE LENGTH section below for how to judge it. Name the sleeve
+style and where its hem ends. Silence on sleeves reads as approval.
 
 Bottom wear must hang with some ease: palazzo pants, straight formal trousers,
 or the straight or slim-straight pants of a kurti set, including ankle-length
@@ -308,6 +302,23 @@ down the arm or whose sleeves cover the hands is oversized and fails its fit.
 
 Never pass a row while describing the very thing its standard fails: a kurti
 you call floral, footwear you call sandals or leggings you name are FAIL.
+
+### SLEEVE LENGTH
+Decide sleeve length from one question: would you call this a cap sleeve or a
+short sleeve, or would you call it a half sleeve, elbow-length, three-quarter
+or full sleeve? PASS everything in the second group; FAIL only a true cap
+sleeve, a short sleeve or sleeveless.
+- A puffed or gathered sleeve bunches its fabric near the shoulder - judge it
+  by where its hem and cuff line sit on the arm, not by how full or short it
+  looks at the shoulder.
+- A dark or richly coloured sleeve, or one next to a similarly dark pallu or
+  dupatta, can make the exact hem hard to pin down - in that case judge the
+  sleeve's evident style and go by the cuff or fabric edge you can see, rather
+  than guessing a precise point on the arm.
+- The shoulder-to-elbow midpoint is a secondary check, not the primary test:
+  use it only to confirm a style call you can already make. FAIL only when the
+  hem is clearly, unmistakably a cap or short sleeve; if the style reads as
+  "about half sleeve" or longer, or the geometry and the style disagree, PASS.
 
 ### BOTTOM WEAR
 Decide bottom wear from one question: does the cloth hang with some ease, or

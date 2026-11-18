@@ -88,7 +88,7 @@ export async function buildWomenCloseUps(imageBuffer, regionBoxes) {
   return { parts, boxes, armImage };
 }
 
-const SLEEVE = ["SLEEVELESS", "CAP", "ABOVE_MIDDLE", "MIDDLE_OF_UPPER_ARM", "ABOVE_ELBOW", "AT_ELBOW", "BELOW_ELBOW", "NOT_VISIBLE"];
+const SLEEVE = ["SLEEVELESS", "CAP", "WELL_ABOVE_MIDDLE", "JUST_ABOVE_MIDDLE", "MIDDLE_OF_UPPER_ARM", "ABOVE_ELBOW", "AT_ELBOW", "BELOW_ELBOW", "NOT_VISIBLE"];
 const PRINT = ["PLAIN", "TINY_SUBTLE_PATTERN", "NOTICEABLE_PRINT", "UNCLEAR"];
 const DUPATTA = ["BOTH_SHOULDERS", "ONE_SHOULDER", "AROUND_NECK_ONLY", "NONE", "UNCLEAR"];
 const FOOTWEAR = ["CLOSED_TOE", "OPEN_TOE_SANDALS", "SLIPPERS_OR_FLIP_FLOPS", "SNEAKERS_OR_SPORTS", "BAREFOOT", "NOT_VISIBLE"];
@@ -139,8 +139,8 @@ export const WOMEN_CLOSE_UP_JSON_SCHEMA = {
   ],
 };
 
-const SLEEVE_SCALE = `Where the sleeve hem ends on the arm, for each arm separately: find the shoulder point and the elbow bend, then find the boundary where the sleeve fabric (its colour or print) stops and bare skin begins. A puffed or gathered sleeve is judged by that hem, not by its fullness at the shoulder.
-SLEEVELESS: no sleeve. CAP: a sleeve ending just below the shoulder. ABOVE_MIDDLE: ending in the upper half of the upper arm. MIDDLE_OF_UPPER_ARM: ending about halfway from the shoulder to the elbow. ABOVE_ELBOW: ending between halfway and the elbow. AT_ELBOW: ending at the elbow. BELOW_ELBOW: three-quarter or full sleeves. NOT_VISIBLE: the arm or its hem is hidden (by the pallu, the dupatta or the pose) or out of frame.`;
+const SLEEVE_SCALE = `Where the sleeve hem ends on the arm, for each arm separately. Start from the sleeve's style: would you call it a cap sleeve or short sleeve, or a half sleeve, elbow-length, three-quarter or full sleeve? Then use the shoulder-to-elbow midpoint only to place that style precisely. A puffed or gathered sleeve bunches fabric near the shoulder - judge it by its hem and cuff line, not by its fullness at the shoulder. When the sleeve is dark, or sits next to a similarly dark pallu or dupatta, the exact hem can be hard to pin down - in that case go by the sleeve's evident style rather than a guessed pixel boundary.
+SLEEVELESS: no sleeve. CAP: a sleeve ending just below the shoulder. WELL_ABOVE_MIDDLE: a true short sleeve, ending clearly in the upper third of the upper arm - well short of halfway to the elbow. JUST_ABOVE_MIDDLE: ending a little above the midpoint - close enough that you would call it about half sleeve. MIDDLE_OF_UPPER_ARM: ending about halfway from the shoulder to the elbow. ABOVE_ELBOW: ending between halfway and the elbow. AT_ELBOW: ending at the elbow. BELOW_ELBOW: three-quarter or full sleeves. NOT_VISIBLE: the arm or its hem is hidden (by the pallu, the dupatta or the pose) or out of frame.`;
 
 export const WOMEN_CLOSE_UP_INSTRUCTIONS = `## CLOSE-UP ANSWERS FOR HER OUTFIT (women_close_up)
 
@@ -195,7 +195,7 @@ ${SLEEVE_SCALE}
 observation: one sentence stating where the hem ends on each arm, then naming the sleeve colour or print. Judge only what the close-up shows.`;
 export const SLEEVE_SECOND_LOOK_PROMPT = "Where does the hem of each sleeve end on the arm in this close-up?";
 
-const LONG_ENOUGH = new Set(["MIDDLE_OF_UPPER_ARM", "ABOVE_ELBOW", "AT_ELBOW", "BELOW_ELBOW"]);
+const LONG_ENOUGH = new Set(["JUST_ABOVE_MIDDLE", "MIDDLE_OF_UPPER_ARM", "ABOVE_ELBOW", "AT_ELBOW", "BELOW_ELBOW"]);
 
 export function sleeveVerdict(left, right) {
   const seen = [left, right].filter((value) => value && value !== "NOT_VISIBLE");

@@ -78,10 +78,11 @@ test("women's written rules: closed-toe footwear only, noticeable prints fail, d
 test("the sleeve verdict is decided by code from where each hem ends, using the arm that can be seen", () => {
   assert.equal(sleeveVerdict("AT_ELBOW", "NOT_VISIBLE"), "PASS");
   assert.equal(sleeveVerdict("MIDDLE_OF_UPPER_ARM", "MIDDLE_OF_UPPER_ARM"), "PASS");
-  assert.equal(sleeveVerdict("CAP", "ABOVE_MIDDLE"), "FAIL");
+  assert.equal(sleeveVerdict("CAP", "WELL_ABOVE_MIDDLE"), "FAIL");
   assert.equal(sleeveVerdict("SLEEVELESS", "NOT_VISIBLE"), "FAIL");
   assert.equal(sleeveVerdict("NOT_VISIBLE", "NOT_VISIBLE"), null);
   assert.equal(sleeveVerdict("CAP", "BELOW_ELBOW"), "PASS", "one long sleeve shows the blouse is not short");
+  assert.equal(sleeveVerdict("CAP", "JUST_ABOVE_MIDDLE"), "PASS", "a hem close to the midpoint passes");
 });
 
 test("an elbow-length blouse the report failed as short is passed on the arm close-up, and so is its presentation", () => {
@@ -235,7 +236,7 @@ const photo = () => sharp({ create: { width: 600, height: 900, channels: 3, back
 test("a sleeve failure gets a second look at the arm close-up, which clears it when the sleeves reach the elbow", async () => {
   const stub = stubGemini([
     { subject_visible: true, attire_type: "SAREE", image_quality: "ADEQUATE", visible_regions: VISIBLE, region_boxes: BOXES },
-    sareeReport({ women_close_up: { ...ANSWER, sleeve_left: "ABOVE_MIDDLE", sleeve_right: "NOT_VISIBLE" } }),
+    sareeReport({ women_close_up: { ...ANSWER, sleeve_left: "WELL_ABOVE_MIDDLE", sleeve_right: "NOT_VISIBLE" } }),
     { sleeve_left: "AT_ELBOW", sleeve_right: "NOT_VISIBLE", observation: "Black printed sleeves reach the elbow." },
   ]);
   try {
