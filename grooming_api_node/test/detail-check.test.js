@@ -84,23 +84,23 @@ test("the tablet's regions are read from the form field, and anything malformed 
   }
 });
 
-test("a belt the close-up cannot find fails, and so do jeans and sneakers", () => {
+test("a belt the close-up cannot find is N/A, never a failure, while jeans and sneakers still fail", () => {
   const rows = passedRows();
   const { failed, passed } = applyDetailFindings(rows, NO_BELT, REGIONS, CROPPED);
 
-  assert.deepEqual(failed.sort(), ["M_BELT", "M_FOOTWEAR_TYPE", "M_TROUSERS_TYPE"]);
+  assert.deepEqual(failed.sort(), ["M_FOOTWEAR_TYPE", "M_TROUSERS_TYPE"]);
   assert.deepEqual(passed, []);
   const belt = row(rows, "M_BELT");
-  assert.equal(belt.status, "FAIL");
+  assert.equal(belt.status, "N/A");
   assert.match(belt.observation, /^Close-up of the waist: .*no buckle or belt strap/);
-  assert.equal(belt.reason, "No belt buckle or belt strap is visible at the waistband in the close-up of the waist.");
-  assert.equal(belt.evidence, undefined, "a missing belt is a clothing failure, not a framing one");
+  assert.equal(belt.reason, "No belt is visible in the close-up of the waist. A belt is optional, so this does not affect compliance.");
+  assert.equal(belt.evidence, undefined);
   assert.match(row(rows, "M_TROUSERS_TYPE").reason, /jeans or denim/);
   assert.match(row(rows, "M_FOOTWEAR_TYPE").reason, /sneakers or sports shoes/);
   assert.match(row(rows, "M_SHIRT_COLLAR_TUCK").reason, /^Confirmed in the close-up: The checked shirt is tucked/);
 
   const tips = improvementTips(rows);
-  assert.ok(tips.includes("Wear a formal belt with your trousers."));
+  assert.ok(!tips.some((tip) => /belt/i.test(tip)), "a missing belt never earns advice");
   assert.ok(tips.includes("Replace jeans with formal trousers."));
   assert.ok(tips.includes("Wear clean formal shoes instead of casual footwear."));
 });
@@ -145,7 +145,7 @@ test("for the attire, the close-up only tightens: a belt it sees passes, and a f
   assert.equal(row(rows, "M_TROUSERS_TYPE").reason, "Jeans.");
 });
 
-test("a waist the close-up cannot see fails the belt as not shown, but leaves the tuck alone", () => {
+test("a waist the close-up cannot see makes the belt N/A, and leaves the tuck alone", () => {
   const rows = passedRows();
   applyDetailFindings(rows, face({
     waist_assessable: false,
@@ -153,9 +153,9 @@ test("a waist the close-up cannot see fails the belt as not shown, but leaves th
     waist_observation: "Both hands and an ID card cover the waistband.",
   }), REGIONS, CROPPED);
   const belt = row(rows, "M_BELT");
-  assert.equal(belt.status, "FAIL");
-  assert.equal(belt.evidence, "NOT_SHOWN");
-  assert.ok(improvementTips(rows).some((tip) => /full-length photograph that shows your waist/.test(tip)));
+  assert.equal(belt.status, "N/A");
+  assert.equal(belt.evidence, undefined);
+  assert.ok(!improvementTips(rows).some((tip) => /belt/i.test(tip)));
   assert.equal(row(rows, "M_SHIRT_COLLAR_TUCK").status, "PASS");
 });
 
@@ -178,8 +178,14 @@ test("a belt seen in the close-up passes even when an ID card covers part of the
 
   const none = passedRows();
   applyDetailFindings(none, face(), REGIONS, CROPPED);
-  assert.equal(row(none, "M_BELT").status, "FAIL");
-  assert.equal(row(none, "M_BELT").reason, "No belt buckle or belt strap is visible at the waistband in the close-up of the waist.");
+  assert.equal(row(none, "M_BELT").status, "N/A");
+  assert.equal(row(none, "M_BELT").reason, "No belt is visible in the close-up of the waist. A belt is optional, so this does not affect compliance.");
+
+  const notAnswered = passedRows();
+  row(notAnswered, "M_BELT").status = "N/A";
+  const upgraded = applyDetailFindings(notAnswered, face({ belt_buckle_visible: true, waist_observation: "A brown belt with a gold buckle." }), REGIONS, CROPPED);
+  assert.equal(row(notAnswered, "M_BELT").status, "PASS", "a belt the close-up sees passes even when the model said N/A");
+  assert.ok(upgraded.passed.includes("M_BELT"));
 });
 
 test("the close-up is told an ID card above the waistband does not hide it", () => {
@@ -189,19 +195,19 @@ test("the close-up is told an ID card above the waistband does not hide it", () 
   assert.doesNotMatch(CLOSE_UP_INSTRUCTIONS, /hidden \(by hands, an ID card/);
 });
 
-test("a shirt hanging over the waistband fails the belt unless a buckle is plainly visible", () => {
+test("a shirt hanging over the waistband hides the belt, so it is N/A unless a buckle is plainly visible", () => {
   const strapOnly = passedRows();
   const result = applyDetailFindings(strapOnly, face({ belt_strap_visible: true, shirt_tucked: "NO" }));
-  assert.equal(row(strapOnly, "M_BELT").status, "FAIL");
+  assert.equal(row(strapOnly, "M_BELT").status, "N/A");
   assert.equal(
     row(strapOnly, "M_BELT").reason,
-    "The shirt hangs over the front of the waistband and no belt buckle is visible in the close-up of the waist.",
+    "The shirt hangs over the front of the waistband, so no belt is visible. A belt is optional, so this does not affect compliance.",
   );
-  assert.ok(result.failed.includes("M_BELT"));
+  assert.ok(!result.failed.includes("M_BELT"));
 
   const nothing = passedRows();
   applyDetailFindings(nothing, face({ shirt_tucked: "NO" }));
-  assert.equal(row(nothing, "M_BELT").status, "FAIL");
+  assert.equal(row(nothing, "M_BELT").status, "N/A");
 
   const buckle = passedRows();
   applyDetailFindings(buckle, face({ belt_buckle_visible: true, shirt_tucked: "NO" }));
@@ -425,15 +431,15 @@ test("a man's report is one request carrying the photograph and the four close-u
     assert.match(stub.bodies[0].systemInstruction.parts[0].text, /## CLOSE-UP: FACE, WAIST, TROUSERS AND SHOES/);
     assert.ok(stub.bodies[0].generationConfig.responseJsonSchema.required.includes("close_up"));
 
-    assert.equal(result.overall_status, "NON_COMPLIANT", "the belt the report invented no longer passes");
+    assert.equal(result.overall_status, "NON_COMPLIANT", "the jeans and sneakers the report missed now fail");
     assert.equal(result.attire_type, "FORMAL");
     assert.deepEqual(result.detail_check, {
       version: DETAIL_CHECK_VERSION,
       crops: ["head", "waist", "legs", "feet"],
-      overridden: ["M_BELT", "M_TROUSERS_TYPE", "M_FOOTWEAR_TYPE"],
+      overridden: ["M_TROUSERS_TYPE", "M_FOOTWEAR_TYPE"],
     });
     const belt = result.attire_check.find((item) => item.code === "M_BELT");
-    assert.equal(belt.status, "FAIL");
+    assert.equal(belt.status, "N/A", "the belt the report invented is no longer passed, and an optional belt never fails");
     assert.deepEqual(belt.evidence_box, paddedBox(WAIST), "the crop it read, to show in the report");
   } finally {
     stub.restore();
@@ -448,7 +454,7 @@ test("without the tablet's regions it is still one request, asked about the phot
     assert.equal(stub.bodies.length, 1);
     assert.equal(images(stub.bodies[0]), 1, "the photograph alone");
     assert.deepEqual(result.detail_check.crops, []);
-    assert.equal(result.attire_check.find((item) => item.code === "M_BELT").status, "FAIL");
+    assert.equal(result.attire_check.find((item) => item.code === "M_BELT").status, "N/A");
     assert.deepEqual(result.attire_check.find((item) => item.code === "M_BELT").evidence_box, paddedBox(NO_BELT_CLOSE_UP.waist_box));
   } finally {
     stub.restore();

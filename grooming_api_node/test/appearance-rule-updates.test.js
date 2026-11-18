@@ -40,12 +40,17 @@ test("men: curls past the hairline fail like any hair on the forehead, and shape
   assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /Curls, waves or a quiff/);
 });
 
-test("men: a belt passes only when it is seen and named, and an untucked shirt hides it", () => {
-  const belt = find("MALE", "FORMAL", "M_BELT").rule;
-  assert.match(belt, /name its colour and its buckle in the observation, and if you cannot, no belt was seen and the answer is FAIL/);
-  assert.match(belt, /An untucked shirt whose hem hangs over the front of the waistband hides the belt/);
+test("men: a belt is optional - PASS when it is seen and named, N/A otherwise, never FAIL", () => {
+  const checkpoint = find("MALE", "FORMAL", "M_BELT");
+  assert.equal(checkpoint.informational, true, "the belt never affects compliance");
+  assert.match(checkpoint.rule, /A belt is optional, so this never affects compliance/);
+  assert.match(checkpoint.rule, /PASS when you can actually see a belt at the waistband: name its colour and its buckle/);
+  assert.match(checkpoint.rule, /N\/A in every other case/);
+  assert.match(checkpoint.rule, /Never FAIL/);
   const prompt = buildSystemPrompt("MALE", "FORMAL");
-  assert.match(prompt, /### BELT/);
+  assert.match(prompt, /### BELT\nA belt is optional and never makes a check-in non-compliant/);
+  assert.doesNotMatch(prompt, /Belt is a FAIL/);
+  assert.doesNotMatch(prompt, /shirt tuck and belt checks/);
   assert.doesNotMatch(buildSystemPrompt("FEMALE", "SAREE"), /### BELT/);
 });
 
@@ -138,5 +143,5 @@ test("the advice in the report matches the new rules", () => {
 });
 
 test("the prompt version moved, so stored reports say which rules judged them", () => {
-  assert.equal(PROMPT_VERSION, "2026-10-14.1");
+  assert.equal(PROMPT_VERSION, "2026-11-18.1");
 });

@@ -1,7 +1,7 @@
 import sharp from "sharp";
 import { z } from "zod";
 
-export const DETAIL_CHECK_VERSION = "2026-10-14.1";
+export const DETAIL_CHECK_VERSION = "2026-11-18.1";
 
 const ROW_REGIONS = Object.freeze({
   M_HAIR_NEATNESS: "head",
@@ -294,6 +294,14 @@ function passRow(row, observation, reason) {
   row.detail_override = true;
 }
 
+function notAssessedRow(row, observation, reason) {
+  row.status = "N/A";
+  row.observation = observation.slice(0, 1000);
+  row.reason = reason.slice(0, 1000);
+  delete row.evidence;
+  row.detail_override = true;
+}
+
 function confirmRow(row, observation) {
   row.reason = `Confirmed in the close-up: ${observation}`.slice(0, 1000);
 }
@@ -388,32 +396,25 @@ export function applyDetailFindings(rows, findings, boxes = {}, { croppedRegions
     const seen = sentence(waist.observation, "The front of the waistband.");
     const belt = findRow(rows, "M_BELT");
     const beltSeen = waist.buckle_visible || (waist.belt_strap_visible && waist.shirt_tucked !== "NO");
-    if (belt?.status === "PASS") {
-      if (beltSeen) {
+    if (belt && beltSeen) {
+      if (belt.status === "PASS") {
         confirmRow(belt, seen);
-      } else if (waist.shirt_tucked === "NO") {
-        failRow(
-          belt,
-          `Close-up of the waist: ${seen}`,
-          "The shirt hangs over the front of the waistband and no belt buckle is visible in the close-up of the waist.",
-        );
-        failed.push("M_BELT");
-      } else if (!waist.assessable) {
-        failRow(
-          belt,
-          `Close-up of the waist: ${seen}`,
-          "The close-up of the waist does not show a belt clearly enough to verify it.",
-          { notShown: true },
-        );
-        failed.push("M_BELT");
       } else {
-        failRow(
+        passRow(
           belt,
           `Close-up of the waist: ${seen}`,
-          "No belt buckle or belt strap is visible at the waistband in the close-up of the waist.",
+          "The close-up of the waist shows a belt. A belt is optional, so this does not affect compliance.",
         );
-        failed.push("M_BELT");
+        passed.push("M_BELT");
       }
+    } else if (belt?.status === "PASS" || belt?.status === "FAIL") {
+      notAssessedRow(
+        belt,
+        `Close-up of the waist: ${seen}`,
+        waist.shirt_tucked === "NO"
+          ? "The shirt hangs over the front of the waistband, so no belt is visible. A belt is optional, so this does not affect compliance."
+          : "No belt is visible in the close-up of the waist. A belt is optional, so this does not affect compliance.",
+      );
     }
 
     const tuck = findRow(rows, "M_SHIRT_COLLAR_TUCK");

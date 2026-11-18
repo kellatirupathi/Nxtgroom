@@ -24,7 +24,12 @@ export const MEN_ATTIRE_CHECKS = [
   { code: "M_SHIRT_COLLAR_TUCK", name: "Shirt Collar / Tuck", rule: "Covers collar presentation, no more than one button open, and tucking. The shirt is visibly tucked when its lower edge disappears continuously into the trouser waistband around the waist or belt line. Natural folds or slight billowing above the waistband do not mean the shirt is untucked. PASS when the collar and buttons comply and the shirt is visibly contained by the waistband. FAIL only when shirt hem, tails or fabric clearly hang outside the trousers, the collar/buttons clearly violate the rule, or the submitted photograph does not show the waist/tuck area well enough to verify this required check; when visibility is the problem, state that the tuck is not shown and recommend a clearer full-body photograph. Do not invent an untucked hem from ordinary folds, belt overlap, shadows or pose, and do not return N/A merely because the waist is cropped, distant, blurred or occluded." },
   { code: "M_TROUSERS_TYPE", name: "Trousers Type", rule: "Formal trousers. FAIL jeans, denim, joggers and obviously casual trousers." },
   { code: "M_TROUSERS_FIT_CONDITION", name: "Trousers Fit & Condition", rule: "Covers fit, visible condition, tears or fraying, heavy creasing and hem length together. Read pressing from the front of the thigh and the line down the leg: pressed trousers fall in a clean vertical line, while unpressed ones crush horizontally across the lap, the seat and behind the knee. The break at the shoe and any fraying at the hem belong here too. Ordinary creasing from sitting is not a failing; a leg broadly rumpled along its length is. Name the region your evidence came from in the observation." },
-  { code: "M_BELT", name: "Belt", rule: "A simple formal belt in good condition, coordinated with the shoes, is required. PASS only when a compliant belt is visibly worn. FAIL when no belt is worn, when the belt is clearly casual, flashy, damaged or mismatched, or when the submitted photograph does not show the waist/belt area well enough to verify this required check; state that the belt is not shown and recommend a clearer full-body photograph. Do not return N/A merely because the waist is cropped, distant, blurred or occluded. A belt is a PASS only when you can actually see it: name its colour and its buckle in the observation, and if you cannot, no belt was seen and the answer is FAIL. An untucked shirt whose hem hangs over the front of the waistband hides the belt, so Belt is a FAIL then unless a buckle is plainly visible. Never assume a belt because the outfit is otherwise formal." },
+  {
+    code: "M_BELT",
+    name: "Belt",
+    informational: true,
+    rule: "A belt is optional, so this never affects compliance. Record whether a belt is visibly worn, and nothing more. PASS when you can actually see a belt at the waistband: name its colour and its buckle in the observation. N/A in every other case - the waist is out of frame, cropped, blurred or covered by an untucked shirt, a kurta or a blazer, or no belt is worn - and say plainly that no belt is visible. Never FAIL, and never assume a belt because the outfit is otherwise formal.",
+  },
 ];
 
 const HEADWEAR_RULE = "No cap or hat is worn on the head. FAIL a baseball cap, sports or snapback cap, beanie or woollen cap, sun hat, fedora or any other hat, a hoodie's hood worn up, and a bandana worn as headwear. Religious head coverings are not headwear and PASS: a prayer cap (topi or kufi), a turban or patka, and a hijab or head scarf. PASS when the head is uncovered or covered only by such a religious covering, and say in the observation what is on the head. Use N/A only when the head is not visible.";
@@ -240,7 +245,7 @@ export const CHECKPOINT_VERSION = createHash("sha256")
   .slice(0, 12);
 
 export const INFORMATIONAL_CODES = new Set(
-  [...MEN_ACCESSORIES_CHECKS, ...WOMEN_ACCESSORIES_CHECKS, ...MEN_KURTA_ATTIRE_CHECKS, ...ABAYA_ATTIRE_CHECKS]
+  [...MEN_ATTIRE_CHECKS, ...MEN_ACCESSORIES_CHECKS, ...WOMEN_ACCESSORIES_CHECKS, ...MEN_KURTA_ATTIRE_CHECKS, ...ABAYA_ATTIRE_CHECKS]
     .filter((item) => item.informational)
     .map((item) => item.code)
 );
@@ -259,7 +264,6 @@ export const IMPROVEMENT_TIPS = {
   M_SHIRT_COLLAR_TUCK: "Button the collar properly and tuck the shirt in.",
   M_TROUSERS_TYPE: "Replace jeans with formal trousers.",
   M_TROUSERS_FIT_CONDITION: "Wear well-fitted, undamaged, pressed trousers.",
-  M_BELT: "Wear a formal belt with your trousers.",
   M_KURTA_ATTIRE_TYPE: "Wear a long kurta with payjama or formal trousers.",
   M_KURTA_BOTTOM: "Wear payjama or formal trousers with the kurta, not jeans.",
   M_KURTA_CONDITION: "Wear a clean, pressed kurta.",
@@ -306,8 +310,7 @@ export const IMPROVEMENT_TIPS = {
 };
 
 export const UNVERIFIED_IMPROVEMENT_TIPS = {
-  M_SHIRT_COLLAR_TUCK: "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
-  M_BELT: "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+  M_SHIRT_COLLAR_TUCK: "Send a full-length photograph that shows your waist, so the shirt tuck can be checked.",
 };
 
 export function improvementTips(sections) {

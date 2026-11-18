@@ -2,7 +2,7 @@ import { checkpointSet, maleCombinedSet, SECTION_KEYS } from "./checkpoints.js";
 import { BLAZER_INSTRUCTIONS } from "./services/blazer.js";
 import { REGION_BOX_INSTRUCTIONS } from "./services/womenDetailCheck.js";
 
-export const PROMPT_VERSION = "2026-10-14.1";
+export const PROMPT_VERSION = "2026-11-18.1";
 
 const SECTION_TITLES = {
   general_idcard_check: "GENERAL ID CARD CHECK",
@@ -75,7 +75,7 @@ the instructor is wearing, is the most common way this goes wrong. Poor
 framing, distance, blur and low light are properties of the picture. They lead
 to N/A when they genuinely prevent a decision, except for a checkpoint whose
 written standard explicitly requires the submitted photograph to show the
-item (the men's shirt tuck and belt checks). Follow those explicit standards.
+item (the men's shirt tuck check). Follow those explicit standards.
 
 For an optional accessory check, clearly seeing the relevant body area and
 seeing no prohibited accessory is evidence of compliance: return PASS. Return
@@ -252,11 +252,11 @@ or unset hair fails Hair Neatness; natural curls or waves that are shaped and
 under control are not messy. Say where the front of the hair sits.
 
 ### BELT
-A belt is a PASS only when you can see it. Name its colour and its buckle; if
-you cannot, no belt was seen and Belt is a FAIL. A shirt hem hanging over the
-front of the waistband hides the belt, so an untucked shirt fails Belt too
-unless a buckle is plainly visible. Never assume a belt because the rest of the
-outfit is formal.
+A belt is optional and never makes a check-in non-compliant. Belt is a PASS
+when you can see a belt: name its colour and its buckle. When you cannot see
+one - the waist is out of frame, an untucked shirt or a blazer covers it, or no
+belt is worn - Belt is N/A, never FAIL. Never assume a belt because the rest of
+the outfit is formal.
 `.trim();
 
 const WOMEN_ANALYSIS_RULES = `

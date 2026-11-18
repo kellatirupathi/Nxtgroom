@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { improvementTips, MEN_ACCESSORIES_CHECKS, MEN_ATTIRE_CHECKS, MEN_GROOMING_CHECKS } from "../src/checkpoints.js";
 import { buildSystemPrompt } from "../src/prompts.js";
-import { resolveMaleAttireVisibility } from "../src/services/visionEngine.js";
+import { resolveMaleAttireVisibility, resolveOptionalBelt } from "../src/services/visionEngine.js";
 
 const row = (code, status, observation = "Not visible.", reason = "Cannot assess.") => ({
   code,
@@ -25,14 +25,27 @@ const rowsWith = ({ fit = "PASS", tuck = "PASS", belt = "PASS", rings, chain } =
 
 const statusOf = (rows, section, code) => rows[section].find((item) => item.code === code).status;
 
-test("an unshown required shirt tuck and belt are failures, not N/A", () => {
+test("an unshown required shirt tuck fails, but the optional belt stays N/A", () => {
   const rows = rowsWith({ tuck: "N/A", belt: "N/A" });
   resolveMaleAttireVisibility(rows, { upper_body: "PARTIAL", lower_body: "PARTIAL" });
 
   assert.equal(statusOf(rows, "attire_check", "M_SHIRT_COLLAR_TUCK"), "FAIL");
-  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "FAIL");
+  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "N/A");
   assert.match(rows.attire_check.find((item) => item.code === "M_SHIRT_COLLAR_TUCK").reason, /does not show.*shirt tuck/i);
-  assert.match(rows.attire_check.find((item) => item.code === "M_BELT").reason, /does not show.*belt/i);
+});
+
+test("a belt is never left as a failure: a failed belt becomes N/A, a seen belt stays PASS", () => {
+  const failed = rowsWith({ belt: "FAIL" });
+  resolveOptionalBelt(failed);
+  const belt = failed.attire_check.find((item) => item.code === "M_BELT");
+  assert.equal(belt.status, "N/A");
+  assert.equal(belt.reason, "No belt is visible. A belt is optional, so this does not affect compliance.");
+  assert.equal(belt.evidence, undefined);
+
+  const seen = rowsWith({ belt: "PASS" });
+  resolveOptionalBelt(seen);
+  assert.equal(statusOf(seen, "attire_check", "M_BELT"), "PASS");
+  assert.equal(statusOf(failed, "attire_check", "M_SHIRT_COLLAR_TUCK"), "PASS", "only the belt is touched");
 });
 
 test("existing tuck and belt judgements are never overwritten", () => {
@@ -123,7 +136,7 @@ test("the written standards state the required visibility outcomes", () => {
 
   assert.match(fit, /tucked are not part of this checkpoint/i);
   assert.match(tuck, /FAIL only when[\s\S]*does not show the waist\/tuck area/i);
-  assert.match(belt, /does not show the waist\/belt area.*FAIL|FAIL when.*does not show the waist\/belt area/i);
+  assert.match(belt, /A belt is optional[\s\S]*N\/A in every other case[\s\S]*Never FAIL/);
   assert.match(rings, /absence of rings.*PASS, not N\/A/i);
   assert.match(chain, /absence of jewellery.*PASS, not N\/A/i);
   assert.match(facialHair, /when the face, jaw and chin are discernible, make the assessment/i);
@@ -150,15 +163,17 @@ test("advice for an unshown tuck or belt asks for a photograph, not a belt", () 
     "an instructor whose belt was never photographed must not be told to wear one"
   );
   assert.deepEqual(tips, [
-    "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+    "Send a full-length photograph that shows your waist, so the shirt tuck can be checked.",
   ]);
 });
 
-test("a genuinely missing belt still gets the ordinary advice", () => {
+test("a missing belt never earns advice, even when the model failed it", () => {
   const rows = rowsWith({ belt: "FAIL" });
   resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "VISIBLE" });
+  resolveOptionalBelt(rows);
 
-  assert.ok(improvementTips(rows).includes("Wear a formal belt with your trousers."));
+  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "N/A");
+  assert.ok(!improvementTips(rows).some((tip) => /belt/i.test(tip)));
 });
 
 test("an untucked hem is not counted as a shirt-fit violation", () => {
@@ -186,18 +201,20 @@ test("an excessively loose shirt is still a fit violation", () => {
 test("a model-returned failure on an unshown waist still gets photograph advice", () => {
   const rows = rowsWith({ tuck: "FAIL", belt: "FAIL" });
   resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "NOT_VISIBLE" });
+  resolveOptionalBelt(rows);
 
-  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "FAIL", "the standard is unchanged");
+  assert.equal(statusOf(rows, "attire_check", "M_BELT"), "N/A", "the optional belt never fails");
   assert.deepEqual(improvementTips(rows), [
-    "Send a full-length photograph that shows your waist, so the shirt tuck and belt can be checked.",
+    "Send a full-length photograph that shows your waist, so the shirt tuck can be checked.",
   ]);
 });
 
-test("a failure on a waist that was photographed keeps the ordinary advice", () => {
+test("a failure on a waist that was photographed keeps the ordinary tuck advice, and nothing about a belt", () => {
   const rows = rowsWith({ tuck: "FAIL", belt: "FAIL" });
   resolveMaleAttireVisibility(rows, { upper_body: "VISIBLE", lower_body: "VISIBLE" });
+  resolveOptionalBelt(rows);
 
   const tips = improvementTips(rows);
-  assert.ok(tips.includes("Wear a formal belt with your trousers."));
+  assert.ok(!tips.some((tip) => /belt/i.test(tip)));
   assert.ok(tips.includes("Button the collar properly and tuck the shirt in."));
 });

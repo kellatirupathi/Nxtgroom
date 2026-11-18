@@ -624,19 +624,7 @@ export function resolveMaleAttireVisibility(rows, visibleRegions) {
     tuck.evidence = "NOT_SHOWN";
   }
 
-  const belt = find("attire_check", "M_BELT");
-  if (belt?.status === "N/A" && lowerBodyInFrame) {
-    belt.status = "FAIL";
-    belt.reason = "The submitted photograph does not show the required belt clearly enough to verify compliance.";
-    belt.evidence = "NOT_SHOWN";
-  }
-
-  if (!lowerBodyInFrame) {
-    for (const code of ["M_SHIRT_COLLAR_TUCK", "M_BELT"]) {
-      const row = find("attire_check", code);
-      if (row?.status === "FAIL") row.evidence = "NOT_SHOWN";
-    }
-  }
+  if (!lowerBodyInFrame && tuck?.status === "FAIL") tuck.evidence = "NOT_SHOWN";
 
   const explicitlyAbsent = (row, itemPattern) => {
     const text = `${row?.observation || ""} ${row?.reason || ""}`.toLowerCase();
@@ -662,6 +650,17 @@ export function resolveMaleAttireVisibility(rows, visibleRegions) {
     chain.reason = "The neck and collar area are visible and no chain, necklace or pendant is present, which complies with the standard.";
   }
 
+  return rows;
+}
+
+export const OPTIONAL_BELT_REASON = "A belt is optional, so this does not affect compliance.";
+
+export function resolveOptionalBelt(rows) {
+  const belt = (rows?.attire_check || []).find((item) => item.code === "M_BELT");
+  if (!belt || belt.status === "PASS" || belt.status === "N/A") return rows;
+  belt.status = "N/A";
+  belt.reason = `No belt is visible. ${OPTIONAL_BELT_REASON}`;
+  delete belt.evidence;
   return rows;
 }
 
@@ -938,6 +937,7 @@ export async function evaluateImage(imageBuffer, mimeType, gender = null, limits
   if (blazer && detailCheck) {
     detailCheck.overridden = detailCheck.overridden.filter((code) => !blazer.passed.includes(code));
   }
+  if (normalizedGender === "MALE") resolveOptionalBelt(rows);
   const verdict = attireType === "UNKNOWN"
     ? { overall_status: "UNASSESSED", image_quality: "RETAKE_RECOMMENDED" }
     : deriveVerdict(rows, { imageQuality: parsed.image_quality });

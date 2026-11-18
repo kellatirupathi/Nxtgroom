@@ -18,7 +18,7 @@ const find = (rows, code) => SECTION_KEYS.flatMap((key) => rows[key] || []).find
 const codes = (rows) => SECTION_KEYS.flatMap((key) => (rows[key] || []).map((item) => item.code));
 const worn = (under = "FORMAL_SHIRT", observation = "A charcoal suit jacket over a white collared shirt.") => ({ worn: true, under, observation });
 
-const MEN_COVERED = ["M_SHIRT_TYPE", "M_SHIRT_FIT", "M_SHIRT_CONDITION", "M_SHIRT_COLLAR_TUCK", "M_BELT"];
+const MEN_COVERED = ["M_SHIRT_TYPE", "M_SHIRT_FIT", "M_SHIRT_CONDITION", "M_SHIRT_COLLAR_TUCK"];
 
 test("without a blazer nothing changes and no Blazer / Suit row is shown", () => {
   for (const answer of [undefined, null, { worn: false, under: "NONE", observation: "No blazer or suit jacket." }, { worn: "yes" }, "blazer"]) {
@@ -30,7 +30,7 @@ test("without a blazer nothing changes and no Blazer / Suit row is shown", () =>
   }
 });
 
-test("a man's blazer passes the shirt and belt rows, adds the row, and leaves every other row alone", () => {
+test("a man's blazer passes the shirt rows, adds the row, and leaves the optional belt and every other row alone", () => {
   const rows = rowsFor("MALE", "FORMAL", "FAIL");
   const result = applyBlazer(rows, { gender: "MALE", attireType: "FORMAL", answer: worn() });
   assert.deepEqual(result.passed, MEN_COVERED);
@@ -41,7 +41,7 @@ test("a man's blazer passes the shirt and belt rows, adds the row, and leaves ev
     assert.equal(row.observation, "Wearing a blazer or suit over the shirt.");
     assert.match(row.reason, /^Not assessed: /);
   }
-  assert.match(find(rows, "M_BELT").reason, /covers the waist and the belt/);
+  assert.equal(find(rows, "M_BELT").status, "FAIL", "the blazer leaves the optional belt to its own rule");
   for (const code of ["M_ATTIRE_TYPE", "M_TROUSERS_TYPE", "M_TROUSERS_FIT_CONDITION", "ID_PRESENT", "M_FACIAL_HAIR", "M_FOOTWEAR_TYPE"]) {
     assert.equal(find(rows, code).status, "FAIL", code);
   }
@@ -51,9 +51,9 @@ test("a man's blazer passes the shirt and belt rows, adds the row, and leaves ev
     checkpoint_name: "Blazer / Suit",
     status: "PASS",
     observation: "A charcoal suit jacket over a white collared shirt.",
-    reason: "Optional. A blazer or suit is worn, so the shirt and belt checkpoints are passed.",
+    reason: "Optional. A blazer or suit is worn, so the shirt checkpoints are passed.",
   });
-  assert.equal(result.remark, "Wearing a blazer or suit over the shirt; the shirt and belt checks are passed.");
+  assert.equal(result.remark, "Wearing a blazer or suit over the shirt; the shirt checks are passed.");
   assert.ok(!improvementTips(rows).some((tip) => /belt|tuck/i.test(tip)));
 });
 
@@ -174,9 +174,9 @@ test("a man in a suit is compliant though the model failed the belt and tuck it 
     const { evaluateImage } = await import("../src/services/visionEngine.js");
     const result = await evaluateImage(image(), "image/jpeg", "MALE");
     assert.equal(result.overall_status, "COMPLIANT");
-    assert.equal(result.attire_check.find((row) => row.code === "M_BELT").status, "PASS");
+    assert.equal(result.attire_check.find((row) => row.code === "M_BELT").status, "N/A", "a belt under a blazer is not visible, so N/A");
     assert.equal(result.attire_check.at(-1).code, "M_BLAZER");
-    assert.match(result.ai_summary, /^Wearing a blazer or suit over the shirt; the shirt and belt checks are passed\. Belt and tuck/);
+    assert.match(result.ai_summary, /^Wearing a blazer or suit over the shirt; the shirt checks are passed. Belt and tuck/);
     const schema = stub.bodies[0].generationConfig.responseJsonSchema;
     assert.ok(schema.required.includes("blazer"));
     assert.deepEqual(schema.properties.blazer.required, ["worn", "under", "observation"]);
@@ -185,17 +185,18 @@ test("a man in a suit is compliant though the model failed the belt and tuck it 
   }
 });
 
-test("a man without a blazer is judged as before, with no Blazer / Suit row", async () => {
+test("a man without a blazer is judged as before, the optional belt is N/A, and there is no Blazer / Suit row", async () => {
   const sections = maleCombinedSet();
   const stub = stubGemini([report(sections, {
-    failing: ["M_BELT"],
+    failing: ["M_BELT", "M_SHIRT_COLLAR_TUCK"],
     extra: { attire_type: "FORMAL", blazer: { worn: false, under: "NONE", observation: "No blazer or suit jacket." } },
   })]);
   try {
     const { evaluateImage } = await import("../src/services/visionEngine.js");
     const result = await evaluateImage(image(), "image/jpeg", "MALE");
-    assert.equal(result.overall_status, "NON_COMPLIANT");
-    assert.equal(result.attire_check.find((row) => row.code === "M_BELT").status, "FAIL");
+    assert.equal(result.overall_status, "NON_COMPLIANT", "the untucked shirt still fails");
+    assert.equal(result.attire_check.find((row) => row.code === "M_BELT").status, "N/A");
+    assert.equal(result.attire_check.find((row) => row.code === "M_SHIRT_COLLAR_TUCK").status, "FAIL");
     assert.ok(!result.attire_check.some((row) => row.code === "M_BLAZER"));
     assert.equal(result.ai_summary, "Belt and tuck not visible.");
   } finally {

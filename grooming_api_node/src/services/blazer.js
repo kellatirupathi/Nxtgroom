@@ -24,7 +24,7 @@ Report in blazer whether a blazer or a suit jacket is worn over the top - any co
 - worn: true only when a blazer or suit jacket is clearly being worn; otherwise false.
 - under: what shows under it at the chest and collar. FORMAL_SHIRT for a collared shirt or a formal blouse; T_SHIRT_OR_POLO when a t-shirt, a polo or another casual collarless top is clearly visible; OTHER for a kurti, a saree blouse or anything else; NOT_VISIBLE when it cannot be seen; NONE when no blazer is worn.
 - observation: one sentence naming the jacket and what is under it, or "No blazer or suit jacket." when none is worn.
-A blazer is optional and never a failure. When one is worn it covers the shirt and the waist, and the shirt and belt checkpoints are settled from this answer: still return them, and judge every other checkpoint as usual.`;
+A blazer is optional and never a failure. When one is worn it covers the shirt and the waist, and the shirt checkpoints are settled from this answer: still return them, and judge every other checkpoint as usual.`;
 
 const SHIRT_OBSERVATION = "Wearing a blazer or suit over the shirt.";
 const TOP_OBSERVATION = "Wearing a blazer or suit over the top.";
@@ -34,7 +34,6 @@ const MEN_COVERED = Object.freeze({
   M_SHIRT_FIT: "Not assessed: a blazer or suit is worn over the shirt.",
   M_SHIRT_CONDITION: "Not assessed: a blazer or suit is worn over the shirt.",
   M_SHIRT_COLLAR_TUCK: "Not assessed: the blazer covers the shirt and the waist.",
-  M_BELT: "Not assessed: the blazer covers the waist and the belt.",
 });
 
 const WOMEN_COVERED = Object.freeze({
@@ -110,14 +109,14 @@ export function applyBlazer(rows, { gender, attireType, answer }) {
     status: "PASS",
     observation: seen.slice(0, 1000),
     reason: formal
-      ? `Optional. A blazer or suit is worn, so the ${female ? "top" : "shirt and belt"} checkpoints are passed.`
+      ? `Optional. A blazer or suit is worn, so the ${female ? "top" : "shirt"} checkpoints are passed.`
       : "Optional. A blazer or suit is worn over the outfit.",
   });
 
   const remark = casualUnder
     ? "Wearing a blazer over a t-shirt or polo."
     : formal
-      ? `Wearing a blazer or suit over the ${female ? "top" : "shirt"}; the ${female ? "top" : "shirt and belt"} checks are passed.`
+      ? `Wearing a blazer or suit over the ${female ? "top" : "shirt"}; the ${female ? "top" : "shirt"} checks are passed.`
       : "Wearing a blazer or suit.";
   return { worn: true, under: blazer.under, passed, failed, remark };
 }
