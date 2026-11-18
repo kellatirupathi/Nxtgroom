@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import PasswordInput from './PasswordInput';
-import { Plus, Users as UsersIcon, ShieldCheck } from 'lucide-react';
+import { ChevronLeft, Plus, Search, Users as UsersIcon, ShieldCheck } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
 import UserPermissionsModal from './UserPermissionsModal';
@@ -8,7 +8,7 @@ import ConfirmDialog from './ConfirmDialog';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
 import { useLocation } from '../lib/useLocation';
-import { closeChildPath, dialogPath, dialogRouteFromPath, goToPath, openChildPath, type DialogRoute } from '../routes';
+import { closeChildPath, dialogPath, dialogRouteFromPath, goToPath, openChildPath, pathForTab, TABS, type DialogRoute } from '../routes';
 import type { AdminUser, Boa, College, Role } from '../types';
 
 interface CreatedUser {
@@ -101,6 +101,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [permissionsFor, setPermissionsFor] = useState<UserRow | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [userTab, setUserTab] = useState<'admins' | 'boas'>('boas');
+  const [mobileSearch, setMobileSearch] = useState('');
 
   const fetchAll = async () => {
     if (boas.length === 0 && admins.length === 0) setLoading(true);
@@ -445,9 +447,73 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const inputClass =
     'w-full rounded-md border border-slate-300 p-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20';
 
+  const adminRows = rows.filter((row) => row.kind === 'admin');
+  const boaRows = rows.filter((row) => row.kind === 'boa');
+  const mobileTerm = mobileSearch.trim().toLowerCase();
+  const mobileRows = (isSuper && userTab === 'admins' ? adminRows : boaRows).filter((row) => (
+    !mobileTerm || [row.name, row.email, row.collegeName, row.employeeId]
+      .some((value) => String(value || '').toLowerCase().includes(mobileTerm))
+  ));
+
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="users-title">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <div className="-mx-1 mb-3 flex items-center gap-1.5 md:hidden">
+        <button
+          type="button"
+          onClick={() => goToPath(pathForTab(TABS.MORE))}
+          aria-label="Back to More"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-900 hover:bg-slate-100"
+        >
+          <ChevronLeft size={22} aria-hidden="true" />
+        </button>
+        <p className="flex-1 text-xl font-extrabold text-slate-900">Users</p>
+        <button
+          type="button"
+          onClick={openCreate}
+          aria-label="Add user"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
+        >
+          <Plus size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="mb-3 md:hidden">
+        {isSuper && (
+          <div role="tablist" aria-label="User type" className="mb-3 flex rounded-[14px] bg-indigo-50 p-1">
+            {([
+              { key: 'admins', label: `Admins · ${adminRows.length}` },
+              { key: 'boas', label: `Campus BOAs · ${boaRows.length}` },
+            ] as const).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                role="tab"
+                aria-selected={userTab === option.key}
+                onClick={() => setUserTab(option.key)}
+                className={`h-[42px] flex-1 rounded-[10px] text-sm transition-colors ${
+                  userTab === option.key
+                    ? 'bg-white font-bold text-indigo-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)]'
+                    : 'font-semibold text-indigo-700'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <label className="relative block">
+          <span className="sr-only">Search users</span>
+          <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+          <input
+            type="search"
+            value={mobileSearch}
+            onChange={(event) => setMobileSearch(event.target.value)}
+            placeholder="Search name, email or institute"
+            className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-3.5 text-[15px] outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+          />
+        </label>
+      </div>
+
+      <div className="mb-5 hidden flex-wrap items-center justify-between gap-3 md:flex">
         <div className="min-w-0">
           <h2 id="users-title" className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <UsersIcon size={22} className="text-indigo-600" aria-hidden="true" />
@@ -474,29 +540,35 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
       )}
       <div className="md:hidden">
         {loading ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">Loading users…</p>
-        ) : rows.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">No users found.</p>
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-500">Loading users…</p>
+        ) : mobileRows.length === 0 ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-500">No users found.</p>
         ) : (
-          <ul className="flex flex-col gap-3 pb-2">
-            {rows.map((row) => (
-              <li key={`${row.kind}-${row.id}`} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="truncate text-[15px] font-bold text-slate-800">{row.name}</h3>
-                    <div className="mt-1.5"><RoleTag role={row.role} /></div>
-                  </div>
-                  <RowActionsMenu label={row.name} actions={actionsFor(row)} />
-                </div>
-                {row.email && <p className="mt-2.5 truncate text-sm text-slate-600">{row.email}</p>}
-                {(row.collegeName || row.employeeId) && (
-                  <p className="mt-1 truncate text-xs font-medium text-slate-500">
-                    {[row.collegeName, row.employeeId].filter((value) => value && value !== '--').join(' · ')}
-                  </p>
-                )}
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="overflow-hidden rounded-[18px] border border-slate-200 bg-white" aria-label="Users">
+              {mobileRows.map((row, index) => {
+                const parts = String(row.name || row.email || '?').trim().split(/\s+/);
+                const initials = `${parts[0]?.[0] || '?'}${parts.length > 1 ? parts[parts.length - 1][0] : ''}`.toUpperCase();
+                const detail = row.kind === 'boa'
+                  ? [row.collegeName, row.employeeId].filter((value) => value && value !== '--').join(' · ')
+                  : row.email;
+                return (
+                  <li key={`${row.kind}-${row.id}`} className={`flex items-center gap-3 py-3 pl-3.5 pr-2 ${index === 0 ? '' : 'border-t border-slate-100'}`}>
+                    <span aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-600">{initials}</span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-[15px] font-bold text-slate-900">{row.name}</h3>
+                      <p className="mt-0.5 truncate text-[13px] text-slate-500">{detail || row.email || '--'}</p>
+                      {row.kind === 'admin' && <div className="mt-1.5"><RoleTag role={row.role} /></div>}
+                    </div>
+                    <RowActionsMenu label={row.name} actions={actionsFor(row)} />
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mx-1 mt-3 text-[13px] leading-relaxed text-slate-500">
+              Use the ⋮ menu to edit a person, reset their password or change what they can delete.
+            </p>
+          </>
         )}
       </div>
 

@@ -46,6 +46,7 @@ const InstructorManagement = lazy(() => import('./components/InstructorManagemen
 const AttendanceScreen = lazy(() => import('./components/AttendanceScreen'));
 const EscalationsPage = lazy(() => import('./components/EscalationsPage'));
 const InstructorRecordsPage = lazy(() => import('./components/InstructorRecordsPage'));
+const MorePage = lazy(() => import('./components/MorePage'));
 
 interface SessionState {
   token: string | null;
@@ -387,18 +388,27 @@ export default function App() {
           {activeTab === 'instructor-records' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><InstructorRecordsPage /></div>
           )}
+
+          {activeTab === 'more' && (
+            <div className="w-full h-full">
+              <MorePage
+                role={session.role}
+                email={session.email}
+                navigate={navigate}
+                onOpenProfile={() => setAccountModal('profile')}
+                onOpenChangePassword={() => setAccountModal('password')}
+                onLogout={handleLogout}
+              />
+            </div>
+          )}
           </Suspense>
         </div>
       </main>
 
       <BottomNav
-        activeTab={navTab}
+        activeTab={activeTab}
         navigate={navigate}
         role={session.role}
-        email={session.email}
-        onLogout={handleLogout}
-        onOpenProfile={() => setAccountModal('profile')}
-        onOpenChangePassword={() => setAccountModal('password')}
       />
       </div>
 

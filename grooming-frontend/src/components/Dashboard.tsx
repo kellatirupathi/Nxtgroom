@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowRight,
+  Bell,
+  Camera,
+  ChevronRight,
   CircleAlert,
   CircleCheck,
   CircleX,
@@ -461,6 +464,142 @@ function ComplianceDelta({ data }: { data: DashboardData }) {
   );
 }
 
+function greeting(hour: number): string {
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+function localHour(timeZone: string): number {
+  try {
+    return Number(new Intl.DateTimeFormat('en-GB', { timeZone, hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
+  } catch {
+    return new Date().getHours();
+  }
+}
+
+const MOBILE_TILE = 'block w-full rounded-2xl border bg-white p-3.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500';
+
+function MobileHome({
+  data,
+  onNavigate,
+  onSelect,
+}: {
+  data: DashboardData;
+  onNavigate: (tab: string) => void;
+  onSelect: (status: DashboardStatusKey) => void;
+}) {
+  const { summary } = data;
+  const change = complianceChange(summary.compliance_percent, summary.compliance_same_day_last_week);
+  const total = data.status_breakdown.reduce((sum, row) => sum + row.count, 0);
+  const rows = data.status_breakdown.filter((row) => row.count > 0);
+  const escalated = data.escalations.length;
+  return (
+    <div className="flex flex-col gap-[18px] lg:hidden">
+      <header className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-slate-500">{tooltipDayLabel(data.today)}</p>
+          <h1 className="mt-0.5 text-[22px] font-extrabold tracking-tight text-slate-900">{greeting(localHour(data.time_zone))}</h1>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('escalations')}
+          aria-label={escalated ? `Escalations, ${escalated} need attention` : 'Escalations'}
+          className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+        >
+          <Bell size={20} aria-hidden="true" />
+          {escalated > 0 && (
+            <span className="absolute right-1.5 top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-rose-600 px-1 text-[11px] font-bold text-white tabular-nums">
+              {escalated}
+            </span>
+          )}
+        </button>
+      </header>
+
+      <button
+        type="button"
+        onClick={() => onNavigate('overview')}
+        className="flex w-full items-center gap-3.5 rounded-[18px] bg-indigo-600 p-4 text-left text-white shadow-[0_10px_24px_-10px_rgba(79,70,229,0.6)] transition-colors hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+      >
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[14px] bg-white/15">
+          <Camera size={24} aria-hidden="true" />
+        </span>
+        <span className="flex-1">
+          <span className="block text-[17px] font-bold">Start attendance</span>
+          <span className="mt-0.5 block text-[13px] text-indigo-100">Face check-in and check-out</span>
+        </span>
+        <ChevronRight size={20} aria-hidden="true" />
+      </button>
+
+      <section aria-labelledby="mobile-today-title">
+        <h2 id="mobile-today-title" className="mb-2.5 text-[15px] font-bold text-slate-900">Today</h2>
+        <div className="grid grid-cols-2 gap-2.5">
+          <button type="button" onClick={() => onNavigate('daily-records')} className={`${MOBILE_TILE} border-slate-200`}>
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500"><UserCheck size={15} className="text-indigo-600" aria-hidden="true" />Present</span>
+            <span className="mt-1.5 block text-[26px] font-extrabold tracking-tight text-slate-900 tabular-nums">
+              {formatCount(summary.present)}<span className="text-sm font-semibold text-slate-400"> / {formatCount(summary.total_instructors)}</span>
+            </span>
+            <span className="mt-2 block h-1.5 rounded-full bg-indigo-50" aria-hidden="true">
+              <span className="block h-1.5 rounded-full bg-indigo-600" style={{ width: `${Math.min(100, summary.present_percent ?? 0)}%` }} />
+            </span>
+          </button>
+          <button type="button" onClick={() => onSelect('compliant')} className={`${MOBILE_TILE} border-slate-200`}>
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500"><Shirt size={15} className="text-cyan-600" aria-hidden="true" />Compliance</span>
+            <span className="mt-1.5 block text-[26px] font-extrabold tracking-tight text-slate-900 tabular-nums">{formatPercent(summary.compliance_percent)}</span>
+            <span className={`mt-1 block text-xs font-semibold tabular-nums ${
+              !change ? 'text-slate-500' : change.direction === 'up' ? 'text-emerald-700' : change.direction === 'down' ? 'text-rose-700' : 'text-slate-500'
+            }`}>
+              {change ? `${change.points > 0 ? '▲ +' : change.points < 0 ? '▼ ' : ''}${change.points.toFixed(1)} pts vs last ${weekdayLabel(data.same_day_last_week).slice(0, 3)}` : `${formatCount(summary.analysed)} analysed`}
+            </span>
+          </button>
+          <button type="button" onClick={() => onSelect('non_compliant')} className={`${MOBILE_TILE} border-rose-200 bg-rose-50`}>
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-rose-700"><CircleX size={15} aria-hidden="true" />Non-compliant</span>
+            <span className="mt-1.5 block text-[26px] font-extrabold tracking-tight text-rose-800 tabular-nums">{formatCount(summary.non_compliant)}</span>
+            <span className="mt-1 block text-xs font-semibold text-rose-700">Review →</span>
+          </button>
+          <button type="button" onClick={() => onNavigate('daily-records')} className={`${MOBILE_TILE} border-slate-200`}>
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-500"><LogOut size={15} className="text-slate-500" aria-hidden="true" />Checked out</span>
+            <span className="mt-1.5 block text-[26px] font-extrabold tracking-tight text-slate-900 tabular-nums">{formatCount(summary.checked_out)}</span>
+            <span className="mt-1 block text-xs text-slate-500 tabular-nums">{formatCount(summary.on_duty)} still on duty</span>
+          </button>
+        </div>
+      </section>
+
+      <section aria-labelledby="mobile-results-title" className="rounded-2xl border border-slate-200 bg-white px-4 pb-1 pt-3.5">
+        <h2 id="mobile-results-title" className="mb-3 text-[15px] font-bold text-slate-900">Check-in results</h2>
+        {total > 0 ? (
+          <div className="mb-1.5 flex h-2.5 gap-[3px]" role="img" aria-label="Check-in results today">
+            {rows.map((row) => (
+              <span key={row.key} className="rounded-full" style={{ width: `${(row.count / total) * 100}%`, background: STATUS_META[row.key].color }} />
+            ))}
+          </div>
+        ) : (
+          <p className="pb-3 text-sm text-slate-500">No check-ins recorded yet today.</p>
+        )}
+        <ul>
+          {rows.map((row) => (
+            <li key={row.key} className="border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => onSelect(row.key)}
+                className="flex min-h-11 w-full items-center justify-between gap-2 py-3 text-left text-sm text-slate-900 focus:outline-none focus-visible:bg-slate-50"
+              >
+                <span className="flex items-center gap-2">
+                  <span aria-hidden="true" className="h-2.5 w-2.5 rounded-[3px]" style={{ background: STATUS_META[row.key].color }} />
+                  {STATUS_META[row.key].label}
+                </span>
+                <span className="font-bold tabular-nums">
+                  {formatCount(row.count)} <span className="font-medium text-slate-500">· {formatPercent((row.count / total) * 100)}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 export default function Dashboard({ onNavigate }: DashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
@@ -525,7 +664,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   }, [reloadVersion]);
 
   const header = (
-    <h2 id="dashboard-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
+    <h2 id="dashboard-title" className="hidden items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl lg:flex">
       <LayoutDashboard size={22} className="text-indigo-600" aria-hidden="true" />
       Dashboard
     </h2>
@@ -568,7 +707,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <MobileHome data={data} onNavigate={onNavigate} onSelect={showInRecords} />
+      <div className="hidden grid-cols-4 gap-3 lg:grid">
         <KpiTile label="Present today" icon={UserCheck} iconClass="text-indigo-500">
           <div className="mt-2 flex items-baseline gap-1 tabular-nums">
             <span className="text-2xl font-extrabold text-slate-800">{formatCount(summary.present)}</span>
@@ -608,7 +748,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         <TrendChart trend={data.trend} />
-        <StatusCard data={data} onSelect={showInRecords} />
+        <div className="hidden lg:block"><StatusCard data={data} onSelect={showInRecords} /></div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">

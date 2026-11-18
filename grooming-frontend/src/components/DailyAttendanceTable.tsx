@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download, X } from 'lucide-react';
+import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download, X, ChevronRight } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import AttendanceFilterDrawer from './AttendanceFilterDrawer';
@@ -83,6 +83,89 @@ function EscalationTag({ escalation, today }: { escalation?: AttendanceEscalatio
       <TriangleAlert size={12} className="shrink-0" aria-hidden="true" />
       <span className="truncate">{label.text}</span>
     </span>
+  );
+}
+
+const MOBILE_DATE_CHIPS: ReadonlyArray<{ value: DatePreset; label: string }> = [
+  { value: 'today', label: 'Today' },
+  { value: 'last_week', label: 'Last 7 days' },
+  { value: 'last_month', label: 'Last 30 days' },
+];
+
+const MOBILE_STATUS_CHIPS: ReadonlyArray<{ value: AttendanceStatus | ''; label: string; active: string }> = [
+  { value: '', label: 'All', active: 'border-slate-900 bg-slate-900 text-white' },
+  { value: 'non_compliant', label: 'Non-compliant', active: 'border-rose-300 bg-rose-50 text-rose-700' },
+  { value: 'compliant', label: 'Compliant', active: 'border-emerald-300 bg-emerald-50 text-emerald-700' },
+  { value: 'pending', label: 'Pending', active: 'border-amber-300 bg-amber-50 text-amber-700' },
+  { value: 'unassessed', label: 'Not assessed', active: 'border-amber-300 bg-amber-50 text-amber-700' },
+];
+
+const AVATAR_TONES = [
+  'bg-indigo-50 text-indigo-700',
+  'bg-fuchsia-50 text-fuchsia-700',
+  'bg-cyan-50 text-cyan-700',
+  'bg-amber-50 text-amber-700',
+  'bg-emerald-50 text-emerald-700',
+];
+
+function initialsOf(name?: string | null): string {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return `${parts[0][0]}${parts.length > 1 ? parts[parts.length - 1][0] : ''}`.toUpperCase();
+}
+
+function avatarTone(name?: string | null): string {
+  const text = String(name || '');
+  let sum = 0;
+  for (let index = 0; index < text.length; index += 1) sum += text.charCodeAt(index);
+  return AVATAR_TONES[sum % AVATAR_TONES.length];
+}
+
+function MobileRecordItem({
+  record,
+  today,
+  onOpen,
+}: {
+  record: AttendanceRecord;
+  today: string;
+  onOpen: (record: AttendanceRecord) => void;
+}) {
+  const openable = canOpenRecord(record.status);
+  const escalated = Boolean(escalationLabel(record.escalation, today));
+  const checkOut = record.check_out_time ? formatAttendanceTime(record.check_out_time) : '—';
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onOpen(record)}
+        disabled={!openable}
+        aria-label={`${record.instructor_name || 'Instructor'}, ${record.college_name || ''}. ${openable ? 'Open the report' : 'Analysis in progress'}`}
+        className="block w-full rounded-2xl border border-slate-200 bg-white p-3.5 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-default disabled:hover:bg-white"
+      >
+        <span className="flex items-center gap-3">
+          <span aria-hidden="true" className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarTone(record.instructor_name)}`}>
+            {initialsOf(record.instructor_name)}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-bold text-slate-900">{record.instructor_name || 'Unknown'}</span>
+            <span className="mt-0.5 block truncate text-[13px] text-slate-500">
+              {[record.college_name, record.instructor_role].filter(Boolean).join(' · ') || '--'}
+            </span>
+          </span>
+          <StatusBadge status={record.status} />
+        </span>
+        <span className="mt-2.5 flex items-center gap-3 border-t border-slate-100 pt-2.5 text-xs text-slate-500">
+          <span>In <b className="text-slate-900">{formatAttendanceTime(record.check_in_time)}</b></span>
+          <span>Out <b className="text-slate-900">{checkOut}</b></span>
+          <span className="ml-auto flex min-w-0 items-center gap-1.5">
+            {escalated
+              ? <EscalationTag escalation={record.escalation} today={today} />
+              : <AttireTag attire={record.attire_type} />}
+            {openable && <ChevronRight size={16} className="shrink-0 text-slate-400" aria-hidden="true" />}
+          </span>
+        </span>
+      </button>
+    </li>
   );
 }
 
@@ -259,6 +342,22 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     }),
     [records, search, roleFilter, collegeFilter, statusFilter, escalationFilter],
   );
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const scoped = filterAttendanceRecords(records, {
+      search,
+      role: roleFilter,
+      college: collegeFilter,
+      escalation: escalationFilter,
+    });
+    for (const record of scoped) {
+      const key = normalizeAttendanceStatus(record.status);
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    counts[''] = scoped.length;
+    return counts;
+  }, [records, search, roleFilter, collegeFilter, escalationFilter]);
+
   const visibleIds = useMemo(
     () => filteredRecords.map((record) => String(record._id)),
     [filteredRecords],
@@ -361,9 +460,10 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="daily-records-title" aria-busy={loading}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 md:mb-5">
-        <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
-          <History size={22} className="text-indigo-600" aria-hidden="true" />
-          Daily Attendance Records
+        <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-[22px] font-extrabold text-slate-900 lg:text-xl lg:font-bold lg:text-slate-800">
+          <History size={22} className="hidden text-indigo-600 lg:block" aria-hidden="true" />
+          <span className="lg:hidden">Records</span>
+          <span className="hidden lg:inline">Daily Attendance Records</span>
         </h2>
 
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-1">
@@ -467,7 +567,68 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
-      <div className="flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col max-lg:min-h-[20rem]">
+      <div className="lg:hidden">
+        <div className="-mx-4 mb-2 flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none]" role="group" aria-label="Date range">
+          {MOBILE_DATE_CHIPS.map((chip) => {
+            const active = preset === chip.value;
+            return (
+              <button
+                key={chip.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => { if (!active) handleRangeChange(chip.value, rangeForPreset(chip.value, today)); }}
+                className={`flex h-9 shrink-0 items-center rounded-full border px-3.5 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setFiltersOpen(true)}
+            aria-pressed={!MOBILE_DATE_CHIPS.some((chip) => chip.value === preset)}
+            className={`flex h-9 shrink-0 items-center rounded-full border px-3.5 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+              MOBILE_DATE_CHIPS.some((chip) => chip.value === preset) ? 'border-slate-200 bg-white text-slate-700' : 'border-slate-900 bg-slate-900 text-white'
+            }`}
+          >
+            Pick dates
+          </button>
+        </div>
+        <div className="-mx-4 mb-3 flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none]" role="group" aria-label="Result">
+          {MOBILE_STATUS_CHIPS.map((chip) => {
+            const active = statusFilter === chip.value;
+            return (
+              <button
+                key={chip.value || 'all'}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setStatusFilter(chip.value)}
+                className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  active ? chip.active : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {chip.label}
+                <span className={active ? '' : 'text-slate-500'}>{statusCounts[chip.value] || 0}</span>
+              </button>
+            );
+          })}
+        </div>
+        {loading && records.length === 0 ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-500" role="status">Loading records…</p>
+        ) : filteredRecords.length === 0 ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-500">No records match these filters.</p>
+        ) : (
+          <ul className="flex flex-col gap-2.5 pb-2" aria-label="Attendance records">
+            {filteredRecords.map((record) => (
+              <MobileRecordItem key={String(record._id)} record={record} today={today} onOpen={openRecord} />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="hidden lg:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">
         <div className="overflow-x-auto flex-1 max-lg:overscroll-x-contain">
           <table className={`text-left border-collapse table-fixed max-w-none ${canBulkDelete ? RECORD_TABLE_WIDTH.withSelect : RECORD_TABLE_WIDTH.withoutSelect}`}>
             <thead className="sticky top-0 bg-slate-50 z-10 shadow-sm">

@@ -118,11 +118,11 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
 
   return (
     <div className={`relative w-full h-full overflow-hidden bg-black ${fullScreen ? '' : 'rounded-md'}`}>
-      <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+3.75rem)] z-10 flex flex-wrap items-center justify-between gap-2 text-white">
-        <h2 className="rounded-md bg-black/50 px-2 py-1 text-sm font-bold shadow-sm">Attendance</h2>
-        <p className="flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs font-medium shadow-sm">
+      <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+4rem)] z-10 flex items-center justify-center text-white">
+        <h2 className="sr-only">Attendance</h2>
+        <p className="flex items-center gap-1.5 rounded-full bg-slate-900/55 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm">
           <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
-          {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
+          {fix ? `Live location · ${describeAccuracy(fix)}` : 'Locating…'}
         </p>
       </div>
 

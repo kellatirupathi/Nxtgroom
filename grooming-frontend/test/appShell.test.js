@@ -66,11 +66,27 @@ test('the bar needs no stacking context now that it is in the flow', () => {
   assert.doesNotMatch(navBar, /\bz-\d/);
 });
 
-test('the bar height is stated once, where the sheet can read it', () => {
+test('the bar height is stated once, and floating buttons rest on it', () => {
   assert.match(css, /--bottom-nav-height:\s*clamp\([\d.]+rem,[^;]+,\s*[\d.]+rem\)/);
   assert.match(nav, /min-h-\[var\(--bottom-nav-height\)\]/);
-  const resting = nav.match(/bottom-\[calc\(var\(--bottom-nav-height\)\+var\(--inset-bottom\)\+1px\)\]/g) || [];
-  assert.equal(resting.length, 2, 'the sheet and its backdrop both rest on the bar');
+  assert.match(
+    read('src/components/InstructorManagement.tsx'),
+    /bottom-\[calc\(var\(--bottom-nav-height\)\+var\(--inset-bottom\)\+1\.25rem\)\]/,
+    'the Add instructor button sits above the bar',
+  );
+});
+
+test('the bar is Home, Records, a raised Attendance camera, Instructors and More', () => {
+  const left = nav.slice(nav.indexOf('const LEFT_ITEMS'), nav.indexOf('const RIGHT_ITEMS'));
+  const right = nav.slice(nav.indexOf('const RIGHT_ITEMS'), nav.indexOf('const RECORDS_TABS'));
+  assert.ok(left.indexOf("label: 'Home'") > 0 && left.indexOf("label: 'Home'") < left.indexOf("label: 'Records'"), 'Home then Records on the left');
+  assert.ok(right.indexOf("label: 'Instructors'") > 0 && right.indexOf("label: 'Instructors'") < right.indexOf("label: 'More'"), 'Instructors then More on the right');
+  const order = ['visible(LEFT_ITEMS).map(renderItem)', "navigate('overview')", 'visible(RIGHT_ITEMS).map(renderItem)']
+    .map((piece) => nav.lastIndexOf(piece));
+  assert.ok(order.every((index) => index > 0), 'a bar group is missing');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'the camera sits between the left and right items');
+  assert.ok(!nav.includes('role="menu"'), 'More is a page now, not a sheet over the bar');
+  assert.ok(shell.includes("activeTab === 'more'"), 'the shell renders the More page');
 });
 
 test('the bar icons and labels scale with the screen', () => {

@@ -137,8 +137,8 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
       type="button"
       onClick={() => setMode(value)}
       aria-pressed={mode === value}
-      className={`flex min-h-11 items-center gap-1.5 rounded-md px-3 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:text-sm ${
-        mode === value ? 'bg-indigo-600 text-white' : 'text-white hover:bg-white/15'
+      className={`flex h-10 items-center gap-1.5 rounded-full px-4 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
+        mode === value ? 'bg-white font-bold text-indigo-900' : 'font-semibold text-white hover:bg-white/15'
       }`}
     >
       <Icon size={16} className="hidden sm:block" aria-hidden="true" />
@@ -153,8 +153,8 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
         : 'relative w-full h-full overflow-hidden rounded-md bg-black'}
     >
       <div className="pointer-events-none absolute inset-x-0 top-[max(0.75rem,var(--inset-top))] z-30 flex items-start justify-between gap-2 px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))]">
-        <div className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-lg border border-white/25 bg-black/50 p-1 shadow-lg backdrop-blur-sm" role="group" aria-label="Attendance capture mode">
-          {tab('single', 'Single', User)}
+        <div className="pointer-events-auto flex shrink-0 items-center gap-0.5 rounded-full bg-slate-900/55 p-1 shadow-lg backdrop-blur-sm" role="group" aria-label="Attendance capture mode">
+          {tab('single', 'One person', User)}
           {tab('group', 'Group', Users)}
         </div>
         <div className="pointer-events-auto flex shrink-0 items-center gap-1.5">
@@ -164,7 +164,7 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
               onClick={startFullScreen}
               aria-label="Full screen"
               title="Full screen"
-              className="flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white shadow-lg backdrop-blur-sm hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900/55 text-white shadow-lg backdrop-blur-sm hover:bg-slate-900/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
               <Maximize size={20} aria-hidden="true" />
             </button>
@@ -174,7 +174,7 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
             onClick={flipCamera}
             aria-label={facing === 'user' ? 'Switch to back camera' : 'Switch to front camera'}
             title="Flip camera"
-            className="flex h-11 w-11 items-center justify-center rounded-full border border-white/30 bg-black/50 text-white shadow-lg backdrop-blur-sm hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900/55 text-white shadow-lg backdrop-blur-sm hover:bg-slate-900/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
           >
             <SwitchCamera size={22} aria-hidden="true" />
           </button>
@@ -183,7 +183,7 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
             onClick={() => fullScreen.active ? setConfirmingExit(true) : onExit()}
             aria-label={fullScreen.active ? 'Exit full screen' : 'Close attendance camera'}
             title={fullScreen.active ? 'Exit full screen' : 'Close attendance camera'}
-            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-white/50 bg-black/50 text-white shadow-lg backdrop-blur-sm hover:bg-black/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-900/55 text-white shadow-lg backdrop-blur-sm hover:bg-slate-900/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
           >
             <X size={24} strokeWidth={2.4} aria-hidden="true" />
           </button>

@@ -4,12 +4,17 @@ import { readFileSync } from 'node:fs';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('Daily Records: one table on every screen, and no cards', () => {
+test('Daily Records: cards with date and result chips below lg, the full table from lg', () => {
   const table = read('src/components/DailyAttendanceTable.tsx');
-  assert.match(table, /<div className="flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col max-lg:min-h-\[20rem\]">/);
-  assert.ok(!table.includes('function RecordCard'), 'the card layout is gone');
-  assert.ok(!table.includes('<div className="lg:hidden">'));
-  assert.ok(!table.includes('hidden lg:flex'), 'the table is not hidden below lg');
+  assert.match(table, /<div className="hidden lg:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">/);
+  assert.match(table, /<div className="lg:hidden">/);
+  assert.ok(table.includes('function MobileRecordItem'), 'phones get one card per record');
+  assert.match(table, /<MobileRecordItem key=\{String\(record\._id\)\} record=\{record\} today=\{today\} onOpen=\{openRecord\} \/>/);
+  const card = table.slice(table.indexOf('function MobileRecordItem'), table.indexOf('const RECORD_COLUMNS = ['));
+  for (const piece of ['<StatusBadge status={record.status} />', '<EscalationTag escalation={record.escalation} today={today} />', '<AttireTag attire={record.attire_type} />', 'formatAttendanceTime(record.check_in_time)']) {
+    assert.ok(card.includes(piece), `the card is missing ${piece}`);
+  }
+  assert.ok(table.includes('aria-label="Date range"') && table.includes('aria-label="Result"'), 'quick date and result chips');
   assert.match(table, /overflow-x-auto flex-1 max-lg:overscroll-x-contain/);
 });
 
@@ -91,8 +96,11 @@ test('panels pinned to the screen edges clear the system bars in the app', () =>
   assert.match(read('src/components/Toast.tsx'), /pt-\[max\(0\.75rem,var\(--inset-top\)\)\]/);
 });
 
-test('Settings sections are swipeable chips on a phone and a left-side menu from md', () => {
+test('Settings is a grouped list on a phone and a left-side menu from md', () => {
   const settings = read('src/components/SettingsPage.tsx');
+  assert.match(settings, /const atIndex = \(pathname\.replace\(\/\\\/\+\$\/, ''\) \|\| '\/'\) === '\/settings';/);
+  assert.match(settings, /\{atIndex && \(\s*<div className="flex flex-col gap-\[18px\] pb-4 md:hidden">/);
+  for (const group of ["title: 'Emails'", "title: 'Attendance'", "title: 'Data'"]) assert.ok(settings.includes(group), group);
   assert.match(settings, /rounded-full border px-3\.5 py-2 md:w-full md:rounded-md md:border-0/);
   assert.match(settings, /md:w-52 md:overflow-visible md:border-r/, 'a left-side menu on wider screens');
   assert.ok(settings.includes('aria-orientation="vertical"'));

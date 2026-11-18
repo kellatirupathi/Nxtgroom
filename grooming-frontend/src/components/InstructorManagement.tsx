@@ -1,5 +1,5 @@
 import { useCallback, useState, useEffect, useMemo, useRef, type FormEvent } from 'react';
-import { Plus, UserCog, Search, Mail, CircleAlert, Upload, X } from 'lucide-react';
+import { Plus, UserCog, Search, Mail, CircleAlert, Upload, X, Check } from 'lucide-react';
 import { apiFetch, apiFetchAllPages, apiFetchCached, apiJson, invalidateCache, primeCache, readStale } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import InstructorGenderCell from './InstructorGenderCell';
@@ -17,6 +17,33 @@ import type { College, Instructor } from '../types';
 
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 const LIST_PATH = '/instructors';
+
+type QuickFilter = 'all' | 'no_face' | 'no_gender';
+
+const AVATAR_TONES = [
+  'bg-indigo-50 text-indigo-700',
+  'bg-fuchsia-50 text-fuchsia-700',
+  'bg-cyan-50 text-cyan-700',
+  'bg-amber-50 text-amber-700',
+  'bg-emerald-50 text-emerald-700',
+];
+
+function initialsOf(name?: string | null): string {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return `${parts[0][0]}${parts.length > 1 ? parts[parts.length - 1][0] : ''}`.toUpperCase();
+}
+
+function avatarTone(name?: string | null): string {
+  const text = String(name || '');
+  let sum = 0;
+  for (let index = 0; index < text.length; index += 1) sum += text.charCodeAt(index);
+  return AVATAR_TONES[sum % AVATAR_TONES.length];
+}
+
+function genderMissing(ins: Instructor): boolean {
+  return !['MALE', 'FEMALE'].includes(String(ins.gender || '').toUpperCase());
+}
 
 interface InstructorForm {
   name: string;
@@ -56,6 +83,7 @@ export default function InstructorManagement() {
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [userIdLocked, setUserIdLocked] = useState(false);
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
   const toast = useToast();
   const { pathname } = useLocation();
 
@@ -316,9 +344,71 @@ export default function InstructorManagement() {
     ].some((value) => String(value ?? '').toLowerCase().includes(term));
   });
 
+  const noFaceCount = instructors.filter((ins) => !ins.face_count).length;
+  const noGenderCount = instructors.filter(genderMissing).length;
+  const mobileInstructors = filteredInstructors.filter((ins) => (
+    quickFilter === 'no_face' ? !ins.face_count : quickFilter === 'no_gender' ? genderMissing(ins) : true
+  ));
+  const instituteCount = new Set(instructors.map((ins) => String(ins.college_id || '')).filter(Boolean)).size;
+  const quickChips: ReadonlyArray<{ value: QuickFilter; label: string; count?: number; dot?: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'no_face', label: 'No face photo', count: noFaceCount, dot: 'bg-amber-500' },
+    { value: 'no_gender', label: 'Gender missing', count: noGenderCount },
+  ];
+
   return (
     <div className="w-full flex flex-col h-full animate-in fade-in duration-300">
-      <div className="flex justify-between items-center mb-6 shrink-0 gap-4 flex-wrap">
+      <div className="mb-3 shrink-0 md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-[22px] font-extrabold text-slate-900">Instructors</h1>
+            <p className="mt-0.5 text-[13px] text-slate-500">
+              {instructors.length.toLocaleString('en-IN')} across {instituteCount} institute{instituteCount === 1 ? '' : 's'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowImport(true)}
+            aria-label="Import instructors"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            <Upload size={20} aria-hidden="true" />
+          </button>
+        </div>
+        <label className="relative mt-3 block">
+          <span className="sr-only">Search instructors</span>
+          <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+          <input
+            type="search"
+            placeholder="Search name, email or ID"
+            className="h-12 w-full rounded-xl border border-slate-200 bg-white pl-11 pr-3.5 text-[15px] outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </label>
+        <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none]" role="group" aria-label="Show">
+          {quickChips.map((chip) => {
+            const active = quickFilter === chip.value;
+            return (
+              <button
+                key={chip.value}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setQuickFilter(chip.value)}
+                className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                  active ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {chip.dot && <span aria-hidden="true" className={`h-2 w-2 rounded-full ${chip.dot}`} />}
+                {chip.label}
+                {chip.count !== undefined && <span className={active ? '' : 'text-slate-500'}>{chip.count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="hidden justify-between items-center mb-6 shrink-0 gap-4 flex-wrap md:flex">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800 flex items-center gap-2">
             <UserCog size={24} className="text-indigo-600" />
@@ -359,32 +449,36 @@ export default function InstructorManagement() {
 
       <div className="md:hidden">
         {loading ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">Loading instructors...</p>
-        ) : filteredInstructors.length === 0 ? (
-          <p className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-400">No instructors found.</p>
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-500">Loading instructors…</p>
+        ) : mobileInstructors.length === 0 ? (
+          <p className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm font-medium text-slate-500">No instructors found.</p>
         ) : (
-          <>
-            <p className="mb-2 px-1 text-xs font-semibold text-slate-500">{filteredInstructors.length} {filteredInstructors.length === 1 ? 'instructor' : 'instructors'}</p>
-            <ul className="flex flex-col gap-3 pb-2">
-              {filteredInstructors.map((ins) => (
-                <li key={ins._id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1">
-                      <h3 className="flex items-center gap-1.5 text-[15px] font-bold text-slate-800">
-                        <span className="truncate">{ins.name}</span>
-                        {!ins.face_count && (
-                          <span title="No reference photo: this instructor will not be recognised automatically" className="shrink-0">
-                            <CircleAlert size={15} className="text-amber-500" aria-label="No reference photo" />
-                          </span>
-                        )}
-                      </h3>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="inline-flex px-2 py-0.5 bg-indigo-50 text-indigo-700 font-bold text-[11px] rounded-md border border-indigo-100">
-                          {ins.instructor_role || ins.role || '--'}
+          <ul className="mb-24 overflow-hidden rounded-[18px] border border-slate-200 bg-white" aria-label="Instructors">
+            {mobileInstructors.map((ins, index) => {
+              const enrolled = Boolean(ins.face_count);
+              const institute = instituteFor(ins);
+              return (
+                <li key={ins._id} className={index === 0 ? '' : 'border-t border-slate-100'}>
+                  <div className="flex items-center gap-1 pr-2">
+                    <button
+                      type="button"
+                      onClick={() => openRecords(ins)}
+                      className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-3.5 text-left focus:outline-none focus-visible:bg-slate-50"
+                    >
+                      <span aria-hidden="true" className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarTone(ins.name)}`}>
+                        {initialsOf(ins.name)}
+                        <span className={`absolute -bottom-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-white text-white ${enrolled ? 'bg-emerald-600' : 'bg-amber-500'}`}>
+                          {enrolled ? <Check size={9} strokeWidth={4} /> : <CircleAlert size={10} strokeWidth={3} />}
                         </span>
-                        {instituteFor(ins) && <span className="min-w-0 truncate text-xs font-medium text-slate-500">{instituteFor(ins)}</span>}
-                      </div>
-                    </div>
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[15px] font-bold text-slate-900">{ins.name}</span>
+                        <span className={`mt-0.5 block truncate text-[13px] ${enrolled ? 'text-slate-500' : 'text-amber-700'}`}>
+                          {[enrolled ? (ins.instructor_role || ins.role) : 'No face photo', institute].filter(Boolean).join(' · ') || '--'}
+                        </span>
+                        <span className="sr-only">{enrolled ? 'Face photo enrolled.' : 'No face photo: will not be recognised automatically.'} Open records.</span>
+                      </span>
+                    </button>
                     <RowActionsMenu
                       label={`Actions for ${ins.name}`}
                       actions={[
@@ -394,31 +488,32 @@ export default function InstructorManagement() {
                       ]}
                     />
                   </div>
-                  {ins.email && (
-                    <p className="mt-2 flex min-w-0 items-center gap-1.5 text-xs font-medium text-slate-500">
-                      <Mail size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
-                      <span className="truncate">{ins.email}</span>
-                    </p>
-                  )}
-                  <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Gender</span>
-                    <InstructorGenderCell
-                      instructorId={String(ins._id)}
-                      instructorName={ins.name}
-                      value={ins.gender}
-                      onSaved={(gender) => setInstructors((current) => current.map(
-                        (row) => (row._id === ins._id ? { ...row, gender } : row),
-                      ))}
-                    />
-                  </div>
-                  {ins.instructor_category && (
-                    <p className="mt-2 text-xs text-slate-500"><span className="font-semibold text-slate-400">Category:</span> {ins.instructor_category}</p>
+                  {genderMissing(ins) && (
+                    <div className="mx-3.5 mb-3 flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2">
+                      <span className="text-xs font-semibold text-amber-800">Set gender</span>
+                      <InstructorGenderCell
+                        instructorId={String(ins._id)}
+                        instructorName={ins.name}
+                        value={ins.gender}
+                        onSaved={(gender) => setInstructors((current) => current.map(
+                          (row) => (row._id === ins._id ? { ...row, gender } : row),
+                        ))}
+                      />
+                    </div>
                   )}
                 </li>
-              ))}
-            </ul>
-          </>
+              );
+            })}
+          </ul>
         )}
+        <button
+          type="button"
+          onClick={openAddModal}
+          className="fixed bottom-[calc(var(--bottom-nav-height)+var(--inset-bottom)+1.25rem)] right-5 z-30 flex h-[52px] items-center gap-2 rounded-2xl bg-indigo-600 px-5 text-[15px] font-bold text-white shadow-[0_10px_22px_-8px_rgba(79,70,229,0.65)] transition-colors hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300"
+        >
+          <Plus size={20} aria-hidden="true" />
+          Add instructor
+        </button>
       </div>
 
       <div className="hidden md:flex bg-white rounded-md shadow-sm border border-slate-200 overflow-hidden flex-1 flex-col">

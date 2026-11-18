@@ -9,6 +9,7 @@ export const TABS = {
   SETTINGS: 'settings',
   ESCALATIONS: 'escalations',
   INSTRUCTOR_RECORDS: 'instructor-records',
+  MORE: 'more',
 } as const;
 
 export type Tab = (typeof TABS)[keyof typeof TABS];
@@ -24,6 +25,7 @@ const TAB_TO_PATH: Record<Tab, string> = {
   [TABS.SETTINGS]: '/settings',
   [TABS.ESCALATIONS]: '/dashboard/escalations',
   [TABS.INSTRUCTOR_RECORDS]: '/instructors/records',
+  [TABS.MORE]: '/more',
 };
 
 const PATH_TO_TAB = new Map<string, Tab>(

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, CalendarOff, Database, FileChartColumn, History, ScanFace, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react';
+import { Bell, Building2, CalendarOff, ChevronLeft, ChevronRight, Database, FileChartColumn, History, ScanFace, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import IdentificationSettingsSection from './IdentificationSettingsSection';
@@ -12,7 +12,7 @@ import ConfigSettingsSection from './ConfigSettingsSection';
 import HolidaySettings from './HolidaySettings';
 import AuditLogSection from './AuditLogSection';
 import type { NotificationSettings } from '../types';
-import { goToPath, settingsTabFromPath, settingsTabPath, type SettingsTab } from '../routes';
+import { goToPath, pathForTab, settingsTabFromPath, settingsTabPath, TABS, type SettingsTab } from '../routes';
 import { useLocation } from '../lib/useLocation';
 
 export interface ToggleProps {
@@ -197,8 +197,43 @@ const SECTIONS: ReadonlyArray<{ tab: SettingsTab; label: string; icon: LucideIco
   { tab: 'audit', label: 'Audit log', icon: History, rootOnly: true },
 ];
 
+const MOBILE_GROUPS: ReadonlyArray<{
+  title: string;
+  tone: string;
+  items: ReadonlyArray<{ tab: SettingsTab; label: string; detail: string }>;
+}> = [
+  {
+    title: 'Emails',
+    tone: 'bg-indigo-50 text-indigo-700',
+    items: [
+      { label: 'Notifications', tab: 'notifications', detail: 'Reports, reminders and who can delete' },
+      { label: 'Daily reports', tab: 'reports', detail: 'Send times, recipients and past reports' },
+      { label: 'Reporting partners', tab: 'rp', detail: 'Who gets alerts and escalations' },
+    ],
+  },
+  {
+    title: 'Attendance',
+    tone: 'bg-cyan-50 text-cyan-700',
+    items: [
+      { label: 'Identification', tab: 'identification', detail: 'Face recognition or picking from a list' },
+      { label: 'Holidays', tab: 'holidays', detail: 'Days with no reminders or reports' },
+      { label: 'Rules and categories', tab: 'config', detail: 'Moving checked-in instructors, categories' },
+    ],
+  },
+  {
+    title: 'Data',
+    tone: 'bg-slate-100 text-slate-600',
+    items: [
+      { label: 'Institutes', tab: 'colleges', detail: 'Add and edit campuses' },
+      { label: 'Sync instructors', tab: 'sync', detail: 'Import the roster from BigQuery' },
+      { label: 'Audit log', tab: 'audit', detail: 'Who changed what' },
+    ],
+  },
+];
+
 export default function SettingsPage({ role = null }: { role?: string | null }) {
   const { pathname } = useLocation();
+  const atIndex = (pathname.replace(/\/+$/, '') || '/') === '/settings';
   const sections = SECTIONS.filter((section) => !section.rootOnly || role === 'SUPER_ADMIN');
   const requested = settingsTabFromPath(pathname);
   const tab = sections.some((section) => section.tab === requested) ? requested : 'notifications';
@@ -215,14 +250,65 @@ export default function SettingsPage({ role = null }: { role?: string | null }) 
 
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="settings-title">
-      <div className="mb-5 shrink-0">
+      <div className="-mx-1 mb-3 flex shrink-0 items-center gap-1.5 md:hidden">
+        <button
+          type="button"
+          onClick={() => goToPath(atIndex ? pathForTab(TABS.MORE) : pathForTab(TABS.SETTINGS))}
+          aria-label={atIndex ? 'Back to More' : 'Back to Settings'}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-900 hover:bg-slate-100"
+        >
+          <ChevronLeft size={22} aria-hidden="true" />
+        </button>
+        <p className="text-xl font-extrabold text-slate-900">
+          {atIndex ? 'Settings' : (MOBILE_GROUPS.flatMap((group) => group.items).find((item) => item.tab === tab)?.label || 'Settings')}
+        </p>
+      </div>
+
+      {atIndex && (
+        <div className="flex flex-col gap-[18px] pb-4 md:hidden">
+          {MOBILE_GROUPS.map((group) => {
+            const items = group.items.filter((item) => sections.some((section) => section.tab === item.tab));
+            if (!items.length) return null;
+            return (
+              <section key={group.title} aria-label={group.title}>
+                <h3 className="mx-1 mb-2 text-xs font-bold uppercase tracking-wider text-slate-500">{group.title}</h3>
+                <ul className="overflow-hidden rounded-[18px] border border-slate-200 bg-white">
+                  {items.map((item, index) => {
+                    const Icon = SECTIONS.find((section) => section.tab === item.tab)?.icon || Bell;
+                    return (
+                      <li key={item.tab} className={index === 0 ? '' : 'border-t border-slate-100'}>
+                        <button
+                          type="button"
+                          onClick={() => goToPath(settingsTabPath(item.tab))}
+                          className="flex min-h-[3.75rem] w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-slate-50 focus:outline-none focus-visible:bg-slate-50"
+                        >
+                          <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] ${group.tone}`}>
+                            <Icon size={18} aria-hidden="true" />
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[15px] font-semibold text-slate-900">{item.label}</span>
+                            <span className="mt-px block truncate text-xs text-slate-500">{item.detail}</span>
+                          </span>
+                          <ChevronRight size={18} className="text-slate-400" aria-hidden="true" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mb-5 hidden shrink-0 md:block">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
         <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners, reports, holidays, configuration and the audit log.</p>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row md:gap-6">
+      <div className={`min-h-0 flex-1 flex-col md:flex md:flex-row md:gap-6 ${atIndex ? 'hidden' : 'flex'}`}>
         <nav
-          className="-mx-4 mb-5 shrink-0 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] md:mx-0 md:mb-0 md:w-52 md:overflow-visible md:border-r md:border-slate-200 md:px-0 md:pb-0 md:pr-4"
+          className="-mx-4 mb-5 hidden shrink-0 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] md:mx-0 md:mb-0 md:block md:w-52 md:overflow-visible md:border-r md:border-slate-200 md:px-0 md:pb-0 md:pr-4"
           aria-label="Settings sections"
         >
           <div

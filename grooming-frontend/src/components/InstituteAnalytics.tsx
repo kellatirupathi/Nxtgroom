@@ -4,6 +4,7 @@ import {
   ArrowUp,
   ArrowUpDown,
   ChartColumnBig,
+  ChevronLeft,
   Plus,
   TriangleAlert,
 } from 'lucide-react';
@@ -30,9 +31,8 @@ import {
 } from '../dashboardFormat';
 import type { DashboardInstitutesRange } from '../types';
 import { useLocation } from '../lib/useLocation';
-import { closeChildPath, currentPathWith, openChildPath, writeQueryParams } from '../routes';
+import { closeChildPath, currentPathWith, goToPath, openChildPath, pathForTab, TABS, writeQueryParams } from '../routes';
 
-const CARD = 'rounded-lg border border-slate-200 bg-white shadow-sm';
 const INSTITUTE_HEADER_HEIGHT = 40;
 const INSTITUTE_ROW_HEIGHT = 52;
 
@@ -43,6 +43,22 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
   { key: 'non_compliant', label: 'Non-compliant', numeric: true },
   { key: 'enrolled_percent', label: 'Faces enrolled', numeric: true },
 ];
+
+const MOBILE_SORTS: { value: string; label: string; sort: InstituteSort }[] = [
+  { value: 'compliance_asc', label: 'Lowest compliance', sort: { key: 'compliance_percent', direction: 1 } },
+  { value: 'non_compliant_desc', label: 'Most non-compliant', sort: { key: 'non_compliant', direction: -1 } },
+  { value: 'present_asc', label: 'Lowest attendance', sort: { key: 'present_percent', direction: 1 } },
+  { value: 'enrolled_asc', label: 'Fewest faces enrolled', sort: { key: 'enrolled_percent', direction: 1 } },
+  { value: 'name_asc', label: 'Name A–Z', sort: { key: 'name', direction: 1 } },
+];
+
+function mobileSortValue(sort: InstituteSort): string {
+  return MOBILE_SORTS.find((option) => option.sort.key === sort.key && option.sort.direction === sort.direction)?.value || '';
+}
+
+function needsAttention(row: { compliance_percent: number | null; low_enrolment: boolean }): boolean {
+  return (typeof row.compliance_percent === 'number' && row.compliance_percent < 80) || row.low_enrolment;
+}
 
 export default function InstituteAnalytics() {
   const [initial] = useState(() => datePresetFromQuery(window.location.search, localDateValue()));
@@ -144,11 +160,20 @@ export default function InstituteAnalytics() {
   };
 
   return (
-    <section className="mx-auto flex h-full min-h-0 w-full max-w-[1400px] flex-col gap-5" aria-labelledby="institutes-title">
+    <section className="mx-auto flex h-full min-h-0 w-full max-w-[1400px] flex-col gap-3 md:gap-5" aria-labelledby="institutes-title">
       <div className="flex shrink-0 items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h2 id="institutes-title" className="flex items-center gap-2 text-lg font-bold text-slate-800 sm:text-xl">
-            <ChartColumnBig size={22} className="text-indigo-600" aria-hidden="true" />
+        <div className="flex min-w-0 flex-1 items-start gap-1">
+          <button
+            type="button"
+            onClick={() => goToPath(pathForTab(TABS.MORE))}
+            aria-label="Back to More"
+            className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-900 hover:bg-slate-100 lg:hidden"
+          >
+            <ChevronLeft size={22} aria-hidden="true" />
+          </button>
+          <div className="min-w-0 pt-2 lg:pt-0">
+          <h2 id="institutes-title" className="flex items-center gap-2 text-xl font-extrabold text-slate-900 lg:text-xl lg:font-bold lg:text-slate-800">
+            <ChartColumnBig size={22} className="hidden text-indigo-600 lg:block" aria-hidden="true" />
             Institutes
           </h2>
           {workingDays > 1 && (
@@ -156,6 +181,7 @@ export default function InstituteAnalytics() {
               Present counts each instructor once per day they checked in, out of {formatCount(workingDays)} working days.
             </p>
           )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -182,21 +208,73 @@ export default function InstituteAnalytics() {
         }}
       />
 
-      <section className={`${CARD} flex min-h-0 flex-1 flex-col overflow-hidden`} aria-label="Institutes">
+      <label className="flex h-11 shrink-0 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 md:hidden">
+        <ArrowUpDown size={16} className="text-slate-500" aria-hidden="true" />
+        <span className="sr-only">Sort institutes</span>
+        <select
+          value={mobileSortValue(sort)}
+          onChange={(event) => {
+            const choice = MOBILE_SORTS.find((option) => option.value === event.target.value);
+            if (choice) setSort(choice.sort);
+          }}
+          className="h-full flex-1 bg-transparent text-sm font-semibold text-slate-900 outline-none"
+        >
+          {!mobileSortValue(sort) && <option value="">Sorted by column</option>}
+          {MOBILE_SORTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+
+      <section className="flex min-h-0 flex-col md:flex-1 md:overflow-hidden md:rounded-lg md:border md:border-slate-200 md:bg-white md:shadow-sm" aria-label="Institutes">
         {error && (
-          <p role="alert" className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm text-rose-700 md:px-5">
+          <p role="alert" className="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm text-rose-700 max-md:mb-2 max-md:rounded-xl max-md:border md:px-5">
             {result ? `Showing the last figures. The latest refresh failed: ${error}` : error}
           </p>
         )}
         {!result ? (
-          <p className="p-6 text-sm text-slate-400" aria-live="polite">
+          <p className="p-6 text-sm text-slate-400 max-md:rounded-2xl max-md:border max-md:border-slate-200 max-md:bg-white max-md:text-slate-500" aria-live="polite">
             {loading ? 'Loading institutes…' : error ? 'No figures to show.' : 'Choose a complete date range.'}
           </p>
         ) : rows.length === 0 ? (
-          <p className="p-6 text-sm text-slate-400">No institutes have been added yet.</p>
+          <p className="p-6 text-sm text-slate-400 max-md:rounded-2xl max-md:border max-md:border-slate-200 max-md:bg-white max-md:text-slate-500">No institutes have been added yet.</p>
         ) : (
+          <>
+          <ul className="flex flex-col gap-2.5 pb-2 md:hidden" aria-label="Institute figures">
+            {rows.map((row) => {
+              const flagged = needsAttention(row);
+              return (
+                <li key={row.college_id} className={`rounded-2xl border bg-white px-4 py-3.5 ${flagged ? 'border-rose-200' : 'border-slate-200'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="min-w-0 text-base font-bold text-slate-900">{row.name}</p>
+                    {flagged && (
+                      <span className="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-xs font-bold text-rose-700">Needs attention</span>
+                    )}
+                  </div>
+                  <p className="mt-2.5 flex justify-between text-xs font-semibold text-slate-500">
+                    <span>Present</span>
+                    <span className="text-slate-900 tabular-nums">{formatPercent(row.present_percent)} <span className="font-medium text-slate-500">· {formatCount(row.present)} / {formatCount(row.expected)}</span></span>
+                  </p>
+                  <span className="mt-1.5 block h-2 rounded-full bg-slate-100" aria-hidden="true">
+                    <span className="block h-2 rounded-full bg-indigo-600" style={{ width: `${Math.min(100, row.present_percent ?? 0)}%` }} />
+                  </span>
+                  <p className="mt-2.5 flex justify-between text-xs font-semibold text-slate-500">
+                    <span>Compliance</span>
+                    <span className={`tabular-nums ${typeof row.compliance_percent === 'number' && row.compliance_percent < 80 ? 'text-rose-700' : 'text-slate-900'}`}>{formatPercent(row.compliance_percent)}</span>
+                  </p>
+                  <span className="mt-1.5 block h-2 rounded-full bg-slate-100" aria-hidden="true">
+                    <span className="block h-2 rounded-full bg-cyan-600" style={{ width: `${Math.min(100, row.compliance_percent ?? 0)}%` }} />
+                  </span>
+                  <p className="mt-3 flex gap-3.5 border-t border-slate-100 pt-2.5 text-xs text-slate-500">
+                    <span><b className="text-rose-700 tabular-nums">{formatCount(row.non_compliant)}</b> non-compliant</span>
+                    <span>
+                      <b className={`tabular-nums ${row.low_enrolment ? 'text-amber-700' : 'text-slate-900'}`}>{row.enrolled_percent}%</b> faces enrolled
+                    </span>
+                  </p>
+                </li>
+              );
+            })}
+          </ul>
           <div
-            className="min-h-[18rem] flex-1 overflow-auto overscroll-contain"
+            className="hidden min-h-[18rem] flex-1 overflow-auto overscroll-contain md:block"
             tabIndex={0}
             aria-label="Institutes, scrollable"
           >
@@ -265,6 +343,7 @@ export default function InstituteAnalytics() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
     </section>

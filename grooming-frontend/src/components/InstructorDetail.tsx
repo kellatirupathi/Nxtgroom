@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, LogIn, LogOut, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, Clock, Calendar, CheckCircle2, XCircle, TriangleAlert, CircleAlert, LogIn, LogOut, RefreshCw, Trash2 } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import PhotoViewer from './PhotoViewer';
@@ -8,6 +8,8 @@ import { useToast } from './useToast';
 import { normalizeAttendanceStatus } from '../status';
 import { formatAttendanceDate, formatAttendanceTime } from '../attendanceFilters';
 import GroomingReport from './GroomingReport';
+import RowActionsMenu, { type RowAction } from './RowActionsMenu';
+import { improvementTipsFor, isUnassessed, reportTables } from '../reportLayout';
 import LocationPanel from './LocationPanel';
 import { readQueryParam, writeQueryParams } from '../routes';
 import type { AttendanceRecord, Evaluation } from '../types';
@@ -94,6 +96,32 @@ function StatusBadge({ status }: { status?: string }) {
     default:
       return <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-bold bg-amber-50 text-amber-600 border border-amber-200"><Clock size={16} aria-hidden="true" /> Pending AI</span>;
   }
+}
+
+const VERDICT_TONES = {
+  non_compliant: { frame: 'border-rose-200 bg-rose-50', headline: 'text-rose-900', detail: 'text-rose-800' },
+  compliant: { frame: 'border-emerald-200 bg-emerald-50', headline: 'text-emerald-900', detail: 'text-emerald-800' },
+  unassessed: { frame: 'border-amber-200 bg-amber-50', headline: 'text-amber-900', detail: 'text-amber-800' },
+  pending: { frame: 'border-indigo-100 bg-indigo-50', headline: 'text-indigo-900', detail: 'text-indigo-800' },
+  error: { frame: 'border-slate-200 bg-slate-50', headline: 'text-slate-900', detail: 'text-slate-600' },
+} as const;
+
+const ATTIRE_LABELS: Record<string, string> = {
+  FORMAL: 'Formal',
+  SAREE: 'Saree',
+  KURTI_WITH_DUPATTA: 'Kurti with dupatta',
+  ABAYA: 'Abaya',
+  KURTA_PAJAMA: 'Kurta with payjama',
+};
+
+function verdictHeadline(status: ReturnType<typeof normalizeAttendanceStatus>, fixCount: number): string {
+  if (status === 'non_compliant') {
+    return fixCount > 0 ? `${fixCount} thing${fixCount === 1 ? '' : 's'} to fix` : 'Did not meet the standard';
+  }
+  if (status === 'compliant') return 'All checks passed';
+  if (status === 'unassessed') return 'Not assessed';
+  if (status === 'error') return 'The analysis did not complete';
+  return 'Analysing the photo…';
 }
 
 export default function InstructorDetail({ record, onBack, canDelete, canDeleteCheckout, canReanalyse = false, onDeleted }: InstructorDetailProps) {
@@ -339,9 +367,41 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
     );
   }
 
+  const halfStatus = normalizeAttendanceStatus(tab === 'checkout'
+    ? (evaluation?.overall_status
+      || displayRecord?.checkout_compliance_status
+      || (displayRecord?.check_out_photo_key ? 'pending' : undefined))
+    : (evaluation?.overall_status || displayRecord?.status));
+  const fixTips = evaluation && !isUnassessed(evaluation) ? improvementTipsFor(evaluation) : [];
+  const failedChecks = evaluation
+    ? reportTables(evaluation).reduce((sum, table) => sum + table.items.filter((item) => String(item.status).toUpperCase() === 'FAIL').length, 0)
+    : 0;
+  const verdictTone = VERDICT_TONES[halfStatus] || VERDICT_TONES.pending;
+  const attireLabel = ATTIRE_LABELS[String(evaluation?.attire_type || (tab === 'checkin' ? displayRecord?.attire_type : '') || '')] || '';
+  const mobileActions: RowAction[] = [
+    ...(tab === 'checkout' && canDeleteCheckout && record.check_out_time
+      ? [{ key: 'delete-checkout', label: 'Delete check-out', icon: 'delete' as const, destructive: true, onSelect: () => setConfirmDelete('checkout') }]
+      : []),
+    ...(canDelete
+      ? [{ key: 'delete-record', label: tab === 'checkin' ? 'Delete check-in' : 'Delete record', icon: 'delete' as const, destructive: true, onSelect: () => setConfirmDelete('record') }]
+      : []),
+  ];
+  const sessionDay = formatAttendanceDate(record.check_in_time || record.date);
+
   return (
     <section className="w-full flex flex-col h-full animate-in fade-in slide-in-from-right-4 duration-300" aria-labelledby="instructor-detail-title">
-      <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-6 shrink-0">
+      <div className="-mx-1 mb-3 flex shrink-0 items-center gap-1.5 lg:hidden">
+        <button type="button" aria-label="Back to records" onClick={onBack} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-900 transition-colors hover:bg-slate-100">
+          <ChevronLeft size={22} aria-hidden="true" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-lg font-extrabold text-slate-900">{record.instructor_name || 'Instructor'}</p>
+          <p className="truncate text-[13px] text-slate-500">{[sessionDay, record.college_name].filter(Boolean).join(' · ')}</p>
+        </div>
+        {mobileActions.length > 0 && <RowActionsMenu label={`Actions for ${record.instructor_name || 'this record'}`} actions={mobileActions} />}
+      </div>
+
+      <div className="mb-6 hidden shrink-0 flex-wrap items-center gap-3 sm:gap-4 lg:flex">
         <button type="button" aria-label="Back to daily records" onClick={onBack} className="p-2 bg-white border border-slate-200 rounded-md hover:bg-slate-50 text-slate-600 transition-colors shadow-sm">
           <ArrowLeft size={20} aria-hidden="true" />
         </button>
@@ -375,25 +435,26 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
         </div>
       </div>
 
-      <div role="tablist" aria-label="Attendance report" className="mb-4 flex shrink-0 gap-1 rounded-md border border-slate-200 bg-white p-1 sm:w-fit">
+      <div role="tablist" aria-label="Attendance report" className="mb-3 flex shrink-0 gap-1 rounded-[14px] bg-indigo-50 p-1 lg:mb-4 lg:w-fit lg:rounded-md lg:border lg:border-slate-200 lg:bg-white">
         {([
-          { key: 'checkin', label: 'Check-in report', Icon: LogIn },
-          { key: 'checkout', label: 'Check-out report', Icon: LogOut },
-        ] as const).map(({ key, label, Icon }) => (
+          { key: 'checkin', label: 'Check-in report', short: 'Check-in', time: record.check_in_time, Icon: LogIn },
+          { key: 'checkout', label: 'Check-out report', short: 'Check-out', time: record.check_out_time, Icon: LogOut },
+        ] as const).map(({ key, label, short, time, Icon }) => (
           <button
             key={key}
             type="button"
             role="tab"
             aria-selected={tab === key}
             onClick={() => setTab(key)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs sm:text-sm font-bold transition-colors sm:flex-none ${
+            className={`flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-[10px] px-3 py-2 text-sm font-bold transition-colors lg:min-h-0 lg:flex-none lg:rounded-md ${
               tab === key
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-600 hover:bg-slate-50'
+                ? 'bg-white text-indigo-900 shadow-[0_1px_3px_rgba(15,23,42,0.08)] lg:bg-indigo-600 lg:text-white lg:shadow-sm'
+                : 'font-semibold text-indigo-700 lg:font-bold lg:text-slate-600 lg:hover:bg-slate-50'
             }`}
           >
-            <Icon size={15} aria-hidden="true" />
-            {label}
+            <Icon size={15} className="hidden lg:block" aria-hidden="true" />
+            <span className="lg:hidden">{short} · {time ? formatAttendanceTime(time) : '—'}</span>
+            <span className="hidden lg:inline">{label}</span>
           </button>
         ))}
       </div>
@@ -423,9 +484,40 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           </div>
         </div>
       ) : (
-      <div className="flex flex-col lg:flex-row gap-6 flex-1 min-h-0 lg:overflow-hidden">
-        <div className="w-full lg:w-1/3 flex flex-col gap-4 sm:gap-6 lg:overflow-y-auto lg:pb-6 lg:pr-2">
-          <div className="bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 flex flex-col items-center text-center shrink-0">
+      <div className="flex flex-col lg:flex-row gap-3 lg:gap-6 flex-1 min-h-0 lg:overflow-hidden">
+        <div className="flex flex-col gap-3 lg:hidden">
+          <section aria-label="Result" className={`flex items-center gap-3 rounded-[18px] border p-3 ${verdictTone.frame}`}>
+            <AttendancePhotoCircle
+              attendanceId={String(record._id)}
+              kind={tab}
+              hasPhoto={halfHasPhoto}
+              label={tab === 'checkin' ? 'Check-in' : 'Check-out'}
+              onOpen={() => setPhotoKind(tab)}
+            />
+            <div className="min-w-0 flex-1">
+              <StatusBadge status={halfStatus} />
+              <p className={`mt-2 text-base font-extrabold ${verdictTone.headline}`}>
+                {verdictHeadline(halfStatus, fixTips.length || failedChecks)}
+              </p>
+              {attireLabel && <p className={`mt-0.5 text-[13px] ${verdictTone.detail}`}>{attireLabel}</p>}
+            </div>
+          </section>
+          {fixTips.length > 0 && (
+            <section aria-labelledby="what-to-fix-title" className="rounded-[18px] border border-slate-200 bg-white px-4 py-3.5">
+              <h3 id="what-to-fix-title" className="mb-2.5 text-[15px] font-bold text-slate-900">What to fix</h3>
+              <ol className="flex flex-col gap-2.5">
+                {fixTips.map((tip, index) => (
+                  <li key={tip} className="flex gap-2.5 text-sm leading-snug text-slate-800">
+                    <span aria-hidden="true" className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-rose-50 text-xs font-extrabold text-rose-700">{index + 1}</span>
+                    {tip}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+        </div>
+        <div className="w-full lg:w-1/3 flex flex-col gap-3 sm:gap-6 lg:overflow-y-auto lg:pb-6 lg:pr-2 max-lg:order-last">
+          <div className="hidden lg:flex bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 flex-col items-center text-center shrink-0">
             <AttendancePhotoCircle
               attendanceId={String(record._id)}
               kind={tab}
@@ -502,9 +594,10 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
           </div>
         </div>
 
-        <div className="w-full lg:w-2/3 bg-white rounded-md shadow-sm border border-slate-200 p-5 sm:p-8 lg:overflow-y-auto flex flex-col mb-4 lg:mb-6">
-          <h3 className="text-base sm:text-lg font-extrabold text-slate-800 mb-4 sm:mb-6 border-b border-slate-100 pb-3 sm:pb-4">
-            Detailed Appearance Report
+        <div className="w-full lg:w-2/3 bg-white rounded-[18px] lg:rounded-md lg:shadow-sm border border-slate-200 p-4 sm:p-6 lg:p-8 lg:overflow-y-auto flex flex-col lg:mb-6">
+          <h3 className="mb-3 text-[15px] font-bold text-slate-900 lg:mb-6 lg:border-b lg:border-slate-100 lg:pb-4 lg:text-lg lg:font-extrabold lg:text-slate-800">
+            <span className="lg:hidden">All checks</span>
+            <span className="hidden lg:inline">Detailed Appearance Report</span>
           </h3>
           {loading ? (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-4" role="status"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" /><p className="text-sm font-medium">Fetching detailed evaluation…</p></div>
@@ -548,9 +641,9 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
               )}
             </div>
           ) : (
-            <div className="flex-1 pb-4">
+            <div className="flex-1 lg:pb-4">
               {evaluation.image_quality === 'RETAKE_RECOMMENDED' && (
-                <div role="note" className="mb-6 rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <div role="note" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 lg:mb-6 lg:rounded-md">
                   <div className="flex items-start gap-3">
                     <CircleAlert size={20} className="mt-0.5 shrink-0" aria-hidden="true" />
                     <div>
@@ -563,7 +656,7 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
                   </div>
                 </div>
               )}
-              <GroomingReport evaluation={evaluation} />
+              <GroomingReport evaluation={evaluation} tipsShownSeparately />
             </div>
           )}
         </div>
