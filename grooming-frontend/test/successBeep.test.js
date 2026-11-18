@@ -7,7 +7,10 @@ import {
   BEEP_FREQUENCY_HZ,
   beepsFor,
   playSuccessBeep,
+  preloadThankYou,
   setBeepContextFactory,
+  setClipLoader,
+  THANK_YOU_CLIP_URL,
   unlockBeep,
 } from '../src/lib/successBeep.ts';
 
@@ -93,6 +96,66 @@ test('a suspended context is woken by the first tap, and no audio is never an er
   } finally {
     setBeepContextFactory(null);
   }
+});
+
+test('a recorded attendance says "Thank you" once the clip has loaded', async () => {
+  const { context, log } = fakeContext();
+  const decoded = { duration: 0.68 };
+  const requested = [];
+  context.decodeAudioData = async (bytes) => {
+    log.push(['decode', bytes.byteLength]);
+    return decoded;
+  };
+  context.createBufferSource = () => {
+    const source = {
+      buffer: null,
+      connect: (target) => log.push(['connect', 'clip', target === 'speaker' ? 'speaker' : 'gain']),
+      start: (when) => log.push(['clip.start', when, source.buffer === decoded]),
+    };
+    return source;
+  };
+  setBeepContextFactory(() => context);
+  setClipLoader(async (url) => { requested.push(url); return new ArrayBuffer(16); });
+  try {
+    await preloadThankYou();
+    assert.deepEqual(requested, [THANK_YOU_CLIP_URL]);
+    playSuccessBeep();
+    assert.deepEqual(log.find((entry) => entry[0] === 'clip.start'), ['clip.start', 10, true], 'the decoded clip plays now');
+    assert.equal(log.some((entry) => entry[0] === 'type'), false, 'no beep tone when the voice plays');
+    assert.deepEqual(log.find((entry) => entry[0] === 'connect' && entry[1] === 'gain'), ['connect', 'gain', 'speaker']);
+    await preloadThankYou();
+    assert.equal(requested.length, 1, 'the clip is fetched once and reused');
+  } finally {
+    setClipLoader(null);
+    setBeepContextFactory(null);
+  }
+});
+
+test('the beep still plays when the clip is missing or not loaded yet', async () => {
+  const { context, log } = fakeContext();
+  context.decodeAudioData = async () => { throw new Error('cannot decode'); };
+  context.createBufferSource = () => { throw new Error('must not play a clip'); };
+  setBeepContextFactory(() => context);
+  setClipLoader(async () => { throw new Error('offline'); });
+  try {
+    await preloadThankYou();
+    assert.doesNotThrow(() => playSuccessBeep());
+    assert.deepEqual(log.find((entry) => entry[0] === 'type'), ['type', 'sine'], 'falls back to the beep');
+  } finally {
+    setClipLoader(null);
+    setBeepContextFactory(null);
+  }
+});
+
+test('the clip ships with the site and is served as a file, not the app page', () => {
+  const clip = readFileSync(new URL('../public/sounds/thank-you.wav', import.meta.url));
+  assert.equal(clip.toString('ascii', 0, 4), 'RIFF');
+  assert.equal(clip.toString('ascii', 8, 12), 'WAVE');
+  assert.ok(clip.length < 200_000, 'small enough to load instantly');
+  const config = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  const spa = new RegExp(`^${config.rewrites[0].source}$`);
+  assert.equal(spa.test(THANK_YOU_CLIP_URL), false, 'not rewritten to index.html');
+  assert.ok(config.headers.some((rule) => rule.source === '/sounds/(.*)'), 'a cache rule for /sounds');
 });
 
 test('only a recorded check-in or check-out beeps', () => {

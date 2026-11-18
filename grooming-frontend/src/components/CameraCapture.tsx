@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Check, RefreshCw, SwitchCamera, X } from 'lucide-react';
+import { Camera, RefreshCw, SwitchCamera, X } from 'lucide-react';
 import {
   AUTO_CAPTURE_COOLDOWN_MS,
   autoCaptureFallbackDue,
@@ -232,14 +232,6 @@ export default function CameraCapture({
   }, [stop]);
 
   const ready = shutterEnabled(verdict, 0, false);
-  const holding = autoCapture && (capturing || steadyFrames > 0);
-  const personSeen = verdict !== 'NO_PERSON' && verdict !== 'UNAVAILABLE';
-  const wholeBody = verdict === 'FULL_BODY';
-  const captureSteps = [
-    { label: 'Face found', done: personSeen, current: !personSeen },
-    { label: 'Head to feet in the frame', done: wholeBody, current: personSeen && !wholeBody },
-    { label: 'Arms by your sides, stand still', done: holding, current: wholeBody && !holding },
-  ];
 
   const shoot = useCallback(async ({ viaAuto = false } = {}) => {
     const video = videoRef.current;
@@ -337,69 +329,36 @@ export default function CameraCapture({
             />
             {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
-            {autoCapture ? (
-              <div className="absolute inset-x-4 bottom-4 rounded-[22px] bg-white p-[18px] text-slate-900 shadow-[0_16px_40px_rgba(0,0,0,0.35)]">
-                <div role="status" aria-live="polite">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-lg font-extrabold leading-snug">
-                      {cooldownSeconds > 0 ? `Ready in ${cooldownSeconds}s` : holding && !guidance ? 'Hold still…' : guidance || 'Stand in front of the camera'}
-                    </p>
-                    {holding && cooldownSeconds === 0 && <span className="shrink-0 text-[13px] font-bold text-indigo-600">Taking photo</span>}
-                  </div>
-                  {cooldownSeconds > 0 ? (
-                    <p className="mt-1 text-sm text-slate-500">The next person can step into the frame.</p>
-                  ) : verdict !== 'UNAVAILABLE' && (
-                    <>
-                      <div className="mb-3.5 mt-3 h-1.5 rounded-full bg-indigo-50" aria-hidden="true">
-                        <div className="h-1.5 rounded-full bg-indigo-600 transition-all" style={{ width: `${(captureSteps.filter((step) => step.done).length / captureSteps.length) * 100}%` }} />
-                      </div>
-                      <ol className="flex flex-col gap-2.5">
-                        {captureSteps.map((step, index) => (
-                          <li key={step.label} className={`flex items-center gap-2 text-[13px] font-semibold ${step.done ? 'text-slate-900' : step.current ? 'text-indigo-700' : 'text-slate-500'}`}>
-                            <span
-                              aria-hidden="true"
-                              className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold ${
-                                step.done ? 'bg-emerald-600 text-white' : step.current ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'
-                              }`}
-                            >
-                              {step.done ? <Check size={13} strokeWidth={3} /> : index + 1}
-                            </span>
-                            {step.label}
-                            <span className="sr-only">{step.done ? '(done)' : ''}</span>
-                          </li>
-                        ))}
-                      </ol>
-                    </>
-                  )}
-                </div>
-                {manualOffered && (
-                  <div className="mt-3.5 border-t border-slate-100 pt-3">
-                    <p className="text-xs font-medium text-amber-700">Not taking the photo by itself? Stand straight with your whole body in the frame, or take it now.</p>
-                    <button
-                      type="button"
-                      onClick={() => void shoot()}
-                      disabled={Boolean(error) || starting || capturing || !ready || cooldownSeconds > 0}
-                      className="mt-2.5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 text-[15px] font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-40"
-                    >
-                      {capturing ? <RefreshCw size={18} className="animate-spin" aria-hidden="true" /> : <Camera size={18} aria-hidden="true" />}
-                      Take photo now
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2 px-6">
-                {guidance ? (
-                  <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
-                    {guidance}
-                  </p>
-                ) : ready ? (
-                  <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
-                    Ready to take photo
-                  </p>
-                ) : null}
-              </div>
-            )}
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2 px-6">
+              {autoCapture && cooldownSeconds > 0 ? (
+                <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
+                  Ready in {cooldownSeconds}s — next person can step into frame
+                </p>
+              ) : guidance ? (
+                <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
+                  {guidance}
+                </p>
+              ) : autoCapture && (capturing || steadyFrames > 0) ? (
+                <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
+                  Hold still…
+                </p>
+              ) : autoCapture ? (
+                <p className="rounded-full bg-slate-900/75 px-4 py-2 text-sm font-semibold text-white" role="status">
+                  Stand in front of the camera, head to feet, to be photographed automatically
+                </p>
+              ) : ready ? (
+                <p className="rounded-full bg-emerald-500/90 px-4 py-2 text-sm font-bold text-white" role="status">
+                  Ready to take photo
+                </p>
+              ) : null}
+
+              {autoCapture && manualOffered && (
+                <p className="rounded-xl bg-amber-500/95 px-4 py-2 text-center text-xs font-semibold text-white max-w-xs" role="status">
+                  Stand straight in front of the camera with your whole body in the frame,
+                  or use the button below.
+                </p>
+              )}
+            </div>
 
             {starting && (
               <div className="absolute inset-0 flex items-center justify-center bg-black" role="status">
@@ -419,7 +378,7 @@ export default function CameraCapture({
         <button
           type="button"
           onClick={() => void shoot()}
-          hidden={autoCapture}
+          hidden={autoCapture && !manualOffered}
           disabled={Boolean(error) || starting || capturing || !ready || cooldownSeconds > 0}
           aria-label={ready ? 'Capture photo' : 'Position one person in the camera to capture a photo'}
           className={`w-[72px] h-[72px] rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 flex items-center justify-center${inline ? ' pointer-events-auto shadow-lg' : ''}`}
