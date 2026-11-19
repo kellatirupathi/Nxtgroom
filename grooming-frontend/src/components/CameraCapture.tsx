@@ -17,9 +17,18 @@ import {
   type FrameVerdict,
 } from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
+import TurnedLayer from './TurnedLayer';
 import type { FaceBox } from '../lib/faceBoxes';
+import { messageTurn, readWithTurn, setTurn, sharedTurnTracker, type QuarterTurn } from '../lib/frameTurn';
 import { bodyGuideSourceRect } from '../lib/cameraGeometry';
-import { cameraVideoConstraints, openCameraStream, tuneCameraTrack } from '../lib/cameraStream';
+import {
+  cameraVideoConstraints,
+  openCameraStream,
+  parkCameraStream,
+  stopParkedCameraStream,
+  takeParkedCameraStream,
+  tuneCameraTrack,
+} from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 import type { BodyRegions, CaptureDetails } from '../lib/bodyRegions';
 import { describeCapture } from '../lib/captureInfo';
@@ -35,6 +44,10 @@ interface CameraCaptureProps {
   onClose: () => void;
   autoCapture?: boolean;
   inline?: boolean;
+  // While true (a result is on screen) the camera neither analyses nor fires.
+  paused?: boolean;
+  // How far on-screen messages must turn to read upright (see lib/frameTurn.ts).
+  onTurn?: (turn: QuarterTurn) => void;
 }
 
 function describeCameraError(error: unknown): string {
@@ -58,6 +71,8 @@ export default function CameraCapture({
   onClose,
   autoCapture = false,
   inline = false,
+  paused = false,
+  onTurn,
 }: CameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -84,12 +99,24 @@ export default function CameraCapture({
   const stillStateRef = useRef(createStillCaptureState());
   const openingRef = useRef(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
+  const pausedRef = useRef(paused);
+  const turnRef = useRef<QuarterTurn>(0);
+  const [shownTurn, setShownTurn] = useState<QuarterTurn>(0);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    onTurn?.(shownTurn);
+  }, [onTurn, shownTurn]);
 
   const stop = useCallback(() => {
     steadyRef.current = 0;
     postureSinceRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    stopParkedCameraStream();
   }, []);
 
   useEffect(() => {
@@ -107,16 +134,18 @@ export default function CameraCapture({
       }
       openingRef.current = true;
       try {
-        const stream = await openCameraStream({
+        // A live camera handed over by the screen that just closed starts at once.
+        const handedOver = takeParkedCameraStream(facing);
+        const stream = handedOver ?? await openCameraStream({
           video: cameraVideoConstraints(facing),
           audio: false,
         }, { isCancelled: () => disposed });
         if (disposed) {
-          stream.getTracks().forEach((track) => track.stop());
+          parkCameraStream(stream, facing);
           return;
         }
         streamRef.current = stream;
-        void tuneCameraTrack(stream.getVideoTracks()[0]);
+        if (!handedOver) void tuneCameraTrack(stream.getVideoTracks()[0]);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});
@@ -132,7 +161,12 @@ export default function CameraCapture({
     void start();
     return () => {
       disposed = true;
-      stop();
+      steadyRef.current = 0;
+      postureSinceRef.current = null;
+      // Hand the camera to whichever screen opens next instead of stopping it.
+      const current = streamRef.current;
+      streamRef.current = null;
+      if (current) parkCameraStream(current, facing);
     };
   }, [facing, stop, streamGeneration]);
 
@@ -151,6 +185,8 @@ export default function CameraCapture({
       candidate: null,
       candidateCount: 0,
     };
+    const tracker = sharedTurnTracker(facing);
+    let wasLandscape: boolean | null = null;
 
     const inspect = async () => {
       if (!fullBodyDetectorSettled()) setGuidance(DETECTOR_STARTING_GUIDANCE);
@@ -160,16 +196,34 @@ export default function CameraCapture({
       if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
       const tick = async () => {
         if (disposed) return;
+        if (pausedRef.current) {
+          steadyRef.current = 0;
+          postureSinceRef.current = null;
+          setSteadyFrames(0);
+          timer = setTimeout(tick, 200);
+          return;
+        }
         const video = videoRef.current;
         const viewport = viewportRef.current;
-        const reading: FrameReading = video
-          ? await readFrame(detector, video, viewport ? {
-              width: viewport.clientWidth,
-              height: viewport.clientHeight,
-              canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
-            } : undefined, { mirrored: facing === 'user' })
-          : { verdict: 'UNAVAILABLE', guidance: null, boxes: [] };
+        if (viewport) {
+          // The screen itself rotated, so the camera now delivers upright frames.
+          const landscape = viewport.clientWidth > viewport.clientHeight;
+          if (wasLandscape !== null && landscape !== wasLandscape) setTurn(tracker, 0);
+          wasLandscape = landscape;
+        }
+        const read = (turn: QuarterTurn) => readFrame(detector, video as HTMLVideoElement, viewport ? {
+          width: viewport.clientWidth,
+          height: viewport.clientHeight,
+          canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
+        } : undefined, { mirrored: facing === 'user', turn });
+        const turned = video
+          ? await readWithTurn(tracker, read)
+          : { reading: { verdict: 'UNAVAILABLE', guidance: null, boxes: [] } as FrameReading, turn: tracker.turn, switched: false };
         if (disposed) return;
+        const reading: FrameReading = turned.reading;
+        if (turned.switched) detector?.tracker?.reset?.();
+        turnRef.current = turned.turn;
+        setShownTurn(messageTurn(turned.turn, facing === 'user'));
 
         stableState = stabilizeFrameReading(stableState, reading);
         const stableReading = stableState.reading;
@@ -257,6 +311,7 @@ export default function CameraCapture({
         maxDimension: SINGLE_UPLOAD_MAX_DIMENSION,
         quality: PHOTO_JPEG_QUALITY,
         state: stillStateRef.current,
+        turn: turnRef.current,
       });
       await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }), {
         bodyRegions,
@@ -278,6 +333,23 @@ export default function CameraCapture({
   useEffect(() => {
     shootRef.current = shoot;
   }, [shoot]);
+
+  const shutter = (
+    <button
+      type="button"
+      onClick={() => void shoot()}
+      hidden={autoCapture && !manualOffered}
+      disabled={Boolean(error) || starting || capturing || !ready || cooldownSeconds > 0}
+      aria-label={ready ? 'Capture photo' : 'Position one person in the camera to capture a photo'}
+      className={`w-[72px] h-[72px] rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 flex items-center justify-center${inline ? ' pointer-events-auto shadow-lg' : ''}`}
+    >
+      {capturing ? (
+        <RefreshCw size={26} className="animate-spin text-slate-700" aria-hidden="true" />
+      ) : (
+        <span className="w-14 h-14 rounded-full bg-white ring-2 ring-slate-900/10" />
+      )}
+    </button>
+  );
 
   return (
     <div
@@ -329,6 +401,7 @@ export default function CameraCapture({
             />
             {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
 
+            <TurnedLayer turn={shownTurn} className="pointer-events-none">
             <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2 px-6">
               {autoCapture && cooldownSeconds > 0 ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
@@ -359,6 +432,7 @@ export default function CameraCapture({
                 </p>
               )}
             </div>
+            </TurnedLayer>
 
             {starting && (
               <div className="absolute inset-0 flex items-center justify-center bg-black" role="status">
@@ -369,27 +443,20 @@ export default function CameraCapture({
         )}
       </div>
 
-      <div
-        className={inline
-          ? 'pointer-events-none absolute inset-x-0 bottom-6 flex flex-col items-center gap-3'
-          : 'flex flex-col items-center gap-3 py-6'}
-        style={inline ? undefined : { paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
-      >
-        <button
-          type="button"
-          onClick={() => void shoot()}
-          hidden={autoCapture && !manualOffered}
-          disabled={Boolean(error) || starting || capturing || !ready || cooldownSeconds > 0}
-          aria-label={ready ? 'Capture photo' : 'Position one person in the camera to capture a photo'}
-          className={`w-[72px] h-[72px] rounded-full bg-white border-4 border-white/40 active:scale-95 transition-transform disabled:opacity-40 flex items-center justify-center${inline ? ' pointer-events-auto shadow-lg' : ''}`}
+      {inline ? (
+        <TurnedLayer turn={shownTurn} className="pointer-events-none">
+          <div className="pointer-events-none absolute inset-x-0 bottom-6 flex flex-col items-center gap-3">
+            {shutter}
+          </div>
+        </TurnedLayer>
+      ) : (
+        <div
+          className="flex flex-col items-center gap-3 py-6"
+          style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
         >
-          {capturing ? (
-            <RefreshCw size={26} className="animate-spin text-slate-700" aria-hidden="true" />
-          ) : (
-            <span className="w-14 h-14 rounded-full bg-white ring-2 ring-slate-900/10" />
-          )}
-        </button>
-      </div>
+          {shutter}
+        </div>
+      )}
     </div>
   );
 }

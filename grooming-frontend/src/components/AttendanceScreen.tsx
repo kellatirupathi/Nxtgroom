@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { Component, lazy, Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { Maximize, RefreshCw, SwitchCamera, User, Users, X } from 'lucide-react';
 import BrandedLoader from './BrandedLoader';
 import ConfirmDialog from './ConfirmDialog';
@@ -11,7 +11,8 @@ import { armBeepUnlock } from '../lib/successBeep';
 
 const loadGroupScreen = memoizedImport(() => import('./GroupKioskAttendance'));
 
-const GROUP_PRELOAD_DELAY_MS = 1_500;
+// Fetched soon after the screen opens, so a tap on Group finds it ready.
+const GROUP_PRELOAD_DELAY_MS = 300;
 
 const REOPEN_GROUP_KEY = 'facultytrack:reopen-group';
 
@@ -92,7 +93,7 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
   const [groupAttempt, setGroupAttempt] = useState(0);
   const [facing, setFacing] = useState<'user' | 'environment'>('user');
   const flipCamera = () => setFacing((current) => current === 'user' ? 'environment' : 'user');
-  const [GroupScreen, setGroupScreen] = useState(() => lazy(loadGroupScreen));
+  const [GroupScreen, setGroupScreen] = useState<ComponentType<{ facing: 'user' | 'environment' }>>(() => lazy(loadGroupScreen));
 
   useEffect(() => {
     preloadFullBodyDetector();
@@ -102,10 +103,19 @@ export default function AttendanceScreen({ onExit }: AttendanceScreenProps) {
 
   useEffect(() => {
     clearReopenGroup();
+    let cancelled = false;
     const timer = setTimeout(() => {
       loadGroupScreen().catch(() => {});
+      // Once the code is here, show the screen itself: a lazy wrapper would
+      // still flash "Loading group attendance" on the first tap.
+      loadGroupScreen().then((module) => {
+        if (!cancelled) setGroupScreen(() => module.default);
+      }, () => {});
     }, GROUP_PRELOAD_DELAY_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
   const retryGroup = () => {

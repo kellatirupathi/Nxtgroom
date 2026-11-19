@@ -43,6 +43,62 @@ test('a box covers the face it was built from', () => {
   assert.equal(box.confident, true);
 });
 
+test('a box covers the whole head, forehead to chin, even when only the eyes are found', () => {
+  // A group member a few metres away: eyes and nose found, ears and shoulders not.
+  const eyesOnly = {
+    keypoints: [
+      { name: 'nose', score: 0.9, x: 240, y: 100 },
+      { name: 'left_eye', score: 0.9, x: 232, y: 94 },
+      { name: 'right_eye', score: 0.9, x: 248, y: 94 },
+    ],
+  };
+  const [box] = faceBoxesFromPoses([eyesOnly], FRAME);
+  const left = box.left * FRAME.frameWidth;
+  const right = (box.left + box.width) * FRAME.frameWidth;
+  const top = box.top * FRAME.frameHeight;
+  const bottom = (box.top + box.height) * FRAME.frameHeight;
+  // Eyes 16px apart belong to a head about 38px wide and 58px tall,
+  // centred on the eyes.
+  const headWidth = 16 / 0.42;
+  assert.ok(right - left >= headWidth, `box ${Math.round(right - left)}px wide for a ${Math.round(headWidth)}px head`);
+  assert.ok(top <= 94 - 0.75 * headWidth, `box top ${Math.round(top)} cuts the forehead`);
+  assert.ok(bottom >= 94 + 0.75 * headWidth, `box bottom ${Math.round(bottom)} cuts the chin`);
+  assert.ok(left < 232 - 8 && right > 248 + 8, 'the box is centred on the face');
+});
+
+test('a box from a frame turned upright lands on the face in the preview', async () => {
+  const { boxesOnPreview } = await import('../src/lib/faceBoxes.ts');
+  // The camera frame is 800 wide and 1000 tall, and the person lies on their
+  // side in it, head on the left. Turned a quarter clockwise the picture is
+  // 1000 wide and 800 tall, with the person standing.
+  const upright = {
+    keypoints: [
+      { name: 'nose', score: 0.9, x: 500, y: 120 },
+      { name: 'left_eye', score: 0.9, x: 490, y: 112 },
+      { name: 'right_eye', score: 0.9, x: 510, y: 112 },
+      { name: 'left_ear', score: 0.8, x: 478, y: 116 },
+      { name: 'right_ear', score: 0.8, x: 522, y: 116 },
+      { name: 'left_shoulder', score: 0.9, x: 470, y: 190 },
+      { name: 'right_shoulder', score: 0.9, x: 530, y: 190 },
+    ],
+  };
+  const inFrame = (point) => ({ x: point.y / 800, y: (1000 - point.x) / 1000 });
+  const [turnedBox] = faceBoxesFromPoses([upright], { frameWidth: 1000, frameHeight: 800 });
+  for (const mirrored of [false, true]) {
+    const [box] = boxesOnPreview([turnedBox], 90, mirrored);
+    for (const point of upright.keypoints.filter((p) => !p.name.endsWith('_shoulder'))) {
+      const raw = inFrame(point);
+      const x = mirrored ? 1 - raw.x : raw.x;
+      assert.ok(
+        x >= box.left && x <= box.left + box.width && raw.y >= box.top && raw.y <= box.top + box.height,
+        `${point.name} at ${x.toFixed(3)},${raw.y.toFixed(3)} is outside the box (mirrored: ${mirrored})`,
+      );
+    }
+    // On the camera frame the face lies sideways, so its box is wider than tall.
+    assert.ok(box.width * 800 > box.height * 1000, 'the box should lie on its side with the face');
+  }
+});
+
 test('the front camera mirrors the box, or it lands on the wrong person', () => {
   const [normal] = faceBoxesFromPoses([person(120)], FRAME);
   const [mirrored] = faceBoxesFromPoses([person(120)], { ...FRAME, mirrored: true });

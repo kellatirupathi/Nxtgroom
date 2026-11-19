@@ -26,6 +26,12 @@ test("the tablet's camera report is kept to known fields and a bounded size", ()
   });
 });
 
+test("a photo the tablet turned upright keeps how far it was turned", () => {
+  const info = parseCaptureInfo(JSON.stringify({ source: "video", turn: 90, region: "960x1193", output: "1193x960" }));
+  assert.equal(info.turn, 90);
+  assert.equal(parseCaptureInfo(JSON.stringify({ source: "video" })).turn, undefined);
+});
+
 test("a missing, oversized or malformed camera report is ignored", () => {
   assert.equal(parseCaptureInfo(undefined), null);
   assert.equal(parseCaptureInfo(""), null);

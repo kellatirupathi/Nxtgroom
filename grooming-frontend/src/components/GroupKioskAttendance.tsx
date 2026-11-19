@@ -2,11 +2,14 @@ import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch } from 'lucide-react';
 import { apiFetch, ApiError } from '../api';
 import GroupCameraCapture from './GroupCameraCapture';
+import TurnedLayer from './TurnedLayer';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { formatAttendanceTime } from '../attendanceFilters';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
+import type { QuarterTurn } from '../lib/frameTurn';
 
+// The camera pauses while the result is up, so nobody is photographed twice.
 const RESULT_VISIBLE_MS = 5_000;
 
 type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'NOT_RECOGNISED';
@@ -43,6 +46,7 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fix, setFix] = useState<Fix | null>(null);
+  const [turn, setTurn] = useState<QuarterTurn>(0);
   const resultTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const submitInFlight = useRef(false);
@@ -113,28 +117,32 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
 
   return (
     <div className={`relative w-full h-full overflow-hidden bg-black ${fullScreen ? '' : 'rounded-md'}`}>
-      <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+3.75rem)] z-10 flex flex-wrap items-center justify-between gap-2 text-white">
-        <h2 className="rounded-md bg-black/50 px-2 py-1 text-sm font-bold shadow-sm">Group attendance</h2>
-        <p className="flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs font-medium shadow-sm">
-          <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
-          {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
-        </p>
-      </div>
-
-      {error && (
-        <div role="alert" className="absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+6.5rem)] z-20 rounded-md border border-rose-200 bg-rose-50/95 p-3 text-sm font-medium text-rose-700">
-          {error}
-        </div>
-      )}
-
       <div className="absolute inset-0">
         <GroupCameraCapture
           facing={facing}
           onCapture={submit}
+          paused={Boolean(result) || submitting}
+          onTurn={setTurn}
         />
+      </div>
+
+      <TurnedLayer turn={turn} className="pointer-events-none z-10">
+        <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+3.75rem)] z-10 flex flex-wrap items-center justify-between gap-2 text-white">
+          <h2 className="rounded-md bg-black/50 px-2 py-1 text-sm font-bold shadow-sm">Group attendance</h2>
+          <p className="flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs font-medium shadow-sm">
+            <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
+            {fix ? `Live location (${describeAccuracy(fix)})` : 'Locating…'}
+          </p>
+        </div>
+
+        {error && (
+          <div role="alert" className="absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+6.5rem)] z-20 rounded-md border border-rose-200 bg-rose-50/95 p-3 text-sm font-medium text-rose-700">
+            {error}
+          </div>
+        )}
 
         {submitting && !result && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-emerald-600/90" role="status">
+          <div className="pointer-events-auto absolute inset-0 flex flex-col items-center justify-center gap-3 bg-emerald-600/90" role="status">
             <Loader2 size={44} className="animate-spin text-white" aria-hidden="true" />
             <p className="text-xl font-extrabold text-white">Identifying everyone…</p>
             <p className="text-sm font-medium text-white/80">This takes a moment for a group.</p>
@@ -143,7 +151,7 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
 
         {result && (
           <div
-            className="absolute inset-0 flex flex-col bg-slate-900/95 px-4 py-4 overflow-y-auto"
+            className="pointer-events-auto absolute inset-0 flex flex-col bg-slate-900/95 px-4 py-4 overflow-y-auto"
             role="status"
             aria-live="assertive"
           >
@@ -187,7 +195,7 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
             )}
           </div>
         )}
-      </div>
+      </TurnedLayer>
     </div>
   );
 }

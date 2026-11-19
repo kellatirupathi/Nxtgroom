@@ -1,5 +1,6 @@
 import type { SourceRect } from './cameraGeometry.ts';
 import { encodeUploadJpeg, PHOTO_MAX_DIMENSION } from './photoEncoding.ts';
+import { drawTurned, turnedSize, type QuarterTurn } from './frameTurn.ts';
 import {
   candidateRotations,
   chooseMapping,
@@ -222,6 +223,7 @@ export interface CaptureDiagnostics {
   region: string;
   output: string;
   still: StillDiagnostics;
+  turn?: QuarterTurn;
 }
 
 export interface CapturedPhoto {
@@ -239,6 +241,7 @@ export interface CaptureOptions {
   maxDimension: number;
   quality: number;
   state: StillCaptureState;
+  turn?: QuarterTurn;
 }
 
 interface StillAttempt {
@@ -377,15 +380,46 @@ async function takeStill({
   }
 }
 
+// A camera whose frames arrive sideways (see frameTurn.ts): the photograph is
+// the whole region the person saw, turned upright, so the server stores it
+// the right way up and cuts each person out of it correctly.
+async function captureTurned(
+  { video, region, maxDimension, quality, state }: CaptureOptions,
+  turn: QuarterTurn,
+  env: CaptureEnvironment,
+): Promise<CapturedPhoto> {
+  const output = fitWithin(turnedSize(region, turn), maxDimension);
+  const frame = canvas2d(env, output);
+  drawTurned(frame.context, video, region, turn, output);
+  const blob = await encode(frame.canvas, quality);
+  state.lastSource = 'video';
+  return {
+    blob,
+    source: 'video',
+    width: output.width,
+    height: output.height,
+    diagnostics: {
+      source: 'video',
+      video: sizeText({ width: video.videoWidth, height: video.videoHeight }),
+      region: sizeText(region),
+      output: sizeText(output),
+      still: { outcome: 'turned' },
+      turn,
+    },
+  };
+}
+
 export async function capturePhoto(
-  { video, track, region, maxDimension, quality, state }: CaptureOptions,
+  options: CaptureOptions,
   env: CaptureEnvironment = browserEnvironment(),
 ): Promise<CapturedPhoto> {
+  const { video, track, region, maxDimension, quality, state } = options;
   const videoSize = { width: video.videoWidth, height: video.videoHeight };
 
   if (track && state.trackId !== null && state.trackId !== track.id) {
     Object.assign(state, createStillCaptureState());
   }
+  if (options.turn) return captureTurned(options, options.turn, env);
   resumeStillsIfDue(state, (env.now ?? Date.now)());
 
   const frameSize = fitWithin(region, maxDimension);

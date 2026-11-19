@@ -21,14 +21,27 @@ import {
   primeFullBodyDetector,
 } from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
+import TurnedLayer from './TurnedLayer';
 import { stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
+import { messageTurn, readWithTurn, setTurn, sharedTurnTracker, type QuarterTurn } from '../lib/frameTurn';
 import { coverSourceRect } from '../lib/cameraGeometry';
-import { cameraVideoConstraints, openCameraStream, tuneCameraTrack } from '../lib/cameraStream';
+import {
+  cameraVideoConstraints,
+  openCameraStream,
+  parkCameraStream,
+  stopParkedCameraStream,
+  takeParkedCameraStream,
+  tuneCameraTrack,
+} from '../lib/cameraStream';
 import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
 
 interface GroupCameraCaptureProps {
   facing: 'user' | 'environment';
   onCapture: (file: File) => void | Promise<void>;
+  // While true (a result is on screen) the camera neither analyses nor fires.
+  paused?: boolean;
+  // How far on-screen messages must turn to read upright (see lib/frameTurn.ts).
+  onTurn?: (turn: QuarterTurn) => void;
 }
 
 function describeCameraError(error: unknown): string {
@@ -45,7 +58,7 @@ function describeCameraError(error: unknown): string {
   return 'The camera could not be started. Check permissions and try again.';
 }
 
-export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCaptureProps) {
+export default function GroupCameraCapture({ facing, onCapture, paused = false, onTurn }: GroupCameraCaptureProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const analysisCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -69,10 +82,22 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
   const stillStateRef = useRef(createStillCaptureState());
   const openingRef = useRef(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
+  const pausedRef = useRef(paused);
+  const turnRef = useRef<QuarterTurn>(0);
+  const [shownTurn, setShownTurn] = useState<QuarterTurn>(0);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    onTurn?.(shownTurn);
+  }, [onTurn, shownTurn]);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    stopParkedCameraStream();
   }, []);
 
   useEffect(() => {
@@ -89,16 +114,18 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
       }
       openingRef.current = true;
       try {
-        const stream = await openCameraStream({
+        // A live camera handed over by the screen that just closed starts at once.
+        const handedOver = takeParkedCameraStream(facing);
+        const stream = handedOver ?? await openCameraStream({
           video: cameraVideoConstraints(facing),
           audio: false,
         }, { isCancelled: () => disposed });
         if (disposed) {
-          stream.getTracks().forEach((track) => track.stop());
+          parkCameraStream(stream, facing);
           return;
         }
         streamRef.current = stream;
-        void tuneCameraTrack(stream.getVideoTracks()[0]);
+        if (!handedOver) void tuneCameraTrack(stream.getVideoTracks()[0]);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play().catch(() => {});
@@ -114,7 +141,10 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
     void start();
     return () => {
       disposed = true;
-      stop();
+      // Hand the camera to whichever screen opens next instead of stopping it.
+      const current = streamRef.current;
+      streamRef.current = null;
+      if (current) parkCameraStream(current, facing);
     };
   }, [facing, stop, streamGeneration]);
 
@@ -130,6 +160,8 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
       }
     }, 4_000);
     let stableState: StableGroupState = INITIAL_GROUP_STATE;
+    const tracker = sharedTurnTracker(facing);
+    let wasLandscape: boolean | null = null;
 
     const inspect = async () => {
       if (!fullBodyDetectorSettled()) {
@@ -141,16 +173,36 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
       if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
       const tick = async () => {
         if (disposed) return;
+        if (pausedRef.current) {
+          steadyRef.current = 0;
+          setSteadyFrames(0);
+          timer = setTimeout(tick, 200);
+          return;
+        }
         const video = videoRef.current;
         const viewport = viewportRef.current;
-        const next: GroupReading = video
-          ? await readGroupFrame(detector, video, viewport ? {
-              width: viewport.clientWidth,
-              height: viewport.clientHeight,
-              canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
-            } : undefined, { mirrored: facing === 'user' })
-          : { verdict: 'UNAVAILABLE', guidance: null, people: 0, faces: 0, boxes: [] };
+        if (viewport) {
+          // The screen itself rotated, so the camera now delivers upright frames.
+          const landscape = viewport.clientWidth > viewport.clientHeight;
+          if (wasLandscape !== null && landscape !== wasLandscape) setTurn(tracker, 0);
+          wasLandscape = landscape;
+        }
+        const read = (turn: QuarterTurn) => readGroupFrame(detector, video as HTMLVideoElement, viewport ? {
+          width: viewport.clientWidth,
+          height: viewport.clientHeight,
+          canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
+        } : undefined, { mirrored: facing === 'user', turn });
+        const turned = video
+          ? await readWithTurn(tracker, read)
+          : { reading: { verdict: 'UNAVAILABLE', guidance: null, people: 0, faces: 0, boxes: [] } as GroupReading, turn: tracker.turn, switched: false };
         if (disposed) return;
+        const next: GroupReading = turned.reading;
+        if (turned.switched) {
+          detector?.tracker?.reset?.();
+          labelMemoryRef.current = {};
+        }
+        turnRef.current = turned.turn;
+        setShownTurn(messageTurn(turned.turn, facing === 'user'));
 
         stableState = stabilizeGroupReading(stableState, next);
         const stable = stableState.reading;
@@ -227,6 +279,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
         maxDimension: GROUP_UPLOAD_MAX_DIMENSION,
         quality: 0.9,
         state: stillStateRef.current,
+        turn: turnRef.current,
       });
       await onCapture(new File([photo.blob], `group-${Date.now()}.jpg`, { type: 'image/jpeg' }));
     } catch {
@@ -250,10 +303,12 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
 
   return (
     <div className="absolute inset-0 bg-black flex flex-col">
-      <p className="pointer-events-none absolute left-3 top-[calc(max(0.75rem,var(--inset-top))+6rem)] z-10 flex items-center gap-2 rounded-md bg-black/50 px-2 py-1 text-xs font-semibold text-white">
-        <Users size={16} aria-hidden="true" />
-        <span aria-live="polite">{countLabel || 'Nobody in frame'}</span>
-      </p>
+      <TurnedLayer turn={shownTurn} className="pointer-events-none z-10">
+        <p className="pointer-events-none absolute left-3 top-[calc(max(0.75rem,var(--inset-top))+6rem)] flex items-center gap-2 rounded-md bg-black/50 px-2 py-1 text-xs font-semibold text-white">
+          <Users size={16} aria-hidden="true" />
+          <span aria-live="polite">{countLabel || 'Nobody in frame'}</span>
+        </p>
+      </TurnedLayer>
 
       <div ref={viewportRef} className="flex-1 relative overflow-hidden">
         {error ? (
@@ -272,7 +327,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
               style={{ transform: facing === 'user' ? 'scaleX(-1)' : undefined }}
             />
 
-            {!starting && <FaceBoxOverlay boxes={faceBoxes} />}
+            {!starting && <FaceBoxOverlay boxes={faceBoxes} labelTurn={shownTurn} />}
 
             {!starting && (
               <div
@@ -287,6 +342,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
               />
             )}
 
+            <TurnedLayer turn={shownTurn} className="pointer-events-none">
             <div className="pointer-events-none absolute inset-x-0 bottom-4 flex flex-col items-center gap-2 px-6">
               {reading.guidance ? (
                 <p className="rounded-full bg-slate-900/75 px-4 py-2 text-center text-sm font-semibold text-white" role="status">
@@ -309,6 +365,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
                 </p>
               )}
             </div>
+            </TurnedLayer>
 
             {starting && (
               <div className="absolute inset-0 flex items-center justify-center bg-black" role="status">
@@ -319,6 +376,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
         )}
       </div>
 
+      <TurnedLayer turn={shownTurn} className="pointer-events-none">
       <div className="pointer-events-none absolute inset-x-0 bottom-6 flex flex-col items-center gap-3">
         <button
           type="button"
@@ -335,6 +393,7 @@ export default function GroupCameraCapture({ facing, onCapture }: GroupCameraCap
           )}
         </button>
       </div>
+      </TurnedLayer>
     </div>
   );
 }

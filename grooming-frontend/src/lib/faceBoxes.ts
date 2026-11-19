@@ -21,17 +21,33 @@ export interface FaceBox {
   label?: string;
 }
 
+import { rectToFrame, type QuarterTurn } from './frameTurn.ts';
+
 const FACE_LANDMARKS = ['nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear'];
 
 const FACING_LANDMARKS = ['nose', 'left_eye', 'right_eye'];
 
-const HEAD_TO_SHOULDER_WIDTH = 0.62;
+// Head breadth (ear to ear) from whatever the detector found. Proportions of
+// an adult head: the eyes are about 0.42 of its breadth apart, the ears sit at
+// its sides, the shoulders are about 2.5 head breadths wide, and the tip of
+// the nose is about 0.3 head breadths below the eyes.
+const EYE_SPAN_TO_HEAD = 2.4;
+const EAR_SPAN_TO_HEAD = 1;
+const SHOULDER_SPAN_TO_HEAD = 0.4;
+const EYE_TO_NOSE_TO_HEAD = 3.3;
+const NOSE_BELOW_EYES = 0.3;
+const EARS_BELOW_EYES = 0.05;
 
-const LANDMARK_SPAN_TO_HEAD = 1.7;
+// Shoulders are only a rough guide; when the face itself gives a size, they
+// may enlarge it by at most this much.
+const MAX_SHOULDER_OVER_FACE = 1.6;
 
+// The box is a quarter wider than the head so hair and ears fit inside it,
+// and 1.3 times as tall as it is wide, which reaches from above the hairline
+// to below the chin when it is centred on the eyes.
+const BOX_TO_HEAD = 1.25;
 const HEAD_ASPECT = 1.3;
-
-const LANDMARK_HEIGHT_FRACTION = 0.58;
+const BOX_RAISE = 0.03;
 
 const MIN_BOX_RATIO = 0.03;
 
@@ -51,10 +67,19 @@ function usablePoints(
   ));
 }
 
-function shoulderWidth(keypoints: BoxKeypoint[], minScore: number): number {
-  const shoulders = usablePoints(keypoints, ['left_shoulder', 'right_shoulder'], minScore);
-  if (shoulders.length < 2) return 0;
-  return Math.abs((shoulders[0].x as number) - (shoulders[1].x as number));
+function pointNamed(points: BoxKeypoint[], name: string): BoxKeypoint | undefined {
+  return points.find((point) => point.name === name);
+}
+
+function span(first: BoxKeypoint | undefined, second: BoxKeypoint | undefined): number {
+  return first && second ? Math.abs((first.x as number) - (second.x as number)) : 0;
+}
+
+function midpoint(first: BoxKeypoint, second: BoxKeypoint): { x: number; y: number } {
+  return {
+    x: ((first.x as number) + (second.x as number)) / 2,
+    y: ((first.y as number) + (second.y as number)) / 2,
+  };
 }
 
 export function faceBoxPixels(
@@ -64,21 +89,44 @@ export function faceBoxPixels(
   const landmarks = usablePoints(pose?.keypoints || [], FACE_LANDMARKS, minScore);
   if (landmarks.length === 0) return null;
 
-  const xs = landmarks.map((point) => point.x as number);
-  const ys = landmarks.map((point) => point.y as number);
-  const centreX = (Math.min(...xs) + Math.max(...xs)) / 2;
-  const landmarkCentreY = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const nose = pointNamed(landmarks, 'nose');
+  const leftEye = pointNamed(landmarks, 'left_eye');
+  const rightEye = pointNamed(landmarks, 'right_eye');
+  const leftEar = pointNamed(landmarks, 'left_ear');
+  const rightEar = pointNamed(landmarks, 'right_ear');
+  const shoulders = usablePoints(pose.keypoints, ['left_shoulder', 'right_shoulder'], minScore);
+  const eyes = [leftEye, rightEye].filter((point): point is BoxKeypoint => Boolean(point));
+  const eyeY = eyes.length ? eyes.reduce((sum, point) => sum + (point.y as number), 0) / eyes.length : null;
 
-  const fromLandmarks = (Math.max(...xs) - Math.min(...xs)) * LANDMARK_SPAN_TO_HEAD;
-  const fromShoulders = shoulderWidth(pose.keypoints, minScore) * HEAD_TO_SHOULDER_WIDTH;
-  const width = Math.max(fromLandmarks, fromShoulders);
-  if (!(width > 0)) return null;
+  const fromFace = Math.max(
+    span(leftEye, rightEye) * EYE_SPAN_TO_HEAD,
+    span(leftEar, rightEar) * EAR_SPAN_TO_HEAD,
+    nose && eyeY !== null && (nose.y as number) > eyeY ? ((nose.y as number) - eyeY) * EYE_TO_NOSE_TO_HEAD : 0,
+  );
+  const fromShoulders = shoulders.length >= 2 ? span(shoulders[0], shoulders[1]) * SHOULDER_SPAN_TO_HEAD : 0;
+  const head = fromFace > 0
+    ? Math.max(fromFace, Math.min(fromShoulders, fromFace * MAX_SHOULDER_OVER_FACE))
+    : fromShoulders;
+  if (!(head > 0)) return null;
 
+  const centreX = leftEar && rightEar
+    ? midpoint(leftEar, rightEar).x
+    : leftEye && rightEye
+      ? midpoint(leftEye, rightEye).x
+      : nose
+        ? nose.x as number
+        : landmarks.reduce((sum, point) => sum + (point.x as number), 0) / landmarks.length;
+  const ears = [leftEar, rightEar].filter((point): point is BoxKeypoint => Boolean(point));
+  const eyeLine = eyeY ?? (nose
+    ? (nose.y as number) - head * NOSE_BELOW_EYES
+    : ears.reduce((sum, point) => sum + (point.y as number), 0) / ears.length - head * EARS_BELOW_EYES);
+
+  const width = head * BOX_TO_HEAD;
   const height = width * HEAD_ASPECT;
   const facing = usablePoints(pose.keypoints, FACING_LANDMARKS, minScore);
   return {
     centreX,
-    centreY: landmarkCentreY - height * (LANDMARK_HEIGHT_FRACTION - 0.5),
+    centreY: eyeLine - height * BOX_RAISE,
     width,
     height,
     confident: facing.length >= 2,
@@ -126,6 +174,25 @@ export function faceBoxesFromPoses(
         height: Math.min(height, 1),
         confident: box.confident,
         ...(label ? { label } : {}),
+      };
+    })
+    .sort((a, b) => a.left - b.left);
+}
+
+// Boxes found in a frame that was turned upright for the detector, moved back
+// onto the preview, which shows the frame as the camera delivered it (and
+// mirrored, for the front camera). Pass the boxes unmirrored.
+export function boxesOnPreview(boxes: FaceBox[], turn: QuarterTurn, mirrored: boolean): FaceBox[] {
+  return boxes
+    .map((box) => {
+      const frame = rectToFrame(box, turn);
+      const left = mirrored ? 1 - frame.left - frame.width : frame.left;
+      return {
+        ...box,
+        left: clamp01(left),
+        top: clamp01(frame.top),
+        width: Math.min(frame.width, 1),
+        height: Math.min(frame.height, 1),
       };
     })
     .sort((a, b) => a.left - b.left);

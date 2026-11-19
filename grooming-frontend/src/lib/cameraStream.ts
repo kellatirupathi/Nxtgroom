@@ -103,6 +103,66 @@ export async function tuneCameraTrack(track: TunableTrack | null | undefined): P
   await track.applyConstraints({ advanced } as MediaTrackConstraints).catch(() => {});
 }
 
+// Switching between the one-person and group screens closes one camera and
+// opens another. Stopping and restarting the camera takes a second or more
+// on a tablet (an iPad especially, and longer still if it reports the camera
+// as busy), so the closing screen parks its live stream for a moment and the
+// opening screen picks it up at once. A parked stream nobody claims is
+// stopped shortly after, so the camera light does not stay on.
+export const CAMERA_HANDOVER_MS = 2_500;
+
+type StreamLike = Pick<MediaStream, 'getTracks' | 'getVideoTracks'>;
+
+let parked: { stream: StreamLike; facing: string; timer: ReturnType<typeof setTimeout> } | null = null;
+
+function stopStream(stream: StreamLike): void {
+  stream.getTracks().forEach((track) => track.stop());
+}
+
+function isLive(stream: StreamLike): boolean {
+  const tracks = stream.getVideoTracks();
+  return tracks.length > 0 && tracks.every((track) => track.readyState === 'live');
+}
+
+export function parkCameraStream(stream: StreamLike, facing: string, holdMs = CAMERA_HANDOVER_MS): void {
+  if (parked && parked.stream !== stream) {
+    clearTimeout(parked.timer);
+    stopStream(parked.stream);
+    parked = null;
+  }
+  if (!isLive(stream)) {
+    stopStream(stream);
+    return;
+  }
+  if (parked) clearTimeout(parked.timer);
+  const timer = setTimeout(() => {
+    if (parked?.stream === stream) {
+      parked = null;
+      stopStream(stream);
+    }
+  }, holdMs);
+  parked = { stream, facing, timer };
+}
+
+export function takeParkedCameraStream<T extends StreamLike = MediaStream>(facing: string): T | null {
+  if (!parked) return null;
+  const { stream, facing: parkedFacing, timer } = parked;
+  clearTimeout(timer);
+  parked = null;
+  if (parkedFacing !== facing || !isLive(stream)) {
+    stopStream(stream);
+    return null;
+  }
+  return stream as T;
+}
+
+export function stopParkedCameraStream(): void {
+  if (!parked) return;
+  clearTimeout(parked.timer);
+  stopStream(parked.stream);
+  parked = null;
+}
+
 export interface OpenCameraOptions {
   isCancelled?: () => boolean;
   delays?: readonly number[];

@@ -10,8 +10,9 @@ import {
   type Pose,
 } from './fullBodyDetector.ts';
 import { coverSourceRect } from './cameraGeometry.ts';
-import { faceBoxesFromPoses, type BoxPose, type FaceBox } from './faceBoxes.ts';
+import { boxesOnPreview, faceBoxesFromPoses, type BoxPose, type FaceBox } from './faceBoxes.ts';
 import { assessBody, shortBodyProblem } from './bodyCompleteness.ts';
+import { drawTurned, turnedSize, uprightScore, type QuarterTurn } from './frameTurn.ts';
 
 export type GroupVerdict =
   | 'GROUP_READY'
@@ -28,6 +29,7 @@ export interface GroupReading {
   people: number;
   faces: number;
   boxes?: FaceBox[];
+  upright?: number;
 }
 
 export const GROUP_MAX_PEOPLE = 6;
@@ -176,11 +178,14 @@ export function groupFallbackDue(unusableFrames: number): boolean {
   return unusableFrames >= GROUP_FALLBACK_ATTEMPTS;
 }
 
+// `turn` turns the frame clockwise before the detector sees it, for a camera
+// whose frames arrive sideways (see frameTurn.ts). The reading describes the
+// turned, upright picture; the face boxes are moved back onto the preview.
 export async function readGroupFrame(
   detector: Detector | null,
   video: HTMLVideoElement,
   viewport?: { width: number; height: number; canvas: HTMLCanvasElement },
-  options?: { mirrored?: boolean },
+  options?: { mirrored?: boolean; turn?: QuarterTurn },
 ): Promise<GroupReading> {
   if (!detector || !video.videoWidth) {
     return { verdict: 'UNAVAILABLE', guidance: null, people: 0, faces: 0 };
@@ -188,44 +193,52 @@ export async function readGroupFrame(
   try {
     let input: HTMLVideoElement | HTMLCanvasElement = video;
     let frameHeight = video.videoHeight;
+    let turn: QuarterTurn = 0;
     if (viewport?.width && viewport.height) {
       const crop = coverSourceRect(video.videoWidth, video.videoHeight, viewport.width, viewport.height);
       const scale = Math.min(1, 480 / Math.max(crop.width, crop.height));
       const canvas = viewport.canvas;
-      canvas.width = Math.max(1, Math.round(crop.width * scale));
-      canvas.height = Math.max(1, Math.round(crop.height * scale));
+      const analysed = turnedSize({
+        width: Math.max(1, Math.round(crop.width * scale)),
+        height: Math.max(1, Math.round(crop.height * scale)),
+      }, options?.turn ?? 0);
+      canvas.width = analysed.width;
+      canvas.height = analysed.height;
       const context = canvas.getContext('2d');
       if (context) {
-        context.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+        turn = options?.turn ?? 0;
+        drawTurned(context, video, crop, turn, analysed);
         input = canvas;
         frameHeight = canvas.height;
       }
     }
     const poses = await detector.estimatePoses(input, { maxPoses: GROUP_MAX_PEOPLE + 1 });
-    const boxes = groupBoxes(poses, {
+    const upright = uprightScore(poses, KEYPOINT_CONFIDENCE);
+    const found = groupBoxes(poses, {
       frameWidth: input instanceof HTMLCanvasElement ? input.width : video.videoWidth,
       frameHeight,
-      mirrored: options?.mirrored,
+      mirrored: turn === 0 ? options?.mirrored : false,
     });
+    const boxes = turn === 0 ? found : boxesOnPreview(found, turn, Boolean(options?.mirrored));
     const reading = readGroupPoses(poses, frameHeight);
     if (reading.verdict !== 'GROUP_READY' || !(input instanceof HTMLCanvasElement)) {
-      return { ...reading, boxes };
+      return { ...reading, boxes, upright };
     }
 
     const context = input.getContext('2d', { willReadFrequently: true });
-    if (!context) return { ...reading, boxes };
+    if (!context) return { ...reading, boxes, upright };
     const quality = measureFrameQuality(
       context.getImageData(0, 0, input.width, input.height).data,
       input.width,
       input.height,
     );
     if (quality.brightness < MIN_FRAME_BRIGHTNESS) {
-      return { ...reading, boxes, verdict: 'FACES_HIDDEN', guidance: 'Move to a brighter area' };
+      return { ...reading, boxes, upright, verdict: 'FACES_HIDDEN', guidance: 'Move to a brighter area' };
     }
     if (quality.sharpness < MIN_FRAME_SHARPNESS) {
-      return { ...reading, boxes, verdict: 'FACES_HIDDEN', guidance: 'Everybody hold still' };
+      return { ...reading, boxes, upright, verdict: 'FACES_HIDDEN', guidance: 'Everybody hold still' };
     }
-    return { ...reading, boxes };
+    return { ...reading, boxes, upright };
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null, people: 0, faces: 0 };
   }

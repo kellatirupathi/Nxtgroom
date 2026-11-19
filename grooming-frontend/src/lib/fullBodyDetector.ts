@@ -13,6 +13,7 @@ export interface FrameReading {
   capturePosture?: CapturePosture;
   bodyRegions?: BodyRegions | null;
   boxes?: FaceBox[];
+  upright?: number;
 }
 
 export type WristPosition = 'RAISED' | 'LOWERED' | 'UNKNOWN';
@@ -25,7 +26,8 @@ export interface PoseSignals {
 export const KEYPOINT_CONFIDENCE = 0.35;
 
 import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
-import { faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
+import { boxesOnPreview, faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
+import { drawTurned, turnedSize, uprightScore, type QuarterTurn } from './frameTurn.ts';
 import { assessBody, describeBodyProblem } from './bodyCompleteness.ts';
 import { assessCapturePosture, type CapturePosture } from './capturePosture.ts';
 import { bodyRegionsFromKeypoints, type BodyRegions } from './bodyRegions.ts';
@@ -477,11 +479,15 @@ export function stabilizeFrameReading(
   return { reading: state.reading, candidate: next, candidateCount };
 }
 
+// `turn` turns the frame clockwise before the detector sees it, for a camera
+// whose frames arrive sideways (see frameTurn.ts). Everything the reading
+// describes is then in the turned, upright picture, except the face boxes,
+// which are moved back onto the preview as the camera delivers it.
 export async function readFrame(
   detector: Detector | null,
   video: HTMLVideoElement,
   viewport?: { width: number; height: number; canvas: HTMLCanvasElement },
-  options?: { mirrored?: boolean },
+  options?: { mirrored?: boolean; turn?: QuarterTurn },
 ): Promise<FrameReading> {
   if (!detector || !video.videoWidth) {
     return { verdict: 'UNAVAILABLE', guidance: null };
@@ -489,6 +495,7 @@ export async function readFrame(
   try {
     let input: HTMLVideoElement | HTMLCanvasElement = video;
     let frameHeight = video.videoHeight;
+    let turn: QuarterTurn = 0;
     if (viewport?.width && viewport.height) {
       const crop = coverSourceRect(
         video.videoWidth,
@@ -498,52 +505,49 @@ export async function readFrame(
       );
       const scale = Math.min(1, ANALYSIS_MAX_SIDE / Math.max(crop.width, crop.height));
       const canvas = viewport.canvas;
-      canvas.width = Math.max(1, Math.round(crop.width * scale));
-      canvas.height = Math.max(1, Math.round(crop.height * scale));
+      const analysed = turnedSize({
+        width: Math.max(1, Math.round(crop.width * scale)),
+        height: Math.max(1, Math.round(crop.height * scale)),
+      }, options?.turn ?? 0);
+      canvas.width = analysed.width;
+      canvas.height = analysed.height;
       const context = canvas.getContext('2d');
       if (context) {
-        context.drawImage(
-          video,
-          crop.x,
-          crop.y,
-          crop.width,
-          crop.height,
-          0,
-          0,
-          canvas.width,
-          canvas.height,
-        );
+        turn = options?.turn ?? 0;
+        drawTurned(context, video, crop, turn, analysed);
         input = canvas;
         frameHeight = canvas.height;
       }
     }
     const poses = await detector.estimatePoses(input, { maxPoses: 6 });
     const frameWidth = input instanceof HTMLCanvasElement ? input.width : video.videoWidth;
-    const boxes = faceBoxesFromPoses(poses, {
+    const upright = uprightScore(poses, KEYPOINT_CONFIDENCE);
+    const found = faceBoxesFromPoses(poses, {
       frameWidth,
       frameHeight,
-      mirrored: options?.mirrored,
+      mirrored: turn === 0 ? options?.mirrored : false,
       limit: 1,
       minScore: KEYPOINT_CONFIDENCE,
     });
+    const boxes = turn === 0 ? found : boxesOnPreview(found, turn, Boolean(options?.mirrored));
     const reading = readPoses(poses, frameHeight, frameWidth);
     if (reading.verdict !== 'FULL_BODY' || !(input instanceof HTMLCanvasElement)) {
-      return { ...reading, boxes };
+      return { ...reading, boxes, upright };
     }
     const context = input.getContext('2d', { willReadFrequently: true });
-    if (!context) return { ...reading, boxes };
+    if (!context) return { ...reading, boxes, upright };
     const quality = measureFrameQuality(
       context.getImageData(0, 0, input.width, input.height).data,
       input.width,
       input.height,
     );
     if (quality.brightness < MIN_FRAME_BRIGHTNESS) {
-      return { ...reading, boxes, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
+      return { ...reading, boxes, upright, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
     }
     if (quality.sharpness < MIN_FRAME_SHARPNESS) {
-      return { ...reading, boxes, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
+      return { ...reading, boxes, upright, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
     }
-    return { ...reading, boxes };
+    return { ...reading, boxes, upright };
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }

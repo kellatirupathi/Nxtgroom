@@ -2,12 +2,16 @@ import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Loader2, MapPin, UserRoundSearch } from 'lucide-react';
 import { apiFetch, ApiError } from '../api';
 import CameraCapture from './CameraCapture';
+import TurnedLayer from './TurnedLayer';
 import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation, type Fix } from '../lib/location';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
 import { BODY_REGIONS_FIELD, CAPTURE_INFO_FIELD, type CaptureDetails } from '../lib/bodyRegions';
+import type { QuarterTurn } from '../lib/frameTurn';
 
-const RESULT_VISIBLE_MS = 1_200;
+// Long enough to read the name and the message. The camera pauses meanwhile,
+// so the person who was just recorded is not photographed a second time.
+const RESULT_VISIBLE_MS = 5_000;
 
 type KioskAction = 'CHECK_IN' | 'CHECK_OUT' | 'TOO_EARLY' | 'ALREADY_DONE' | 'NOT_RECOGNISED';
 
@@ -38,6 +42,7 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [fix, setFix] = useState<Fix | null>(null);
+  const [turn, setTurn] = useState<QuarterTurn>(0);
   const resultTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const submitInFlight = useRef(false);
@@ -118,20 +123,6 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
 
   return (
     <div className={`relative w-full h-full overflow-hidden bg-black ${fullScreen ? '' : 'rounded-md'}`}>
-      <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+4rem)] z-10 flex items-center justify-center text-white">
-        <h2 className="sr-only">Attendance</h2>
-        <p className="flex items-center gap-1.5 rounded-full bg-slate-900/55 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm">
-          <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
-          {fix ? `Live location · ${describeAccuracy(fix)}` : 'Locating…'}
-        </p>
-      </div>
-
-      {error && (
-        <div role="alert" className="absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+6.5rem)] z-20 rounded-md border border-rose-200 bg-rose-50/95 p-3 text-sm font-medium text-rose-700">
-          {error}
-        </div>
-      )}
-
       <div className="absolute inset-0">
         <CameraCapture
           facing={facing}
@@ -140,11 +131,29 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
           onFlip={onFlip}
           onCapture={submit}
           onClose={onExit}
+          paused={Boolean(result) || submitting}
+          onTurn={setTurn}
         />
+      </div>
+
+      <TurnedLayer turn={turn} className="pointer-events-none z-10">
+        <div className="pointer-events-none absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+4rem)] z-10 flex items-center justify-center text-white">
+          <h2 className="sr-only">Attendance</h2>
+          <p className="flex items-center gap-1.5 rounded-full bg-slate-900/55 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm">
+            <MapPin size={14} className={fix ? 'text-emerald-400' : 'text-slate-300'} aria-hidden="true" />
+            {fix ? `Live location · ${describeAccuracy(fix)}` : 'Locating…'}
+          </p>
+        </div>
+
+        {error && (
+          <div role="alert" className="absolute inset-x-3 top-[calc(max(0.75rem,var(--inset-top))+6.5rem)] z-20 rounded-md border border-rose-200 bg-rose-50/95 p-3 text-sm font-medium text-rose-700">
+            {error}
+          </div>
+        )}
 
         {submitting && !result && (
           <div
-            className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-emerald-600/90"
+            className="pointer-events-auto absolute inset-0 flex flex-col items-center justify-center gap-3 bg-emerald-600/90"
             role="status"
           >
             <Loader2 size={44} className="animate-spin text-white" aria-hidden="true" />
@@ -154,7 +163,7 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
 
         {result && (
           <div
-            className={`absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center ${toneStyles[result.tone]}`}
+            className={`pointer-events-auto absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center ${toneStyles[result.tone]}`}
             role="status"
             aria-live="assertive"
           >
@@ -170,7 +179,7 @@ export default function KioskAttendance({ onExit, facing, onFlip }: KioskAttenda
             )}
           </div>
         )}
-      </div>
+      </TurnedLayer>
     </div>
   );
 }

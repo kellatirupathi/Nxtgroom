@@ -18,6 +18,7 @@ export interface CaptureInfo {
   still: Record<string, string | number | undefined>;
   camera?: Record<string, string | number | undefined>;
   device?: string;
+  turn?: number;
 }
 
 export interface CaptureDetails {

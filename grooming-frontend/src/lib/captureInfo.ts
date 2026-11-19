@@ -51,5 +51,6 @@ export function describeCapture(photo: CapturedPhoto, track: SettingsTrack, user
     still: { ...diagnostics.still },
     ...(camera ? { camera } : {}),
     device: deviceModel(userAgent),
+    ...(diagnostics.turn ? { turn: diagnostics.turn } : {}),
   };
 }
