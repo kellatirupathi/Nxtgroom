@@ -208,13 +208,45 @@ test("SES check-in report is concise and escapes instructor data", () => {
     checkInTime: "2026-08-14T03:30:00.000Z",
     reportUrl: "https://facultytrack.example/reports/check-in",
   });
-  assert.equal(email.subject, "Your check-in appearance report");
+  assert.equal(email.subject, "Your check-in on 14 Aug 2026 did not meet the appearance standards");
+  assert.match(email.text, /did not meet the appearance standards\./);
+  assert.match(email.text, /Check-in: 14 Aug 2026, 9:00/);
   assert.match(email.text, /Appearance status: NON-COMPLIANT/);
-  assert.match(email.text, /ID card is missing\./);
+  assert.match(email.text, /What needs attention:\nID card is missing\./);
+  assert.match(email.html, /What needs attention/);
+  assert.match(email.html, /border-left:3px solid #f59e0b/);
+  assert.match(email.text, /Please review the detail before acting on it\./);
   assert.match(email.html, /A &lt;Instructor&gt;/);
   assert.doesNotMatch(email.html, /A <Instructor>/);
   assert.match(email.text, /https:\/\/facultytrack\.example\/reports\/check-in/);
   assert.match(email.html, /View check-in report/);
+});
+
+test("a compliant check-in keeps the usual report mail", () => {
+  const email = buildEvaluationEmail({
+    instructorName: "Test Instructor",
+    overallStatus: "COMPLIANT",
+    aiSummary: "All checks passed.",
+    checkInTime: "2026-08-14T03:30:00.000Z",
+  });
+  assert.equal(email.subject, "Your check-in appearance report");
+  assert.match(email.text, /Summary: All checks passed\./);
+});
+
+test("a non-compliant checkout is one mail with both times and the failure", () => {
+  const email = buildCheckoutEmail({
+    instructorName: "Test Instructor",
+    checkInTime: "2026-08-14T03:30:00.000Z",
+    checkOutTime: "2026-08-14T11:30:00.000Z",
+    status: "NON_COMPLIANT",
+    remarks: "Sneakers instead of formal shoes.",
+    reportUrl: "https://facultytrack.example/reports/check-out",
+  });
+  assert.equal(email.subject, "Your check-out on 14 Aug 2026 did not meet the appearance standards");
+  assert.match(email.text, /Check-in: 14 Aug 2026/);
+  assert.match(email.text, /Check-out: 14 Aug 2026/);
+  assert.match(email.text, /What needs attention:\nSneakers instead of formal shoes\./);
+  assert.match(email.html, /View check-out report/);
 });
 
 test("SES checkout report includes attendance times and latest appearance status", () => {

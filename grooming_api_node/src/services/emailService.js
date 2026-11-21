@@ -24,6 +24,65 @@ function formatDateTime(value) {
   }).format(parsed);
 }
 
+function formatDate(value) {
+  const parsed = new Date(value || Date.now());
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeZone: runtimeConfig().appTimeZone,
+  }).format(parsed);
+}
+
+// One mail for a failed check: the report and the alert used to arrive
+// separately, so a non-compliant result reached the instructor twice.
+function attentionBlock(summary) {
+  return `<p style="margin:0 0 4px"><strong>What needs attention</strong></p>
+      <p style="background:#fff7ed;border-left:3px solid #f59e0b;padding:10px 14px;margin-top:0">${escapeHtml(summary)}</p>`;
+}
+
+function reportButton(reportUrl, label) {
+  return reportUrl
+    ? `<p><a href="${escapeHtml(reportUrl)}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;font-weight:bold">${escapeHtml(label)}</a></p>`
+    : "";
+}
+
+function buildNonCompliantReport({ name, eventLabel, eventDate, timeLines, summary, qualityLine, reportUrl, notice, intro }) {
+  return {
+    subject: `Your ${eventLabel} on ${eventDate} did not meet the appearance standards`,
+    text: [
+      `Hello ${name},`,
+      "",
+      intro,
+      "",
+      ...timeLines.map(([label, value]) => `${label}: ${value}`),
+      "Appearance status: NON-COMPLIANT",
+      "",
+      "What needs attention:",
+      summary,
+      ...(qualityLine ? ["", qualityLine] : []),
+      ...(reportUrl ? ["", `View ${eventLabel} report:`, reportUrl] : []),
+      "",
+      notice,
+      "",
+      "Regards,",
+      "NxtWave Administration",
+    ].join("\n"),
+    html: `
+      <p>Hello ${escapeHtml(name)},</p>
+      <p>${escapeHtml(intro)}</p>
+      <p>
+        ${timeLines.map(([label, value]) => `<strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}<br>`).join("\n        ")}
+        <strong>Appearance status:</strong> NON-COMPLIANT
+      </p>
+      ${attentionBlock(summary)}
+      ${qualityLine ? `<p>${escapeHtml(qualityLine)}</p>` : ""}
+      ${reportButton(reportUrl, `View ${eventLabel} report`)}
+      <p>${escapeHtml(notice)}</p>
+      <p>Regards,<br>NxtWave Administration</p>
+    `,
+  };
+}
+
 function displayStatus(status) {
   const normalized = String(status || "").toLowerCase();
   if (["compliant", "done", "review_required", "needs_review"].includes(normalized)) {
@@ -60,6 +119,20 @@ export function buildEvaluationEmail({
   const introduction = status === "ANALYSIS UNAVAILABLE"
     ? "Your check-in photo could not be analysed."
     : "Your check-in photo has been analysed.";
+
+  if (status === "NON-COMPLIANT") {
+    return buildNonCompliantReport({
+      name,
+      eventLabel: "check-in",
+      eventDate: formatDate(checkInTime),
+      timeLines: [["Check-in", checkIn]],
+      summary,
+      qualityLine,
+      reportUrl,
+      notice,
+      intro: "Your check-in photo has been analysed, and it did not meet the appearance standards.",
+    });
+  }
 
   return {
     subject: "Your check-in appearance report",
@@ -111,6 +184,20 @@ export function buildCheckoutEmail({
   const qualityLine = imageQuality === "RETAKE_RECOMMENDED"
     ? "Image quality: A clearer full-body photo is recommended."
     : null;
+
+  if (reportStatus === "NON-COMPLIANT") {
+    return buildNonCompliantReport({
+      name,
+      eventLabel: "check-out",
+      eventDate: formatDate(checkOutTime || checkInTime),
+      timeLines: [["Check-in", checkIn], ["Check-out", checkOut]],
+      summary,
+      qualityLine,
+      reportUrl,
+      notice,
+      intro: "Your check-out has been recorded. Your check-out photo has been analysed, and it did not meet the appearance standards.",
+    });
+  }
 
   return {
     subject: "Checkout confirmation and appearance summary",

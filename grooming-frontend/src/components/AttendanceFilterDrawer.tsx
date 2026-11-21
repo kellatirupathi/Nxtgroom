@@ -67,17 +67,25 @@ export default function AttendanceFilterDrawer({
 
   if (!open) return null;
 
+  // Opens as a dropdown under the Filters button rather than a full-height
+  // side panel. A click anywhere outside closes it; the date menu opens above
+  // it (z-[200]), so picking a date keeps it open.
   return (
-    <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-labelledby="attendance-filters-title">
+    <>
       <button
         type="button"
         aria-label="Close filters"
         tabIndex={-1}
         onClick={onClose}
-        className="absolute inset-0 h-full w-full cursor-default bg-slate-900/40"
+        className="fixed inset-0 z-[60] h-full w-full cursor-default bg-slate-900/20 sm:bg-transparent"
       />
-      <aside className="absolute inset-y-0 right-0 flex w-full max-w-sm flex-col bg-white pt-[var(--inset-top)] pb-[var(--inset-bottom)] shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+      <div
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="attendance-filters-title"
+        className="absolute left-0 top-full z-[61] mt-2 flex w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xl"
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
           <h3 id="attendance-filters-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
             <SlidersHorizontal size={18} className="text-indigo-600" aria-hidden="true" />
             Filters
@@ -93,7 +101,7 @@ export default function AttendanceFilterDrawer({
           </button>
         </div>
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+        <div className="max-h-[min(30rem,calc(100dvh-16rem))] space-y-4 overflow-y-auto px-4 py-4">
           <div>
             <p className="mb-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">Date</p>
             <DateRangeFilter preset={preset} range={range} today={today} onChange={onRangeChange} />
@@ -144,7 +152,7 @@ export default function AttendanceFilterDrawer({
           </label>
         </div>
 
-        <div className="flex items-center gap-3 border-t border-slate-200 px-5 py-4">
+        <div className="flex items-center gap-3 border-t border-slate-200 px-4 py-3">
           <button
             type="button"
             onClick={onClearAll}
@@ -160,7 +168,7 @@ export default function AttendanceFilterDrawer({
             Show {matchCount} {matchCount === 1 ? 'record' : 'records'}
           </button>
         </div>
-      </aside>
-    </div>
+      </div>
+    </>
   );
 }

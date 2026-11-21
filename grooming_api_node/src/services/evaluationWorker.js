@@ -87,6 +87,7 @@ async function sendGroomingAlerts(db, {
   checkInTime,
   eventTime = checkInTime,
   kind = "checkin",
+  instructorReportQueued = false,
 }) {
   const instructor = instructorId
     ? await db.collection("instructors").findOne({ _id: idMatch(String(instructorId)) })
@@ -112,7 +113,9 @@ async function sendGroomingAlerts(db, {
 
   const deliveries = [];
   const to = instructorEmail || instructor.email;
-  if (to) {
+  // The instructor's report mail already carries the failure in full; the
+  // separate alert goes to them only when that report is not being sent.
+  if (to && !instructorReportQueued) {
     deliveries.push({ to, role: "instructor", payload });
   }
 
@@ -591,7 +594,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
     );
     if (!attendanceUpdate.matchedCount) return false;
 
-    await enqueueNotification(db, {
+    const checkoutReportQueued = await enqueueNotification(db, {
       attendanceId: job.attendance_id,
       type: "checkout",
       toEmail: job.instructor?.email,
@@ -617,6 +620,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
           checkInTime: job.check_in_time,
           eventTime: job.check_out_time || job.check_in_time,
           kind: "checkout",
+          instructorReportQueued: checkoutReportQueued,
         });
       } catch (error) {
         console.error(`Check-out alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);
@@ -662,7 +666,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
     }
   );
   if (!attendanceUpdate.matchedCount) return false;
-  await enqueueNotification(db, {
+  const checkinReportQueued = await enqueueNotification(db, {
     attendanceId: job.attendance_id,
     type: "checkin",
     toEmail: job.instructor?.email,
@@ -686,6 +690,7 @@ async function syncStoredEvaluation(db, job, evaluation, ownedStatus) {
         summary: evaluation.ai_summary || "",
         checkInTime: job.check_in_time,
         kind: jobKind(job),
+        instructorReportQueued: checkinReportQueued,
       });
     } catch (error) {
       console.error(`Grooming alert not sent for ${job.attendance_id}: ${error?.name || "Error"}`);

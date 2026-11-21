@@ -77,10 +77,13 @@ function memoryDb(seed = {}) {
 const RPS = ["rp.one@nxtwave.in", "rp.two@nxtwave.in"];
 const INSTRUCTOR = { _id: "i1", name: "Himanshu", email: "himanshu@nxtwave.in", report_token: "tok-himanshu", gender: "MALE" };
 
-function world({ attendance = [], rpSettings = {} } = {}) {
+function world({ attendance = [], rpSettings = {}, notificationSettings = null } = {}) {
   return memoryDb({
     instructors: [INSTRUCTOR],
-    app_settings: [{ _id: "rp_recipients", emails: RPS, checkin_enabled: true, checkout_enabled: true, ...rpSettings }],
+    app_settings: [
+      { _id: "rp_recipients", emails: RPS, checkin_enabled: true, checkout_enabled: true, ...rpSettings },
+      ...(notificationSettings ? [{ _id: "notification_settings", ...notificationSettings }] : []),
+    ],
     attendance,
   });
 }
@@ -145,15 +148,20 @@ test("a compliant check-out is reported to partners as a check-out", async () =>
   assert.equal(reports[0].payload.kind, "checkout");
 });
 
-test("a non-compliant result still sends exactly the alerts it always did", async () => {
+test("a non-compliant result reaches the instructor once, through the report mail", async () => {
   const db = world({ attendance: [day("a1", "2026-09-25")] });
   await complete(db, { attendanceId: "a1" });
 
   const alerts = byPrefix(db, ":grooming-alert:checkin:");
   assert.deepEqual(
     alerts.map((job) => `${job.payload.role}:${job.to_email}`).sort(),
-    ["instructor:himanshu@nxtwave.in", ...RPS.map((rp) => `reporting_partner:${rp}`)].sort(),
+    RPS.map((rp) => `reporting_partner:${rp}`).sort(),
+    "the instructor gets no separate alert",
   );
+  const reports = db.docs("notification_jobs").filter((job) => job._id === "a1:checkin");
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].to_email, INSTRUCTOR.email);
+  assert.equal(reports[0].report.overallStatus, "NON_COMPLIANT");
   assert.equal(byPrefix(db, ":compliance-report:").length, 0, "a failure is not also reported as a pass");
   assert.equal(byPrefix(db, "escalation:").length, 0, "one failure is not an escalation");
 });
@@ -187,7 +195,26 @@ test("the third check-in day in a row escalates to every partner, listing the ru
     "Sneakers instead of formal shoes.",
   ]);
   assert.match(payload.occurrences[1].reportUrl, /\/day\/2026-09-22\/check-in$/);
-  assert.equal(byPrefix(db, "wed:grooming-alert:checkin:").length, 3);
+  assert.equal(byPrefix(db, "wed:grooming-alert:checkin:").length, RPS.length);
+});
+
+test("when check-in report mails are switched off, the instructor still gets the alert", async () => {
+  const db = world({
+    attendance: [day("a1", "2026-09-25")],
+    notificationSettings: { checkin_email_enabled: false },
+  });
+  await complete(db, { attendanceId: "a1" });
+  const alerts = byPrefix(db, ":grooming-alert:checkin:");
+  assert.ok(alerts.some((job) => job.payload.role === "instructor" && job.to_email === INSTRUCTOR.email));
+  assert.equal(db.docs("notification_jobs").length, 0);
+});
+
+test("a non-compliant check-out also reaches the instructor once", async () => {
+  const db = world({ attendance: [day("a1", "2026-09-25", { status: "compliant" })] });
+  await complete(db, { attendanceId: "a1", kind: "checkout" });
+  const alerts = byPrefix(db, ":grooming-alert:checkout:");
+  assert.equal(alerts.some((job) => job.payload.role === "instructor"), false);
+  assert.equal(db.docs("notification_jobs").filter((job) => job._id === "a1:checkout").length, 1);
 });
 
 test("a fourth day in a row sends a new escalation; a repeat of the third sends nothing", async () => {

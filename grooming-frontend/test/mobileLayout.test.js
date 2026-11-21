@@ -92,7 +92,9 @@ test('report checkpoints stack on a phone instead of scrolling a four-column tab
 });
 
 test('panels pinned to the screen edges clear the system bars in the app', () => {
-  assert.match(read('src/components/AttendanceFilterDrawer.tsx'), /<aside className="[^"]*pt-\[var\(--inset-top\)\] pb-\[var\(--inset-bottom\)\]/);
+  const filters = read('src/components/AttendanceFilterDrawer.tsx');
+  assert.match(filters, /className="absolute left-0 top-full z-\[61\]/, 'the filters open as a dropdown under the Filters button');
+  assert.doesNotMatch(filters, /<aside /, 'the filters are no longer a panel pinned to the screen edge');
   assert.match(read('src/components/Toast.tsx'), /pt-\[max\(0\.75rem,var\(--inset-top\)\)\]/);
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { History, Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download, X, ChevronRight } from 'lucide-react';
+import { Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download, X, ChevronRight } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import AttendanceFilterDrawer from './AttendanceFilterDrawer';
@@ -459,25 +459,11 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
 
   return (
     <section className="w-full flex flex-col h-full" aria-labelledby="daily-records-title" aria-busy={loading}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 md:mb-5">
-        <h2 id="daily-records-title" className="flex shrink-0 items-center gap-2 text-[22px] font-extrabold text-slate-900 lg:text-xl lg:font-bold lg:text-slate-800">
-          <History size={22} className="hidden text-indigo-600 lg:block" aria-hidden="true" />
-          <span className="lg:hidden">Records</span>
-          <span className="hidden lg:inline">Daily Attendance Records</span>
-        </h2>
-
-        <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-1">
-          {canBulkDelete && selectedIds.size > 0 && (
-            <button
-              type="button"
-              onClick={() => setConfirmBulkDelete(true)}
-              className="order-last flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/20 sm:order-none sm:h-9 sm:w-auto sm:rounded-md"
-            >
-              <Trash2 size={16} aria-hidden="true" />
-              Delete selected ({selectedIds.size})
-            </button>
-          )}
-          <span className="relative min-w-0 flex-1 sm:min-w-[10rem] sm:flex-none">
+      <h2 id="daily-records-title" className="sr-only">Daily attendance records</h2>
+      <div className="mb-4 flex items-center justify-between gap-2 md:mb-5">
+        {/* Left: search and Filters. The filters open as a dropdown under this row. */}
+        <div className="relative flex min-w-0 flex-1 items-center gap-2">
+          <span className="relative min-w-0 flex-1 sm:max-w-xs">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 sm:left-2.5" aria-hidden="true" />
             <input
               type="search"
@@ -486,7 +472,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               placeholder="Search name, institute, remarks…"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-11 w-full rounded-lg border border-slate-300 bg-white py-0 pl-9 pr-3 text-base font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:w-56 sm:rounded-md sm:pl-8 sm:text-sm"
+              className="h-11 w-full rounded-lg border border-slate-300 bg-white py-0 pl-9 pr-3 text-base font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:rounded-md sm:pl-8 sm:text-sm"
             />
           </span>
           <button
@@ -524,6 +510,43 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               <span className="hidden sm:inline">Clear</span>
             </button>
           )}
+
+          <AttendanceFilterDrawer
+            open={filtersOpen}
+            onClose={closeFilters}
+            preset={preset}
+            range={range}
+            today={today}
+            onRangeChange={handleRangeChange}
+            college={collegeFilter}
+            colleges={colleges}
+            onCollegeChange={setCollegeFilter}
+            role={roleFilter}
+            roles={roles}
+            onRoleChange={setRoleFilter}
+            status={statusFilter}
+            onStatusChange={setStatusFilter}
+            escalation={escalationFilter}
+            onEscalationChange={setEscalationFilter}
+            onClearAll={clearAllFilters}
+            matchCount={filteredRecords.length}
+          />
+        </div>
+
+        {/* Right: bulk delete (when rows are selected) and Export. */}
+        <div className="flex shrink-0 items-center gap-2">
+          {canBulkDelete && selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmBulkDelete(true)}
+              aria-label={`Delete selected (${selectedIds.size})`}
+              className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 focus:outline-none focus:ring-2 focus:ring-rose-500/20 sm:h-9 sm:rounded-md"
+            >
+              <Trash2 size={16} aria-hidden="true" />
+              <span className="sm:hidden">{selectedIds.size}</span>
+              <span className="hidden sm:inline">Delete selected ({selectedIds.size})</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -543,27 +566,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
           </button>
         </div>
       </div>
-
-      <AttendanceFilterDrawer
-        open={filtersOpen}
-        onClose={closeFilters}
-        preset={preset}
-        range={range}
-        today={today}
-        onRangeChange={handleRangeChange}
-        college={collegeFilter}
-        colleges={colleges}
-        onCollegeChange={setCollegeFilter}
-        role={roleFilter}
-        roles={roles}
-        onRoleChange={setRoleFilter}
-        status={statusFilter}
-        onStatusChange={setStatusFilter}
-        escalation={escalationFilter}
-        onEscalationChange={setEscalationFilter}
-        onClearAll={clearAllFilters}
-        matchCount={filteredRecords.length}
-      />
 
       {error && <div role="alert" className="mb-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-700">{error}</div>}
 
