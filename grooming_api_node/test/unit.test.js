@@ -37,7 +37,8 @@ test("trusted proxy hops default to one and reject out-of-range values", () => {
 test("production configuration fails closed when secrets are missing", () => {
   process.env.NODE_ENV = "production";
   for (const name of [
-    "MONGODB_URI", "DB_NAME", "GEMINI_API_KEY", "GEMINI_MODEL", "SECRET_KEY",
+    "DYNAMODB_REGION", "DYNAMODB_ACCESS_KEY_ID", "DYNAMODB_SECRET_ACCESS_KEY",
+    "GEMINI_API_KEY", "GEMINI_MODEL", "SECRET_KEY",
     "JWT_EXPIRE_MINUTES", "JWT_ISSUER", "JWT_AUDIENCE", "ADMIN_EMAIL",
     "ADMIN_PASSWORD", "ADMIN_PASSWORD_VERSION", "CORS_ORIGINS", "AWS_REGION",
     "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SES_FROM_EMAIL", "APP_TIME_ZONE",
@@ -55,8 +56,9 @@ test("production configuration fails closed when secrets are missing", () => {
 test("production configuration accepts an exact secure contract", () => {
   Object.assign(process.env, {
     NODE_ENV: "production",
-    MONGODB_URI: "mongodb+srv://db.example.invalid/grooming_standards",
-    DB_NAME: "grooming_standards",
+    DYNAMODB_REGION: "ap-south-1",
+    DYNAMODB_ACCESS_KEY_ID: "test-only-dynamodb-key",
+    DYNAMODB_SECRET_ACCESS_KEY: "test-only-dynamodb-secret",
     GEMINI_API_KEY: "test-only-gemini-key",
     GEMINI_MODEL: "gemini-2.5-flash-lite",
     GEMINI_TIMEOUT_MS: "120000",
@@ -107,11 +109,12 @@ test("production configuration accepts an exact secure contract", () => {
   process.env.CORS_ORIGINS = ",,,";
   assert.throws(() => validateEnvironment(), /at least one exact HTTPS origin/);
   process.env.CORS_ORIGINS = "https://facultytrack.example.com";
-  process.env.MONGODB_URI = "mongodb://db.example.invalid:27017/grooming_standards";
-  assert.throws(() => validateEnvironment(), /must explicitly set tls=true/);
-  process.env.MONGODB_URI = "mongodb+srv://db.example.invalid/grooming_standards?tls=false";
-  assert.throws(() => validateEnvironment(), /cannot disable TLS/);
-  process.env.MONGODB_URI = "mongodb+srv://db.example.invalid/grooming_standards";
+  delete process.env.DYNAMODB_SECRET_ACCESS_KEY;
+  assert.throws(() => validateEnvironment(), /DYNAMODB_ACCESS_KEY_ID and DYNAMODB_SECRET_ACCESS_KEY are required/);
+  process.env.DYNAMODB_SECRET_ACCESS_KEY = "test-only-dynamodb-secret";
+  delete process.env.DYNAMODB_REGION;
+  assert.throws(() => validateEnvironment(), /DYNAMODB_REGION is required/);
+  process.env.DYNAMODB_REGION = "ap-south-1";
   process.env.SECRET_KEY = "replace-with-at-least-32-random-characters";
   assert.throws(() => validateEnvironment(), /SECRET_KEY must be a unique secret/);
   process.env.SECRET_KEY = "x".repeat(64);
@@ -119,7 +122,7 @@ test("production configuration accepts an exact secure contract", () => {
   assert.throws(() => validateEnvironment(), /ADMIN_PASSWORD must be at least 12 characters/);
   process.env.ADMIN_PASSWORD = "test-only-password-123";
   for (const name of [
-    "DB_NAME", "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES",
+    "GEMINI_MODEL", "GEMINI_TIMEOUT_MS", "GEMINI_MAX_RETRIES",
     "GEMINI_EXPLICIT_CACHE", "GEMINI_CACHE_TTL_SECONDS",
     "EVALUATION_POLL_MS", "EVALUATION_LEASE_MS", "EVALUATION_MAX_ATTEMPTS",
     "EVALUATION_CONCURRENCY", "CHECKIN_CONCURRENCY_LIMIT", "JWT_EXPIRE_MINUTES",
@@ -128,7 +131,6 @@ test("production configuration accepts an exact secure contract", () => {
     "APP_TIME_ZONE", "TIMEZONE_OFFSET_MINUTES",
   ]) delete process.env[name];
   const compact = validateEnvironment();
-  assert.equal(compact.dbName, "grooming_standards");
   assert.equal(compact.geminiModel, "gemini-2.5-flash-lite");
   assert.equal(compact.geminiExplicitCache, true);
   assert.equal(compact.geminiCacheTtlSeconds, 3600);
@@ -311,7 +313,7 @@ test("emailed links cannot be built from a localhost origin in production", () =
     process.env.NODE_ENV = "production";
     process.env.APP_URL = origins.split(",")[0];
     Object.assign(process.env, {
-      PORT: "8000", MONGODB_URI: "mongodb+srv://u:p@h/?appName=x", DB_NAME: "d",
+      PORT: "8000", DYNAMODB_REGION: "ap-south-1", DYNAMODB_ACCESS_KEY_ID: "k", DYNAMODB_SECRET_ACCESS_KEY: "s",
       SECRET_KEY: "x".repeat(48), JWT_EXPIRE_MINUTES: "480",
       JWT_ISSUER: "i", JWT_AUDIENCE: "a",
       ADMIN_EMAIL: "admin@nxtwave.com", ADMIN_PASSWORD: "Faculty@2026!Track",

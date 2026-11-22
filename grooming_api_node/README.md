@@ -5,7 +5,7 @@ evaluation, and Amazon SES check-in/checkout notifications.
 
 ## Local development
 
-Prerequisites: Node.js 24, npm 11, MongoDB, a Gemini API key, and (to test
+Prerequisites: Node.js 24, npm 11, DynamoDB (or DYNAMODB_ENDPOINT=memory locally), a Gemini API key, and (to test
 email delivery) an Amazon SES identity.
 
 ```powershell
@@ -35,7 +35,7 @@ documents.
 Health endpoints:
 
 - `GET /health/live` confirms that the process is running.
-- `GET /health/ready` confirms MongoDB connectivity, worker-loop progress, and
+- `GET /health/ready` confirms DynamoDB connectivity, worker-loop progress, and
   that no durable queue is approaching its 24-hour privacy deadline.
 - `GET /health` is retained as the readiness-compatible health endpoint.
 
@@ -50,9 +50,9 @@ worker readiness. The image does not bake
 
 Deploy the API as a continuously running container (on Lightsail,
 `docker-compose.yml` restarts it automatically). The in-process evaluation and
-email workers stop whenever the container stops. Photos waiting for analysis and notification jobs are stored in MongoDB;
+email workers stop whenever the container stops. Photos waiting for analysis and notification jobs are stored in DynamoDB;
 no persistent filesystem volume is required.
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for the exact AWS Lightsail, Vercel, MongoDB,
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for the exact AWS Lightsail, Vercel, DynamoDB,
 Gemini, and Amazon SES settings and the complete production environment
 contract.

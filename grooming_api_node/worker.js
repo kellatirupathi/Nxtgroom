@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { closeMongoConnection, connectToMongo } from "./src/config/db.js";
+import { closeDatabaseConnection, connectToDatabase } from "./src/config/db.js";
 import { validateEnvironment } from "./src/config/env.js";
 import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
@@ -11,8 +11,8 @@ async function startWorkers() {
   if (config.processRole !== "worker") {
     throw new Error("worker.js requires PROCESS_ROLE=worker");
   }
-  const db = await connectToMongo();
-  if (!db) throw new Error("MongoDB is required to start workers");
+  const db = await connectToDatabase();
+  if (!db) throw new Error("The database is required to start workers");
   const workers = [
     startEvaluationWorker(db),
     startNotificationWorker(db),
@@ -32,7 +32,7 @@ async function startWorkers() {
     }, 20_000);
     forceExit.unref();
     await Promise.allSettled(workers.map((worker) => worker.stop()));
-    await closeMongoConnection();
+    await closeDatabaseConnection();
     clearTimeout(forceExit);
   };
   const fatalShutdown = (error) => {

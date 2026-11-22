@@ -50,7 +50,7 @@ and management.
 
 | Choice | Why |
 |---|---|
-| **Queues stored in MongoDB** (`evaluation_jobs`, `notification_jobs`, `mail_jobs`) | Work survives restarts. Each job has a lease, retries and a fixed ID, so nothing is sent twice. |
+| **Queues stored in DynamoDB** (`evaluation_jobs`, `notification_jobs`, `mail_jobs`) | Work survives restarts. Each job has a lease, retries and a fixed ID, so nothing is sent twice. |
 | **API and workers in one process** | Simple to run at today's scale. `PROCESS_ROLE=api` / `worker` can split them later. |
 | **The kiosk app loads the live website** | Web changes reach every tablet without publishing a new APK. |
 | **Photos in R2, served through short-lived signed links** | Cheap storage; nobody can browse photos without a link the server issues. |
@@ -168,7 +168,7 @@ reloaded, bookmarked or shared.
 | Kiosk app | Capacitor 8 Android shell that loads the live site |
 | On-device vision | TensorFlow.js pose detection (full body & posture) |
 | API | Node.js 24, Express 4, zod validation |
-| Database | MongoDB 6 driver (Atlas) |
+| Database | Amazon DynamoDB (one table per collection, through `src/docdb`) |
 | AI | Google Gemini 2.5 Flash-Lite, structured JSON output, prompt caching |
 | Faces | AWS Rekognition |
 | Images | sharp (server), canvas (device) |
@@ -233,7 +233,7 @@ Nxtgroom/
 │   ├── server.js               App setup, security, routers, workers
 │   ├── src/routes/             auth · attendance · instructors · admin · dashboard · reports
 │   ├── src/services/           AI engine, workers, emails, reports, sync, holidays, audit log
-│   ├── src/stores/             Settings, evaluations, delivery runs (MongoDB / DynamoDB)
+│   ├── src/stores/             Settings, evaluations, delivery runs
 │   ├── src/prompts.js          Grading instructions for Gemini
 │   ├── src/checkpoints.js      Checkpoint tables for men and women
 │   └── test/                   Backend tests (node --test)

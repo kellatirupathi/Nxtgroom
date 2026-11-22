@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ColumnHeader, { EMPTY_RANGE, inRange, rangeActive, RangeFilter, TextFilter, type NumberRange } from './ColumnHeader';
+import { textMatches } from '../lib/tableSort';
 import {
-  ArrowDown,
-  ArrowUp,
   ArrowUpDown,
   ChartColumnBig,
   ChevronLeft,
   Plus,
   TriangleAlert,
+  X,
 } from 'lucide-react';
 import { apiFetch } from '../api';
 import DateRangeFilter from './DateRangeFilter';
@@ -44,6 +45,30 @@ const INSTITUTE_COLUMNS: { key: InstituteSortKey; label: string; numeric?: boole
   { key: 'enrolled_percent', label: 'Faces enrolled', numeric: true },
 ];
 
+type NumericKey = Exclude<InstituteSortKey, 'name'>;
+
+interface InstituteFilters {
+  name: string;
+  ranges: Record<NumericKey, NumberRange>;
+}
+
+const NO_INSTITUTE_FILTERS: InstituteFilters = {
+  name: '',
+  ranges: {
+    present_percent: EMPTY_RANGE,
+    compliance_percent: EMPTY_RANGE,
+    non_compliant: EMPTY_RANGE,
+    enrolled_percent: EMPTY_RANGE,
+  },
+};
+
+const RANGE_UNITS: Record<NumericKey, string | undefined> = {
+  present_percent: '%',
+  compliance_percent: '%',
+  non_compliant: undefined,
+  enrolled_percent: '%',
+};
+
 const MOBILE_SORTS: { value: string; label: string; sort: InstituteSort }[] = [
   { value: 'compliance_asc', label: 'Lowest compliance', sort: { key: 'compliance_percent', direction: 1 } },
   { value: 'non_compliant_desc', label: 'Most non-compliant', sort: { key: 'non_compliant', direction: -1 } },
@@ -75,6 +100,7 @@ export default function InstituteAnalytics() {
     else closeChildPath(currentPathWith({}).replace(/^\/institutes\/new(?=[?#]|$)/, '/institutes'));
   };
   const [reloadKey, setReloadKey] = useState(0);
+  const [filters, setFilters] = useState<InstituteFilters>(NO_INSTITUTE_FILTERS);
   const hasResult = useRef(false);
 
   useEffect(() => {
@@ -151,6 +177,33 @@ export default function InstituteAnalytics() {
 
   const workingDays = result?.working_days ?? 0;
   const rows = useMemo(() => sortInstitutes(result?.institutes ?? [], sort), [result, sort]);
+  const filtersActive = Boolean(filters.name.trim())
+    || (Object.values(filters.ranges) as NumberRange[]).some(rangeActive);
+  const tableRows = rows.filter((row) => (
+    textMatches(row.name, filters.name)
+    && (Object.keys(filters.ranges) as NumericKey[]).every((key) => inRange(row[key] as number | null | undefined, filters.ranges[key]))
+  ));
+  const columnFilter = (key: InstituteSortKey) => {
+    if (key === 'name') {
+      return {
+        active: Boolean(filters.name.trim()),
+        render: (close: () => void) => (
+          <TextFilter value={filters.name} onChange={(name) => setFilters((current) => ({ ...current, name }))} close={close} placeholder="Institute contains…" />
+        ),
+      };
+    }
+    return {
+      active: rangeActive(filters.ranges[key]),
+      render: (close: () => void) => (
+        <RangeFilter
+          value={filters.ranges[key]}
+          unit={RANGE_UNITS[key]}
+          onChange={(range) => setFilters((current) => ({ ...current, ranges: { ...current.ranges, [key]: range } }))}
+          close={close}
+        />
+      ),
+    };
+  };
   const toggle = (key: InstituteSortKey) => {
     setSort((current) => (
       current.key === key
@@ -184,6 +237,16 @@ export default function InstituteAnalytics() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={() => setFilters(NO_INSTITUTE_FILTERS)}
+              className="hidden h-9 items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 md:flex"
+            >
+              <X size={16} aria-hidden="true" />
+              Clear filters
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -283,7 +346,7 @@ export default function InstituteAnalytics() {
                 <tr style={{ height: INSTITUTE_HEADER_HEIGHT }}>
                   {INSTITUTE_COLUMNS.map((column) => {
                     const active = sort.key === column.key;
-                    const SortIcon = active ? (sort.direction === 1 ? ArrowUp : ArrowDown) : ArrowUpDown;
+                    const filter = columnFilter(column.key);
                     return (
                       <th
                         key={column.key}
@@ -291,21 +354,27 @@ export default function InstituteAnalytics() {
                         aria-sort={active ? (sort.direction === 1 ? 'ascending' : 'descending') : 'none'}
                         className={`sticky top-0 z-10 bg-slate-50 px-3 text-xs first:pl-4 last:pr-4 font-bold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226_232_240)] ${column.numeric ? 'text-right' : ''}`}
                       >
-                        <button
-                          type="button"
-                          onClick={() => toggle(column.key)}
-                          className={`inline-flex items-center gap-1 whitespace-nowrap uppercase tracking-wider rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${active ? 'text-indigo-700' : 'hover:text-slate-700'}`}
-                        >
-                          {column.label}
-                          <SortIcon size={12} aria-hidden="true" />
-                        </button>
+                        <ColumnHeader
+                          label={column.label}
+                          sortKey={column.key}
+                          sort={{ key: sort.key, direction: sort.direction === 1 ? 'asc' : 'desc' }}
+                          onSort={() => toggle(column.key)}
+                          filterActive={filter.active}
+                          filter={filter.render}
+                          align={column.numeric ? 'right' : 'left'}
+                        />
                       </th>
                     );
                   })}
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, index) => {
+                {tableRows.length === 0 && (
+                  <tr>
+                    <td colSpan={INSTITUTE_COLUMNS.length} className="p-8 text-center text-sm text-slate-400">No institutes match these filters.</td>
+                  </tr>
+                )}
+                {tableRows.map((row, index) => {
                   const cell = `px-3 first:pl-4 last:pr-4 whitespace-nowrap ${index === 0 ? '' : 'shadow-[inset_0_1px_0_0_rgb(241_245_249)]'}`;
                   return (
                     <tr key={row.college_id} style={{ height: INSTITUTE_ROW_HEIGHT }} className="hover:bg-slate-50">

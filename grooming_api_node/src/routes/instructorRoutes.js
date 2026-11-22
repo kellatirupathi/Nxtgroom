@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import { withMongoTransaction } from "../config/db.js";
+import { withTransaction } from "../config/db.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin, ROLES } from "../middleware/auth.js";
 import { asyncRoute, createDocument, dateBoundsInTimeZone, parsePagination, serializeDocument } from "../utils.js";
 import { runtimeConfig } from "../config/env.js";
@@ -154,7 +154,7 @@ async function newInstructorUserId(db, session) {
 export async function createInstructorGuarded(
   db,
   input,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const college = await db.collection("colleges").findOne(
@@ -201,7 +201,7 @@ export async function updateInstructorGuarded(
   db,
   instructorId,
   input,
-  runTransaction = withMongoTransaction,
+  runTransaction = withTransaction,
   { allowMoveWhileCheckedIn = false } = {}
 ) {
   return runTransaction(async (session) => {
@@ -268,7 +268,7 @@ export async function updateInstructorGuarded(
 export async function deleteInstructorGuarded(
   db,
   instructorId,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const existing = await db.collection("instructors").findOne(
@@ -371,7 +371,7 @@ instructorRouter.post(
         database,
         instructorId,
         fields,
-        withMongoTransaction,
+        withTransaction,
         { allowMoveWhileCheckedIn },
       ),
     });
@@ -483,7 +483,7 @@ instructorRouter.put(
         db,
         req.params.instructorId,
         req.validatedBody,
-        withMongoTransaction,
+        withTransaction,
         { allowMoveWhileCheckedIn }
       );
     } catch (error) {

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import multer from "multer";
-import { withMongoTransaction } from "../config/db.js";
+import { withTransaction } from "../config/db.js";
 import { runtimeConfig } from "../config/env.js";
 import { idMatch, instructorScope, isElevated, requireSuperAdmin } from "../middleware/auth.js";
 import { validateImageUpload } from "../imageValidation.js";
@@ -330,7 +330,7 @@ export async function commitGuardedCheckIn(
     captureInfo = null,
     now = new Date(),
   },
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const instructor = await db.collection("instructors").findOne(

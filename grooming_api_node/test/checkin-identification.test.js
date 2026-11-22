@@ -17,7 +17,6 @@ const environment = {
   R2_BUCKET: "test-only-bucket",
   R2_ACCESS_KEY_ID: "test-only",
   R2_SECRET_ACCESS_KEY: "test-only",
-  SETTINGS_STORE: "mongo",
 };
 const original = {};
 let photo;

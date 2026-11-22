@@ -25,7 +25,7 @@ test('Daily Records: every column width adds up to the table width, on phones an
   assert.equal(widths.length, 13);
   const compact = widths.reduce((sum, [small]) => sum + small, 0);
   const wide = widths.reduce((sum, [, large]) => sum + large, 0);
-  assert.equal(wide, 2110);
+  assert.equal(wide, 2200, 'desktop columns are wider so the sort and filter icons fit beside each label');
   assert.match(table, /const SELECT_COLUMN_WIDTH = 'w-10 lg:w-12';/);
   assert.match(table, new RegExp(`withSelect: 'w-\\[${compact + 40}px\\] lg:w-\\[${wide + 48}px\\]'`));
   assert.match(table, new RegExp(`withoutSelect: 'w-\\[${compact}px\\] lg:w-\\[${wide}px\\]'`));

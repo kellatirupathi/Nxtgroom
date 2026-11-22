@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Search, MapPin, CheckCircle2, CircleAlert, XCircle, Clock, TriangleAlert, FileText, Image as ImageIcon, LogOut, Trash2, SlidersHorizontal, Download, X, ChevronRight } from 'lucide-react';
 import { apiFetchAllPages, apiJson } from '../api';
 import PhotoViewer from './PhotoViewer';
 import AttendanceFilterDrawer from './AttendanceFilterDrawer';
+import ColumnHeader, { OptionsFilter, TextFilter } from './ColumnHeader';
+import DateRangeFilter from './DateRangeFilter';
+import { nextColumnSort, sortRows, textMatches, timeValue, type ColumnSort } from '../lib/tableSort';
 import { downloadAttendanceCsv } from '../attendanceExport';
 import ConfirmDialog from './ConfirmDialog';
 import { useToast } from './useToast';
@@ -15,6 +18,8 @@ import {
   type DatePreset,
   type DateRange,
   type EscalationFilter,
+  ESCALATION_FILTER_OPTIONS,
+  STATUS_FILTER_OPTIONS,
   escalationLabel,
   filterAttendanceRecords,
   loadRecordsFilters,
@@ -169,17 +174,26 @@ function MobileRecordItem({
   );
 }
 
+const ATTIRE_LABELS: Record<string, string> = {
+  FORMAL: 'Formal',
+  SAREE: 'Saree',
+  KURTI_WITH_DUPATTA: 'Kurti + Dupatta',
+  ABAYA: 'Abaya',
+  KURTA_PAJAMA: 'Kurta + Payjama',
+};
+
+// key: what the header sorts and filters by; columns without one are plain.
 const RECORD_COLUMNS = [
-  { label: 'Instructor Name', width: 'w-[160px] lg:w-[200px]' },
-  { label: 'Role', width: 'w-[130px] lg:w-[150px]' },
-  { label: 'Institute', width: 'w-[140px] lg:w-[160px]' },
-  { label: 'Date', width: 'w-[122px] lg:w-[130px]' },
-  { label: 'Check-In', width: 'w-[96px] lg:w-[110px]' },
-  { label: 'Check-Out', width: 'w-[104px] lg:w-[110px]' },
+  { label: 'Instructor Name', key: 'name', width: 'w-[160px] lg:w-[220px]' },
+  { label: 'Role', key: 'role', width: 'w-[130px] lg:w-[160px]' },
+  { label: 'Institute', key: 'institute', width: 'w-[140px] lg:w-[170px]' },
+  { label: 'Date', key: 'date', width: 'w-[122px] lg:w-[140px]' },
+  { label: 'Check-In', key: 'checkin', width: 'w-[96px] lg:w-[120px]' },
+  { label: 'Check-Out', key: 'checkout', width: 'w-[104px] lg:w-[130px]' },
   { label: 'Coordinates', width: 'w-[176px] lg:w-[190px]' },
-  { label: 'Status', width: 'w-[136px] lg:w-[150px]' },
-  { label: 'Escalation', width: 'w-[210px] lg:w-[230px]' },
-  { label: 'Attire', width: 'w-[150px] lg:w-[170px]' },
+  { label: 'Status', key: 'status', width: 'w-[136px] lg:w-[160px]' },
+  { label: 'Escalation', key: 'escalation', width: 'w-[210px] lg:w-[230px]' },
+  { label: 'Attire', key: 'attire', width: 'w-[150px] lg:w-[170px]' },
   { label: 'Photo', width: 'w-[84px] lg:w-[90px]' },
   { label: 'Report', width: 'w-[92px] lg:w-[100px]' },
   { label: 'Remark', width: 'w-[260px] lg:w-[320px]' },
@@ -188,8 +202,8 @@ const RECORD_COLUMNS = [
 const SELECT_COLUMN_WIDTH = 'w-10 lg:w-12';
 
 const RECORD_TABLE_WIDTH = {
-  withSelect: 'w-[1900px] lg:w-[2158px]',
-  withoutSelect: 'w-[1860px] lg:w-[2110px]',
+  withSelect: 'w-[1900px] lg:w-[2248px]',
+  withoutSelect: 'w-[1860px] lg:w-[2200px]',
 } as const;
 
 const HEAD_CELL = 'px-3 py-3 lg:p-4';
@@ -217,6 +231,9 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
   const [escalationFilter, setEscalationFilter] = useState<EscalationFilter>(savedFilters.escalation);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [search, setSearch] = useState(savedFilters.search);
+  const [nameFilter, setNameFilter] = useState('');
+  const [attireFilter, setAttireFilter] = useState('');
+  const [sort, setSort] = useState<ColumnSort | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -332,15 +349,41 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     () => uniqueRecordValues(records, 'college_name', collegeFilter),
     [records, collegeFilter],
   );
+  const attireOptions = useMemo(
+    () => [...new Set(records.map((record) => record.attire_type).filter((value): value is string => Boolean(value)))]
+      .map((value) => ({ value, label: ATTIRE_LABELS[value] || value }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+    [records],
+  );
   const filteredRecords = useMemo(
-    () => filterAttendanceRecords(records, {
-      search,
-      role: roleFilter,
-      college: collegeFilter,
-      status: statusFilter,
-      escalation: escalationFilter,
-    }),
-    [records, search, roleFilter, collegeFilter, statusFilter, escalationFilter],
+    () => sortRows(
+      filterAttendanceRecords(records, {
+        search,
+        role: roleFilter,
+        college: collegeFilter,
+        status: statusFilter,
+        escalation: escalationFilter,
+      }).filter((record) => (
+        textMatches(record.instructor_name, nameFilter)
+        && (!attireFilter || record.attire_type === attireFilter)
+      )),
+      sort,
+      (record, key) => {
+        switch (key) {
+          case 'name': return record.instructor_name;
+          case 'role': return record.instructor_role;
+          case 'institute': return record.college_name;
+          case 'date': return timeValue(record.date || record.check_in_time);
+          case 'checkin': return timeValue(record.check_in_time);
+          case 'checkout': return timeValue(record.check_out_time);
+          case 'status': return normalizeAttendanceStatus(record.status);
+          case 'escalation': return record.escalation?.count ?? null;
+          case 'attire': return record.attire_type ? ATTIRE_LABELS[record.attire_type] || record.attire_type : null;
+          default: return null;
+        }
+      },
+    ),
+    [records, search, roleFilter, collegeFilter, statusFilter, escalationFilter, nameFilter, attireFilter, sort],
   );
   const statusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -383,6 +426,55 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     </tr>
   );
 
+  // The filter each column header opens. These are the same filters the phone
+  // layout reaches through its Filters panel, so both stay in step.
+  const columnFilter = (key: string): { active: boolean; render: (close: () => void) => ReactNode } | null => {
+    switch (key) {
+      case 'name':
+        return {
+          active: Boolean(nameFilter.trim()),
+          render: (close) => <TextFilter value={nameFilter} onChange={setNameFilter} close={close} placeholder="Name contains…" />,
+        };
+      case 'role':
+        return {
+          active: Boolean(roleFilter),
+          render: (close) => <OptionsFilter value={roleFilter} options={roles.map((value) => ({ value, label: value }))} onChange={setRoleFilter} close={close} allLabel="All roles" />,
+        };
+      case 'institute':
+        return {
+          active: Boolean(collegeFilter),
+          render: (close) => <OptionsFilter value={collegeFilter} options={colleges.map((value) => ({ value, label: value }))} onChange={setCollegeFilter} close={close} allLabel="All institutes" />,
+        };
+      case 'date':
+        return {
+          active: preset !== 'today',
+          render: () => (
+            <div className="flex flex-col gap-2 p-1">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Show records for</p>
+              <DateRangeFilter preset={preset} range={range} today={today} onChange={handleRangeChange} />
+            </div>
+          ),
+        };
+      case 'status':
+        return {
+          active: Boolean(statusFilter),
+          render: (close) => <OptionsFilter value={statusFilter} options={STATUS_FILTER_OPTIONS} onChange={setStatusFilter} close={close} allLabel="All statuses" />,
+        };
+      case 'escalation':
+        return {
+          active: Boolean(escalationFilter),
+          render: (close) => <OptionsFilter value={escalationFilter} options={ESCALATION_FILTER_OPTIONS} onChange={setEscalationFilter} close={close} allLabel="All instructors" />,
+        };
+      case 'attire':
+        return {
+          active: Boolean(attireFilter),
+          render: (close) => <OptionsFilter value={attireFilter} options={attireOptions} onChange={setAttireFilter} close={close} allLabel="All attire" />,
+        };
+      default:
+        return null;
+    }
+  };
+
   const handleRangeChange = (nextPreset: DatePreset, nextRange: DateRange) => {
     setSelectedIds(new Set());
     setRecords([]);
@@ -395,7 +487,9 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     + (collegeFilter ? 1 : 0)
     + (roleFilter ? 1 : 0)
     + (statusFilter ? 1 : 0)
-    + (escalationFilter ? 1 : 0);
+    + (escalationFilter ? 1 : 0)
+    + (nameFilter.trim() ? 1 : 0)
+    + (attireFilter ? 1 : 0);
 
   const closeFilters = useCallback(() => setFiltersOpen(false), []);
 
@@ -404,6 +498,8 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
     setRoleFilter('');
     setStatusFilter('');
     setEscalationFilter('');
+    setNameFilter('');
+    setAttireFilter('');
     if (preset !== 'today') handleRangeChange('today', rangeForPreset('today', today));
   };
 
@@ -481,7 +577,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             aria-haspopup="dialog"
             aria-expanded={filtersOpen}
             aria-label={activeFilterCount ? `Filters, ${activeFilterCount} active` : 'Filters'}
-            className={`relative flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:justify-start sm:rounded-md ${
+            className={`relative flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:justify-start sm:rounded-md lg:hidden ${
               activeFilterCount
                 ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
@@ -648,11 +744,28 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
                     />
                   </th>
                 )}
-                {RECORD_COLUMNS.map((column, index) => (
-                  <th key={column.label} className={`${HEAD_CELL} ${column.width} ${index === 0 ? PINNED_HEAD : ''}`}>
-                    {column.label}
-                  </th>
-                ))}
+                {RECORD_COLUMNS.map((column, index) => {
+                  const key = 'key' in column ? column.key : undefined;
+                  const filter = key ? columnFilter(key) : null;
+                  const sorted = Boolean(key) && sort?.key === key;
+                  return (
+                    <th
+                      key={column.label}
+                      scope="col"
+                      aria-sort={sorted ? (sort?.direction === 'asc' ? 'ascending' : 'descending') : undefined}
+                      className={`${HEAD_CELL} ${column.width} ${index === 0 ? PINNED_HEAD : ''}`}
+                    >
+                      <ColumnHeader
+                        label={column.label}
+                        sortKey={key}
+                        sort={sort}
+                        onSort={(nextKey) => setSort((current) => nextColumnSort(current, nextKey))}
+                        filterActive={filter?.active}
+                        filter={filter?.render}
+                      />
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">

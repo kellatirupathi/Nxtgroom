@@ -35,7 +35,7 @@ import {
 } from "../services/passwordResetService.js";
 import { enqueueMailJob } from "../services/mailWorker.js";
 import { sealSecret } from "../services/secretBox.js";
-import { withMongoTransaction } from "../config/db.js";
+import { withTransaction } from "../config/db.js";
 import rateLimit from "express-rate-limit";
 
 const googleLoginLimiter = rateLimit({
@@ -259,7 +259,7 @@ authRouter.post(
 
     const db = req.app.locals.db;
     const passwordHash = await getPasswordHash(newPassword);
-    const outcome = await withMongoTransaction(async (session) => {
+    const outcome = await withTransaction(async (session) => {
       const consumed = await consumeResetToken(db, token, { session });
       if (consumed.error) return consumed;
       const user = await db.collection("users").findOne(

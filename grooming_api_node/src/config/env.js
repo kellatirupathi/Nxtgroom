@@ -60,8 +60,6 @@ export function runtimeConfig() {
     nodeEnv: process.env.NODE_ENV || "development",
     port: parseInteger("PORT", 8000, { min: 1, max: 65535 }),
     trustProxyHops: parseInteger("TRUST_PROXY_HOPS", 1, { min: 0, max: 5 }),
-    mongoUri: process.env.MONGODB_URI || "",
-    dbName: process.env.DB_NAME || "grooming_standards",
     jwtSecret: process.env.SECRET_KEY || DEV_JWT_SECRET,
     jwtExpiresMinutes: parseInteger("JWT_EXPIRE_MINUTES", JWT_ONE_YEAR_MINUTES, { min: 5, max: JWT_ONE_YEAR_MINUTES }),
     jwtIssuer: process.env.JWT_ISSUER || "facultytrack-api",
@@ -124,13 +122,12 @@ export function validateEnvironment() {
   if (!["development", "test", "production"].includes(config.nodeEnv)) {
     throw new Error("NODE_ENV must be development, test, or production");
   }
-  const dynamoErrors = dynamoConfigurationErrors();
-  if (dynamoErrors.length) throw new Error(dynamoErrors.join("; "));
   if (!isProduction()) return config;
 
-  const errors = [];
+  // The database: a DynamoDB region and access key (an in-memory store is
+  // refused in production when the connection is made).
+  const errors = [...dynamoConfigurationErrors()];
   const required = [
-    "MONGODB_URI",
     "GEMINI_API_KEY",
     "SECRET_KEY",
     "ADMIN_EMAIL",
@@ -205,27 +202,6 @@ export function validateEnvironment() {
       }
     } catch {
       errors.push(`Production CORS origin is invalid: ${origin}`);
-    }
-  }
-  if (config.mongoUri && !/^mongodb(?:\+srv)?:\/\//.test(config.mongoUri)) {
-    errors.push("MONGODB_URI must start with mongodb:// or mongodb+srv://");
-  } else if (config.mongoUri.startsWith("mongodb://")) {
-    try {
-      const uri = new URL(config.mongoUri);
-      const tls = (uri.searchParams.get("tls") || uri.searchParams.get("ssl") || "").toLowerCase();
-      if (tls !== "true") {
-        errors.push("Production mongodb:// connections must explicitly set tls=true; prefer mongodb+srv://");
-      }
-    } catch {
-      errors.push("MONGODB_URI is invalid");
-    }
-  } else if (config.mongoUri.startsWith("mongodb+srv://")) {
-    try {
-      const uri = new URL(config.mongoUri);
-      const tls = (uri.searchParams.get("tls") || uri.searchParams.get("ssl") || "").toLowerCase();
-      if (tls === "false") errors.push("MONGODB_URI cannot disable TLS in production");
-    } catch {
-      errors.push("MONGODB_URI is invalid");
     }
   }
   if (config.geminiModel !== "gemini-2.5-flash-lite") {

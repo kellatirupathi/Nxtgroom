@@ -6,6 +6,8 @@ import InstructorGenderCell from './InstructorGenderCell';
 import InstructorImportDialog from './InstructorImportDialog';
 import ReferencePhotoField from './ReferencePhotoField';
 import RowActionsMenu from './RowActionsMenu';
+import ColumnHeader, { OptionsFilter, TextFilter } from './ColumnHeader';
+import { nextColumnSort, sortRows, textMatches, uniqueValues, type ColumnSort } from '../lib/tableSort';
 import { instructorRoleOptions } from '../instructorRoles';
 import SearchableSelect from './SearchableSelect';
 import { useToast } from './useToast';
@@ -40,6 +42,23 @@ function avatarTone(name?: string | null): string {
   for (let index = 0; index < text.length; index += 1) sum += text.charCodeAt(index);
   return AVATAR_TONES[sum % AVATAR_TONES.length];
 }
+
+interface InstructorColumnFilters {
+  name: string;
+  role: string;
+  gender: string;
+  institute: string;
+  category: string;
+  email: string;
+}
+
+const NO_COLUMN_FILTERS: InstructorColumnFilters = { name: '', role: '', gender: '', institute: '', category: '', email: '' };
+
+const GENDER_OPTIONS = [
+  { value: 'MALE', label: 'Male' },
+  { value: 'FEMALE', label: 'Female' },
+  { value: 'MISSING', label: 'Not set' },
+];
 
 function genderMissing(ins: Instructor): boolean {
   return !['MALE', 'FEMALE'].includes(String(ins.gender || '').toUpperCase());
@@ -84,6 +103,8 @@ export default function InstructorManagement() {
   const [showImport, setShowImport] = useState(false);
   const [userIdLocked, setUserIdLocked] = useState(false);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+  const [columnFilters, setColumnFilters] = useState<InstructorColumnFilters>(NO_COLUMN_FILTERS);
+  const [sort, setSort] = useState<ColumnSort | null>(null);
   const toast = useToast();
   const { pathname } = useLocation();
 
@@ -344,6 +365,46 @@ export default function InstructorManagement() {
     ].some((value) => String(value ?? '').toLowerCase().includes(term));
   });
 
+  const roleOf = (ins: Instructor) => ins.instructor_role || ins.role || '';
+  const tableInstructors = sortRows(
+    filteredInstructors.filter((ins) => (
+      textMatches(ins.name, columnFilters.name)
+      && (!columnFilters.role || roleOf(ins) === columnFilters.role)
+      && (!columnFilters.gender || (columnFilters.gender === 'MISSING' ? genderMissing(ins) : String(ins.gender || '').toUpperCase() === columnFilters.gender))
+      && (!columnFilters.institute || instituteFor(ins) === columnFilters.institute)
+      && (!columnFilters.category || (ins.instructor_category || '') === columnFilters.category)
+      && textMatches(ins.email, columnFilters.email)
+    )),
+    sort,
+    (ins, key) => {
+      switch (key) {
+        case 'name': return ins.name;
+        case 'role': return roleOf(ins);
+        case 'gender': return ins.gender ? String(ins.gender) : null;
+        case 'institute': return instituteFor(ins);
+        case 'category': return ins.instructor_category;
+        case 'email': return ins.email;
+        default: return null;
+      }
+    },
+  );
+  const columnFiltersActive = Object.values(columnFilters).some((value) => value.trim() !== '');
+  const setColumnFilter = (key: keyof InstructorColumnFilters) => (value: string) => (
+    setColumnFilters((current) => ({ ...current, [key]: value }))
+  );
+  const optionsFrom = (values: unknown[]) => uniqueValues(values).map((value) => ({ value, label: value }));
+  const header = (label: string, key: keyof InstructorColumnFilters, kind: 'text' | 'options', options: { value: string; label: string }[] = [], allLabel = 'All') => (
+    <ColumnHeader
+      label={label}
+      sortKey={key}
+      sort={sort}
+      onSort={(nextKey) => setSort((current) => nextColumnSort(current, nextKey))}
+      filterActive={columnFilters[key].trim() !== ''}
+      filter={(close) => (kind === 'text'
+        ? <TextFilter value={columnFilters[key]} onChange={setColumnFilter(key)} close={close} placeholder={`${label} contains…`} />
+        : <OptionsFilter value={columnFilters[key]} options={options} onChange={setColumnFilter(key)} close={close} allLabel={allLabel} />)}
+    />
+  );
   const noFaceCount = instructors.filter((ins) => !ins.face_count).length;
   const noGenderCount = instructors.filter(genderMissing).length;
   const mobileInstructors = filteredInstructors.filter((ins) => (
@@ -426,6 +487,16 @@ export default function InstructorManagement() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+          {columnFiltersActive && (
+            <button
+              type="button"
+              onClick={() => setColumnFilters(NO_COLUMN_FILTERS)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-2.5 text-sm font-semibold text-rose-700 shadow-sm transition-colors hover:bg-rose-50"
+            >
+              <X size={16} aria-hidden="true" />
+              Clear filters
+            </button>
+          )}
         <button
             type="button"
             onClick={openAddModal}
@@ -521,12 +592,12 @@ export default function InstructorManagement() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">Instructor Name</th>
-                <th className="p-4">Role</th>
-                <th className="p-4">Gender</th>
-                <th className="p-4 hidden lg:table-cell">Institute</th>
-                <th className="p-4 hidden lg:table-cell">Category</th>
-                <th className="p-4 hidden xl:table-cell">Email</th>
+                <th className="p-4">{header('Instructor Name', 'name', 'text')}</th>
+                <th className="p-4">{header('Role', 'role', 'options', optionsFrom(instructors.map(roleOf)), 'All roles')}</th>
+                <th className="p-4">{header('Gender', 'gender', 'options', GENDER_OPTIONS, 'All genders')}</th>
+                <th className="p-4 hidden lg:table-cell">{header('Institute', 'institute', 'options', optionsFrom(instructors.map(instituteFor)), 'All institutes')}</th>
+                <th className="p-4 hidden lg:table-cell">{header('Category', 'category', 'options', optionsFrom(instructors.map((ins) => ins.instructor_category)), 'All categories')}</th>
+                <th className="p-4 hidden xl:table-cell">{header('Email', 'email', 'text')}</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -535,12 +606,14 @@ export default function InstructorManagement() {
                 <tr>
                   <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">Loading instructors...</td>
                 </tr>
-              ) : filteredInstructors.length === 0 ? (
+              ) : tableInstructors.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">No instructors found.</td>
+                  <td colSpan={7} className="p-8 text-center text-slate-400 font-medium">
+                    {columnFiltersActive ? 'No instructors match these filters.' : 'No instructors found.'}
+                  </td>
                 </tr>
               ) : (
-                filteredInstructors.map(ins => (
+                tableInstructors.map(ins => (
                   <tr key={ins._id} className="hover:bg-slate-50 transition-colors group">
                     <td className="p-4 font-bold text-slate-800">
                       <span className="flex items-center gap-1.5">

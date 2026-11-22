@@ -89,7 +89,7 @@ test("evaluation outbox reconciliation creates one deterministic job and clears 
   assert.equal(
     Object.prototype.hasOwnProperty.call(queued, "image"),
     false,
-    "image bytes must never be written to MongoDB",
+    "image bytes must never be written to the database",
   );
   assert.equal(attendanceWrites[0][1].$unset._private_evaluation_outbox, "");
 });

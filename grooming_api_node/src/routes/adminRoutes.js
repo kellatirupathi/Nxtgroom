@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { withMongoTransaction } from "../config/db.js";
+import { withTransaction } from "../config/db.js";
 import {
   getPasswordHash,
   idMatch,
@@ -203,7 +203,7 @@ export async function createBoaGuarded(
   db,
   input,
   passwordHash,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const college = await db.collection("colleges").findOne(
@@ -255,7 +255,7 @@ export async function updateBoaGuarded(
   boaId,
   input,
   passwordHash,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const boa = await db.collection("boas").findOne(
@@ -327,7 +327,7 @@ export async function updateBoaGuarded(
 export async function deleteBoaGuarded(
   db,
   boaId,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const boa = await db.collection("boas").findOne(
@@ -369,7 +369,7 @@ export async function updateCollegeGuarded(
   db,
   collegeId,
   input,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const college = await db.collection("colleges").findOne(
@@ -395,7 +395,7 @@ export async function updateCollegeGuarded(
 export async function deleteCollegeGuarded(
   db,
   collegeId,
-  runTransaction = withMongoTransaction
+  runTransaction = withTransaction
 ) {
   return runTransaction(async (session) => {
     const college = await db.collection("colleges").findOne(

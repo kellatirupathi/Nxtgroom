@@ -1,40 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ObjectId } from "mongodb";
 import { idMatch } from "../src/middleware/auth.js";
 
-const OBJECT_ID = "6a82eb647377e77789a4bede";
+// Ids are strings: records copied from the old database keep their
+// 24-character ids, and records added by hand have UUIDs.
+const COPIED_ID = "6a82eb647377e77789a4bede";
 const UUID = "ce4293b8-0eb1-43fa-9181-8ac06081078b";
 
-function findOne(documents, filter) {
-  const wanted = filter._id?.$in ?? [filter._id];
-  return documents.find((document) => wanted.some((candidate) => (
-    candidate instanceof ObjectId && document._id instanceof ObjectId
-      ? candidate.equals(document._id)
-      : String(candidate) === String(document._id) && typeof candidate === typeof document._id
-  ))) || null;
-}
-
-const roster = [
-  { _id: new ObjectId(OBJECT_ID), name: "Imported instructor", email: "imported@nxtwave.co.in" },
-  { _id: UUID, name: "Hand-added instructor", email: "manual@nxtwave.co.in" },
-];
-
-test("a raw string never matches an imported instructor", () => {
-  assert.equal(findOne(roster, { _id: OBJECT_ID }), null);
+test("idMatch matches an id exactly, whatever its shape", () => {
+  assert.deepEqual(idMatch(COPIED_ID), { $in: [COPIED_ID] });
+  assert.deepEqual(idMatch(UUID), { $in: [UUID] });
 });
 
-test("idMatch finds an instructor under either kind of id", () => {
-  assert.equal(findOne(roster, { _id: idMatch(OBJECT_ID) })?.email, "imported@nxtwave.co.in");
-  assert.equal(findOne(roster, { _id: idMatch(UUID) })?.email, "manual@nxtwave.co.in");
-});
-
-test("idMatch offers both forms only when the string really is an ObjectId", () => {
-  const objectVariants = idMatch(OBJECT_ID).$in;
-  assert.equal(objectVariants.length, 2, "a 24-character hex id must be tried both ways");
-  assert.ok(objectVariants.some((value) => value instanceof ObjectId));
-
-  assert.deepEqual(idMatch(UUID).$in, [UUID]);
+test("idMatch turns a non-string id into its string form", () => {
+  assert.deepEqual(idMatch(42), { $in: ["42"] });
 });
 
 test("no instructor lookup outside the roster code compares a raw id", async () => {

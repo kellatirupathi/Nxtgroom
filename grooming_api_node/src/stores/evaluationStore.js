@@ -1,84 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { BatchGetCommand, DeleteCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
-import { dynamoTableName, getDynamoDocumentClient } from "../config/dynamo.js";
-import { idMatch } from "../middleware/auth.js";
-import { fromItem, upsertCommandInput } from "./dynamoItems.js";
-import { routedRead, routedWrite } from "./routing.js";
 
+// AI evaluation results, one per attendance and kind (check-in or check-out).
 const STORE = "evaluations";
-const KINDS = ["checkin", "checkout"];
-const BATCH_SESSIONS = 50;
-const MAX_BATCH_ATTEMPTS = 8;
-
-function table() {
-  return dynamoTableName(STORE);
-}
-
-function kindOf(kind) {
-  return kind === "checkout" ? "checkout" : "checkin";
-}
-
-function keyOf(attendanceId, kind) {
-  return { attendance_id: String(attendanceId), kind: kindOf(kind) };
-}
-
-export function evaluationFilter(attendanceId, kind = "checkin") {
-  return kind === "checkout"
-    ? { attendance_id: attendanceId, kind: "checkout" }
-    : { attendance_id: attendanceId, kind: { $ne: "checkout" } };
-}
-
-export async function getEvaluation(db, attendanceId, kind) {
-  return routedRead(STORE, {
-    mongo: () => db.collection(STORE).findOne(evaluationFilter(attendanceId, kind)),
-    dynamo: async () => {
-      const { Item } = await getDynamoDocumentClient().send(new GetCommand({
-        TableName: table(),
-        Key: keyOf(attendanceId, kind),
-        ConsistentRead: true,
-      }));
-      return Item ? fromItem(Item) : null;
-    },
-  });
-}
-
-export async function saveEvaluation(db, attendanceId, kind, evaluation, now = new Date()) {
-  const setOnInsert = { _id: randomUUID(), created_at: now };
-  await routedWrite(STORE, "save", {
-    mongo: () => db.collection(STORE).updateOne(
-      evaluationFilter(attendanceId, kind),
-      { $set: evaluation, $setOnInsert: setOnInsert },
-      { upsert: true }
-    ),
-    dynamo: () => getDynamoDocumentClient().send(new UpdateCommand(
-      upsertCommandInput(table(), keyOf(attendanceId, kind), { set: evaluation, setOnInsert })
-    )),
-  });
-}
-
-export async function deleteEvaluation(db, attendanceId, kind) {
-  await routedWrite(STORE, "delete", {
-    mongo: () => db.collection(STORE).deleteMany(evaluationFilter(attendanceId, kind)),
-    dynamo: () => getDynamoDocumentClient().send(new DeleteCommand({
-      TableName: table(),
-      Key: keyOf(attendanceId, kind),
-    })),
-  });
-}
-
-export async function deleteEvaluationsForAttendance(db, attendanceId) {
-  await routedWrite(STORE, "delete_for_attendance", {
-    mongo: () => db.collection(STORE).deleteMany({ attendance_id: String(attendanceId) }),
-    dynamo: async () => {
-      for (const kind of KINDS) {
-        await getDynamoDocumentClient().send(new DeleteCommand({
-          TableName: table(),
-          Key: keyOf(attendanceId, kind),
-        }));
-      }
-    },
-  });
-}
 
 const CHECK_GROUPS = [
   "general_idcard_check",
@@ -88,82 +11,49 @@ const CHECK_GROUPS = [
   "footwear_check",
 ];
 
-async function dynamoEvaluationsFor(attendanceIds) {
-  const client = getDynamoDocumentClient();
-  const ids = [...new Set(attendanceIds.map(String))];
-  const found = [];
-  for (let start = 0; start < ids.length; start += BATCH_SESSIONS) {
-    let keys = ids.slice(start, start + BATCH_SESSIONS).flatMap((id) => KINDS.map((kind) => keyOf(id, kind)));
-    for (let attempt = 1; keys.length; attempt += 1) {
-      if (attempt > MAX_BATCH_ATTEMPTS) throw new Error("evaluations: DynamoDB kept returning unprocessed keys");
-      const { Responses, UnprocessedKeys } = await client.send(new BatchGetCommand({
-        RequestItems: { [table()]: { Keys: keys } },
-      }));
-      found.push(...(Responses?.[table()] || []));
-      keys = UnprocessedKeys?.[table()]?.Keys || [];
-      if (keys.length) await new Promise((resolve) => setTimeout(resolve, Math.min(2000, 50 * 2 ** attempt)));
-    }
-  }
-  return found.map(fromItem);
+export function evaluationFilter(attendanceId, kind = "checkin") {
+  return kind === "checkout"
+    ? { attendance_id: attendanceId, kind: "checkout" }
+    : { attendance_id: attendanceId, kind: { $ne: "checkout" } };
+}
+
+export async function getEvaluation(db, attendanceId, kind) {
+  return db.collection(STORE).findOne(evaluationFilter(attendanceId, kind));
+}
+
+export async function saveEvaluation(db, attendanceId, kind, evaluation, now = new Date()) {
+  await db.collection(STORE).updateOne(
+    evaluationFilter(attendanceId, kind),
+    { $set: evaluation, $setOnInsert: { _id: randomUUID(), created_at: now } },
+    { upsert: true }
+  );
+}
+
+export async function deleteEvaluation(db, attendanceId, kind) {
+  await db.collection(STORE).deleteMany(evaluationFilter(attendanceId, kind));
+}
+
+export async function deleteEvaluationsForAttendance(db, attendanceId) {
+  await db.collection(STORE).deleteMany({ attendance_id: String(attendanceId) });
 }
 
 export async function evaluationsForSessions(db, attendanceIds) {
   if (!attendanceIds.length) return [];
-  return routedRead(STORE, {
-    mongo: () => db.collection(STORE)
-      .find({ attendance_id: { $in: idVariants(attendanceIds) } })
-      .toArray(),
-    dynamo: () => dynamoEvaluationsFor(attendanceIds),
-  });
+  const ids = [...new Set(attendanceIds.map(String))];
+  return db.collection(STORE).find({ attendance_id: { $in: ids } }).toArray();
 }
 
+// Every failed checkpoint across the given sessions, one row per failure.
 export async function failedCheckpointRows(db, attendanceIds) {
-  if (!attendanceIds.length) return [];
-  return routedRead(STORE, {
-    mongo: () => db.collection(STORE).aggregate([
-      { $match: { attendance_id: { $in: idVariants(attendanceIds) } } },
-      {
-        $project: {
-          attendance_id: 1,
-          kind: 1,
-          rows: { $concatArrays: CHECK_GROUPS.map((group) => ({ $ifNull: [`$${group}`, []] })) },
-        },
-      },
-      { $unwind: "$rows" },
-      { $match: { "rows.status": "FAIL" } },
-      {
-        $project: {
-          _id: 0,
-          attendance_id: 1,
-          kind: 1,
-          code: "$rows.code",
-          name: "$rows.checkpoint_name",
-        },
-      },
-    ]).toArray(),
-    dynamo: async () => (await dynamoEvaluationsFor(attendanceIds)).flatMap((evaluation) => (
-      CHECK_GROUPS.flatMap((group) => evaluation[group] || [])
-        .filter((row) => row?.status === "FAIL")
-        .map((row) => ({
-          attendance_id: evaluation.attendance_id,
-          kind: evaluation.kind,
-          code: row.code,
-          name: row.checkpoint_name,
-        }))
-    )),
-  });
-}
-
-function idVariants(ids) {
-  const seen = new Set();
-  const variants = [];
-  for (const id of ids) {
-    for (const variant of idMatch(String(id)).$in) {
-      const key = `${variant?._bsontype || typeof variant}:${String(variant)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      variants.push(variant);
-    }
-  }
-  return variants;
+  const evaluations = await evaluationsForSessions(db, attendanceIds);
+  return evaluations.flatMap((evaluation) => (
+    CHECK_GROUPS.flatMap((group) => evaluation[group] || [])
+      .filter((row) => row?.status === "FAIL")
+      .map((row) => ({
+        attendance_id: evaluation.attendance_id,
+        kind: evaluation.kind,
+        code: row.code,
+        name: row.checkpoint_name,
+      }))
+  ));
 }

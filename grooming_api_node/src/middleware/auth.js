@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import { ObjectId } from "mongodb";
 import { runtimeConfig } from "../config/env.js";
 
 const ALGORITHM = "HS256";
@@ -150,12 +149,10 @@ export function requireRootAdmin(req, res, next) {
   return next();
 }
 
+// Filter for a document id. Ids are stored as strings (records copied from the
+// old database keep their 24-character ids), so this is a plain match.
 export function idMatch(idStr) {
-  const variants = [idStr];
-  if (ObjectId.isValid(idStr) && String(new ObjectId(idStr)) === idStr) {
-    variants.push(new ObjectId(idStr));
-  }
-  return { $in: variants };
+  return { $in: [String(idStr)] };
 }
 
 export function requireCronSecret(req, res, next) {

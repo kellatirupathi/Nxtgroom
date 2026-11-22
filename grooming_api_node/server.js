@@ -7,9 +7,9 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import {
-  checkMongoConnection,
-  closeMongoConnection,
-  connectToMongo,
+  checkDatabaseConnection,
+  closeDatabaseConnection,
+  connectToDatabase,
 } from "./src/config/db.js";
 import { CORS_METHODS, HTTP_REQUEST_TIMEOUT_MS, isProduction, runtimeConfig, validateEnvironment } from "./src/config/env.js";
 import {
@@ -114,7 +114,7 @@ app.get("/health/live", (_req, res) => {
 app.get("/health/metrics", requireCronSecret, (_req, res) => res.json(telemetrySnapshot()));
 
 async function readinessStatus() {
-  const databaseReady = Boolean(app.locals.db) && await checkMongoConnection();
+  const databaseReady = Boolean(app.locals.db) && await checkDatabaseConnection();
   if (!databaseReady) {
     return {
       ready: false,
@@ -305,8 +305,8 @@ export async function seedAdmin(db) {
 
 export async function startServer() {
   const currentConfig = validateEnvironment();
-  const db = await connectToMongo();
-  if (!db) throw new Error("MongoDB is required to start the API");
+  const db = await connectToDatabase();
+  if (!db) throw new Error("The database is required to start the API");
   app.locals.db = db;
   await seedAdmin(db);
 
@@ -341,7 +341,7 @@ export async function startServer() {
       new Promise((resolve) => server.close(resolve)),
       ...workers.map((worker) => worker.stop()),
     ]);
-    await closeMongoConnection();
+    await closeDatabaseConnection();
     clearTimeout(forceExit);
   };
   const fatalShutdown = (error) => {

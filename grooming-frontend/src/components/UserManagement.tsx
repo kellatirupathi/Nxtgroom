@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import PasswordInput from './PasswordInput';
-import { ChevronLeft, Plus, Search, Users as UsersIcon, ShieldCheck } from 'lucide-react';
+import { ChevronLeft, Plus, Search, Users as UsersIcon, ShieldCheck, X } from 'lucide-react';
 import { apiFetch, apiFetchCached, apiJson, invalidateCache, readStale } from '../api';
 import RowActionsMenu, { type RowAction } from './RowActionsMenu';
+import ColumnHeader, { OptionsFilter, TextFilter } from './ColumnHeader';
+import { nextColumnSort, sortRows, textMatches, uniqueValues, type ColumnSort } from '../lib/tableSort';
 import UserPermissionsModal from './UserPermissionsModal';
 import ConfirmDialog from './ConfirmDialog';
 import SearchableSelect from './SearchableSelect';
@@ -33,6 +35,18 @@ interface UserRow {
   createdAt?: string | null;
   isSuperAdmin: boolean;
 }
+
+interface UserColumnFilters {
+  name: string;
+  role: string;
+  email: string;
+  employeeId: string;
+  institute: string;
+}
+
+const NO_USER_FILTERS: UserColumnFilters = { name: '', role: '', email: '', employeeId: '', institute: '' };
+
+const ROLE_LABELS: Record<Role, string> = { SUPER_ADMIN: 'Super Admin', ADMIN: 'Admin', BOA: 'BOA' };
 
 interface FormState {
   role: 'ADMIN' | 'BOA';
@@ -103,6 +117,8 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const [confirmPassword, setConfirmPassword] = useState('');
   const [userTab, setUserTab] = useState<'admins' | 'boas'>('boas');
   const [mobileSearch, setMobileSearch] = useState('');
+  const [columnFilters, setColumnFilters] = useState<UserColumnFilters>(NO_USER_FILTERS);
+  const [sort, setSort] = useState<ColumnSort | null>(null);
 
   const fetchAll = async () => {
     if (boas.length === 0 && admins.length === 0) setLoading(true);
@@ -447,6 +463,47 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
   const inputClass =
     'w-full rounded-md border border-slate-300 p-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20';
 
+  const blank = (value: string) => (value && value !== '--' ? value : '');
+  const tableRows = sortRows(
+    rows.filter((row) => (
+      textMatches(row.name, columnFilters.name)
+      && (!columnFilters.role || row.role === columnFilters.role)
+      && textMatches(row.email, columnFilters.email)
+      && textMatches(blank(row.employeeId), columnFilters.employeeId)
+      && (!columnFilters.institute || blank(row.collegeName) === columnFilters.institute)
+    )),
+    sort,
+    (row, key) => {
+      switch (key) {
+        case 'name': return row.name;
+        case 'role': return ROLE_LABELS[row.role] || row.role;
+        case 'email': return row.email;
+        case 'employeeId': return blank(row.employeeId);
+        case 'institute': return blank(row.collegeName);
+        default: return null;
+      }
+    },
+  );
+  const columnFiltersActive = Object.values(columnFilters).some((value) => value.trim() !== '');
+  const setColumnFilter = (key: keyof UserColumnFilters) => (value: string) => (
+    setColumnFilters((current) => ({ ...current, [key]: value }))
+  );
+  const roleOptions = (Object.keys(ROLE_LABELS) as Role[])
+    .filter((role) => rows.some((row) => row.role === role))
+    .map((role) => ({ value: role as string, label: ROLE_LABELS[role] }));
+  const header = (label: string, key: keyof UserColumnFilters, kind: 'text' | 'options', options: { value: string; label: string }[] = [], allLabel = 'All') => (
+    <ColumnHeader
+      label={label}
+      sortKey={key}
+      sort={sort}
+      onSort={(nextKey) => setSort((current) => nextColumnSort(current, nextKey))}
+      filterActive={columnFilters[key].trim() !== ''}
+      filter={(close) => (kind === 'text'
+        ? <TextFilter value={columnFilters[key]} onChange={setColumnFilter(key)} close={close} placeholder={label + ' contains…'} />
+        : <OptionsFilter value={columnFilters[key]} options={options} onChange={setColumnFilter(key)} close={close} allLabel={allLabel} />)}
+    />
+  );
+
   const adminRows = rows.filter((row) => row.kind === 'admin');
   const boaRows = rows.filter((row) => row.kind === 'boa');
   const mobileTerm = mobileSearch.trim().toLowerCase();
@@ -525,14 +582,26 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
               : 'Manage BOA accounts. Only the super admin can manage administrators.'}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors"
-        >
-          <Plus size={18} aria-hidden="true" />
-          Add User
-        </button>
+        <div className="flex items-center gap-2">
+          {columnFiltersActive && (
+            <button
+              type="button"
+              onClick={() => setColumnFilters(NO_USER_FILTERS)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 bg-white px-3 py-2.5 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50"
+            >
+              <X size={16} aria-hidden="true" />
+              Clear filters
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={openCreate}
+            className="bg-indigo-600 text-white px-4 py-2.5 rounded-md font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 transition-colors"
+          >
+            <Plus size={18} aria-hidden="true" />
+            Add User
+          </button>
+        </div>
       </div>
 
       {error && !showForm && !passwordFor && (
@@ -577,20 +646,20 @@ export default function UserManagement({ currentRole, currentEmail }: UserManage
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="p-4">Name</th>
-                <th className="p-4">Role</th>
-                <th className="p-4 hidden md:table-cell">Email</th>
-                <th className="p-4 hidden xl:table-cell">Employee ID</th>
-                <th className="p-4 hidden lg:table-cell">Institute</th>
+                <th className="p-4">{header('Name', 'name', 'text')}</th>
+                <th className="p-4">{header('Role', 'role', 'options', roleOptions, 'All roles')}</th>
+                <th className="p-4 hidden md:table-cell">{header('Email', 'email', 'text')}</th>
+                <th className="p-4 hidden xl:table-cell">{header('Employee ID', 'employeeId', 'text')}</th>
+                <th className="p-4 hidden lg:table-cell">{header('Institute', 'institute', 'options', uniqueValues(rows.map((row) => blank(row.collegeName))).map((value) => ({ value, label: value })), 'All institutes')}</th>
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Loading users…</td></tr>
-              ) : rows.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-medium">No users found.</td></tr>
-              ) : rows.map((row) => (
+              ) : tableRows.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-slate-400 font-medium">{columnFiltersActive ? 'No users match these filters.' : 'No users found.'}</td></tr>
+              ) : tableRows.map((row) => (
                 <tr key={`${row.kind}-${row.id}`} className="hover:bg-slate-50 transition-colors">
                   <td className="p-4 font-bold text-slate-800">{row.name}</td>
                   <td className="p-4"><RoleTag role={row.role} /></td>

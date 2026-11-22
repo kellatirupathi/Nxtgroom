@@ -72,13 +72,14 @@ test('the file is named after the dates it covers', () => {
   assert.equal(attendanceExportFileName({ from: '', to: '' }), 'daily-attendance-all.csv');
 });
 
-test('the header is search, then Filters, then Export - and the filters live in the panel', () => {
+test('the header is search, then Filters (phones only), then Export - and the column headers filter on desktop', () => {
   const table = read('src/components/DailyAttendanceTable.tsx');
   const search = table.indexOf('aria-label="Search attendance records"');
   const filters = table.indexOf('setFiltersOpen(true)');
   const exportButton = table.indexOf('downloadAttendanceCsv(filteredRecords, range)');
   assert.ok(search > 0 && search < filters && filters < exportButton, 'order must be search, Filters, Export');
-  assert.ok(!table.includes('<DateRangeFilter'), 'the date filter moved into the panel');
+  assert.match(table, /sm:rounded-md lg:hidden \$\{/, 'the Filters button is for phones; desktop filters from the column headers');
+  assert.match(table, /case 'date':[\s\S]*?<DateRangeFilter /, 'the Date column header holds the date filter');
   assert.ok(!table.includes('aria-label="Filter by institute"'), 'the institute select moved into the panel');
 
   const drawer = read('src/components/AttendanceFilterDrawer.tsx');

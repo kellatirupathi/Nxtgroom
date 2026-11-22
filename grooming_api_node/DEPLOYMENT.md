@@ -22,7 +22,7 @@ and cost reasoning is in [docs/COST_ESTIMATION.md](../docs/COST_ESTIMATION.md).
 
 Treat any credential previously pasted into chat, source code, screenshots,
 issue trackers, or build logs as compromised. Before the first production
-deployment, revoke and replace the MongoDB password, Gemini API key, AWS access
+deployment, revoke and replace the DynamoDB access key, Gemini API key, AWS access
 key, JWT secret, and administrator password. Do not reuse development values.
 
 Store runtime secrets only in `grooming_api_node/.env` on the instance, owned by
@@ -88,66 +88,13 @@ the cleaned commit.
 
 ## 2. Prepare external services
 
-### MongoDB Atlas
+### Amazon DynamoDB
 
-1. Create a dedicated production database user with `readWrite` access only to
-   the `grooming_standards` database.
-2. Use a TLS `mongodb+srv://` connection string with retryable writes enabled.
-3. Add the Lightsail instance's static IP address to Atlas as a single `/32`
-   network entry. Do not leave `0.0.0.0/0` enabled. Without this entry the API
-   cannot connect and refuses to start.
-4. Use a paid tier (Flex or above). The free M0 tier holds 512 MB, which this
-   workload fills in about 5–7 weeks, caps throughput at 100 operations per
-   second, and has no backups.
-5. Run the database preflight before starting a production revision. Its
-   default mode is read-only and reports document IDs without printing email
-   addresses:
-
-```powershell
-cd grooming_api_node
-npm run db:preflight
-```
-
-The audit blocks on non-canonical, duplicate, or case-colliding user emails;
-invalid or duplicate BOA/instructor employee IDs; duplicate case-insensitive
-college name/location keys; active BOAs or instructors assigned to a missing or
-archived college; missing or invalid active-instructor emails; invalid or
-duplicate active attendances; duplicate or invalid evaluation attendance IDs;
-and conflicting index definitions. Resolve those records manually using the
-listed document IDs. In particular, preserve attendance history: choose the
-authoritative active record and give the other records an accurate
-`check_out_time`; do not delete them blindly.
-
-After the read-only report says `safe_to_apply_indexes`, run the index step in a
-one-off container on the instance or a trusted administrative environment using the same
-database settings:
-
-```powershell
-$env:DATABASE_PREFLIGHT_APPLY="CREATE_INDEXES"
-npm run db:preflight:apply
-Remove-Item Env:DATABASE_PREFLIGHT_APPLY
-npm run db:preflight
-```
-
-The apply command is deliberately narrow and idempotent: it creates only
-missing indexes. It never edits, merges, closes, or deletes application
-documents, and it refuses to replace a conflicting index. Index construction
-can consume database CPU, memory, I/O, and storage, so schedule the one-off job
-for an appropriate maintenance window and monitor Atlas while it runs.
-
-Production API startup is verify-only. It repeats the read-only data audit and
-index verification, then fails closed with an actionable preflight error if
-data blockers, missing indexes, or conflicting indexes remain. Development
-startup may create missing indexes automatically after the same audit passes.
-
-### Amazon DynamoDB (migration in progress)
-
-Data is moving from MongoDB to DynamoDB one collection at a time; see
-`docs/DYNAMODB_MIGRATION_PLAN.md`. Migrated so far: `app_settings`,
-`report_delivery_runs` and `evaluations`, none of which takes part in a
-MongoDB transaction. The collections that share transactions (colleges,
-BOAs, users, instructors, attendance) move together, last. With the
-switches unset, everything stays on MongoDB and none of this is needed.
+The application stores everything in DynamoDB (region `ap-south-1`), one
+table per collection named `facultytrack-db-<collection>` plus
+`facultytrack-db-_unique`, which holds the unique rules (one attendance per
+instructor per day, one account per email, and so on). Tables use on-demand
+billing; new tables get point-in-time recovery.
 
 1. In IAM, create a user `facultytrack-dynamodb` with an access key and only
    this policy (replace the account id). Lightsail cannot use IAM roles, and
@@ -160,48 +107,43 @@ switches unset, everything stays on MongoDB and none of this is needed.
        {
          "Effect": "Allow",
          "Action": [
-           "dynamodb:DescribeTable", "dynamodb:CreateTable", "dynamodb:TagResource",
-           "dynamodb:UpdateContinuousBackups", "dynamodb:GetItem", "dynamodb:PutItem",
-           "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query",
-           "dynamodb:Scan", "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem",
-           "dynamodb:ConditionCheckItem"
+           "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem",
+           "dynamodb:Query", "dynamodb:Scan", "dynamodb:BatchGetItem", "dynamodb:BatchWriteItem",
+           "dynamodb:ConditionCheckItem", "dynamodb:DescribeTable", "dynamodb:CreateTable",
+           "dynamodb:DescribeTimeToLive", "dynamodb:UpdateTimeToLive",
+           "dynamodb:DescribeContinuousBackups", "dynamodb:UpdateContinuousBackups"
          ],
          "Resource": [
-           "arn:aws:dynamodb:ap-south-1:ACCOUNT_ID:table/facultytrack-*",
-           "arn:aws:dynamodb:ap-south-1:ACCOUNT_ID:table/facultytrack-*/index/*"
+           "arn:aws:dynamodb:ap-south-1:ACCOUNT_ID:table/facultytrack-db-*",
+           "arn:aws:dynamodb:ap-south-1:ACCOUNT_ID:table/facultytrack-db-*/index/*"
          ]
-       }
+       },
+       { "Effect": "Allow", "Action": "dynamodb:ListTables", "Resource": "*" }
      ]
    }
    ```
 
-2. Add `DYNAMODB_REGION`, `DYNAMODB_ACCESS_KEY_ID` and
-   `DYNAMODB_SECRET_ACCESS_KEY` to `.env`, then create the tables
-   (on-demand billing, deletion protection and point-in-time recovery on):
+2. Add `DYNAMODB_REGION`, `DYNAMODB_ACCESS_KEY_ID`,
+   `DYNAMODB_SECRET_ACCESS_KEY` (and `DYNAMODB_TABLE_PREFIX` if not
+   `facultytrack-`) to `.env`, then create the tables once. Existing tables
+   are never changed or deleted:
 
    ```bash
-   docker compose run --rm api npm run dynamo:tables          # report only
-   docker compose run --rm api npm run dynamo:tables:apply    # create missing tables
+   docker compose run --rm api npm run dynamodb:tables          # report only
+   docker compose run --rm api npm run dynamodb:tables:apply    # create missing tables
    ```
 
-3. Copy the existing data. MongoDB is only read.
+The API checks at start-up that every table and index exists and refuses to
+start, naming what is missing, if one does not.
 
-   ```bash
-   docker compose run --rm api npm run dynamo:copy -- --apply
-   ```
+To copy data in from the old MongoDB database (a one-time move), install its
+driver for the run and set `MONGODB_URI`; MongoDB is only read:
 
-4. Turn on dual writes: set `DB_WRITE_TO=both` (reads stay on MongoDB) and
-   redeploy. A failed DynamoDB write is logged as `shadow_write_failed` and
-   never fails a request.
-
-5. Check daily that the databases agree; it exits 1 on any difference:
-
-   ```bash
-   docker compose run --rm api npm run dynamo:compare
-   ```
-
-6. After a clean week, move reads: `DB_READ_FROM=dynamo`. To undo either
-   step, set the value back to `mongo` and redeploy.
+```bash
+npm install --no-save mongodb@6
+npm run dynamodb:migrate:apply   # safe to repeat; add -- --prune to drop records deleted at the source
+npm run dynamodb:verify          # every collection must report OK
+```
 
 ### Amazon SES
 
@@ -218,7 +160,7 @@ switches unset, everything stays on MongoDB and none of this is needed.
 The API queues check-in mail after AI analysis completes. A photographed
 checkout is analysed by the same evaluation worker, and its report mail is
 queued only after that report is stored; a checkout without a photo queues a
-plain confirmation. Sending is retried from MongoDB, so at least one process
+plain confirmation. Sending is retried from the database, so at least one process
 with the workers must keep running (`PROCESS_ROLE=all` on the single instance
 covers this).
 
@@ -337,7 +279,7 @@ Docker restarts the container automatically when the process exits
 uptime monitor at `https://<api-hostname>/health/ready` so someone is alerted
 when it returns 503.
 
-Readiness covers MongoDB and Cloudflare R2 connectivity, the progress markers
+Readiness covers DynamoDB and Cloudflare R2 connectivity, the progress markers
 of all four durable workers (evaluation, notification, storage cleanup, mail),
 and the age of evaluation/email queues and private attendance outboxes. A queue
 at least 15 minutes old is reported as a warning; readiness fails at 23 hours,
@@ -384,15 +326,11 @@ with an insecure fallback.
 | `PORT` | Optional | `8000` (container default) |
 | `TRUST_PROXY_HOPS` | Optional | Defaults to `1` (Nginx only). Add one per extra proxy layer, such as a Lightsail load balancer or Cloudflare; permitted range is 0–5 |
 | `PROCESS_ROLE` | Optional | Defaults to `all`; set only when API and worker run separately |
-| `MONGODB_URI` | Required, secret | Rotated Atlas connection URI |
-| `DB_NAME` | Optional | Defaults to `grooming_standards` |
-| `DATABASE_PREFLIGHT_APPLY` | One-off only | Leave unset on the API service. Set to `CREATE_INDEXES` only for the confirmed migration job, then remove it. |
-| `DB_WRITE_TO` | Optional | `mongo` (default), `both` or `dynamo`: where migrated stores write. Per-store override, e.g. `DB_WRITE_TO_APP_SETTINGS` |
-| `DB_READ_FROM` | Optional | `mongo` (default) or `dynamo`: where migrated stores read. Must be a database that is written |
-| `DYNAMODB_REGION` | Required once a store uses DynamoDB | `ap-south-1` |
-| `DYNAMODB_ACCESS_KEY_ID` / `DYNAMODB_SECRET_ACCESS_KEY` | Required once a store uses DynamoDB, secret | Keys of the `facultytrack-dynamodb` IAM user; never the SES key |
+| `DYNAMODB_REGION` | Required | `ap-south-1` |
+| `DYNAMODB_ACCESS_KEY_ID` / `DYNAMODB_SECRET_ACCESS_KEY` | Required, secret | Keys of the `facultytrack-dynamodb` IAM user; never the SES key |
 | `DYNAMODB_TABLE_PREFIX` | Optional | Defaults to `facultytrack-` |
-| `DYNAMODB_ENDPOINT` | Development only | DynamoDB Local, e.g. `http://localhost:8001`; unset on a server |
+| `DYNAMODB_ENDPOINT` | Development only | `memory` (in-process tables) or DynamoDB Local, e.g. `http://localhost:8001`; unset on a server |
+| `DOCDB_LOG_SCANS` | Optional | `true` logs each query that reads a whole table |
 | `SECRET_KEY` | Required, secret | Unique random value, at least 32 characters |
 | `JWT_EXPIRE_MINUTES` | Optional | Defaults to `525600` (one year); permitted range is 5–525600. Leave unset for one-year sign-ins; a password change or reset still signs every device out |
 | `JWT_ISSUER` | Optional | Defaults to `facultytrack-api` |
@@ -525,7 +463,7 @@ Then verify the deployed services:
 4. A test instructor with a verified/allowed SES address can check in, receive
    the completed AI report, check out, and receive the checkout report.
 5. A BOA cannot read or modify instructors belonging to another college.
-6. MongoDB contains one evaluation and the expected email delivery status for
+6. DynamoDB contains one evaluation and the expected email delivery status for
    the test attendance record.
 7. `/health/ready` reports all four workers as `ok`, no critical queue ages, and no
    `QUEUE_METRICS_UNAVAILABLE` reason.
@@ -534,8 +472,8 @@ Then verify the deployed services:
 9. A photo upload of about 5 MB succeeds (confirms the Nginx body-size limit).
 
 After verification, remove test data according to the organization's retention
-policy and monitor SES bounces/complaints, Gemini errors and spend, MongoDB
-capacity, HTTP error rate, and worker queue age.
+policy and monitor SES bounces/complaints, Gemini errors and spend, DynamoDB
+cost, HTTP error rate, and worker queue age.
 
 ## 6. Rollback
 

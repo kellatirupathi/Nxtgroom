@@ -90,7 +90,9 @@ test('the table shows the column after Status, and the panel filters on it', () 
   const headers = [...columns.matchAll(/label: '([^']+)'/g)].map((match) => match[1]);
   assert.equal(headers.length, 13);
   assert.equal(headers[headers.indexOf('Status') + 1], 'Escalation');
-  assert.match(table, /\{RECORD_COLUMNS\.map\(\(column, index\) => \(/);
+  assert.match(table, /\{RECORD_COLUMNS\.map\(\(column, index\) => \{/);
+  assert.match(table, /<ColumnHeader/, 'each header sorts and filters its own column');
+  assert.match(table, /case 'escalation':\s+return \{\s+active: Boolean\(escalationFilter\)/, 'the Escalation header filters on it');
   assert.match(table, /colSpan=\{RECORD_COLUMNS\.length \+ \(canBulkDelete \? 1 : 0\)\}/);
   assert.match(table, /<EscalationTag escalation=\{record\.escalation\} today=\{today\} \/>/);
   assert.match(table, /escalation: escalationFilter,/);
