@@ -577,7 +577,7 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             aria-haspopup="dialog"
             aria-expanded={filtersOpen}
             aria-label={activeFilterCount ? `Filters, ${activeFilterCount} active` : 'Filters'}
-            className={`relative flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:justify-start sm:rounded-md lg:hidden ${
+            className={`relative flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:justify-start sm:rounded-md ${
               activeFilterCount
                 ? 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                 : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'

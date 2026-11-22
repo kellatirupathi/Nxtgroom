@@ -762,10 +762,13 @@ export class DynamoDocumentDatabase {
       let outcome;
       if (!target) {
         if (!upsert || remove) return { matched: 0, modified: 0, before: null, after: null };
+        // The new document's id comes from the filter, or else from $set or
+        // $setOnInsert (as when saveEvaluation supplies one); only when
+        // neither gives one is an id generated.
         const seed = upsertSeed(filter);
-        if (seed._id === undefined) seed._id = newDocumentId();
-        if (typeof seed._id !== "string") throw new TypeError("DynamoDB documents need a string _id");
         const { document } = applyUpdate(seed, update, { isInsert: true, arrayFilters });
+        if (document._id === undefined || document._id === null) document._id = newDocumentId();
+        if (typeof document._id !== "string") throw new TypeError("DynamoDB documents need a string _id");
         const stored = session?.entry(collection, document._id)?.base
           ?? await this.readById(collection, document._id, { consistent: true });
         if (stored && !this.isExpired(collection, stored.doc) && !session?.entry(collection, document._id)) {

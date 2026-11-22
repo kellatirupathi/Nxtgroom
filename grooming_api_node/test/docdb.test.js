@@ -175,6 +175,28 @@ describe("document store (in memory)", () => {
     await assert.rejects(settings.updateOne({ _id: "holidays" }, { $set: { _id: "other" } }), { code: 66 });
   });
 
+  test("an upsert whose filter has no id takes the id from $setOnInsert", async () => {
+    // How saveEvaluation stores a new AI result.
+    const evaluations = db.collection("evaluations");
+    const result = await evaluations.updateOne(
+      { attendance_id: "a1", kind: { $ne: "checkout" } },
+      { $set: { attendance_id: "a1", overall_status: "COMPLIANT" }, $setOnInsert: { _id: "e1", created_at: new Date() } },
+      { upsert: true }
+    );
+    assert.equal(result.upsertedId, "e1");
+    assert.equal((await evaluations.findOne({ attendance_id: "a1" }))._id, "e1");
+    await evaluations.updateOne(
+      { attendance_id: "a1", kind: { $ne: "checkout" } },
+      { $set: { overall_status: "NON_COMPLIANT" }, $setOnInsert: { _id: "e2" } },
+      { upsert: true }
+    );
+    const stored = await evaluations.find({ attendance_id: "a1" }).toArray();
+    assert.deepEqual(stored.map((row) => [row._id, row.overall_status]), [["e1", "NON_COMPLIANT"]]);
+
+    const generated = await evaluations.updateOne({ attendance_id: "a2" }, { $set: { kind: "checkout" } }, { upsert: true });
+    assert.match(generated.upsertedId, /^[0-9a-f]{24}$/);
+  });
+
   test("an unchanged update is matched but not modified", async () => {
     const { insertedId } = await db.collection("colleges").insertOne({ name: "X", location: "Y" });
     const result = await db.collection("colleges").updateOne({ _id: insertedId }, { $set: { name: "X" } });

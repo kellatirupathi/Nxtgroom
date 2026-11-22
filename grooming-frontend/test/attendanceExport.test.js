@@ -78,7 +78,7 @@ test('the header is search, then Filters (phones only), then Export - and the co
   const filters = table.indexOf('setFiltersOpen(true)');
   const exportButton = table.indexOf('downloadAttendanceCsv(filteredRecords, range)');
   assert.ok(search > 0 && search < filters && filters < exportButton, 'order must be search, Filters, Export');
-  assert.match(table, /sm:rounded-md lg:hidden \$\{/, 'the Filters button is for phones; desktop filters from the column headers');
+  assert.doesNotMatch(table, /sm:rounded-md lg:hidden \$\{/, 'the Filters button shows on every screen, beside the column filters');
   assert.match(table, /case 'date':[\s\S]*?<DateRangeFilter /, 'the Date column header holds the date filter');
   assert.ok(!table.includes('aria-label="Filter by institute"'), 'the institute select moved into the panel');
 

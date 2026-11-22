@@ -1116,12 +1116,20 @@ adminRouter.delete(
   })
 );
 
+// The Users page lists BOAs by their BOA record, so the id it sends may be the
+// BOA's id rather than its sign-in account's id; accept either.
+async function findPermissionsUser(db, id) {
+  const users = db.collection("users");
+  return await users.findOne({ _id: idMatch(id) })
+    || await users.findOne({ reference_id: idMatch(id), role: ROLES.BOA });
+}
+
 adminRouter.get(
   "/users/:userId/permissions",
   requireSuperAdmin,
   asyncRoute(async (req, res) => {
     const db = req.app.locals.db;
-    const user = await db.collection("users").findOne({ _id: idMatch(req.params.userId) });
+    const user = await findPermissionsUser(db, req.params.userId);
     if (!user) return res.status(404).json({ detail: "User not found" });
     const settings = await getAccessSettings(db);
     return res.json({
@@ -1145,7 +1153,7 @@ adminRouter.put(
     }
 
     const db = req.app.locals.db;
-    const user = await db.collection("users").findOne({ _id: idMatch(req.params.userId) });
+    const user = await findPermissionsUser(db, req.params.userId);
     if (!user) return res.status(404).json({ detail: "User not found" });
     if (user.role !== ROLES.BOA) {
       return res.status(422).json({
