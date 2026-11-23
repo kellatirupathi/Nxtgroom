@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Download, ExternalLink, FileUp, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ChevronLeft, ClipboardList, Download, ExternalLink, FileUp, Search, SlidersHorizontal, X } from 'lucide-react';
 import { apiFetch } from '../api';
+import { goToPath, pathForTab, TABS } from '../routes';
 import { saveCsvFile } from '../attendanceExport';
 import {
   isCompleteRange,
@@ -302,12 +303,25 @@ export default function FormResponsesSection() {
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col" aria-labelledby="form-responses-title">
-      <div className="mb-4 shrink-0">
-        <h3 id="form-responses-title" className="text-base font-bold text-slate-800">Form responses</h3>
-        <p className="mt-1 text-sm text-slate-500">
-          The daily grooming photo form from each institute's link. <b>Automatic</b> rows were sent through the link; <b>Manual</b> rows were imported from a sheet.
-          Copy an institute's link from the Form link column on the Institutes page.
-        </p>
+      <div className="mb-4 flex shrink-0 items-start gap-1">
+        <button
+          type="button"
+          onClick={() => goToPath(pathForTab(TABS.MORE))}
+          aria-label="Back to More"
+          className="-ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-900 hover:bg-slate-100 lg:hidden"
+        >
+          <ChevronLeft size={22} aria-hidden="true" />
+        </button>
+        <div className="min-w-0 pt-2 lg:pt-0">
+          <h2 id="form-responses-title" className="flex items-center gap-2 text-xl font-extrabold text-slate-900 lg:font-bold lg:text-slate-800">
+            <ClipboardList size={22} className="hidden text-indigo-600 lg:block" aria-hidden="true" />
+            Form Responses
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            The daily grooming photo form from each institute's link. <b>Automatic</b> rows were sent through the link; <b>Manual</b> rows were imported from a sheet.
+            Copy an institute's link from the Form link column on the Institutes page.
+          </p>
+        </div>
       </div>
 
       <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">

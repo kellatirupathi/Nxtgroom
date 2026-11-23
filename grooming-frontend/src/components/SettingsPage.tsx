@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, Building2, CalendarOff, ChevronLeft, ChevronRight, ClipboardList, Database, FileChartColumn, History, ScanFace, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react';
+import { Bell, Building2, CalendarOff, ChevronLeft, ChevronRight, Database, FileChartColumn, History, ScanFace, SlidersHorizontal, Users, type LucideIcon } from 'lucide-react';
 import { apiFetch, apiJson } from '../api';
 import CollegeManagement from './CollegeManagement';
 import IdentificationSettingsSection from './IdentificationSettingsSection';
@@ -11,7 +11,6 @@ import AttendanceReminderSettings from './AttendanceReminderSettings';
 import ConfigSettingsSection from './ConfigSettingsSection';
 import HolidaySettings from './HolidaySettings';
 import AuditLogSection from './AuditLogSection';
-import FormResponsesSection from './FormResponsesSection';
 import type { NotificationSettings } from '../types';
 import { goToPath, pathForTab, settingsTabFromPath, settingsTabPath, TABS, type SettingsTab } from '../routes';
 import { useLocation } from '../lib/useLocation';
@@ -193,7 +192,6 @@ const SECTIONS: ReadonlyArray<{ tab: SettingsTab; label: string; icon: LucideIco
   { tab: 'sync', label: 'Sync Data', icon: Database },
   { tab: 'rp', label: 'RP', icon: Users },
   { tab: 'reports', label: 'Reports', icon: FileChartColumn },
-  { tab: 'responses', label: 'Form Responses', icon: ClipboardList },
   { tab: 'holidays', label: 'Holidays', icon: CalendarOff },
   { tab: 'config', label: 'Config', icon: SlidersHorizontal },
   { tab: 'audit', label: 'Audit log', icon: History, rootOnly: true },
@@ -227,7 +225,6 @@ const MOBILE_GROUPS: ReadonlyArray<{
     tone: 'bg-slate-100 text-slate-600',
     items: [
       { label: 'Institutes', tab: 'colleges', detail: 'Add and edit campuses' },
-      { label: 'Form Responses', tab: 'responses', detail: 'Daily grooming photo forms from institutes' },
       { label: 'Sync instructors', tab: 'sync', detail: 'Import the roster from BigQuery' },
       { label: 'Audit log', tab: 'audit', detail: 'Who changed what' },
     ],
@@ -306,7 +303,7 @@ export default function SettingsPage({ role = null }: { role?: string | null }) 
 
       <div className="mb-5 hidden shrink-0 md:block">
         <h2 id="settings-title" className="text-xl font-bold text-slate-800">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners, reports, form responses, holidays, configuration and the audit log.</p>
+        <p className="text-sm text-slate-500 mt-1">Manage notifications, identification, institutes, data sync, reporting partners, reports, holidays, configuration and the audit log.</p>
       </div>
 
       <div className={`min-h-0 flex-1 flex-col md:flex md:flex-row md:gap-6 ${atIndex ? 'hidden' : 'flex'}`}>
@@ -336,8 +333,7 @@ export default function SettingsPage({ role = null }: { role?: string | null }) 
           </div>
         </nav>
 
-        <div className={`min-h-0 min-w-0 flex-1 ${tab === 'responses' ? 'flex flex-col overflow-hidden max-md:overflow-auto' : 'overflow-auto'}`}>
-          {tab === 'responses' && <FormResponsesSection />}
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {tab === 'notifications' && <NotificationSettings />}
           {tab === 'identification' && <IdentificationSettingsSection />}
           {tab === 'colleges' && <CollegeManagement />}

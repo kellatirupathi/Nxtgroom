@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  calendarDays,
+  dayBefore,
+  shiftMonth,
   displayDate,
   formPagePath,
   formResponsesCsv,
@@ -12,7 +15,7 @@ import {
   longDate,
   urlDateFromKey,
 } from '../src/lib/instituteForm.ts';
-import { publicFormFromLocation, settingsSectionFromPath, settingsTabPath } from '../src/routes.ts';
+import { pathForTab, publicFormFromLocation, tabForPath, TABS } from '../src/routes.ts';
 
 const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
 
@@ -39,9 +42,18 @@ test('a public form link opens today, a given day, or flags an impossible date',
   assert.equal(publicFormFromLocation('/dashboard'), null);
 });
 
-test('Form Responses is a settings section of its own', () => {
-  assert.equal(settingsTabPath('responses'), '/settings/responses');
-  assert.equal(settingsSectionFromPath('/settings/responses'), 'responses');
+test('Form Responses is its own admin page, in the sidebar below Users and not in Settings', () => {
+  assert.equal(pathForTab(TABS.FORM_RESPONSES), '/form-responses');
+  assert.equal(tabForPath('/form-responses'), 'form-responses');
+  assert.equal(tabForPath('/settings/responses'), 'form-responses', 'the old address still opens it');
+  const app = source('App.tsx');
+  assert.match(app, /const ADMIN_TABS = new Set\(\[[^\]]*'form-responses'[^\]]*\]\)/);
+  assert.match(app, /activeTab === 'form-responses' && isElevatedRole\(session\.role\)/);
+  const sidebar = source('components/Sidebar.tsx');
+  const nav = sidebar.slice(sidebar.indexOf('<nav'), sidebar.indexOf('</nav>'));
+  assert.ok(nav.indexOf("navigate('form-responses')") > nav.indexOf("navigate('boa-management')"), 'listed after Users');
+  assert.ok(!source('components/SettingsPage.tsx').includes('FormResponses'), 'Settings no longer has the section');
+  assert.match(source('components/MorePage.tsx'), /navigate\('form-responses'\)/);
 });
 
 test('a Google Form sheet is read by its column titles, wherever they are', () => {
@@ -113,6 +125,33 @@ test('the public form is shown before sign-in and admin screens use the compact 
   assert.ok(app.indexOf('if (publicForm)') < app.indexOf('if (!session.token)'), 'no sign-in is needed for the form');
   assert.match(app, /root\.classList\.toggle\('compact-ui', shellShown && activeTab !== 'overview'\)/);
   assert.match(source('index.css'), /html\.compact-ui \{\s*font-size: clamp\(13px, calc\(0\.52vw \+ 5px\), 16px\);/);
+});
+
+test('the calendar shows whole weeks from Monday, with the edges from the next and previous months', () => {
+  const november = calendarDays(2026, 11);
+  assert.equal(november.length, 42, 'November 2026 starts on a Sunday, so it needs six weeks');
+  assert.deepEqual(november[0], { key: '2026-10-26', day: 26, inMonth: false });
+  assert.deepEqual(november[6], { key: '2026-11-01', day: 1, inMonth: true });
+  assert.deepEqual(november.at(-1), { key: '2026-12-06', day: 6, inMonth: false });
+  const february = calendarDays(2027, 2);
+  assert.equal(february.length, 28, 'February 2027 starts on a Monday and fits four weeks');
+  assert.equal(february[0].key, '2027-02-01');
+  assert.deepEqual(shiftMonth(2026, 12, 1), { year: 2027, month: 1 });
+  assert.deepEqual(shiftMonth(2026, 1, -1), { year: 2025, month: 12 });
+  assert.equal(dayBefore('2026-03-01'), '2026-02-28');
+});
+
+test('the form has no logo or password note, its own calendar, and the picture question from the start', () => {
+  const page = source('components/PublicFormPage.tsx');
+  assert.ok(!page.includes('/logo.png'), 'no logo at the top');
+  assert.ok(!page.includes('>FacultyTrack<'), 'no FacultyTrack name at the top');
+  assert.ok(!page.includes('Never submit passwords'), 'no password note');
+  assert.ok(!page.includes('type="date"'), 'not the browser date box');
+  assert.match(page, /<FormDatePicker/);
+  assert.match(page, /\{draft\.status !== 'no' && \(\s*<Card id="question-photos"/);
+  const picker = source('components/FormDatePicker.tsx');
+  assert.match(picker, /const unavailable = day\.key > today \|\| day\.key < min;/);
+  assert.match(picker, /onClick=\{\(\) => choose\(today\)\}/);
 });
 
 test('removing a photo on the form asks first', () => {

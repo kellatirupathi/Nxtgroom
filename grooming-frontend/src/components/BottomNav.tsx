@@ -21,7 +21,7 @@ const RIGHT_ITEMS: NavItem[] = [
 
 const RECORDS_TABS = new Set(['daily-records', 'instructor-detail']);
 const INSTRUCTOR_TABS = new Set(['instructor-management', 'instructor-records']);
-const MORE_TABS = new Set(['more', 'institutes', 'boa-management', 'settings']);
+const MORE_TABS = new Set(['more', 'institutes', 'boa-management', 'form-responses', 'settings']);
 
 interface BottomNavProps {
   activeTab: string;

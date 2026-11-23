@@ -132,6 +132,43 @@ export function formatMoment(value: string | null | undefined): string {
   }).format(date);
 }
 
+export const MONTH_TITLES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export const WEEKDAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+export interface CalendarDay {
+  key: string;
+  day: number;
+  inMonth: boolean;
+}
+
+function keyFromUtc(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+// The days shown for a month (1-12) in the form's calendar, in whole weeks
+// starting on Monday, with the neighbouring months' days filling the edges.
+export function calendarDays(year: number, month: number): CalendarDay[] {
+  const offset = (new Date(Date.UTC(year, month - 1, 1)).getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const total = Math.ceil((offset + daysInMonth) / 7) * 7;
+  return Array.from({ length: total }, (_, index) => {
+    const date = new Date(Date.UTC(year, month - 1, 1 - offset + index));
+    return { key: keyFromUtc(date), day: date.getUTCDate(), inMonth: date.getUTCMonth() === month - 1 };
+  });
+}
+
+// The month (1-12) a number of months away, keeping the year in step.
+export function shiftMonth(year: number, month: number, delta: number): { year: number; month: number } {
+  const date = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 };
+}
+
+// The day before a YYYY-MM-DD date.
+export function dayBefore(key: string): string {
+  const [year, month, day] = key.split('-').map(Number);
+  return keyFromUtc(new Date(Date.UTC(year, month - 1, day - 1)));
+}
+
 // /form/<slug>/<token>, with /DD_MM_YYYY when a date is given.
 export function formPagePath(slug: string, token: string, dateKey?: string | null): string {
   const base = `/form/${slug}/${token}`;

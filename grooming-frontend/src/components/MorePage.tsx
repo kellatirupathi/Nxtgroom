@@ -1,4 +1,4 @@
-import { ChartColumnBig, ChevronRight, KeyRound, LogOut, Settings, ShieldAlert, User, Users } from 'lucide-react';
+import { ChartColumnBig, ChevronRight, ClipboardList, KeyRound, LogOut, Settings, ShieldAlert, User, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { isElevatedRole, type Role } from '../types';
 
@@ -69,6 +69,7 @@ export default function MorePage({ role, email, navigate, onOpenProfile, onOpenC
     { key: 'escalations', label: 'Escalations', icon: ShieldAlert, tone: 'bg-rose-50 text-rose-700', onSelect: () => navigate('escalations') },
     { key: 'institutes', label: 'Institutes', icon: ChartColumnBig, tone: 'bg-indigo-50 text-indigo-700', onSelect: () => navigate('institutes') },
     { key: 'users', label: 'Users', icon: Users, tone: 'bg-indigo-50 text-indigo-700', onSelect: () => navigate('boa-management') },
+    { key: 'form-responses', label: 'Form Responses', icon: ClipboardList, tone: 'bg-indigo-50 text-indigo-700', onSelect: () => navigate('form-responses') },
     { key: 'settings', label: 'Settings', icon: Settings, tone: 'bg-indigo-50 text-indigo-700', onSelect: () => navigate('settings') },
   ];
 

@@ -50,6 +50,7 @@ const EscalationsPage = lazy(() => import('./components/EscalationsPage'));
 const InstructorRecordsPage = lazy(() => import('./components/InstructorRecordsPage'));
 const MorePage = lazy(() => import('./components/MorePage'));
 const PublicFormPage = lazy(() => import('./components/PublicFormPage'));
+const FormResponsesSection = lazy(() => import('./components/FormResponsesSection'));
 
 interface SessionState {
   token: string | null;
@@ -65,7 +66,7 @@ interface SessionState {
 
 type AccountModal = 'profile' | 'password' | 'forgot' | null;
 
-const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management', 'escalations', 'instructor-records']);
+const ADMIN_TABS = new Set(['dashboard', 'institutes', 'boa-management', 'settings', 'instructor-management', 'escalations', 'instructor-records', 'form-responses']);
 const INSTRUCTORS_PATH = '/api/v2/instructors?include_feedback=false';
 
 function initialSession(): SessionState {
@@ -409,6 +410,10 @@ export default function App() {
 
           {activeTab === 'instructor-records' && isElevatedRole(session.role) && (
             <div className="w-full h-full"><InstructorRecordsPage /></div>
+          )}
+
+          {activeTab === 'form-responses' && isElevatedRole(session.role) && (
+            <div className="w-full h-full"><FormResponsesSection /></div>
           )}
 
           {activeTab === 'more' && (

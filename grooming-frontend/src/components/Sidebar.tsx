@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ChartColumnBig,
+  ClipboardList,
   LayoutDashboard,
   LayoutGrid,
   Users,
@@ -135,6 +136,14 @@ export default function Sidebar({
             >
               <Users size={20} aria-hidden="true" />
               Users
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('form-responses')}
+              className={navClass(activeTab === 'form-responses')}
+            >
+              <ClipboardList size={20} aria-hidden="true" />
+              Form Responses
             </button>
           </>
         )}

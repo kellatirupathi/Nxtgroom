@@ -11,6 +11,7 @@ export const TABS = {
   SETTINGS: 'settings',
   ESCALATIONS: 'escalations',
   INSTRUCTOR_RECORDS: 'instructor-records',
+  FORM_RESPONSES: 'form-responses',
   MORE: 'more',
 } as const;
 
@@ -27,6 +28,7 @@ const TAB_TO_PATH: Record<Tab, string> = {
   [TABS.SETTINGS]: '/settings',
   [TABS.ESCALATIONS]: '/dashboard/escalations',
   [TABS.INSTRUCTOR_RECORDS]: '/instructors/records',
+  [TABS.FORM_RESPONSES]: '/form-responses',
   [TABS.MORE]: '/more',
 };
 
@@ -110,9 +112,9 @@ export function recordIdFromLocation(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export const SETTINGS_SECTIONS = ['notifications', 'identification', 'institutes', 'sync', 'rp', 'reports', 'responses', 'holidays', 'config', 'audit'] as const;
+export const SETTINGS_SECTIONS = ['notifications', 'identification', 'institutes', 'sync', 'rp', 'reports', 'holidays', 'config', 'audit'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
-export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'responses' | 'holidays' | 'config' | 'audit';
+export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'holidays' | 'config' | 'audit';
 
 const SETTINGS_TAB_SECTIONS: Record<SettingsTab, SettingsSection> = {
   notifications: 'notifications',
@@ -121,7 +123,6 @@ const SETTINGS_TAB_SECTIONS: Record<SettingsTab, SettingsSection> = {
   sync: 'sync',
   rp: 'rp',
   reports: 'reports',
-  responses: 'responses',
   holidays: 'holidays',
   config: 'config',
   audit: 'audit',
@@ -135,6 +136,8 @@ const SUB_ROUTES: ReadonlyArray<[RegExp, Tab]> = [
   [/^\/users\/(new|[^/]+\/(edit|password|permissions))$/, TABS.USERS],
   [new RegExp(`^/settings/(${SETTINGS_SECTIONS.join('|')})$`), TABS.SETTINGS],
   [/^\/settings\/institutes\/(new|[^/]+\/edit)$/, TABS.SETTINGS],
+  // Form Responses was briefly a Settings section; old links open the page.
+  [/^\/settings\/responses$/, TABS.FORM_RESPONSES],
 ];
 
 export function tabForPath(pathname: string): Tab {

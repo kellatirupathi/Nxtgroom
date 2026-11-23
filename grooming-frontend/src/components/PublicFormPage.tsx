@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { AlertCircle, CheckCircle2, ExternalLink, ImagePlus, Loader2, Pencil, RefreshCw, X } from 'lucide-react';
 import { apiFetch, type ApiError } from '../api';
 import ConfirmDialog from './ConfirmDialog';
+import FormDatePicker from './FormDatePicker';
 import ImageLightbox, { type LightboxImage } from './ImageLightbox';
 import { publicFormFromLocation } from '../routes';
 import {
@@ -408,7 +409,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   const addedImages = draft.added.map((photo, index) => ({ url: photo.preview, label: `New photo ${index + 1}` }));
   const allImages = [...keptImages, ...addedImages];
   const photoCount = draft.kept.length + draft.added.length;
-  const savedPhotosWillGo = draft.status === 'no' && Boolean(response?.photos.length);
+  const photosWillGo = draft.status === 'no' && (draft.added.length > 0 || Boolean(response?.photos.length));
 
   return (
     <main className="min-h-dvh bg-[#f0ebf8] px-3 py-4 text-slate-900 sm:px-4 sm:py-8">
@@ -416,10 +417,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
         <section className="overflow-hidden rounded-lg border border-[#dadce0] bg-white">
           <div className="h-2.5 bg-indigo-600" aria-hidden="true" />
           <div className="px-5 pb-4 pt-5 sm:px-6 sm:pt-6">
-            <div className="mb-3 flex items-center gap-2">
-              <img src="/logo.png" alt="" className="h-7 w-7 object-contain" />
-              <span className="text-sm font-semibold text-slate-500">FacultyTrack</span>
-            </div>
             <h1 className="text-[26px] leading-tight text-slate-900 sm:text-[32px]">{FORM_TITLE}</h1>
             {institute && (
               <p className="mt-2 text-sm text-slate-600">
@@ -461,15 +458,13 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
           <Card id="question-date">
             <QuestionTitle required htmlFor="form-date">Date</QuestionTitle>
             <p className="mt-3 text-xs text-slate-500">Date</p>
-            <input
+            <FormDatePicker
               id="form-date"
-              type="date"
               value={shownDate}
+              today={today}
               min="2020-01-01"
-              max={today}
-              onChange={(event) => goToDate(event.target.value)}
               disabled={submitting}
-              className="mt-1 h-10 w-48 max-w-full border-0 border-b border-slate-400 bg-transparent px-0 text-base text-slate-900 outline-none focus:border-b-2 focus:border-indigo-600"
+              onChange={goToDate}
             />
             <p className="mt-2 text-xs text-slate-500">
               {shownDate === today ? "Today's form." : `The form for ${longDate(shownDate)}.`} Pick another date to see or change that day's response.
@@ -584,8 +579,8 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                   />
                 ))}
               </div>
-              {savedPhotosWillGo && (
-                <p className="mt-2 text-xs text-amber-700">The saved photos will be removed when you submit with No.</p>
+              {photosWillGo && (
+                <p className="mt-2 text-xs text-amber-700">Photos are not sent with No. Choose Yes to keep them.</p>
               )}
               <ErrorLine message={errors.status} />
             </Card>
@@ -603,7 +598,8 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               <p className="mt-2 text-xs text-slate-500">This link belongs to {institute?.name}.</p>
             </Card>
 
-            {draft.status === 'yes' && (
+            {/* Shown from the start; hidden only when the answer is No. */}
+            {draft.status !== 'no' && (
               <Card id="question-photos" invalid={Boolean(errors.photos)}>
                 <QuestionTitle required>Grooming Picture</QuestionTitle>
                 <p className="mt-2 text-sm text-slate-500">
@@ -724,15 +720,8 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               </p>
             )}
 
+            {/* Clear form (or Cancel editing) on the left, Submit on the right. */}
             <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <button
-                type="submit"
-                disabled={submitting || preparing}
-                className="inline-flex h-11 min-w-28 items-center justify-center gap-2 rounded-md bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:opacity-60"
-              >
-                {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                {submitting ? (draft.added.length ? 'Uploading photos…' : 'Submitting…') : 'Submit'}
-              </button>
               {response ? (
                 <button type="button" onClick={cancelEdit} disabled={submitting} className="h-11 rounded-md px-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 disabled:opacity-60">
                   Cancel editing
@@ -742,11 +731,19 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                   Clear form
                 </button>
               )}
+              <button
+                type="submit"
+                disabled={submitting || preparing}
+                className="ml-auto inline-flex h-11 min-w-28 items-center justify-center gap-2 rounded-md bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:opacity-60"
+              >
+                {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
+                {submitting ? (draft.added.length ? 'Uploading photos…' : 'Submitting…') : 'Submit'}
+              </button>
             </div>
           </form>
         )}
 
-        <p className="px-1 pb-4 pt-2 text-xs text-slate-500">Never submit passwords through this form.</p>
+        <div className="pb-4" aria-hidden="true" />
       </div>
 
       <ConfirmDialog

@@ -10,7 +10,7 @@ test('Settings lists its sections in the side menu, with Holidays, Config and a 
   const tabs = [...page.matchAll(/\{ tab: '([a-z]+)', label: '([^']+)'/g)].map((match) => `${match[1]}:${match[2]}`);
   assert.deepEqual(tabs, [
     'notifications:Notifications', 'identification:Identification', 'colleges:Institutes', 'sync:Sync Data',
-    'rp:RP', 'reports:Reports', 'responses:Form Responses', 'holidays:Holidays', 'config:Config', 'audit:Audit log',
+    'rp:RP', 'reports:Reports', 'holidays:Holidays', 'config:Config', 'audit:Audit log',
   ]);
   assert.ok(page.includes("{ tab: 'audit', label: 'Audit log', icon: History, rootOnly: true }"));
   assert.ok(page.includes("SECTIONS.filter((section) => !section.rootOnly || role === 'SUPER_ADMIN')"));
