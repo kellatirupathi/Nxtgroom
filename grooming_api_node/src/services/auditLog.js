@@ -18,6 +18,7 @@ const RESOURCES = [
   [/^\/api\/v2\/attendance\/[^/]+\/checkout-photo/, () => "attendance check-out photo"],
   [/^\/api\/v2\/attendance/, () => "attendance record"],
   [/^\/api\/v2\/colleges/, () => "institute"],
+  [/^\/api\/v2\/form-responses\/import/, () => "form responses import"],
   [/^\/api\/v2\/admins\/[^/]+\/password/, () => "admin password"],
   [/^\/api\/v2\/admins/, () => "admin user"],
   [/^\/api\/v2\/boas\/[^/]+\/password/, () => "BOA password"],

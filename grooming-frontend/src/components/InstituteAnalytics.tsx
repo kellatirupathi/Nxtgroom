@@ -4,12 +4,16 @@ import { textMatches } from '../lib/tableSort';
 import {
   ArrowUpDown,
   ChartColumnBig,
+  Check,
   ChevronLeft,
+  Copy,
+  ExternalLink,
   Plus,
   TriangleAlert,
   X,
 } from 'lucide-react';
 import { apiFetch } from '../api';
+import type { FormLink } from '../lib/instituteForm';
 import DateRangeFilter from './DateRangeFilter';
 import InstituteFormDialog from './InstituteFormDialog';
 import {
@@ -85,6 +89,63 @@ function needsAttention(row: { compliance_percent: number | null; low_enrolment:
   return (typeof row.compliance_percent === 'number' && row.compliance_percent < 80) || row.low_enrolment;
 }
 
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    return copied;
+  }
+}
+
+// The institute's public grooming-photo form: copy the link to share it, or
+// open it in a new tab.
+function FormLinkActions({ link, name }: { link: FormLink | undefined; name: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return undefined;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  if (!link) return <span className="text-xs text-slate-400">—</span>;
+  const url = `${window.location.origin}${link.path}`;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => { void copyText(url).then(setCopied); }}
+        aria-label={`Copy the form link for ${name}`}
+        title={url}
+        className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+          copied ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+        }`}
+      >
+        {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+        {copied ? 'Copied' : 'Copy link'}
+      </button>
+      <a
+        href={link.path}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open the form for ${name} in a new tab`}
+        title="Open the form"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 hover:text-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+      >
+        <ExternalLink size={14} aria-hidden="true" />
+      </a>
+    </span>
+  );
+}
+
 export default function InstituteAnalytics() {
   const [initial] = useState(() => datePresetFromQuery(window.location.search, localDateValue()));
   const [sort, setSort] = useState<InstituteSort>(() => instituteSortFromQuery(window.location.search));
@@ -101,7 +162,21 @@ export default function InstituteAnalytics() {
   };
   const [reloadKey, setReloadKey] = useState(0);
   const [filters, setFilters] = useState<InstituteFilters>(NO_INSTITUTE_FILTERS);
+  const [formLinks, setFormLinks] = useState<Map<string, FormLink>>(() => new Map());
   const hasResult = useRef(false);
+
+  // Each institute's public form link (created the first time it is listed).
+  useEffect(() => {
+    const controller = new AbortController();
+    apiFetch<FormLink[]>('/api/v2/form-links', { signal: controller.signal })
+      .then((links) => {
+        if (!controller.signal.aborted && Array.isArray(links)) {
+          setFormLinks(new Map(links.map((link) => [link.college_id, link])));
+        }
+      })
+      .catch(() => { });
+    return () => controller.abort();
+  }, [reloadKey]);
 
   useEffect(() => {
     if (adding) return;
@@ -332,6 +407,10 @@ export default function InstituteAnalytics() {
                       <b className={`tabular-nums ${row.low_enrolment ? 'text-amber-700' : 'text-slate-900'}`}>{row.enrolled_percent}%</b> faces enrolled
                     </span>
                   </p>
+                  <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
+                    <span className="text-xs font-semibold text-slate-500">Form link</span>
+                    <FormLinkActions link={formLinks.get(row.college_id)} name={row.name} />
+                  </div>
                 </li>
               );
             })}
@@ -341,7 +420,7 @@ export default function InstituteAnalytics() {
             tabIndex={0}
             aria-label="Institutes, scrollable"
           >
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm">
               <thead>
                 <tr style={{ height: INSTITUTE_HEADER_HEIGHT }}>
                   {INSTITUTE_COLUMNS.map((column) => {
@@ -366,12 +445,18 @@ export default function InstituteAnalytics() {
                       </th>
                     );
                   })}
+                  <th
+                    scope="col"
+                    className="sticky top-0 z-10 bg-slate-50 px-3 text-xs last:pr-4 font-bold uppercase tracking-wider text-slate-500 shadow-[inset_0_-1px_0_0_rgb(226_232_240)]"
+                  >
+                    Form link
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {tableRows.length === 0 && (
                   <tr>
-                    <td colSpan={INSTITUTE_COLUMNS.length} className="p-8 text-center text-sm text-slate-400">No institutes match these filters.</td>
+                    <td colSpan={INSTITUTE_COLUMNS.length + 1} className="p-8 text-center text-sm text-slate-400">No institutes match these filters.</td>
                   </tr>
                 )}
                 {tableRows.map((row, index) => {
@@ -405,6 +490,9 @@ export default function InstituteAnalytics() {
                             {row.enrolled_percent}%
                           </span>
                         )}
+                      </td>
+                      <td className={cell}>
+                        <FormLinkActions link={formLinks.get(row.college_id)} name={row.name} />
                       </td>
                     </tr>
                   );

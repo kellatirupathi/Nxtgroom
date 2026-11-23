@@ -9,12 +9,14 @@ import {
   homeTabForRole,
   dailyReportFromLocation,
   LOCATION_CHANGE_EVENT,
+  publicFormFromLocation,
   publicReportFromLocation,
   pushTabPath,
   recordIdFromLocation,
   replaceTabPath,
   RESET_PASSWORD_PATH,
   type DailyReportRoute,
+  type PublicFormRoute,
   type PublicReportRoute,
 } from './routes';
 import { ChangePasswordModal, ProfileModal } from './components/AccountModals';
@@ -47,6 +49,7 @@ const AttendanceScreen = lazy(() => import('./components/AttendanceScreen'));
 const EscalationsPage = lazy(() => import('./components/EscalationsPage'));
 const InstructorRecordsPage = lazy(() => import('./components/InstructorRecordsPage'));
 const MorePage = lazy(() => import('./components/MorePage'));
+const PublicFormPage = lazy(() => import('./components/PublicFormPage'));
 
 interface SessionState {
   token: string | null;
@@ -88,6 +91,7 @@ function initialResetToken(): string | null {
 export default function App() {
   const [publicReport] = useState<PublicReportRoute | null>(publicReportFromLocation);
   const [dailyReport] = useState<DailyReportRoute | null>(dailyReportFromLocation);
+  const [publicForm] = useState<PublicFormRoute | null>(() => publicFormFromLocation());
   const [session, setSession] = useState(initialSession);
   const [resetToken, setResetToken] = useState<string | null>(initialResetToken);
   const [activeTab, setActiveTab] = useState<string>(currentTabFromLocation);
@@ -178,8 +182,18 @@ export default function App() {
     else pushTabPath(target);
   }, [session.role, selectedAttendanceRecord]);
 
+  // Admin screens use a slightly smaller base size on laptops and desktops
+  // (see .compact-ui in index.css), so a full page fits at 100% zoom. The
+  // attendance camera screen keeps its normal size.
+  const shellShown = !publicReport && !dailyReport && !publicForm && !resetToken && Boolean(session.token) && session.validated;
   useEffect(() => {
-    if (publicReport || dailyReport || resetToken) return undefined;
+    const root = document.documentElement;
+    root.classList.toggle('compact-ui', shellShown && activeTab !== 'overview');
+    return () => root.classList.remove('compact-ui');
+  }, [shellShown, activeTab]);
+
+  useEffect(() => {
+    if (publicReport || dailyReport || publicForm || resetToken) return undefined;
     if (!session.token || !session.validated) return undefined;
     const recordId = recordIdFromLocation();
     if (!recordId || selectedAttendanceRecord) return undefined;
@@ -197,10 +211,10 @@ export default function App() {
         replaceTabPath('daily-records');
       });
     return () => controller.abort();
-  }, [session.token, session.validated, selectedAttendanceRecord, publicReport, dailyReport, resetToken]);
+  }, [session.token, session.validated, selectedAttendanceRecord, publicReport, dailyReport, publicForm, resetToken]);
 
   useEffect(() => {
-    if (publicReport || dailyReport || resetToken) return undefined;
+    if (publicReport || dailyReport || publicForm || resetToken) return undefined;
     const onPopState = () => {
       const tab = currentTabFromLocation();
       setActiveTab(
@@ -215,10 +229,10 @@ export default function App() {
       window.removeEventListener('popstate', onPopState);
       window.removeEventListener(LOCATION_CHANGE_EVENT, onPopState);
     };
-  }, [session.role, publicReport, dailyReport, resetToken]);
+  }, [session.role, publicReport, dailyReport, publicForm, resetToken]);
 
   useEffect(() => {
-    if (publicReport || dailyReport || resetToken) return;
+    if (publicReport || dailyReport || publicForm || resetToken) return;
     if (!session.validated || !session.token) return;
     const atRoot = (window.location.pathname.replace(/\/+$/, '') || '/') === '/';
     const requested = atRoot ? homeTabForRole(isElevatedRole(session.role)) : currentTabFromLocation();
@@ -228,7 +242,15 @@ export default function App() {
       : tab;
     setActiveTab(allowed);
     replaceTabPath(allowed, recordIdFromLocation() || undefined);
-  }, [session.validated, session.token, session.role, publicReport, dailyReport, resetToken]);
+  }, [session.validated, session.token, session.role, publicReport, dailyReport, publicForm, resetToken]);
+
+  if (publicForm) {
+    return (
+      <Suspense fallback={<BrandedLoader label="Opening the form" />}>
+        <PublicFormPage slug={publicForm.slug} token={publicForm.token} date={publicForm.date} />
+      </Suspense>
+    );
+  }
 
   if (publicReport) {
     return (

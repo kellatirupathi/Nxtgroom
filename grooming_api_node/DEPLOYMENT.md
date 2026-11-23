@@ -136,6 +136,24 @@ billing; new tables get point-in-time recovery.
 The API checks at start-up that every table and index exists and refuses to
 start, naming what is missing, if one does not.
 
+When an update adds a table (for example `form_responses` and
+`institute_form_links` for the institute grooming-photo form), create it with
+the new code before running `deploy.sh`. Otherwise the new release refuses to
+start and `deploy.sh` rolls back to the previous one. The running API is not
+touched while the tables are created:
+
+```bash
+cd /opt/facultytrack
+git fetch origin
+git checkout --detach origin/main
+cd grooming_api_node
+IMAGE_TAG=tables docker compose build
+IMAGE_TAG=tables docker compose run --rm api npm run dynamodb:tables:apply   # creates only the new tables
+cd /opt/facultytrack
+deploy/lightsail/deploy.sh
+docker image rm facultytrack-api:tables
+```
+
 To copy data in from the old MongoDB database (a one-time move), install its
 driver for the run and set `MONGODB_URI`; MongoDB is only read:
 

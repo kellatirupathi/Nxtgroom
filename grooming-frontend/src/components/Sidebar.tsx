@@ -136,14 +136,6 @@ export default function Sidebar({
               <Users size={20} aria-hidden="true" />
               Users
             </button>
-            <button
-              type="button"
-              onClick={() => navigate('settings')}
-              className={navClass(activeTab === 'settings')}
-            >
-              <Settings size={20} aria-hidden="true" />
-              Settings
-            </button>
           </>
         )}
       </nav>
@@ -155,6 +147,21 @@ export default function Sidebar({
             aria-label="Account menu"
             className="absolute bottom-2 left-full ml-2 w-56 bg-white border border-slate-200 rounded-md shadow-xl overflow-hidden z-50"
           >
+            {/* Settings lives here for administrators, not in the main list. */}
+            {isElevatedRole(role) && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runMenuAction(() => navigate('settings'))}
+                aria-current={activeTab === 'settings' ? 'page' : undefined}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors border-b border-slate-100 ${
+                  activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <Settings size={16} aria-hidden="true" />
+                Settings
+              </button>
+            )}
             <button
               type="button"
               role="menuitem"
@@ -190,7 +197,9 @@ export default function Sidebar({
           onClick={() => setIsMenuOpen((open) => !open)}
           aria-haspopup="menu"
           aria-expanded={isMenuOpen}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-white transition-colors text-left"
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors text-left ${
+            activeTab === 'settings' ? 'bg-white ring-1 ring-indigo-200' : 'hover:bg-white'
+          }`}
         >
           <span
             aria-hidden="true"

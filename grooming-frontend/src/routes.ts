@@ -1,3 +1,5 @@
+import { keyFromUrlDate } from './lib/instituteForm.ts';
+
 export const TABS = {
   DASHBOARD: 'dashboard',
   INSTITUTES: 'institutes',
@@ -78,6 +80,22 @@ export function dailyReportFromLocation(): DailyReportRoute | null {
   return match[2] ? { date: match[1], campus: match[2], token: match[3] } : { date: match[1], token: match[3] };
 }
 
+export interface PublicFormRoute {
+  slug: string;
+  token: string;
+  // YYYY-MM-DD from a /DD_MM_YYYY ending; null when the address has no date
+  // (today's form), 'invalid' when it has one that is not a real date.
+  date: string | null;
+}
+
+// An institute's public grooming-photo form: /form/<name>/<token>[/DD_MM_YYYY].
+export function publicFormFromLocation(pathname: string = typeof window === 'undefined' ? '' : window.location.pathname): PublicFormRoute | null {
+  const match = pathname.match(/^\/form\/([a-z0-9-]{1,80})\/([A-Za-z0-9_-]{16,64})(?:\/([0-9_]{1,12}))?\/?$/);
+  if (!match) return null;
+  const date = match[3] ? (keyFromUrlDate(match[3]) ?? 'invalid') : null;
+  return { slug: match[1], token: match[2], date };
+}
+
 export function pathForTab(tab: string, recordId?: string): string {
   const base = TAB_TO_PATH[tab as Tab] ?? TAB_TO_PATH[TABS.OVERVIEW];
   if (tab === TABS.INSTRUCTOR_DETAIL && recordId) {
@@ -92,9 +110,9 @@ export function recordIdFromLocation(): string | null {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-export const SETTINGS_SECTIONS = ['notifications', 'identification', 'institutes', 'sync', 'rp', 'reports', 'holidays', 'config', 'audit'] as const;
+export const SETTINGS_SECTIONS = ['notifications', 'identification', 'institutes', 'sync', 'rp', 'reports', 'responses', 'holidays', 'config', 'audit'] as const;
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
-export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'holidays' | 'config' | 'audit';
+export type SettingsTab = 'notifications' | 'identification' | 'colleges' | 'sync' | 'rp' | 'reports' | 'responses' | 'holidays' | 'config' | 'audit';
 
 const SETTINGS_TAB_SECTIONS: Record<SettingsTab, SettingsSection> = {
   notifications: 'notifications',
@@ -103,6 +121,7 @@ const SETTINGS_TAB_SECTIONS: Record<SettingsTab, SettingsSection> = {
   sync: 'sync',
   rp: 'rp',
   reports: 'reports',
+  responses: 'responses',
   holidays: 'holidays',
   config: 'config',
   audit: 'audit',

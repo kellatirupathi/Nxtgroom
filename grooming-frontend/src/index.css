@@ -13,6 +13,18 @@
   --shell-offset-top: 0px;
 }
 
+/* Admin screens on laptops and desktops: every size in the app is in rem, so
+   a smaller root size shrinks text, spacing and panels together, like the
+   browser at 80-90% zoom. About 13px on a 1366-1536px wide screen, growing to
+   15px at 1920px and the normal 16px on very wide screens. Phones, tablets and
+   the attendance camera screen keep 16px. Breakpoints are unaffected: media
+   queries in rem use the browser's default size, not this one. */
+@media (min-width: 64rem) {
+  html.compact-ui {
+    font-size: clamp(13px, calc(0.52vw + 5px), 16px);
+  }
+}
+
 body {
   background-color: #f9fafb;
   color: #111827;

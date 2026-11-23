@@ -25,6 +25,7 @@ import { authRouter } from "./src/routes/authRoutes.js";
 import { dashboardRouter } from "./src/routes/dashboardRoutes.js";
 import { instructorRouter } from "./src/routes/instructorRoutes.js";
 import { reportRouter } from "./src/routes/reportRoutes.js";
+import { formAdminRouter, publicFormRouter } from "./src/routes/formRoutes.js";
 import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
@@ -42,6 +43,7 @@ const config = runtimeConfig();
 export function loggedPath(path) {
   return String(path)
     .replace(/^(\/api\/v2\/reports\/)(?!cron(?:\/|$))[^/]+/, "$1<token>")
+    .replace(/^(\/api\/v2\/forms\/)[^/]+/, "$1<token>")
     .replace(/^(\/api\/v2\/auth\/reset-password\/)[^/]+/, "$1<token>");
 }
 
@@ -174,8 +176,9 @@ app.use("/api/v2", auditTrail);
 app.use("/api/v2/auth/login", loginLimiter);
 app.use("/api/v2/auth", requireDatabase, authRouter);
 app.use("/api/v2/reports", requireDatabase, reportRouter);
+app.use("/api/v2/forms", requireDatabase, publicFormRouter);
 app.use("/api/v2/dashboard", requireDatabase, getCurrentUser, dashboardRouter);
-app.use("/api/v2", requireDatabase, getCurrentUser, adminRouter);
+app.use("/api/v2", requireDatabase, getCurrentUser, adminRouter, formAdminRouter);
 app.use("/api/v2/instructors", requireDatabase, getCurrentUser, instructorRouter);
 app.use("/api/v2/attendance", requireDatabase, getCurrentUser, attendanceRouter);
 

@@ -101,6 +101,28 @@ export const COLLECTIONS = Object.freeze({
   audit_logs: { indexes: [{ name: "by_time", pk: null, sk: "at" }], unique: [] },
   app_settings: { indexes: [], unique: [] },
   report_delivery_runs: { indexes: [], unique: [] },
+  // One public grooming-photo form link per institute (see services/instituteForms.js).
+  institute_form_links: {
+    indexes: [
+      { name: "by_token", pk: "token" },
+      { name: "by_college", pk: "college_id" },
+    ],
+    unique: [
+      { name: "form_link_token_unique", fields: ["token"], requireStrings: true },
+      { name: "form_link_college_unique", fields: ["college_id"], requireStrings: true },
+    ],
+  },
+  // One answer per institute per day to the grooming-photo form, filled in
+  // through the public link ("automatic") or imported by an admin ("manual").
+  form_responses: {
+    indexes: [
+      { name: "by_college_date", pk: "college_id", sk: "form_date" },
+      { name: "by_date", pk: null, sk: "form_date" },
+    ],
+    unique: [
+      { name: "one_form_response_per_day", fields: ["college_id", "form_date"], requireStrings: true },
+    ],
+  },
 });
 
 export const COLLECTION_NAMES = Object.freeze(Object.keys(COLLECTIONS));

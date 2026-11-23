@@ -73,8 +73,8 @@ test('the full-day link is recognised, and nothing else is', () => {
 
 test('the page opens before the sign-in gate and never rewrites its own address', () => {
   const app = read('src/App.tsx');
-  assert.equal((app.match(/if \(publicReport \|\| dailyReport \|\| resetToken\) return/g) || []).length, 3);
-  assert.equal((app.match(/publicReport, dailyReport, resetToken\]\);/g) || []).length, 3);
+  assert.equal((app.match(/if \(publicReport \|\| dailyReport \|\| publicForm \|\| resetToken\) return/g) || []).length, 3);
+  assert.equal((app.match(/publicReport, dailyReport, publicForm, resetToken\]\);/g) || []).length, 3);
   const page = app.indexOf('if (dailyReport) {');
   assert.ok(page > 0 && page < app.indexOf('if (!session.token)'), 'rendered before the sign-in screen');
   assert.match(app, /<DailyReportPage date=\{dailyReport\.date\} token=\{dailyReport\.token\} campus=\{dailyReport\.campus\} \/>/);
