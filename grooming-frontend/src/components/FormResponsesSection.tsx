@@ -317,10 +317,6 @@ export default function FormResponsesSection() {
             <ClipboardList size={22} className="hidden text-indigo-600 lg:block" aria-hidden="true" />
             Form Responses
           </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            The daily grooming photo form from each institute's link. <b>Automatic</b> rows were sent through the link; <b>Manual</b> rows were imported from a sheet.
-            Copy an institute's link from the Form link column on the Institutes page.
-          </p>
         </div>
       </div>
 
