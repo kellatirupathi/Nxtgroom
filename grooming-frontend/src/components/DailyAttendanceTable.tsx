@@ -571,6 +571,10 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               className="h-11 w-full rounded-lg border border-slate-300 bg-white py-0 pl-9 pr-3 text-base font-medium text-slate-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 sm:h-9 sm:rounded-md sm:pl-8 sm:text-sm"
             />
           </span>
+          {/* From md up the filters panel lines up with the Filters button's
+              left edge and opens to the right; narrower screens keep it under
+              the search row so it cannot run off the right edge. */}
+          <div className="shrink-0 md:relative">
           <button
             type="button"
             onClick={() => setFiltersOpen(true)}
@@ -591,22 +595,6 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
               </span>
             )}
           </button>
-          {(activeFilterCount > 0 || search) && (
-            <button
-              type="button"
-              onClick={() => {
-                clearAllFilters();
-                setSearch('');
-              }}
-              aria-label="Clear filters"
-              title="Clear all filters and the search"
-              className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500/20 sm:h-9 sm:justify-start sm:rounded-md"
-            >
-              <X size={18} className="sm:size-4" aria-hidden="true" />
-              <span className="hidden sm:inline">Clear</span>
-            </button>
-          )}
-
           <AttendanceFilterDrawer
             open={filtersOpen}
             onClose={closeFilters}
@@ -627,6 +615,22 @@ export default function DailyAttendanceTable({ onRowClick, canBulkDelete = false
             onClearAll={clearAllFilters}
             matchCount={filteredRecords.length}
           />
+          </div>
+          {(activeFilterCount > 0 || search) && (
+            <button
+              type="button"
+              onClick={() => {
+                clearAllFilters();
+                setSearch('');
+              }}
+              aria-label="Clear filters"
+              title="Clear all filters and the search"
+              className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-500/20 sm:h-9 sm:justify-start sm:rounded-md"
+            >
+              <X size={18} className="sm:size-4" aria-hidden="true" />
+              <span className="hidden sm:inline">Clear</span>
+            </button>
+          )}
         </div>
 
         {/* Right: bulk delete (when rows are selected) and Export. */}
