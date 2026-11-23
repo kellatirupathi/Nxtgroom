@@ -590,7 +590,6 @@ export default function InstructorDetail({ record, onBack, canDelete, canDeleteC
             <p className="text-sm text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-md border border-slate-100">
               {aiRemarksForHalf(tab, displayRecord, evaluation) || 'No remarks available.'}
             </p>
-            <p className="mt-3 text-xs text-slate-400">AI output is assistive and should be reviewed by an authorized person before adverse action.</p>
           </div>
         </div>
 
