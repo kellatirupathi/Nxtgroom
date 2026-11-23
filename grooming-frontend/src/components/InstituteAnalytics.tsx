@@ -7,6 +7,7 @@ import {
   Check,
   ChevronLeft,
   Copy,
+  Download,
   ExternalLink,
   Plus,
   TriangleAlert,
@@ -14,6 +15,8 @@ import {
 } from 'lucide-react';
 import { apiFetch } from '../api';
 import type { FormLink } from '../lib/instituteForm';
+import { instituteCsv, instituteExportFileName } from '../lib/instituteExport';
+import { saveCsvFile } from '../attendanceExport';
 import DateRangeFilter from './DateRangeFilter';
 import InstituteFormDialog from './InstituteFormDialog';
 import {
@@ -279,6 +282,12 @@ export default function InstituteAnalytics() {
       ),
     };
   };
+  // The rows on screen, after the column filters and sort.
+  const exportInstitutes = () => {
+    const from = preset === 'all_time' ? '' : range.from;
+    const to = preset === 'all_time' ? '' : range.to;
+    void saveCsvFile(instituteExportFileName(from, to), instituteCsv(tableRows, formLinks, window.location.origin));
+  };
   const toggle = (key: InstituteSortKey) => {
     setSort((current) => (
       current.key === key
@@ -322,6 +331,8 @@ export default function InstituteAnalytics() {
               Clear filters
             </button>
           )}
+          {/* Left to right: the period, Add Institute, Export. */}
+          <DateRangeFilter preset={preset} range={range} today={localDateValue()} onChange={changeRange} />
           <button
             type="button"
             onClick={() => setAdding(true)}
@@ -332,7 +343,17 @@ export default function InstituteAnalytics() {
             <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
             <span className="hidden sm:inline">Add Institute</span>
           </button>
-          <DateRangeFilter preset={preset} range={range} today={localDateValue()} onChange={changeRange} />
+          <button
+            type="button"
+            onClick={exportInstitutes}
+            disabled={!result || tableRows.length === 0}
+            aria-label="Export institutes"
+            title="Export the institutes shown, as a CSV file"
+            className="flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:opacity-50 sm:px-3"
+          >
+            <Download size={16} aria-hidden="true" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
         </div>
       </div>
 
