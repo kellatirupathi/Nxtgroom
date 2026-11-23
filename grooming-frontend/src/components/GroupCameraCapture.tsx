@@ -22,7 +22,17 @@ import {
 } from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
 import TurnedLayer from './TurnedLayer';
-import { stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
+import { rememberedLabels, smoothBoxes, stabilizeBoxLabels, withoutLabels, type FaceBox, type LabelMemory } from '../lib/faceBoxes';
+import { planNextRead, smoothedCost } from '../lib/detectionPace';
+import {
+  clearToFire,
+  createSteadyMemory,
+  forgetAnchors,
+  isSteady,
+  MAX_GROUP_BODY_SPEED,
+  recordAnchors,
+  type SteadyHold,
+} from '../lib/steadiness';
 import { messageTurn, readWithTurn, setTurn, sharedTurnTracker, type QuarterTurn } from '../lib/frameTurn';
 import { coverSourceRect } from '../lib/cameraGeometry';
 import {
@@ -33,11 +43,14 @@ import {
   takeParkedCameraStream,
   tuneCameraTrack,
 } from '../lib/cameraStream';
-import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
+import { capturePhoto, createStillCaptureState, GROUP_UPLOAD_MAX_DIMENSION, type FocusArea } from '../lib/stillCapture';
+import type { CaptureDetails } from '../lib/bodyRegions';
+import { describeCapture } from '../lib/captureInfo';
+import { PHOTO_JPEG_QUALITY } from '../lib/photoEncoding';
 
 interface GroupCameraCaptureProps {
   facing: 'user' | 'environment';
-  onCapture: (file: File) => void | Promise<void>;
+  onCapture: (file: File, details?: CaptureDetails) => void | Promise<void>;
   // While true (a result is on screen) the camera neither analyses nor fires.
   paused?: boolean;
   // How far on-screen messages must turn to read upright (see lib/frameTurn.ts).
@@ -79,6 +92,7 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
   const manualOfferedRef = useRef(false);
   const shootRef = useRef<(options?: { viaAuto?: boolean }) => Promise<void>>(async () => {});
   const labelMemoryRef = useRef<LabelMemory>({});
+  const focusRef = useRef<FocusArea[]>([]);
   const stillStateRef = useRef(createStillCaptureState());
   const openingRef = useRef(false);
   const [streamGeneration, setStreamGeneration] = useState(0);
@@ -162,6 +176,18 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
     let stableState: StableGroupState = INITIAL_GROUP_STATE;
     const tracker = sharedTurnTracker(facing);
     let wasLandscape: boolean | null = null;
+    const steadyMemory = createSteadyMemory();
+    const steadyHold: SteadyHold = { since: null };
+    let shownBoxes: FaceBox[] = [];
+    let lastDecisionAt = 0;
+    let readCost = 0;
+    let personInView = false;
+    let quickNext = false;
+
+    const showBoxes = (boxes: FaceBox[]) => {
+      shownBoxes = smoothBoxes(shownBoxes, boxes);
+      setFaceBoxes(shownBoxes);
+    };
 
     const inspect = async () => {
       if (!fullBodyDetectorSettled()) {
@@ -171,11 +197,26 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
       clearTimeout(detectorGraceTimer);
       const preview = viewportRef.current;
       if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
+      // Full readings keep their beat; while people are in view the time
+      // between them goes to quick looks that only move the face boxes.
+      const scheduleNext = () => {
+        const plan = planNextRead({
+          sinceDecisionMs: performance.now() - lastDecisionAt,
+          readCostMs: readCost,
+          personInView,
+        });
+        quickNext = plan.quick;
+        timer = setTimeout(tick, plan.delayMs);
+      };
       const tick = async () => {
         if (disposed) return;
         if (pausedRef.current) {
           steadyRef.current = 0;
           setSteadyFrames(0);
+          personInView = false;
+          quickNext = false;
+          steadyHold.since = null;
+          forgetAnchors(steadyMemory);
           timer = setTimeout(tick, 200);
           return;
         }
@@ -192,14 +233,36 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
           height: viewport.clientHeight,
           canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
         } : undefined, { mirrored: facing === 'user', turn });
+        const startedAt = performance.now();
+        if (quickNext && video) {
+          // Not while a photograph is being taken: the camera is busy with it.
+          if (!firingRef.current) {
+            const quick = await read(tracker.turn);
+            if (disposed) return;
+            const quickAt = performance.now();
+            readCost = smoothedCost(readCost, quickAt - startedAt);
+            if (!pausedRef.current) {
+              // The chips stay as the last full reading settled them.
+              const kept = rememberedLabels(labelMemoryRef.current, quick.boxes ?? []);
+              showBoxes(verdictRef.current === 'GROUP_READY' ? withoutLabels(kept) : kept);
+              focusRef.current = quick.focus ?? [];
+              recordAnchors(steadyMemory, quick.anchors, quickAt);
+            }
+          }
+          scheduleNext();
+          return;
+        }
         const turned = video
           ? await readWithTurn(tracker, read)
           : { reading: { verdict: 'UNAVAILABLE', guidance: null, people: 0, faces: 0, boxes: [] } as GroupReading, turn: tracker.turn, switched: false };
         if (disposed) return;
+        const readAt = performance.now();
+        readCost = smoothedCost(readCost, readAt - startedAt);
         const next: GroupReading = turned.reading;
         if (turned.switched) {
           detector?.tracker?.reset?.();
           labelMemoryRef.current = {};
+          forgetAnchors(steadyMemory);
         }
         turnRef.current = turned.turn;
         setShownTurn(messageTurn(turned.turn, facing === 'user'));
@@ -210,12 +273,16 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
         verdictRef.current = stable.verdict;
         const labelled = stabilizeBoxLabels(labelMemoryRef.current, next.boxes ?? []);
         labelMemoryRef.current = labelled.memory;
-        setFaceBoxes(stable.verdict === 'GROUP_READY' ? withoutLabels(labelled.boxes) : labelled.boxes);
+        showBoxes(stable.verdict === 'GROUP_READY' ? withoutLabels(labelled.boxes) : labelled.boxes);
+        // Everybody ready in this very picture, and nobody still moving.
+        const settled = next.verdict === 'GROUP_READY'
+          && isSteady(steadyMemory, next.anchors, readAt, MAX_GROUP_BODY_SPEED);
+        focusRef.current = next.focus ?? [];
+        recordAnchors(steadyMemory, next.anchors, readAt);
 
         const fireable = stable.verdict === 'GROUP_READY';
         const held = fireable ? steadyRef.current + 1 : 0;
         steadyRef.current = held;
-        setSteadyFrames(held);
 
         unusableRef.current = fireable ? 0 : unusableRef.current + 1;
         if (!manualOfferedRef.current && groupFallbackDue(unusableRef.current)) {
@@ -223,14 +290,17 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
           setManualOffered(true);
         }
 
-        if (
-          groupCaptureReady(stable.verdict, held)
+        const ready = groupCaptureReady(stable.verdict, held)
           && Date.now() >= cooldownUntilRef.current
-          && !firingRef.current
-        ) {
-          void shootRef.current({ viaAuto: true });
-        }
-        timer = setTimeout(tick, 200);
+          && !firingRef.current;
+        // A ready photograph waits a moment for people who are still moving,
+        // and the screen goes on asking them to hold still meanwhile.
+        const fire = clearToFire(steadyHold, ready, settled, Date.now());
+        setSteadyFrames(ready && !fire ? Math.min(held, GROUP_CAPTURE_CONFIRMATIONS - 1) : held);
+        if (fire) void shootRef.current({ viaAuto: true });
+        lastDecisionAt = performance.now();
+        personInView = (next.boxes?.length ?? 0) > 0;
+        scheduleNext();
       };
       void tick();
     };
@@ -277,11 +347,14 @@ export default function GroupCameraCapture({ facing, onCapture, paused = false, 
         track: streamRef.current?.getVideoTracks()[0] ?? null,
         region: crop,
         maxDimension: GROUP_UPLOAD_MAX_DIMENSION,
-        quality: 0.9,
+        quality: PHOTO_JPEG_QUALITY,
         state: stillStateRef.current,
         turn: turnRef.current,
+        focus: focusRef.current,
       });
-      await onCapture(new File([photo.blob], `group-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      await onCapture(new File([photo.blob], `group-${Date.now()}.jpg`, { type: 'image/jpeg' }), {
+        capture: describeCapture(photo, streamRef.current?.getVideoTracks()[0] ?? null),
+      });
     } catch {
       setError('The photo could not be captured. Try again.');
     } finally {

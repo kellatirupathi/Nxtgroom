@@ -28,6 +28,20 @@ export const VIDEO_SIZES: readonly (readonly [number, number])[] = [
   [1280, 960],
 ];
 
+// The camera's own largest picture, when it is not one of the sizes above: a
+// 7 MP tablet camera reports 3088x2316, and the nearest listed size would
+// leave a third of its pixels unused. Only a real camera shape counts, since
+// some browsers report the largest width and the largest height separately.
+const CAMERA_SHAPES: readonly number[] = [4 / 3, 16 / 9, 3 / 2];
+
+export function nativeVideoSize(capWidth: number, capHeight: number): readonly [number, number] | null {
+  const long = Math.max(capWidth, capHeight);
+  const short = Math.min(capWidth, capHeight);
+  if (!(short > 0) || long > MAX_VIDEO_LONG_SIDE) return null;
+  const shape = long / short;
+  return CAMERA_SHAPES.some((known) => Math.abs(shape - known) < 0.03) ? [long, short] : null;
+}
+
 type TunableTrack = {
   getCapabilities?: () => object;
   getSettings?: () => MediaTrackSettings;
@@ -57,7 +71,11 @@ export function videoSizeCandidates(
   if (!capWidth || !capHeight) return [];
   const portrait = current.height > current.width;
   const currentLong = Math.max(current.width, current.height);
-  return VIDEO_SIZES
+  const native = nativeVideoSize(capWidth, capHeight);
+  const sizes = native && !VIDEO_SIZES.some(([long, short]) => long === native[0] && short === native[1])
+    ? [native, ...VIDEO_SIZES]
+    : VIDEO_SIZES;
+  return sizes
     .filter(([long]) => long <= MAX_VIDEO_LONG_SIDE && long > currentLong)
     .map(([long, short]) => (portrait ? { width: short, height: long } : { width: long, height: short }))
     .filter(({ width, height }) => {

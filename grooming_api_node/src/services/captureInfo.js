@@ -1,5 +1,5 @@
 const MAX_RAW_LENGTH = 1500;
-const TOP_FIELDS = ["source", "video", "region", "output", "bytes", "device", "turn"];
+const TOP_FIELDS = ["source", "video", "region", "output", "bytes", "device", "turn", "frames", "picked", "sharpness"];
 const STILL_FIELDS = ["outcome", "capabilities", "requested", "raw", "score", "rotation", "error"];
 const CAMERA_FIELDS = ["width", "height", "maxWidth", "maxHeight", "frameRate", "facingMode", "focusMode"];
 

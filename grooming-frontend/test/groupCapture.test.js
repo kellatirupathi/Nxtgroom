@@ -89,8 +89,8 @@ test('both cameras draw the boxes outside the mirroring transform', () => {
 
 test('the boxes follow the live reading, not the stabilised one', () => {
   const single = read('src/components/CameraCapture.tsx');
-  assert.match(single, /setFaceBoxes\(reading\.boxes \?\? \[\]\)/);
-  assert.ok(!single.includes('setFaceBoxes(stableReading'), 'boxes must not be stabilised');
+  assert.match(single, /showBoxes\(reading\.boxes \?\? \[\]\)/);
+  assert.ok(!single.includes('setFaceBoxes(stableReading') && !single.includes('showBoxes(stableReading'), 'boxes must not be stabilised');
 
   const group = read('src/components/GroupCameraCapture.tsx');
   assert.match(group, /stabilizeBoxLabels\(labelMemoryRef\.current, next\.boxes \?\? \[\]\)/);

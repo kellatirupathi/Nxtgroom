@@ -10,7 +10,9 @@ import {
   type Pose,
 } from './fullBodyDetector.ts';
 import { coverSourceRect } from './cameraGeometry.ts';
-import { boxesOnPreview, faceBoxesFromPoses, type BoxPose, type FaceBox } from './faceBoxes.ts';
+import { boxesOnPreview, faceBoxesFromPoses, focusAreas, type BoxPose, type FaceBox } from './faceBoxes.ts';
+import { anchorFromPose, type Anchor } from './steadiness.ts';
+import type { FocusArea } from './stillCapture.ts';
 import { assessBody, shortBodyProblem } from './bodyCompleteness.ts';
 import { drawTurned, turnedSize, uprightScore, type QuarterTurn } from './frameTurn.ts';
 
@@ -30,6 +32,10 @@ export interface GroupReading {
   faces: number;
   boxes?: FaceBox[];
   upright?: number;
+  // Where the faces are in the upright picture, and where the bodies are, for
+  // choosing the sharpest frame and for telling whether everybody is still.
+  focus?: FocusArea[];
+  anchors?: Anchor[];
 }
 
 export const GROUP_MAX_PEOPLE = 6;
@@ -220,25 +226,33 @@ export async function readGroupFrame(
       mirrored: turn === 0 ? options?.mirrored : false,
     });
     const boxes = turn === 0 ? found : boxesOnPreview(found, turn, Boolean(options?.mirrored));
+    const seen = {
+      boxes,
+      upright,
+      focus: focusAreas(found, turn === 0 && Boolean(options?.mirrored)),
+      anchors: distinctPeople(poses, frameHeight)
+        .map((pose) => anchorFromPose(pose, frameHeight, KEYPOINT_CONFIDENCE))
+        .filter((anchor): anchor is Anchor => anchor !== null),
+    };
     const reading = readGroupPoses(poses, frameHeight);
     if (reading.verdict !== 'GROUP_READY' || !(input instanceof HTMLCanvasElement)) {
-      return { ...reading, boxes, upright };
+      return { ...reading, ...seen };
     }
 
     const context = input.getContext('2d', { willReadFrequently: true });
-    if (!context) return { ...reading, boxes, upright };
+    if (!context) return { ...reading, ...seen };
     const quality = measureFrameQuality(
       context.getImageData(0, 0, input.width, input.height).data,
       input.width,
       input.height,
     );
     if (quality.brightness < MIN_FRAME_BRIGHTNESS) {
-      return { ...reading, boxes, upright, verdict: 'FACES_HIDDEN', guidance: 'Move to a brighter area' };
+      return { ...reading, ...seen, verdict: 'FACES_HIDDEN', guidance: 'Move to a brighter area' };
     }
     if (quality.sharpness < MIN_FRAME_SHARPNESS) {
-      return { ...reading, boxes, upright, verdict: 'FACES_HIDDEN', guidance: 'Everybody hold still' };
+      return { ...reading, ...seen, verdict: 'FACES_HIDDEN', guidance: 'Everybody hold still' };
     }
-    return { ...reading, boxes, upright };
+    return { ...reading, ...seen };
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null, people: 0, faces: 0 };
   }

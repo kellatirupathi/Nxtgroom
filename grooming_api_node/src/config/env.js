@@ -108,7 +108,13 @@ export function runtimeConfig() {
     rekognitionTimeoutMs: parseInteger("REKOGNITION_TIMEOUT_MS", 10000, { min: 2000, max: 30000 }),
     rekognitionMaxAttempts: parseInteger("REKOGNITION_MAX_ATTEMPTS", 2, { min: 1, max: 4 }),
     groupMaxPeople: parseInteger("GROUP_ATTENDANCE_MAX_PEOPLE", 6, { min: 2, max: 12 }),
-    groupMinFacePixels: parseInteger("GROUP_MIN_FACE_PIXELS", 72, { min: 32, max: 300 }),
+    // The smallest face, in pixels across and down, that is searched for. A
+    // person standing head to feet in a 1.2 megapixel tablet picture has a
+    // face about 55 to 70 pixels wide, which the earlier floor of 72 turned
+    // away as "too far" without ever trying; 48 is the size the face service
+    // itself asks for. Who counts as a match is decided separately, by
+    // REKOGNITION_MATCH_THRESHOLD, and is unchanged.
+    groupMinFacePixels: parseInteger("GROUP_MIN_FACE_PIXELS", 48, { min: 32, max: 300 }),
     groupCropConcurrency: parseInteger("GROUP_CROP_CONCURRENCY", 3, { min: 1, max: 8 }),
     groupConcurrencyLimit: parseInteger("GROUP_CONCURRENCY_LIMIT", 2, { min: 1, max: 10 }),
   };

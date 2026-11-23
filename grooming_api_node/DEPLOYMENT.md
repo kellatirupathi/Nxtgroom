@@ -357,7 +357,7 @@ with an insecure fallback.
 | `GROUP_ATTENDANCE_MAX_PEOPLE` | Optional | Defaults to `6`; permitted range is 2–12 |
 | `GROUP_CONCURRENCY_LIMIT` | Optional | Defaults to `2`; group photographs processed at once |
 | `GROUP_CROP_CONCURRENCY` | Optional | Defaults to `3`; faces cropped at once within one group photograph |
-| `GROUP_MIN_FACE_PIXELS` | Optional | Defaults to `72` |
+| `GROUP_MIN_FACE_PIXELS` | Optional | Defaults to `48`; permitted range is 32–300. The smallest face (pixels across and down) in a group photograph that is searched for; smaller faces are answered "Too far from the camera to identify". Set `72` to restore the earlier, stricter floor |
 | `R2_ENDPOINT` | Required | Cloudflare R2 HTTPS S3 endpoint without a path |
 | `R2_BUCKET` | Required | Private attendance-photo bucket name |
 | `R2_ACCESS_KEY_ID` | Required, secret | R2 object read/write/delete credential |

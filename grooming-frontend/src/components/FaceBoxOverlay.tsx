@@ -24,7 +24,7 @@ export default function FaceBoxOverlay({ boxes, labelTurn = 0 }: FaceBoxOverlayP
       {boxes.map((box) => (
         <div
           key={box.key}
-          className={`absolute rounded-lg border-[3px] transition-[left,top,width,height] duration-200 ease-linear ${
+          className={`absolute rounded-lg border-[3px] transition-[left,top,width,height] duration-100 ease-linear ${
             box.confident ? 'border-emerald-400' : 'border-amber-400'
           }`}
           style={{

@@ -14,6 +14,10 @@ export interface FrameReading {
   bodyRegions?: BodyRegions | null;
   boxes?: FaceBox[];
   upright?: number;
+  // Where the face is in the upright picture, and where the body is, for
+  // choosing the sharpest frame and for telling whether the person is still.
+  focus?: FocusArea[];
+  anchors?: Anchor[];
 }
 
 export type WristPosition = 'RAISED' | 'LOWERED' | 'UNKNOWN';
@@ -26,7 +30,9 @@ export interface PoseSignals {
 export const KEYPOINT_CONFIDENCE = 0.35;
 
 import { BODY_GUIDE_BOUNDS, coverSourceRect } from './cameraGeometry.ts';
-import { boxesOnPreview, faceBoxesFromPoses, type FaceBox } from './faceBoxes.ts';
+import { boxesOnPreview, faceBoxesFromPoses, focusAreas, type FaceBox } from './faceBoxes.ts';
+import { anchorFromPose, type Anchor } from './steadiness.ts';
+import type { FocusArea } from './stillCapture.ts';
 import { drawTurned, turnedSize, uprightScore, type QuarterTurn } from './frameTurn.ts';
 import { assessBody, describeBodyProblem } from './bodyCompleteness.ts';
 import { assessCapturePosture, type CapturePosture } from './capturePosture.ts';
@@ -46,7 +52,7 @@ export const MIN_FRAME_BRIGHTNESS = 42;
 export const MIN_FRAME_SHARPNESS = 7;
 
 export type Keypoint = { name?: string; score?: number; x?: number; y?: number };
-export type Pose = { keypoints: Keypoint[]; score?: number };
+export type Pose = { keypoints: Keypoint[]; score?: number; id?: number };
 
 export type Detector = {
   estimatePoses: (
@@ -63,6 +69,11 @@ type TfCore = typeof import('@tensorflow/tfjs-core');
 export const MOVENET_MODEL_URL = '/models/movenet-multipose-lightning-v1/model.json';
 
 const ANALYSIS_MAX_SIDE = 480;
+// Measured on photographs of two to six standing people (November 2026): the
+// pose model finds people best when each is about 100 to 270 pixels tall in
+// its input, which is where 320 puts both one person and a group. At 416 and
+// 480 it lost people who fill the picture, so the size is the same for both
+// screens and is not raised for groups.
 const MULTI_POSE_MAX_DIMENSION = 320;
 
 let detectorPromise: Promise<Detector | null> | null = null;
@@ -530,24 +541,33 @@ export async function readFrame(
       minScore: KEYPOINT_CONFIDENCE,
     });
     const boxes = turn === 0 ? found : boxesOnPreview(found, turn, Boolean(options?.mirrored));
+    const seen = {
+      boxes,
+      upright,
+      focus: focusAreas(found, turn === 0 && Boolean(options?.mirrored)),
+      anchors: poses
+        .filter(isDetectedPerson)
+        .map((pose) => anchorFromPose(pose, frameHeight, KEYPOINT_CONFIDENCE))
+        .filter((anchor): anchor is Anchor => anchor !== null),
+    };
     const reading = readPoses(poses, frameHeight, frameWidth);
     if (reading.verdict !== 'FULL_BODY' || !(input instanceof HTMLCanvasElement)) {
-      return { ...reading, boxes, upright };
+      return { ...reading, ...seen };
     }
     const context = input.getContext('2d', { willReadFrequently: true });
-    if (!context) return { ...reading, boxes, upright };
+    if (!context) return { ...reading, ...seen };
     const quality = measureFrameQuality(
       context.getImageData(0, 0, input.width, input.height).data,
       input.width,
       input.height,
     );
     if (quality.brightness < MIN_FRAME_BRIGHTNESS) {
-      return { ...reading, boxes, upright, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
+      return { ...reading, ...seen, verdict: 'PARTIAL', guidance: 'Move to a brighter area' };
     }
     if (quality.sharpness < MIN_FRAME_SHARPNESS) {
-      return { ...reading, boxes, upright, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
+      return { ...reading, ...seen, verdict: 'PARTIAL', guidance: 'Hold still for a clear photo' };
     }
-    return { ...reading, boxes, upright };
+    return { ...reading, ...seen };
   } catch {
     return { verdict: 'UNAVAILABLE', guidance: null };
   }

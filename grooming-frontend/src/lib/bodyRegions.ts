@@ -19,6 +19,9 @@ export interface CaptureInfo {
   camera?: Record<string, string | number | undefined>;
   device?: string;
   turn?: number;
+  frames?: number;
+  picked?: number;
+  sharpness?: number;
 }
 
 export interface CaptureDetails {

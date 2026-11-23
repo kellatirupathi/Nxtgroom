@@ -18,7 +18,9 @@ import {
 } from '../lib/fullBodyDetector';
 import FaceBoxOverlay from './FaceBoxOverlay';
 import TurnedLayer from './TurnedLayer';
-import type { FaceBox } from '../lib/faceBoxes';
+import { smoothBoxes, type FaceBox } from '../lib/faceBoxes';
+import { planNextRead, smoothedCost } from '../lib/detectionPace';
+import { clearToFire, createSteadyMemory, forgetAnchors, isSteady, recordAnchors, type SteadyHold } from '../lib/steadiness';
 import { messageTurn, readWithTurn, setTurn, sharedTurnTracker, type QuarterTurn } from '../lib/frameTurn';
 import { bodyGuideSourceRect } from '../lib/cameraGeometry';
 import {
@@ -29,7 +31,7 @@ import {
   takeParkedCameraStream,
   tuneCameraTrack,
 } from '../lib/cameraStream';
-import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION } from '../lib/stillCapture';
+import { capturePhoto, createStillCaptureState, SINGLE_UPLOAD_MAX_DIMENSION, type FocusArea } from '../lib/stillCapture';
 import type { BodyRegions, CaptureDetails } from '../lib/bodyRegions';
 import { describeCapture } from '../lib/captureInfo';
 import { PHOTO_JPEG_QUALITY } from '../lib/photoEncoding';
@@ -91,6 +93,7 @@ export default function CameraCapture({
   const firingRef = useRef(false);
   const verdictRef = useRef<FrameVerdict>('NO_PERSON');
   const bodyRegionsRef = useRef<BodyRegions | null>(null);
+  const focusRef = useRef<FocusArea[]>([]);
   const steadyRef = useRef(0);
   const postureSinceRef = useRef<number | null>(null);
   const unusableRef = useRef(0);
@@ -187,6 +190,18 @@ export default function CameraCapture({
     };
     const tracker = sharedTurnTracker(facing);
     let wasLandscape: boolean | null = null;
+    const steadyMemory = createSteadyMemory();
+    const steadyHold: SteadyHold = { since: null };
+    let shownBoxes: FaceBox[] = [];
+    let lastDecisionAt = 0;
+    let readCost = 0;
+    let personInView = false;
+    let quickNext = false;
+
+    const showBoxes = (boxes: FaceBox[]) => {
+      shownBoxes = smoothBoxes(shownBoxes, boxes);
+      setFaceBoxes(shownBoxes);
+    };
 
     const inspect = async () => {
       if (!fullBodyDetectorSettled()) setGuidance(DETECTOR_STARTING_GUIDANCE);
@@ -194,12 +209,33 @@ export default function CameraCapture({
       clearTimeout(detectorGraceTimer);
       const preview = viewportRef.current;
       if (preview) await primeFullBodyDetector(detector, preview.clientWidth, preview.clientHeight);
+      // Full readings keep their beat; while somebody is in view the time
+      // between them goes to quick looks that only move the face box.
+      const scheduleNext = () => {
+        const plan = planNextRead({
+          sinceDecisionMs: performance.now() - lastDecisionAt,
+          readCostMs: readCost,
+          personInView,
+        });
+        quickNext = plan.quick;
+        timer = setTimeout(tick, plan.delayMs);
+      };
+      // What every look at the picture updates, quick or full.
+      const follow = (reading: FrameReading, at: number) => {
+        showBoxes(reading.boxes ?? []);
+        focusRef.current = reading.focus ?? [];
+        recordAnchors(steadyMemory, reading.anchors, at);
+      };
       const tick = async () => {
         if (disposed) return;
         if (pausedRef.current) {
           steadyRef.current = 0;
           postureSinceRef.current = null;
           setSteadyFrames(0);
+          personInView = false;
+          quickNext = false;
+          steadyHold.since = null;
+          forgetAnchors(steadyMemory);
           timer = setTimeout(tick, 200);
           return;
         }
@@ -216,12 +252,29 @@ export default function CameraCapture({
           height: viewport.clientHeight,
           canvas: analysisCanvasRef.current ||= document.createElement('canvas'),
         } : undefined, { mirrored: facing === 'user', turn });
+        const startedAt = performance.now();
+        if (quickNext && video) {
+          // Not while a photograph is being taken: the camera is busy with it.
+          if (!firingRef.current) {
+            const quick = await read(tracker.turn);
+            if (disposed) return;
+            readCost = smoothedCost(readCost, performance.now() - startedAt);
+            if (!pausedRef.current) follow(quick, performance.now());
+          }
+          scheduleNext();
+          return;
+        }
         const turned = video
           ? await readWithTurn(tracker, read)
           : { reading: { verdict: 'UNAVAILABLE', guidance: null, boxes: [] } as FrameReading, turn: tracker.turn, switched: false };
         if (disposed) return;
+        const readAt = performance.now();
+        readCost = smoothedCost(readCost, readAt - startedAt);
         const reading: FrameReading = turned.reading;
-        if (turned.switched) detector?.tracker?.reset?.();
+        if (turned.switched) {
+          detector?.tracker?.reset?.();
+          forgetAnchors(steadyMemory);
+        }
         turnRef.current = turned.turn;
         setShownTurn(messageTurn(turned.turn, facing === 'user'));
 
@@ -233,7 +286,8 @@ export default function CameraCapture({
           : stableReading.guidance);
         verdictRef.current = stableReading.verdict;
         bodyRegionsRef.current = reading.verdict === 'FULL_BODY' ? (reading.bodyRegions ?? null) : null;
-        setFaceBoxes(reading.boxes ?? []);
+        const steady = isSteady(steadyMemory, reading.anchors, readAt);
+        follow(reading, readAt);
 
         if (autoCapture) {
           const fireable = stableReading.verdict === 'FULL_BODY'
@@ -251,16 +305,18 @@ export default function CameraCapture({
             setManualOffered(true);
           }
 
-          if (
-            autoCaptureReady(stableReading.verdict, held)
+          const ready = autoCaptureReady(stableReading.verdict, held)
             && postureHoldComplete(postureSinceRef.current, now)
             && Date.now() >= cooldownUntilRef.current
-            && !firingRef.current
-          ) {
+            && !firingRef.current;
+          // A ready photograph waits a moment for a person who is still moving.
+          if (clearToFire(steadyHold, ready, steady, now)) {
             void shootRef.current({ viaAuto: true });
           }
         }
-        timer = setTimeout(tick, 200);
+        lastDecisionAt = performance.now();
+        personInView = (reading.boxes?.length ?? 0) > 0;
+        scheduleNext();
       };
       void tick();
     };
@@ -312,6 +368,7 @@ export default function CameraCapture({
         quality: PHOTO_JPEG_QUALITY,
         state: stillStateRef.current,
         turn: turnRef.current,
+        focus: focusRef.current,
       });
       await onCapture(new File([photo.blob], `check-in-${Date.now()}.jpg`, { type: 'image/jpeg' }), {
         bodyRegions,

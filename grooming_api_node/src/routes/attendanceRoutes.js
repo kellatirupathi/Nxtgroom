@@ -725,6 +725,7 @@ attendanceRouter.post(
       return res.status(422).json({ detail: "location_coordinates must be valid latitude,longitude" });
     }
     const accuracyMetres = Number.parseInt(req.body.location_accuracy_m, 10) || null;
+    const captureInfo = parseCaptureInfo(req.body?.capture_info);
 
     let groupImage;
     try {
@@ -932,6 +933,7 @@ attendanceRouter.post(
             locationAccuracyM: accuracyMetres,
             capturedAt: now,
             identification: identificationFor(person),
+            captureInfo,
             now,
           });
         } catch (error) {
@@ -1008,6 +1010,7 @@ attendanceRouter.post(
             check_out_photo_captured_at: now,
             ...(coordinates ? { check_out_coordinates: coordinates } : {}),
             ...(accuracyMetres != null ? { check_out_location_accuracy_m: accuracyMetres } : {}),
+            ...(captureInfo ? { check_out_capture: captureInfo } : {}),
             checkout_identification: identificationFor(person),
             checkout_evaluation_queue_status: "processing",
             checkout_email_status: recipient ? "waiting_for_analysis" : "skipped_no_email",

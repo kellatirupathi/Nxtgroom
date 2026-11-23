@@ -28,6 +28,25 @@ export const MAX_STILL_FAILURES = 2;
 export const MAX_STILL_MISSES = 4;
 export const STILL_RETRY_AFTER_MS = 10 * 60 * 1000;
 
+// One video frame can catch a person mid-movement. The camera therefore looks
+// at a few frames in a row and keeps the one that is sharpest where it
+// matters (the faces), measured at the resolution of the photograph itself.
+export const BURST_FRAMES = 4;
+export const BURST_FRAME_WAIT_MS = 150;
+export const FOCUS_PATCH = 256;
+export const MAX_FOCUS_AREAS = 6;
+
+// A part of the upright photograph, in fractions of its width and height.
+export interface FocusArea {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+// With no face to go by, the upper middle of the picture, where one stands.
+const DEFAULT_FOCUS: readonly FocusArea[] = [{ left: 0.25, top: 0.1, width: 0.5, height: 0.5 }];
+
 interface PhotoSettingsLike {
   imageWidth?: number;
   imageHeight?: number;
@@ -72,6 +91,30 @@ export interface CaptureEnvironment {
   ImageCapture: ImageCaptureConstructor | null;
   timeoutMs?: number;
   now?: () => number;
+  // Resolves when the camera has delivered its next frame. Where it is
+  // missing, the photograph is the single frame it always was.
+  nextFrame?: (video: unknown) => Promise<void>;
+}
+
+function waitForNextFrame(video: unknown): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const source = video as { requestVideoFrameCallback?: (callback: () => void) => number };
+    const announced = typeof source?.requestVideoFrameCallback === 'function';
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, announced ? BURST_FRAME_WAIT_MS : 70);
+    if (announced) {
+      try {
+        source.requestVideoFrameCallback?.(finish);
+      } catch {
+      }
+    }
+  });
 }
 
 function browserEnvironment(): CaptureEnvironment {
@@ -86,6 +129,7 @@ function browserEnvironment(): CaptureEnvironment {
       return scope.createImageBitmap(blob);
     },
     ImageCapture: typeof scope.ImageCapture === 'function' ? scope.ImageCapture : null,
+    nextFrame: waitForNextFrame,
   };
 }
 
@@ -196,6 +240,127 @@ function encode(canvas: CanvasLike, quality: number): Promise<Blob> {
   return encodeUploadJpeg(canvas, quality);
 }
 
+function release(canvas: CanvasLike | null | undefined): void {
+  if (!canvas) return;
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+// How strong the edges are in a patch of pixels: the mean difference between
+// each pixel and its four neighbours. A moving person smears edges, so the
+// same patch reads lower in a blurred frame than in a sharp one.
+export function patchSharpness(pixels: Uint8ClampedArray, width: number, height: number): number {
+  if (width < 3 || height < 3 || pixels.length < width * height * 4) return 0;
+  const gray = new Float32Array(width * height);
+  for (let i = 0, p = 0; i < gray.length; i += 1, p += 4) {
+    gray[i] = pixels[p] * 0.299 + pixels[p + 1] * 0.587 + pixels[p + 2] * 0.114;
+  }
+  let total = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    const row = y * width;
+    for (let x = 1; x < width - 1; x += 1) {
+      const at = row + x;
+      total += Math.abs(4 * gray[at] - gray[at - 1] - gray[at + 1] - gray[at - width] - gray[at + width]);
+    }
+  }
+  return total / ((width - 2) * (height - 2));
+}
+
+// The pixels of `area` that are read: the whole of a small area, or the
+// middle of a large one, never scaled.
+export function focusPatch(area: FocusArea, size: Size): Rect | null {
+  const clamp = (value: number) => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+  const left = clamp(area.left) * size.width;
+  const top = clamp(area.top) * size.height;
+  const right = clamp(area.left + area.width) * size.width;
+  const bottom = clamp(area.top + area.height) * size.height;
+  const width = Math.min(FOCUS_PATCH, Math.floor(right - left));
+  const height = Math.min(FOCUS_PATCH, Math.floor(bottom - top));
+  if (width < 8 || height < 8) return null;
+  return {
+    x: Math.floor((left + right - width) / 2),
+    y: Math.floor((top + bottom - height) / 2),
+    width,
+    height,
+  };
+}
+
+type Surface = ReturnType<typeof canvas2d>;
+
+// One number for a frame. The least sharp area counts most, so that one
+// blurred face is not hidden behind several sharp ones.
+function frameSharpness(probe: Surface, frame: CanvasLike, size: Size, focus: readonly FocusArea[]): number {
+  const readings: number[] = [];
+  for (const area of focus) {
+    const patch = focusPatch(area, size);
+    if (!patch) continue;
+    probe.context.drawImage(frame, patch.x, patch.y, patch.width, patch.height, 0, 0, patch.width, patch.height);
+    readings.push(patchSharpness(
+      probe.context.getImageData(0, 0, patch.width, patch.height).data,
+      patch.width,
+      patch.height,
+    ));
+  }
+  if (!readings.length) return 0;
+  const lowest = Math.min(...readings);
+  const mean = readings.reduce((sum, value) => sum + value, 0) / readings.length;
+  return lowest * 0.7 + mean * 0.3;
+}
+
+interface PickedFrame {
+  canvas: CanvasLike;
+  frames: number;
+  picked: number;
+  sharpness?: number;
+}
+
+// Draws the photograph from several consecutive camera frames and keeps the
+// sharpest. The first frame is always drawn at once, so a camera that stops
+// delivering frames still yields the photograph it would have before.
+async function sharpestFrame(
+  env: CaptureEnvironment,
+  video: unknown,
+  size: Size,
+  draw: (context: Context2DLike) => void,
+  focus: readonly FocusArea[] | null | undefined,
+  wanted: number | undefined,
+): Promise<PickedFrame> {
+  let best = canvas2d(env, size);
+  draw(best.context);
+  const count = Math.max(1, Math.min(8, Math.round(wanted ?? BURST_FRAMES)));
+  if (count < 2 || !env.nextFrame) return { canvas: best.canvas, frames: 1, picked: 1 };
+
+  let spare: Surface | null = null;
+  let probe: Surface | null = null;
+  let frames = 1;
+  let picked = 1;
+  let bestScore = 0;
+  try {
+    const areas = (focus?.length ? focus : DEFAULT_FOCUS).slice(0, MAX_FOCUS_AREAS);
+    probe = canvas2d(env, { width: FOCUS_PATCH, height: FOCUS_PATCH }, true);
+    bestScore = frameSharpness(probe, best.canvas, size, areas);
+    for (let index = 2; index <= count; index += 1) {
+      await env.nextFrame(video);
+      spare ||= canvas2d(env, size);
+      draw(spare.context);
+      frames = index;
+      const score = frameSharpness(probe, spare.canvas, size, areas);
+      if (score > bestScore) {
+        [best, spare] = [spare, best];
+        bestScore = score;
+        picked = index;
+      }
+    }
+  } catch {
+  } finally {
+    release(spare?.canvas);
+    release(probe?.canvas);
+  }
+  return frames > 1
+    ? { canvas: best.canvas, frames, picked, sharpness: Math.round(bestScore * 100) / 100 }
+    : { canvas: best.canvas, frames: 1, picked: 1 };
+}
+
 function clampRegion(region: Rect, size: Size): Rect {
   const x = Math.max(0, region.x);
   const y = Math.max(0, region.y);
@@ -224,6 +389,10 @@ export interface CaptureDiagnostics {
   output: string;
   still: StillDiagnostics;
   turn?: QuarterTurn;
+  // How many frames were looked at, which one was kept, and how sharp it read.
+  frames?: number;
+  picked?: number;
+  sharpness?: number;
 }
 
 export interface CapturedPhoto {
@@ -242,6 +411,16 @@ export interface CaptureOptions {
   quality: number;
   state: StillCaptureState;
   turn?: QuarterTurn;
+  // Where the faces are in the upright photograph; the frame kept is the one
+  // sharpest there. `frames` overrides how many frames are looked at.
+  focus?: readonly FocusArea[] | null;
+  frames?: number;
+}
+
+function burstReport(frame: PickedFrame): Pick<CaptureDiagnostics, 'frames' | 'picked' | 'sharpness'> {
+  return frame.frames > 1
+    ? { frames: frame.frames, picked: frame.picked, sharpness: frame.sharpness }
+    : {};
 }
 
 interface StillAttempt {
@@ -384,13 +563,14 @@ async function takeStill({
 // the whole region the person saw, turned upright, so the server stores it
 // the right way up and cuts each person out of it correctly.
 async function captureTurned(
-  { video, region, maxDimension, quality, state }: CaptureOptions,
+  { video, region, maxDimension, quality, state, focus, frames }: CaptureOptions,
   turn: QuarterTurn,
   env: CaptureEnvironment,
 ): Promise<CapturedPhoto> {
   const output = fitWithin(turnedSize(region, turn), maxDimension);
-  const frame = canvas2d(env, output);
-  drawTurned(frame.context, video, region, turn, output);
+  const frame = await sharpestFrame(env, video, output, (context) => {
+    drawTurned(context, video, region, turn, output);
+  }, focus, frames);
   const blob = await encode(frame.canvas, quality);
   state.lastSource = 'video';
   return {
@@ -405,6 +585,7 @@ async function captureTurned(
       output: sizeText(output),
       still: { outcome: 'turned' },
       turn,
+      ...burstReport(frame),
     },
   };
 }
@@ -423,18 +604,19 @@ export async function capturePhoto(
   resumeStillsIfDue(state, (env.now ?? Date.now)());
 
   const frameSize = fitWithin(region, maxDimension);
-  const frame = canvas2d(env, frameSize);
-  frame.context.drawImage(
-    video,
-    region.x,
-    region.y,
-    region.width,
-    region.height,
-    0,
-    0,
-    frameSize.width,
-    frameSize.height,
-  );
+  const frame = await sharpestFrame(env, video, frameSize, (context) => {
+    context.drawImage(
+      video,
+      region.x,
+      region.y,
+      region.width,
+      region.height,
+      0,
+      0,
+      frameSize.width,
+      frameSize.height,
+    );
+  }, options.focus, options.frames);
 
   const diag: StillDiagnostics = {
     outcome: !env.ImageCapture
@@ -450,6 +632,7 @@ export async function capturePhoto(
     region: sizeText(region),
     output: sizeText(output),
     still: diag,
+    ...(source === 'video' ? burstReport(frame) : {}),
   });
 
   const stillsPossible = !state.disabled && Boolean(env.ImageCapture) && track?.readyState === 'live';

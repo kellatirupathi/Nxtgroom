@@ -7,6 +7,7 @@ import { describeAccuracy, formatCoordinates, getCachedFix, subscribeToLocation,
 import { formatAttendanceTime } from '../attendanceFilters';
 import { AttendanceFullScreenContext } from '../lib/attendanceFullscreen';
 import { beepsFor, playSuccessBeep } from '../lib/successBeep';
+import { CAPTURE_INFO_FIELD, type CaptureDetails } from '../lib/bodyRegions';
 import type { QuarterTurn } from '../lib/frameTurn';
 
 // The camera pauses while the result is up, so nobody is photographed twice.
@@ -65,7 +66,7 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
     resultTimer.current = setTimeout(() => setResult(null), RESULT_VISIBLE_MS);
   }, []);
 
-  const submit = useCallback(async (file: File) => {
+  const submit = useCallback(async (file: File, details?: CaptureDetails) => {
     if (submitInFlight.current) return;
     submitInFlight.current = true;
     setSubmitting(true);
@@ -74,6 +75,7 @@ export default function GroupKioskAttendance({ facing }: { facing: 'user' | 'env
     try {
       const form = new FormData();
       form.append('file', file);
+      if (details?.capture) form.append(CAPTURE_INFO_FIELD, JSON.stringify(details.capture).slice(0, 1500));
       const currentFix = fix ?? getCachedFix();
       const coordinates = formatCoordinates(currentFix);
       if (coordinates) {

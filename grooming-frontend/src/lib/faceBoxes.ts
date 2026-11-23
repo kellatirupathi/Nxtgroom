@@ -236,3 +236,60 @@ export function stabilizeBoxLabels(
 export function withoutLabels(boxes: FaceBox[]): FaceBox[] {
   return boxes.map(({ label: _label, ...rest }) => rest);
 }
+
+// The chips already settled on, put onto freshly found boxes without counting
+// this look towards changing them. Used for the quick looks between full
+// readings, so a chip changes no sooner than it did before.
+export function rememberedLabels(memory: LabelMemory, boxes: FaceBox[]): FaceBox[] {
+  return boxes.map((box) => {
+    const { label: _live, ...rest } = box;
+    const kept = memory[box.key]?.label;
+    return kept ? { ...rest, label: kept } : rest;
+  });
+}
+
+// A box that has moved by this much of its own size is following a real
+// movement and jumps straight there; smaller changes are mostly the detector
+// trembling and are eased, so a still face has a still box.
+export const BOX_FOLLOW_AT = 0.25;
+const BOX_EASE = 0.45;
+
+export function smoothBoxes(previous: FaceBox[], next: FaceBox[]): FaceBox[] {
+  if (!previous.length) return next;
+  return next.map((box) => {
+    const before = previous.find((candidate) => candidate.key === box.key);
+    if (!before) return box;
+    const size = Math.max(box.width, box.height, 1e-6);
+    const moved = Math.hypot(
+      (box.left + box.width / 2) - (before.left + before.width / 2),
+      (box.top + box.height / 2) - (before.top + before.height / 2),
+    ) / size;
+    const resized = Math.abs(box.width - before.width) / size;
+    const change = Math.max(moved, resized);
+    if (change >= BOX_FOLLOW_AT) return box;
+    const follow = BOX_EASE + (1 - BOX_EASE) * (change / BOX_FOLLOW_AT);
+    const ease = (from: number, to: number) => from + (to - from) * follow;
+    return {
+      ...box,
+      left: ease(before.left, box.left),
+      top: ease(before.top, box.top),
+      width: ease(before.width, box.width),
+      height: ease(before.height, box.height),
+    };
+  });
+}
+
+// Where the faces are in the upright, unmirrored picture: what the camera
+// keeps sharp when it chooses between frames. `boxes` are as found in the
+// analysed picture, mirrored or not as `mirrored` says.
+export function focusAreas(
+  boxes: FaceBox[],
+  mirrored: boolean,
+): { left: number; top: number; width: number; height: number }[] {
+  return boxes.map((box) => ({
+    left: mirrored ? clamp01(1 - box.left - box.width) : box.left,
+    top: box.top,
+    width: box.width,
+    height: box.height,
+  }));
+}

@@ -130,10 +130,21 @@ export async function identifyPeopleInPhoto(input, _dimensions = {}) {
     }
   });
 
-  const searches = await Promise.all(searchCrops.map(async (crop) => {
-    if (!crop) return null;
-    return searchFaceByImage(crop.buffer);
-  }));
+  // Cutting each person out does not depend on who they turn out to be, so it
+  // is done while the faces are being searched for, not after.
+  const [searches, bodies] = await Promise.all([
+    Promise.all(searchCrops.map(async (crop) => {
+      if (!crop) return null;
+      return searchFaceByImage(crop.buffer);
+    })),
+    mapWithConcurrency(faces, config.groupCropConcurrency, async (face) => {
+      try {
+        return await cropRegion(pixels, personBodyCrop(face.box, width, height));
+      } catch {
+        return null;
+      }
+    }),
+  ]);
 
   const people = faces.map((face, index) => {
     const crop = searchCrops[index];
@@ -167,14 +178,6 @@ export async function identifyPeopleInPhoto(input, _dimensions = {}) {
     }
     seenBy.set(person.instructorId, person);
   }
-
-  const bodies = await mapWithConcurrency(people, config.groupCropConcurrency, async (person) => {
-    try {
-      return await cropRegion(pixels, personBodyCrop(person.face.box, width, height));
-    } catch {
-      return null;
-    }
-  });
 
   observeDuration("group_identify_latency", Date.now() - startedAt);
   incrementMetric("group_identify_total");
