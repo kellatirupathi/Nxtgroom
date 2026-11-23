@@ -149,9 +149,12 @@ test('the form has no logo or password note, its own calendar, and the picture q
   assert.ok(!page.includes('type="date"'), 'not the browser date box');
   assert.match(page, /<FormDatePicker/);
   assert.match(page, /\{draft\.status !== 'no' && \(\s*<Card id="question-photos"/);
+  assert.match(page, /const EMPTY_DRAFT: Draft = \{ status: 'yes',/, 'Yes is chosen when the form opens');
+  const order = ['id="question-university"', 'id="question-photos"', 'id="question-reason"', 'id="question-submitted_by"'].map((piece) => page.indexOf(piece));
+  assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'University, Picture or Reason, then Submitted By');
   const picker = source('components/FormDatePicker.tsx');
   assert.match(picker, /const unavailable = day\.key > today \|\| day\.key < min;/);
-  assert.match(picker, /onClick=\{\(\) => choose\(today\)\}/);
+  assert.ok(!picker.includes('Yesterday') && !picker.includes('>\n              Today'), 'no Today / Yesterday buttons');
 });
 
 test('removing a photo on the form asks first', () => {

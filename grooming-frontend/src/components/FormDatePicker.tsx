@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   calendarDays,
-  dayBefore,
   displayDate,
   longDate,
   MONTH_TITLES,
@@ -25,8 +24,8 @@ function monthOf(key: string): { year: number; month: number } {
 }
 
 // A calendar that opens under the date: the month with arrows to move
-// between months, today outlined, the chosen day filled, future days greyed
-// out, and Today / Yesterday shortcuts.
+// between months, today outlined, the chosen day filled and future days
+// greyed out.
 export default function FormDatePicker({ id, value, today, min, disabled = false, onChange }: FormDatePickerProps) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState(() => monthOf(value || today));
@@ -67,7 +66,6 @@ export default function FormDatePicker({ id, value, today, min, disabled = false
   const minMonth = monthOf(min);
   const atLatest = view.year > todayMonth.year || (view.year === todayMonth.year && view.month >= todayMonth.month);
   const atEarliest = view.year < minMonth.year || (view.year === minMonth.year && view.month <= minMonth.month);
-  const yesterday = dayBefore(today);
 
   return (
     <div ref={wrapperRef} className="relative inline-block">
@@ -149,24 +147,6 @@ export default function FormDatePicker({ id, value, today, min, disabled = false
                 </button>
               );
             })}
-          </div>
-
-          <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
-            <button
-              type="button"
-              onClick={() => choose(today)}
-              className="h-9 flex-1 rounded-lg bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200"
-            >
-              Today
-            </button>
-            <button
-              type="button"
-              onClick={() => choose(yesterday)}
-              disabled={yesterday < min}
-              className="h-9 flex-1 rounded-lg bg-slate-100 text-sm font-medium text-slate-700 hover:bg-slate-200 disabled:opacity-40"
-            >
-              Yesterday
-            </button>
           </div>
         </div>
       )}

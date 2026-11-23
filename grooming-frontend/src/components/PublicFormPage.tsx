@@ -49,7 +49,8 @@ type Errors = Partial<Record<'status' | 'photos' | 'submitted_by' | 'reason', st
 
 const REQUIRED = 'This is a required question';
 const NAME_KEY = 'ft_form_submitted_by';
-const EMPTY_DRAFT: Draft = { status: '', submittedBy: '', reason: '', reasonOther: '', kept: [], added: [] };
+// A new form starts with Photo Submission Status set to Yes.
+const EMPTY_DRAFT: Draft = { status: 'yes', submittedBy: '', reason: '', reasonOther: '', kept: [], added: [] };
 
 function rememberedName(): string {
   try {
@@ -367,7 +368,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     const found = validate(draft);
     setErrors(found);
     setSubmitError('');
-    const first = (['status', 'photos', 'submitted_by', 'reason'] as const).find((key) => found[key]);
+    const first = (['status', 'photos', 'reason', 'submitted_by'] as const).find((key) => found[key]);
     if (first) {
       document.getElementById(`question-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
@@ -657,21 +658,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               </Card>
             )}
 
-            <Card id="question-submitted_by" invalid={Boolean(errors.submitted_by)}>
-              <QuestionTitle required htmlFor="form-submitted-by">Submitted By</QuestionTitle>
-              <input
-                id="form-submitted-by"
-                type="text"
-                value={draft.submittedBy}
-                maxLength={120}
-                autoComplete="name"
-                placeholder="Your answer"
-                onChange={(event) => update({ submittedBy: event.target.value }, 'submitted_by')}
-                className="mt-4 h-10 w-full max-w-md border-0 border-b border-slate-300 bg-transparent px-0 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:border-b-2 focus:border-indigo-600"
-              />
-              <ErrorLine message={errors.submitted_by} />
-            </Card>
-
+            {/* With No, the reason comes right after University Name. */}
             {draft.status === 'no' && (
               <Card id="question-reason" invalid={Boolean(errors.reason)}>
                 <QuestionTitle required>Reason for Non Submission</QuestionTitle>
@@ -712,6 +699,21 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                 <ErrorLine message={errors.reason} />
               </Card>
             )}
+
+            <Card id="question-submitted_by" invalid={Boolean(errors.submitted_by)}>
+              <QuestionTitle required htmlFor="form-submitted-by">Submitted By</QuestionTitle>
+              <input
+                id="form-submitted-by"
+                type="text"
+                value={draft.submittedBy}
+                maxLength={120}
+                autoComplete="name"
+                placeholder="Your answer"
+                onChange={(event) => update({ submittedBy: event.target.value }, 'submitted_by')}
+                className="mt-4 h-10 w-full max-w-md border-0 border-b border-slate-300 bg-transparent px-0 text-[15px] text-slate-900 outline-none placeholder:text-slate-400 focus:border-b-2 focus:border-indigo-600"
+              />
+              <ErrorLine message={errors.submitted_by} />
+            </Card>
 
             {submitError && (
               <p role="alert" className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
