@@ -234,7 +234,140 @@ export async function removeFormPhotos(photos = []) {
   for (const photo of photos) {
     if (photo?.key) await deletePhoto(photo.key);
     if (photo?.thumb_key) await deletePhoto(photo.thumb_key);
+    await removePersonCrops(photo?.people);
   }
+}
+
+// ---- the people in each photo ---------------------------------------------
+//
+// The submitter's browser finds each person in a group photo, cuts them out
+// and reads the printed name labels (no face recognition, no work here). The
+// form sends the small cut-outs with the instructor chosen for each, and they
+// are kept on the photo as `people: [{ id, crop_key, instructor_id, name,
+// employee_id, source, box }]`.
+
+export const FORM_MAX_PEOPLE_PER_PHOTO = 60;
+export const FORM_MAX_CROPS = 150;
+export const FORM_MAX_CROP_BYTES = Math.floor(1.5 * 1024 * 1024);
+const PERSON_SOURCES = new Set(["label", "manual", "none"]);
+
+export async function removePersonCrops(people = []) {
+  for (const person of Array.isArray(people) ? people : []) {
+    if (person?.crop_key) await deletePhoto(person.crop_key);
+  }
+}
+
+// The institute's instructors, for the form's name list.
+export async function formInstructors(db, collegeId) {
+  const rows = await db.collection("instructors")
+    .find({ $and: [{ college_id: String(collegeId) }, ACTIVE] })
+    .limit(3000)
+    .toArray();
+  return rows
+    .map((row) => ({ id: String(row._id), name: String(row.name || ""), employee_id: row.employee_id ? String(row.employee_id) : "" }))
+    .filter((row) => row.name)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function clampFraction(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : 0;
+}
+
+function readBox(value) {
+  if (!value || typeof value !== "object") return null;
+  const box = {
+    left: clampFraction(value.left),
+    top: clampFraction(value.top),
+    width: clampFraction(value.width),
+    height: clampFraction(value.height),
+  };
+  return box.width > 0 && box.height > 0 ? box : null;
+}
+
+// The people the form sent, as a JSON list of
+//   { photo: "new:<n>" | "<saved photo id>", people: [{ id?, crop?, instructor_id, source, box }] }
+// where `crop` is the position of that person's cut-out among the uploaded
+// crops and `id` keeps a person already saved. Returns null when malformed.
+export function readPeoplePlan(value) {
+  if (value === undefined || value === null || value === "") return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(String(value));
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed) || parsed.length > FORM_MAX_PHOTOS * 2) return null;
+  const plan = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object" || typeof entry.photo !== "string" || !Array.isArray(entry.people)) return null;
+    if (!/^(new:\d{1,2}|[A-Za-z0-9_-]{1,64})$/.test(entry.photo)) return null;
+    if (entry.people.length > FORM_MAX_PEOPLE_PER_PHOTO) return null;
+    const people = [];
+    for (const person of entry.people) {
+      if (!person || typeof person !== "object") return null;
+      const id = typeof person.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(person.id) ? person.id : null;
+      const crop = Number.isSafeInteger(person.crop) && person.crop >= 0 && person.crop < FORM_MAX_CROPS ? person.crop : null;
+      if (!id && crop === null) return null;
+      const instructorId = typeof person.instructor_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(person.instructor_id)
+        ? person.instructor_id
+        : null;
+      people.push({
+        id,
+        crop,
+        instructorId,
+        source: PERSON_SOURCES.has(person.source) ? person.source : (instructorId ? "manual" : "none"),
+        box: readBox(person.box),
+      });
+    }
+    plan.push({ photo: entry.photo, people });
+  }
+  return plan;
+}
+
+function personKey(collegeId, date, photoId, personId) {
+  return formPhotoKey(collegeId, date, `${photoId}-${personId}`);
+}
+
+// The people for one photo after an edit: saved people kept (with any new
+// name), new cut-outs stored, and those no longer listed returned as removed.
+// `crops` are the uploaded cut-out files; `roster` maps instructor id to the
+// institute's instructor. Throws { status, message } when a crop is unusable.
+export async function buildPhotoPeople({ entry, existing = [], crops, roster, collegeId, date, photoId }) {
+  const saved = new Map((Array.isArray(existing) ? existing : []).map((person) => [person.id, person]));
+  const people = [];
+  const stored = [];
+  for (const planned of entry.people) {
+    const instructor = planned.instructorId ? roster.get(planned.instructorId) : null;
+    const named = instructor
+      ? { instructor_id: instructor.id, name: instructor.name, employee_id: instructor.employee_id || null }
+      : { instructor_id: null, name: null, employee_id: null };
+    const source = instructor ? (planned.source === "none" ? "manual" : planned.source) : "none";
+    if (planned.id && saved.has(planned.id)) {
+      const person = saved.get(planned.id);
+      saved.delete(planned.id);
+      people.push({ ...person, ...named, source, box: planned.box ?? person.box ?? null });
+      continue;
+    }
+    const file = planned.crop === null ? null : crops[planned.crop];
+    if (!file) continue;
+    const personId = crypto.randomBytes(6).toString("base64url");
+    const key = personKey(collegeId, date, photoId, personId);
+    const upload = await uploadPhoto({
+      key,
+      body: file.buffer,
+      mimeType: file.mimeType,
+      metadata: { college_id: String(collegeId), form_date: date, kind: "form_person" },
+    });
+    if (!upload.stored) {
+      await removePersonCrops(stored);
+      throw Object.assign(new Error("The people's pictures could not be saved right now. Please press Submit again."), { status: 502 });
+    }
+    const person = { id: personId, crop_key: key, ...named, source, box: planned.box };
+    stored.push(person);
+    people.push(person);
+  }
+  return { people, stored, removed: [...saved.values()] };
 }
 
 // ---- reading responses -----------------------------------------------------
@@ -244,6 +377,15 @@ export async function serializeFormResponse(doc, { collegeName, expiresIn = 3600
     id: photo.id,
     url: await getPhotoUrl(photo.key, { expiresIn }),
     thumb_url: photo.thumb_key ? await getPhotoUrl(photo.thumb_key, { expiresIn }) : null,
+    people: await Promise.all((Array.isArray(photo.people) ? photo.people : []).map(async (person) => ({
+      id: person.id,
+      instructor_id: person.instructor_id || null,
+      name: person.name || null,
+      employee_id: person.employee_id || null,
+      source: PERSON_SOURCES.has(person.source) ? person.source : "none",
+      box: person.box || null,
+      crop_url: person.crop_key ? await getPhotoUrl(person.crop_key, { expiresIn }) : null,
+    }))),
   })));
   return {
     _id: String(doc._id),

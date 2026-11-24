@@ -8,17 +8,23 @@ import { isPhotoStorageConfigured } from "../services/photoStorage.js";
 import { isValidDateKey, localDateKey } from "../services/instructorReports.js";
 import {
   activeCollegeNames,
+  buildPhotoPeople,
   ensureFormLinks,
   findFormLink,
   findFormResponse,
+  formInstructors,
   FORM_IMPORT_MAX_ROWS,
+  FORM_MAX_CROP_BYTES,
+  FORM_MAX_CROPS,
   FORM_MAX_FILE_BYTES,
   FORM_MAX_PHOTOS,
   importFormResponses,
   listFormResponses,
   readFormAnswers,
   readKeptPhotoIds,
+  readPeoplePlan,
   removeFormPhotos,
+  removePersonCrops,
   resolveFormDate,
   serializeFormResponse,
   storeFormPhoto,
@@ -70,19 +76,23 @@ function uploadGate(_req, res, next) {
   return next();
 }
 
+// Up to five photos plus the small cut-outs of the people in them.
 const formUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: FORM_MAX_FILE_BYTES,
-    files: FORM_MAX_PHOTOS,
-    fields: 12,
-    fieldSize: 16 * 1024,
-    parts: 24,
+    files: FORM_MAX_PHOTOS + FORM_MAX_CROPS,
+    fields: 16,
+    fieldSize: 256 * 1024,
+    parts: FORM_MAX_PHOTOS + FORM_MAX_CROPS + 16,
   },
 });
 
 function receivePhotos(req, res, next) {
-  formUpload.array("photos", FORM_MAX_PHOTOS)(req, res, (error) => {
+  formUpload.fields([
+    { name: "photos", maxCount: FORM_MAX_PHOTOS },
+    { name: "crops", maxCount: FORM_MAX_CROPS },
+  ])(req, res, (error) => {
     if (!error) return next();
     if (error.code === "LIMIT_FILE_SIZE") {
       return res.status(413).json({ detail: "Each photo must be 10 MB or smaller." });
@@ -126,6 +136,18 @@ publicFormRouter.get(
   })
 );
 
+// The institute's instructors, to name the people in a group photo.
+publicFormRouter.get(
+  "/:token/instructors",
+  readLimiter,
+  asyncRoute(async (req, res) => {
+    const db = req.app.locals.db;
+    const found = await findFormLink(db, req.params.token);
+    if (!found) return res.status(404).json({ detail: FORM_NOT_FOUND });
+    return res.json(await formInstructors(db, found.college._id));
+  })
+);
+
 publicFormRouter.post(
   "/:token/:date",
   submitLimiter,
@@ -144,10 +166,21 @@ publicFormRouter.post(
     const answers = readFormAnswers(req.body);
     const kept = readKeptPhotoIds(req.body?.keep);
     if (kept === null) return res.status(400).json({ detail: "The form could not be read. Please reload the page and try again." });
-    const files = Array.isArray(req.files) ? req.files : [];
+    const files = Array.isArray(req.files?.photos) ? req.files.photos : [];
     for (const file of files) {
       const checked = validateImageUpload(file);
       if (!checked.valid) return res.status(422).json({ detail: `${file.originalname || "A file"}: ${checked.detail}` });
+    }
+    // The people the submitter's browser found in the photos: their cut-outs
+    // and the instructor chosen for each.
+    const plan = readPeoplePlan(req.body?.people);
+    if (plan === null) return res.status(400).json({ detail: "The people in the photos could not be read. Please reload the page and try again." });
+    const crops = [];
+    for (const file of Array.isArray(req.files?.crops) ? req.files.crops : []) {
+      const checked = validateImageUpload(file);
+      if (!checked.valid) return res.status(422).json({ detail: "One of the people's pictures could not be read. Please add the photo again." });
+      if (file.size > FORM_MAX_CROP_BYTES) return res.status(413).json({ detail: "One of the people's pictures is too large. Please add the photo again." });
+      crops.push({ buffer: file.buffer, mimeType: checked.mimeType });
     }
 
     const existing = await findFormResponse(db, collegeId, date);
@@ -165,7 +198,7 @@ publicFormRouter.post(
     if (Object.keys(errors).length) {
       return res.status(422).json({ detail: "Please answer the questions marked in red.", errors });
     }
-    if (files.length && !isPhotoStorageConfigured()) {
+    if ((files.length || crops.length) && !isPhotoStorageConfigured()) {
       return res.status(503).json({ detail: "Photo storage is not available right now. Please try again later." });
     }
 
@@ -179,6 +212,44 @@ publicFormRouter.post(
       added.push(stored.photo);
     }
 
+    // Each photo's people: saved photos keep theirs unless the form sent a
+    // new list for them; new photos ("new:<n>", in upload order) get theirs.
+    const planByPhoto = new Map((answers.status === "yes" ? plan : []).map((entry) => [entry.photo, entry]));
+    const newCrops = [];
+    const removedPeople = [];
+    const photos = [];
+    try {
+      const roster = planByPhoto.size
+        ? new Map((await formInstructors(db, collegeId)).map((instructor) => [instructor.id, instructor]))
+        : new Map();
+      for (const photo of keptPhotos) {
+        const entry = planByPhoto.get(photo.id);
+        if (!entry) {
+          photos.push(photo);
+          continue;
+        }
+        const built = await buildPhotoPeople({ entry, existing: photo.people, crops, roster, collegeId, date, photoId: photo.id });
+        newCrops.push(...built.stored);
+        removedPeople.push(...built.removed);
+        photos.push({ ...photo, people: built.people });
+      }
+      for (const [index, photo] of added.entries()) {
+        const entry = planByPhoto.get(`new:${index}`);
+        if (!entry) {
+          photos.push({ ...photo, people: [] });
+          continue;
+        }
+        const built = await buildPhotoPeople({ entry, existing: [], crops, roster, collegeId, date, photoId: photo.id });
+        newCrops.push(...built.stored);
+        photos.push({ ...photo, people: built.people });
+      }
+    } catch (error) {
+      await removePersonCrops(newCrops);
+      await removeFormPhotos(added);
+      if (error?.status) return res.status(error.status).json({ detail: error.message });
+      throw error;
+    }
+
     const now = new Date();
     const fields = {
       college_name: found.college.name,
@@ -186,7 +257,7 @@ publicFormRouter.post(
       submitted_by: answers.submittedBy,
       reason: answers.reason,
       reason_other: answers.reasonOther,
-      photos: [...keptPhotos, ...added],
+      photos,
       photo_links: photoLinks,
       updated_at: now,
     };
@@ -210,6 +281,7 @@ publicFormRouter.post(
         await db.collection("form_responses").insertOne(saved);
       }
     } catch (error) {
+      await removePersonCrops(newCrops);
       await removeFormPhotos(added);
       if (error?.code === 11000) {
         return res.status(409).json({ detail: "A response for this date was just sent from another device. Reload the page to see it and edit it." });
@@ -221,6 +293,9 @@ publicFormRouter.post(
     const removed = existingPhotos.filter((photo) => !keptIds.has(photo.id));
     if (removed.length) {
       void removeFormPhotos(removed).catch(() => {});
+    }
+    if (removedPeople.length) {
+      void removePersonCrops(removedPeople).catch(() => {});
     }
     return res.status(existing ? 200 : 201).json({
       response: await serializeFormResponse(saved, { collegeName: found.college.name }),

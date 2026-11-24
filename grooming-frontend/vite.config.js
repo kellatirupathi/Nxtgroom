@@ -30,6 +30,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@mediapipe/pose': fileURLToPath(new URL('./src/lib/mediapipeStub.js', import.meta.url)),
+        '@mediapipe/face_detection': fileURLToPath(new URL('./src/lib/mediapipeFaceStub.js', import.meta.url)),
       },
     },
     plugins: [react(), tailwindcss()],

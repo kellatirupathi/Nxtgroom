@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronLeft, ClipboardList, Download, ExternalLink, FileUp, Search, SlidersHorizontal, X } from 'lucide-react';
+import { ChevronLeft, ClipboardList, Download, ExternalLink, FileUp, Search, SlidersHorizontal, Users, X } from 'lucide-react';
+import PeopleTable from './PeopleTable';
 import { apiFetch } from '../api';
 import { goToPath, pathForTab, TABS } from '../routes';
 import { saveCsvFile } from '../attendanceExport';
@@ -23,6 +24,7 @@ import {
   formatMoment,
   formResponsesCsv,
   formResponsesFileName,
+  peopleCount,
   sourceLabel,
   statusLabel,
   type FormReason,
@@ -77,6 +79,10 @@ function sortValue(row: FormResponse, key: string): string | number | null {
     case 'institute': return row.college_name;
     case 'status': return statusLabel(row.status);
     case 'photos': return pictureCount(row);
+    case 'people': {
+      const count = peopleCount(row.photos);
+      return count.identified + count.unknown ? count.identified : null;
+    }
     case 'submitted_by': return row.submitted_by;
     case 'reason': return row.reason_label;
     case 'source': return sourceLabel(row.source);
@@ -100,6 +106,24 @@ function SourceTag({ source }: { source: string }) {
     <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-bold ${manual ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-sky-200 bg-sky-50 text-sky-700'}`}>
       {sourceLabel(source)}
     </span>
+  );
+}
+
+// The People column: how many were identified in the photos, opening the
+// Name | ID | Image table.
+function PeopleCell({ row, onOpen }: { row: FormResponse; onOpen: () => void }) {
+  const count = peopleCount(row.photos);
+  if (!count.identified && !count.unknown) return <span className="text-slate-400">—</span>;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="inline-flex items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+    >
+      <Users size={13} aria-hidden="true" />
+      {count.identified} named
+      {count.unknown > 0 && <span className="font-medium text-slate-500">· {count.unknown} not named</span>}
+    </button>
   );
 }
 
@@ -158,6 +182,7 @@ export default function FormResponsesSection() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState('');
   const [viewer, setViewer] = useState<{ images: LightboxImage[]; index: number; title: string } | null>(null);
+  const [peopleOf, setPeopleOf] = useState<FormResponse | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
 
   const query = useMemo(() => {
@@ -187,6 +212,11 @@ export default function FormResponsesSection() {
       });
     return () => controller.abort();
   }, [query, range, preset, reloadKey]);
+
+  // Keep an open People table in step with reloaded rows.
+  useEffect(() => {
+    setPeopleOf((current) => (current ? rows.find((row) => row._id === current._id) ?? current : current));
+  }, [rows]);
 
   useEffect(() => {
     if (!filtersOpen) return undefined;
@@ -268,12 +298,13 @@ export default function FormResponsesSection() {
     },
     {
       key: 'photos',
-      label: 'Grooming Picture',
+      label: 'Appearance Picture',
       filter: {
         active: Boolean(filters.photos),
         render: (close) => <OptionsFilter value={filters.photos} options={PHOTO_OPTIONS} onChange={(value) => setFilter('photos', value)} close={close} />,
       },
     },
+    { key: 'people', label: 'People' },
     {
       key: 'submitted_by',
       label: 'Submitted By',
@@ -501,6 +532,11 @@ export default function FormResponsesSection() {
             <div className="mt-2.5 text-xs text-slate-600">
               {row.status === 'yes' ? <Pictures row={row} onOpen={openViewer(row)} /> : <span>{row.reason_label || '—'}</span>}
             </div>
+            {row.status === 'yes' && peopleCount(row.photos).identified + peopleCount(row.photos).unknown > 0 && (
+              <div className="mt-2">
+                <PeopleCell row={row} onOpen={() => setPeopleOf(row)} />
+              </div>
+            )}
           </li>
         ))}
       </ul>
@@ -543,6 +579,7 @@ export default function FormResponsesSection() {
                   <td className={`${cell} max-w-[220px] truncate text-slate-800`} title={row.college_name}>{row.college_name}</td>
                   <td className={cell}><StatusTag status={row.status} /></td>
                   <td className={cell}><Pictures row={row} onOpen={openViewer(row)} /></td>
+                  <td className={cell}><PeopleCell row={row} onOpen={() => setPeopleOf(row)} /></td>
                   <td className={`${cell} max-w-[180px] truncate text-slate-700`} title={row.submitted_by}>{row.submitted_by}</td>
                   <td className={`${cell} max-w-[220px] truncate text-slate-700`} title={row.reason_label}>{row.reason_label || <span className="text-slate-400">—</span>}</td>
                   <td className={cell}><SourceTag source={row.source} /></td>
@@ -563,6 +600,35 @@ export default function FormResponsesSection() {
       <FormResponsesImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={() => setReloadKey((key) => key + 1)} />
 
       {viewer && <ImageLightbox images={viewer.images} startIndex={viewer.index} title={viewer.title} onClose={() => setViewer(null)} />}
+
+      {peopleOf && (
+        <div
+          className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="people-dialog-title"
+          onClick={() => setPeopleOf(null)}
+          onKeyDown={(event) => { if (event.key === 'Escape') setPeopleOf(null); }}
+        >
+          <div className="flex max-h-[90dvh] w-full max-w-xl flex-col overflow-hidden rounded-t-xl bg-white shadow-xl sm:rounded-lg" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div className="min-w-0">
+                <h2 id="people-dialog-title" className="flex items-center gap-2 text-base font-bold text-slate-800">
+                  <Users size={18} className="text-indigo-600" aria-hidden="true" />
+                  People in the photos
+                </h2>
+                <p className="mt-0.5 truncate text-sm text-slate-500">{peopleOf.college_name} · {displayDate(peopleOf.form_date)}</p>
+              </div>
+              <button type="button" onClick={() => setPeopleOf(null)} aria-label="Close" autoFocus className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100">
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+              <PeopleTable photos={peopleOf.photos} title={`${peopleOf.college_name} · ${displayDate(peopleOf.form_date)}`} />
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

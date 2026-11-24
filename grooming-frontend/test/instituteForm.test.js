@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import {
   calendarDays,
   dayBefore,
+  peopleCount,
+  peopleRows,
   shiftMonth,
   displayDate,
   formPagePath,
@@ -105,8 +107,8 @@ test('export has one row per response with its pictures and type', () => {
     edit_count: 0,
   }]);
   const [header, row] = csv.split('\r\n');
-  assert.equal(header, 'Date,University Name,Photo Submission Status,Grooming Picture,Photos,Submitted By,Reason for Non Submission,Type,Submitted At,Last Updated');
-  assert.match(row, /^23-11-2026,Aurora University,Yes,"https:\/\/r2\.example\/p1 , https:\/\/drive\.google\.com\/open\?id=9",2,Ravi,,Manual,"23 Nov 2026, 10:04 am",/);
+  assert.equal(header, 'Date,University Name,Photo Submission Status,Appearance Picture,Photos,People Identified,Unknown People,Submitted By,Reason for Non Submission,Type,Submitted At,Last Updated');
+  assert.match(row, /^23-11-2026,Aurora University,Yes,"https:\/\/r2\.example\/p1 , https:\/\/drive\.google\.com\/open\?id=9",2,,0,Ravi,,Manual,"23 Nov 2026, 10:04 am",/);
   assert.equal(formResponsesFileName('2026-11-01', '2026-11-23'), 'form-responses-2026-11-01_to_2026-11-23.csv');
   assert.equal(formResponsesFileName('', ''), 'form-responses-all.csv');
 });
@@ -149,12 +151,59 @@ test('the form has no logo or password note, its own calendar, and the picture q
   assert.ok(!page.includes('type="date"'), 'not the browser date box');
   assert.match(page, /<FormDatePicker/);
   assert.match(page, /\{draft\.status !== 'no' && \(\s*<Card id="question-photos"/);
+  assert.match(page, /<QuestionTitle required>Appearance Picture<\/QuestionTitle>/);
+  assert.ok(!page.includes('Grooming'), 'the form says Appearance, not Grooming');
+  const people = page.indexOf('<Card id="question-people">');
+  assert.ok(people > page.indexOf('<Card id="question-photos"') && people < page.indexOf('<Card id="question-submitted_by"'), 'People in the Photos sits between the picture and Submitted By');
   assert.match(page, /const EMPTY_DRAFT: Draft = \{ status: 'yes',/, 'Yes is chosen when the form opens');
   const order = ['id="question-university"', 'id="question-photos"', 'id="question-reason"', 'id="question-submitted_by"'].map((piece) => page.indexOf(piece));
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'University, Picture or Reason, then Submitted By');
   const picker = source('components/FormDatePicker.tsx');
   assert.match(picker, /const unavailable = day\.key > today \|\| day\.key < min;/);
   assert.ok(!picker.includes('Yesterday') && !picker.includes('>\n              Today'), 'no Today / Yesterday buttons');
+});
+
+test('people across the photos: each named person once, A-Z, then the unnamed', () => {
+  const person = (id, instructorId, name, employeeId) => ({ id, instructor_id: instructorId, name, employee_id: employeeId, source: instructorId ? 'label' : 'none', box: null, crop_url: `https://x/${id}` });
+  const photos = [
+    { id: 'a', url: null, thumb_url: null, people: [person('p1', 'i2', 'Sita Devi', 'NW2'), person('p2', null, null, null)] },
+    { id: 'b', url: null, thumb_url: null, people: [person('p3', 'i1', 'Ravi Kumar', 'NW1'), person('p4', 'i2', 'Sita Devi', 'NW2')] },
+  ];
+  const rows = peopleRows(photos);
+  assert.deepEqual(rows.map((row) => [row.label, row.employee_id]), [
+    ['Ravi Kumar', 'NW1'],
+    ['Sita Devi', 'NW2'],
+    ['Not named', null],
+  ]);
+  assert.deepEqual(peopleCount(photos), { identified: 2, unknown: 1 });
+  assert.deepEqual(peopleCount([{ id: 'c', url: null, thumb_url: null }]), { identified: 0, unknown: 0 });
+});
+
+test('the form summary and the responses page both show the Name | ID | Image table', () => {
+  const table = source('components/PeopleTable.tsx');
+  const headers = [...table.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
+  assert.deepEqual(headers, ['Name', 'ID', 'Image']);
+  assert.match(source('components/PublicFormPage.tsx'), /<PeopleTable photos=\{response\.photos\}/);
+  const responses = source('components/FormResponsesSection.tsx');
+  assert.match(responses, /\{ key: 'people', label: 'People' \}/);
+  assert.match(responses, /<PeopleTable photos=\{peopleOf\.photos\}/);
+});
+
+test('people are found in the browser, named from labels, editable, and sent as small cut-outs', () => {
+  const page = source('components/PublicFormPage.tsx');
+  assert.match(page, /reader\.readGroupPhoto\(\s*photo\.original,/);
+  assert.match(page, /body\.append\('people', JSON\.stringify\(plan\)\)/);
+  assert.match(page, /crops\.forEach\(\(crop, index\) => body\.append\('crops', crop,/);
+  assert.match(page, /<FormPeopleEditor/);
+  const editor = source('components/FormPeopleEditor.tsx');
+  const headers = [...editor.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
+  assert.deepEqual(headers, ['Image', 'Name', 'ID']);
+  assert.match(editor, /Add a person/);
+  const reader = source('lib/groupPhotoReader.ts');
+  assert.match(reader, /'\/models\/mediapipe-face-detection-full\/model\.json'/);
+  assert.match(reader, /'\/models\/tesseract-7\.0\.0'/);
+  assert.match(reader, /workerBlobURL: false/, 'the worker is a file from this site, as the security policy requires');
+  assert.ok(!/rekognition|face-api|SearchFaces/i.test(reader), 'no face recognition');
 });
 
 test('removing a photo on the form asks first', () => {
