@@ -234,6 +234,19 @@ test("the public form opens today, saves a No answer once, then edits the same r
     assert.equal(edited.body.response.edit_count, 1);
     assert.equal((await db.collection("form_responses").find({}).toArray()).length, 1, "still one response for the day");
 
+    // Earlier days can be opened to view, but not sent or changed.
+    const yesterday = localDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const pastView = await server.call(`/forms/${link.token}?date=${yesterday}`);
+    assert.equal(pastView.status, 200);
+    assert.equal(pastView.body.date, yesterday);
+    assert.equal(pastView.body.today, today);
+    const pastSend = await server.call(`/forms/${link.token}/${yesterday}`, {
+      method: "POST",
+      body: formBody({ status: "no", submitted_by: "Ravi Kumar", reason: "wfh" }),
+    });
+    assert.equal(pastSend.status, 403);
+    assert.equal((await db.collection("form_responses").find({ form_date: yesterday }).toArray()).length, 0, "nothing saved for an earlier day");
+
     const listed = await server.call(`/form-responses?from=${today}&to=${today}`);
     assert.equal(listed.status, 200);
     assert.equal(listed.body.length, 1);

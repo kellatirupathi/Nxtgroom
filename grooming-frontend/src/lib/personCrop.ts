@@ -6,7 +6,14 @@
 import type { Box } from './groupLabels.ts';
 
 const FACE_BOX_TO_HEAD = 0.78;
-const HEADS_PER_BODY = 7.6;
+// Crown to the soles of the shoes is about 7.5 heads; a whole head more is
+// kept below so feet are never cut (tall people, the camera held low, a
+// wide phone lens stretching the legs), and a little room above the hair.
+const HEADS_PER_BODY = 8.6;
+const HEAD_ROOM = 0.2;
+// When the feet would end within this many heads of the bottom of the
+// photo, the picture simply runs to the bottom.
+const SNAP_TO_BOTTOM_HEADS = 1.5;
 const SHOULDERS_PER_FACE_WIDTH = 3.4;
 const BODY_SIDE_MARGIN = 0.12;
 
@@ -27,9 +34,10 @@ export function bodyCropFromFace(face: Box): Box {
   const centreX = face.left + face.width / 2;
   const bodyWidth = face.width * SHOULDERS_PER_FACE_WIDTH * (1 + BODY_SIDE_MARGIN * 2);
   const left = clamp(centreX - bodyWidth / 2, 0, 1);
-  const top = clamp(crownTop, 0, 1);
+  const top = clamp(crownTop - headHeight * HEAD_ROOM, 0, 1);
   const right = clamp(centreX + bodyWidth / 2, 0, 1);
-  const bottom = clamp(crownTop + bodyHeight, 0, 1);
+  const feet = crownTop + bodyHeight;
+  const bottom = feet >= 1 - headHeight * SNAP_TO_BOTTOM_HEADS ? 1 : clamp(feet, 0, 1);
   return { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
 }
 

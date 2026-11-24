@@ -45,10 +45,11 @@ export default function PeopleTable({ photos, title }: PeopleTableProps) {
                     type="button"
                     onClick={() => setViewing(index)}
                     aria-label={`View the picture of ${row.label}`}
-                    className="block h-24 w-[4.5rem] overflow-hidden rounded-md border border-slate-200 bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    className="flex h-28 w-16 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                   >
+                    {/* The whole person, head to feet: shown, not cut to fill the box. */}
                     {row.crop_url
-                      ? <img src={row.crop_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      ? <img src={row.crop_url} alt="" loading="lazy" className="h-full w-full object-contain" />
                       : <UserRound size={22} className="mx-auto text-slate-300" aria-hidden="true" />}
                   </button>
                 </td>

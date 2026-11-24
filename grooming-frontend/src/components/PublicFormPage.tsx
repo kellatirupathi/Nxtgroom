@@ -405,6 +405,8 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   // Brings back answers kept in this browser for this form and date, unless
   // the response has been sent or changed elsewhere since.
   const restoreKeptDraft = async (loaded: PublicFormData, isStale: () => boolean) => {
+    // Earlier days can only be viewed: nothing typed is brought back there.
+    if (loaded.date !== loaded.today) return;
     const key = draftKey(token, loaded.date);
     const stored = await loadFormDraft(key);
     if (!stored || isStale()) return;
@@ -595,7 +597,9 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       }
       shown = result;
       replaceDraft(draftFrom(result.response));
-      setMode(result.response ? 'summary' : 'edit');
+      // Earlier days are only shown; today's form opens ready to fill in (or
+      // showing what was sent, with Edit response).
+      setMode(result.response || result.date !== result.today ? 'summary' : 'edit');
       setRestored(false);
       void restoreKeptDraft(result, () => disposed);
       // Today's link shows today's date in the address, so it can be shared
@@ -645,10 +649,12 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
 
   const shownDate = data?.date ?? (date && date !== 'invalid' ? date : today);
   const response = data?.response ?? null;
+  // Only today's form can be filled in or changed; earlier days are view only.
+  const viewOnly = Boolean(data && data.date !== data.today);
 
   // The names are needed as soon as the form can be edited.
   useEffect(() => {
-    if (mode === 'edit' && data) void ensureRoster();
+    if (mode === 'edit' && data && data.date === data.today) void ensureRoster();
   }, [mode, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const goToDate = (value: string) => {
@@ -730,6 +736,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   };
 
   const startEdit = () => {
+    if (viewOnly) return;
     replaceDraft(draftFrom(response));
     setErrors({});
     setSubmitError('');
@@ -764,7 +771,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!data || submitting || preparing) return;
+    if (!data || viewOnly || submitting || preparing) return;
     const found = validate(draft);
     setErrors(found);
     setSubmitError('');
@@ -916,7 +923,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
         )}
 
         {/* Answers brought back after a reload: said at the top, above Date. */}
-        {!fatal && restored && mode === 'edit' && (
+        {!fatal && restored && mode === 'edit' && !viewOnly && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
             <span>Your answers that were not sent yet have been brought back. Check them and press Submit.</span>
             <button
@@ -931,7 +938,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
         )}
 
         {/* Editing a sent response: said at the top, above Date. */}
-        {!fatal && data && response && mode === 'edit' && (
+        {!fatal && data && response && mode === 'edit' && !viewOnly && (
           <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
             You are editing the response for {longDate(data.date)}. Press Submit to save your changes.
           </p>
@@ -950,7 +957,9 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               onChange={goToDate}
             />
             <p className="mt-2 text-xs text-slate-500">
-              {shownDate === today ? "Today's form." : `The form for ${longDate(shownDate)}.`} Pick another date to see or change that day's response.
+              {shownDate === today
+                ? "Today's form. Pick an earlier date to see what was sent that day."
+                : `${longDate(shownDate)}: earlier days can only be viewed, not changed.`}
             </p>
           </Card>
         )}
@@ -1029,18 +1038,39 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               )}
             </dl>
 
-            <button
-              type="button"
-              onClick={startEdit}
-              className="mt-5 inline-flex h-11 items-center gap-2 rounded-md border border-indigo-200 bg-white px-4 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-            >
-              <Pencil size={16} aria-hidden="true" />
-              Edit response
-            </button>
+            {viewOnly ? (
+              <p className="mt-5 text-sm text-slate-500">This is an earlier day, so it can only be viewed. Only today's response can be changed.</p>
+            ) : (
+              <button
+                type="button"
+                onClick={startEdit}
+                className="mt-5 inline-flex h-11 items-center gap-2 rounded-md border border-indigo-200 bg-white px-4 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                <Pencil size={16} aria-hidden="true" />
+                Edit response
+              </button>
+            )}
           </Card>
         )}
 
-        {!fatal && data && mode === 'edit' && (
+        {/* An earlier day with nothing sent: said so, with no form to fill. */}
+        {!fatal && data && viewOnly && !response && (
+          <Card>
+            <h2 className="text-lg font-semibold text-slate-900">No response was sent for {longDate(data.date)}.</h2>
+            <p className="mt-1 text-sm text-slate-500">Earlier days can only be viewed. Only today's form can be filled in.</p>
+            {today && (
+              <button
+                type="button"
+                onClick={() => goToDate(today)}
+                className="mt-5 inline-flex h-11 items-center rounded-md bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+              >
+                Open today's form
+              </button>
+            )}
+          </Card>
+        )}
+
+        {!fatal && data && mode === 'edit' && !viewOnly && (
           <form onSubmit={submit} noValidate className="flex flex-col gap-3">
             <Card id="question-status" invalid={Boolean(errors.status)}>
               <QuestionTitle required>Photo Submission Status</QuestionTitle>

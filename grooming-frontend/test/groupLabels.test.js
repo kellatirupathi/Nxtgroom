@@ -102,7 +102,7 @@ test('a label not in the instructor list still names its person as printed; a na
 
 test('the person is cut out head to feet from the face, kept inside the photo', () => {
   const crop = bodyCropFromFace({ left: 0.1, top: 0.5, width: 0.05, height: 0.03 });
-  assert.ok(crop.top < 0.5 && crop.top > 0.49, 'starts just above the face');
+  assert.ok(crop.top < 0.49 && crop.top > 0.48, 'starts just above the hair');
   assert.ok(crop.height > 0.25, 'reaches down to the feet');
   assert.ok(crop.left >= 0 && crop.left + crop.width <= 1);
   const edge = bodyCropFromFace({ left: 0.97, top: 0.9, width: 0.05, height: 0.05 });
@@ -193,4 +193,19 @@ test('a two-word name over one person stays whole', () => {
   const assigned = assignLabels(spots(GROUP_FACES), readLabels(words, ROSTER, W / H));
   assert.equal(assigned[2]?.nameText, 'Sai Kiran');
   assert.equal(assigned.filter(Boolean).length, 1);
+});
+
+test('the picture runs from above the hair to below the feet, never cutting them', () => {
+  // A person in the middle of a tall photo: the picture ends well below
+  // where the shoes are (about 7.5 heads below the crown).
+  const face = { left: 0.45, top: 0.1, width: 0.04, height: 0.039 };
+  const head = face.height / 0.78;
+  const crown = face.top - (head - face.height);
+  const crop = bodyCropFromFace(face);
+  assert.ok(crop.top + crop.height >= crown + head * 8.5, 'a whole head of room below the shoes');
+  assert.ok(crop.top < crown, 'room above the hair');
+  // Feet close to the bottom of the photo: the picture runs to the bottom.
+  const [standing] = GROUP_FACES;
+  const low = bodyCropFromFace(standing);
+  assert.equal(low.top + low.height, 1);
 });

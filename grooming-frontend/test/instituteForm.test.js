@@ -218,3 +218,13 @@ test('removing a photo on the form asks first', () => {
   assert.match(page, /onRemove=\{\(\) => setRemoving\(\{ kind: 'kept', id: photo\.id \}\)\}/);
   assert.match(page, /body\.append\('keep', JSON\.stringify\(draft\.kept\.map\(\(photo\) => photo\.id\)\)\)/);
 });
+
+test('earlier days are view only: no form, no Edit response, no Submit; today works as before', () => {
+  const page = source('components/PublicFormPage.tsx');
+  assert.match(page, /const viewOnly = Boolean\(data && data\.date !== data\.today\);/);
+  assert.match(page, /setMode\(result\.response \|\| result\.date !== result\.today \? 'summary' : 'edit'\)/);
+  assert.match(page, /\{!fatal && data && mode === 'edit' && !viewOnly && \(\s*<form onSubmit=\{submit\}/);
+  assert.match(page, /\{viewOnly \? \(/, 'Edit response is replaced by a note on earlier days');
+  assert.match(page, /No response was sent for \{longDate\(data\.date\)\}\./);
+  assert.match(page, /if \(!data \|\| viewOnly \|\| submitting \|\| preparing\) return;/);
+});

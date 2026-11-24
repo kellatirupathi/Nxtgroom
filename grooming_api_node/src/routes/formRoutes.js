@@ -162,6 +162,11 @@ publicFormRouter.post(
     const resolved = resolveFormDate(req.params.date, today);
     if (resolved.error) return res.status(422).json({ detail: resolved.error });
     const date = resolved.date;
+    // Only today's form can be sent or changed; earlier days are view only
+    // (past data is added by the admins, from Form Responses > Import).
+    if (date !== today) {
+      return res.status(403).json({ detail: "Earlier days can only be viewed. Only today's form can be sent or changed. Reload the page to open today's form." });
+    }
     const collegeId = String(found.college._id);
 
     const answers = readFormAnswers(req.body);

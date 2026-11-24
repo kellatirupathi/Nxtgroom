@@ -20,7 +20,7 @@ const FACE_MODEL_PATH = '/models/mediapipe-face-detection-full/model.json';
 const TESSERACT_PATH = '/models/tesseract-7.0.0';
 const DETECTION_MAX_SIDE = 2048;
 const READING_MAX_SIDE = 2600;
-const CROP_MAX_SIDE = 480;
+const CROP_MAX_SIDE = 600;
 const MIN_FACE_PIXELS = 12;
 const BLACK_WHITE_THRESHOLD = 150;
 

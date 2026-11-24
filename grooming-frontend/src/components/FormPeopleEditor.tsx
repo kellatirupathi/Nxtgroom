@@ -232,10 +232,11 @@ export default function FormPeopleEditor({ photos, roster, rosterError, disabled
                                 type="button"
                                 onClick={() => setViewing({ photoKey: photo.key, index })}
                                 aria-label={`View the picture of person ${index + 1}`}
-                                className="block h-20 w-16 overflow-hidden rounded-md border border-slate-200 bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                className="flex h-28 w-16 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                               >
+                                {/* The whole person, head to feet: shown, not cut to fill the box. */}
                                 {person.preview
-                                  ? <img src={person.preview} alt={`Person ${index + 1}`} className="h-full w-full object-cover" />
+                                  ? <img src={person.preview} alt={`Person ${index + 1}`} className="h-full w-full object-contain" />
                                   : <UserRound size={20} className="mx-auto text-slate-300" aria-hidden="true" />}
                               </button>
                             </td>
