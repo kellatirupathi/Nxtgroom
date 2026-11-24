@@ -34,8 +34,10 @@ export interface PhotoPeople {
   labelsFailed?: boolean;
 }
 
-// The name list's value for "the name as printed in the photo".
-export const PRINTED_NAME = '__printed__';
+// The suggestions shown while typing a name: the institute's instructors.
+const NAMES_LIST_ID = 'form-instructor-names';
+
+export type PersonField = 'name' | 'id';
 
 export interface EditablePhoto {
   key: string;
@@ -48,7 +50,7 @@ interface FormPeopleEditorProps {
   roster: FormInstructor[] | null;
   rosterError: string;
   disabled: boolean;
-  onChoose: (photoKey: string, personKey: string, instructorId: string) => void;
+  onEdit: (photoKey: string, personKey: string, field: PersonField, value: string) => void;
   onRemove: (photoKey: string, personKey: string) => void;
 }
 
@@ -137,7 +139,7 @@ function PersonPicture({ entries, startIndex, onClose }: { entries: PictureEntry
 // The people in each group photo: their picture, a name filled in from the
 // label printed next to them (or chosen here), their ID, and a ✕ to remove
 // someone who should not be listed.
-export default function FormPeopleEditor({ photos, roster, rosterError, disabled, onChoose, onRemove }: FormPeopleEditorProps) {
+export default function FormPeopleEditor({ photos, roster, rosterError, disabled, onEdit, onRemove }: FormPeopleEditorProps) {
   const [viewing, setViewing] = useState<{ photoKey: string; index: number } | null>(null);
   const byId = new Map((roster ?? []).map((instructor) => [instructor.id, instructor]));
   const chosen = new Map<string, number>();
@@ -149,8 +151,18 @@ export default function FormPeopleEditor({ photos, roster, rosterError, disabled
 
   if (!photos.length) return null;
 
+  // Names read in the photos come first among the suggestions.
+  const inPhotos = new Set(photos.flatMap((photo) => photo.people?.photoInstructorIds ?? []));
+  const suggestions = [
+    ...(roster ?? []).filter((option) => inPhotos.has(option.id)),
+    ...(roster ?? []).filter((option) => !inPhotos.has(option.id)),
+  ];
+
   return (
     <div className="mt-2">
+      <datalist id={NAMES_LIST_ID}>
+        {suggestions.map((option) => <option key={option.id} value={option.name}>{option.employee_id}</option>)}
+      </datalist>
       {rosterError && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700">
           <AlertCircle size={14} aria-hidden="true" />
@@ -210,10 +222,9 @@ export default function FormPeopleEditor({ photos, roster, rosterError, disabled
                       {state.people.map((person, index) => {
                         const instructor = person.instructorId ? byId.get(person.instructorId) : undefined;
                         const twice = Boolean(person.instructorId && (chosen.get(person.instructorId) ?? 0) > 1);
-                        const printed = !person.instructorId && Boolean(person.labelName || person.labelId);
-                        const inPhoto = new Set(state.photoInstructorIds ?? []);
-                        const fromPhoto = (roster ?? []).filter((option) => inPhoto.has(option.id));
-                        const others = (roster ?? []).filter((option) => !inPhoto.has(option.id));
+                        const typed = !person.instructorId && Boolean(person.labelName || person.labelId);
+                        const nameValue = instructor?.name ?? person.labelName ?? '';
+                        const idValue = instructor?.employee_id ?? person.labelId ?? '';
                         return (
                           <tr key={person.key} className="border-t border-slate-100 align-middle">
                             <td className="px-3 py-2">
@@ -229,42 +240,44 @@ export default function FormPeopleEditor({ photos, roster, rosterError, disabled
                               </button>
                             </td>
                             <td className="px-3 py-2">
-                              <select
-                                value={person.instructorId || (printed ? PRINTED_NAME : '')}
-                                onChange={(event) => onChoose(photo.key, person.key, event.target.value)}
-                                disabled={disabled || (!roster && !printed)}
+                              {/* Edited in place: just a line under the text, highlighted while typing. */}
+                              <input
+                                type="text"
+                                value={nameValue}
+                                list={NAMES_LIST_ID}
+                                maxLength={120}
+                                placeholder="Type a name"
+                                autoComplete="off"
+                                onChange={(event) => onEdit(photo.key, person.key, 'name', event.target.value)}
+                                disabled={disabled}
                                 aria-label={`Name of person ${index + 1}`}
-                                className={`h-10 w-full min-w-[10rem] max-w-xs rounded-md border bg-white px-2 text-sm text-slate-800 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 ${
-                                  person.instructorId || printed ? 'border-slate-300' : 'border-amber-300'
+                                className={`h-9 w-full min-w-[9rem] border-0 border-b bg-transparent px-0 text-sm text-slate-900 outline-none placeholder:text-slate-400 hover:border-slate-300 focus:border-b-2 focus:border-indigo-600 disabled:opacity-60 ${
+                                  nameValue ? 'border-transparent' : 'border-amber-300'
                                 }`}
-                              >
-                                <option value="">{roster ? 'Choose a name' : 'Loading names…'}</option>
-                                {printed && (
-                                  <option value={PRINTED_NAME}>{person.labelName || 'Name as printed'}</option>
-                                )}
-                                {fromPhoto.length > 0 ? (
-                                  <>
-                                    <optgroup label="Names in this photo">
-                                      {fromPhoto.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-                                    </optgroup>
-                                    <optgroup label="All instructors">
-                                      {others.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-                                    </optgroup>
-                                  </>
-                                ) : (
-                                  others.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)
-                                )}
-                              </select>
+                              />
                               {person.source === 'label' && person.instructorId && (
                                 <span className="mt-1 block text-xs text-emerald-700">Filled in from the name label</span>
                               )}
-                              {printed && (
-                                <span className="mt-1 block text-xs text-amber-700">As printed in the photo · not in the instructor list</span>
+                              {typed && (
+                                <span className="mt-1 block text-xs text-amber-700">
+                                  {person.source === 'label' ? 'As printed in the photo · not in the instructor list' : 'Not in the instructor list'}
+                                </span>
                               )}
                               {twice && <span className="mt-1 block text-xs text-amber-700">This name is chosen for more than one person</span>}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">
-                              {instructor?.employee_id || (printed ? person.labelId : '') || '—'}
+                            <td className="px-3 py-2">
+                              <input
+                                type="text"
+                                value={idValue}
+                                maxLength={40}
+                                placeholder="ID"
+                                autoComplete="off"
+                                spellCheck={false}
+                                onChange={(event) => onEdit(photo.key, person.key, 'id', event.target.value)}
+                                disabled={disabled}
+                                aria-label={`ID of person ${index + 1}`}
+                                className="h-9 w-32 border-0 border-b border-transparent bg-transparent px-0 text-sm uppercase tabular-nums text-slate-800 outline-none placeholder:normal-case placeholder:text-slate-400 hover:border-slate-300 focus:border-b-2 focus:border-indigo-600 disabled:opacity-60"
+                              />
                             </td>
                             <td className="px-2 py-2 text-right">
                               <button

@@ -3,7 +3,7 @@ import { AlertCircle, CheckCircle2, ExternalLink, ImagePlus, Loader2, Pencil, Re
 import { apiFetch, type ApiError } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import FormDatePicker from './FormDatePicker';
-import FormPeopleEditor, { PRINTED_NAME, type DraftPerson, type EditablePhoto, type PhotoPeople } from './FormPeopleEditor';
+import FormPeopleEditor, { type DraftPerson, type EditablePhoto, type PersonField, type PhotoPeople } from './FormPeopleEditor';
 import PeopleTable from './PeopleTable';
 import ImageLightbox, { type LightboxImage } from './ImageLightbox';
 import { publicFormFromLocation } from '../routes';
@@ -128,6 +128,28 @@ function draftFrom(response: FormResponse | null): Draft {
     added: [],
     people: Object.fromEntries(response.photos.map((photo) => [photo.id, savedPeople(photo)])),
   };
+}
+
+function sameText(left: string | undefined, right: string | undefined): boolean {
+  return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
+}
+
+// A person after their name or ID is typed in: a name or ID that is one of
+// the institute's instructors links that instructor (filling in the other),
+// anything else is kept as typed, with the other value left as it was.
+function editedPerson(person: DraftPerson, field: PersonField, value: string, roster: readonly FormInstructor[]): DraftPerson {
+  const current = person.instructorId ? roster.find((option) => option.id === person.instructorId) : undefined;
+  const name = current?.name ?? person.labelName;
+  const id = current?.employee_id ?? person.labelId;
+  if (field === 'name') {
+    const match = roster.find((option) => sameText(option.name, value));
+    if (match) return { ...person, instructorId: match.id, source: 'manual', labelName: undefined, labelId: undefined };
+    return { ...person, instructorId: '', source: value.trim() || id ? 'manual' : 'none', labelName: value || undefined, labelId: id || undefined };
+  }
+  const typed = value.toUpperCase();
+  const match = roster.find((option) => sameText(option.employee_id, typed));
+  if (match) return { ...person, instructorId: match.id, source: 'manual', labelName: undefined, labelId: undefined };
+  return { ...person, instructorId: '', source: typed.trim() || name ? 'manual' : 'none', labelName: name || undefined, labelId: typed || undefined };
 }
 
 // What is kept in the browser while the form is being filled in.
@@ -494,18 +516,11 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     }
   };
 
-  const choosePerson = (photoKey: string, personKey: string, instructorId: string) => {
+  const editPerson = (photoKey: string, personKey: string, field: PersonField, value: string) => {
     dirtyRef.current = true;
     setPhotoPeople(photoKey, (current) => current && {
       ...current,
-      people: current.people.map((person) => {
-        if (person.key !== personKey) return person;
-        // Back to the name as printed in the photo.
-        if (instructorId === PRINTED_NAME) return { ...person, instructorId: '', source: 'label' };
-        // "Choose a name": no name at all, printed or chosen.
-        if (!instructorId) return { ...person, instructorId: '', source: 'none', labelName: undefined, labelId: undefined };
-        return { ...person, instructorId, source: 'manual' };
-      }),
+      people: current.people.map((person) => (person.key === personKey ? editedPerson(person, field, value, roster ?? []) : person)),
     });
   };
 
@@ -780,7 +795,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
         // (by its position among the crops sent) and the name chosen.
         const crops: Blob[] = [];
         const personPlan = (person: DraftPerson) => {
-          const printed = !person.instructorId && person.source === 'label' && Boolean(person.labelName || person.labelId);
+          const printed = !person.instructorId && Boolean(person.labelName || person.labelId);
           const common = {
             instructor_id: person.instructorId || null,
             source: person.instructorId || printed ? person.source : 'none',
@@ -1135,7 +1150,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                   roster={roster}
                   rosterError={rosterError}
                   disabled={submitting}
-                  onChoose={choosePerson}
+                  onEdit={editPerson}
                   onRemove={(photoKey, personKey) => setPersonRemoving({ photoKey, personKey })}
                 />
               </Card>

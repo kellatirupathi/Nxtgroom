@@ -345,13 +345,14 @@ export async function buildPhotoPeople({ entry, existing = [], crops, roster, co
   const stored = [];
   for (const planned of entry.people) {
     const instructor = planned.instructorId ? roster.get(planned.instructorId) : null;
-    const printed = !instructor && planned.source === "label" && (planned.labelName || planned.labelId);
+    // Not in the instructor list: the name and id as printed or typed.
+    const printed = !instructor && (planned.labelName || planned.labelId);
     const named = instructor
       ? { instructor_id: instructor.id, name: instructor.name, employee_id: instructor.employee_id || null }
       : printed
         ? { instructor_id: null, name: planned.labelName || planned.labelId, employee_id: planned.labelId }
         : { instructor_id: null, name: null, employee_id: null };
-    const source = instructor ? (planned.source === "none" ? "manual" : planned.source) : (printed ? "label" : "none");
+    const source = instructor || printed ? (planned.source === "none" ? "manual" : planned.source) : "none";
     if (planned.id && saved.has(planned.id)) {
       const person = saved.get(planned.id);
       saved.delete(planned.id);

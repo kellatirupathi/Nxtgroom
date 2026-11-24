@@ -198,6 +198,10 @@ test('people are found in the browser, named from labels, editable, and sent as 
   const editor = source('components/FormPeopleEditor.tsx');
   const headers = [...editor.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
   assert.deepEqual(headers, ['Image', 'Name', 'ID']);
+  assert.match(editor, /onEdit\(photo\.key, person\.key, 'name', event\.target\.value\)/, 'the name is typed in place');
+  assert.match(editor, /onEdit\(photo\.key, person\.key, 'id', event\.target\.value\)/, 'the ID is typed in place');
+  assert.match(editor, /border-0 border-b border-transparent bg-transparent px-0/, 'only a line under the text');
+  assert.ok(!editor.includes('<select'), 'no drop-down list');
   assert.ok(!editor.includes('Add a person'), 'no Add a person button');
   assert.match(editor, /onClick=\{\(\) => setViewing\(\{ photoKey: photo\.key, index \}\)\}/, 'a person picture opens');
   assert.match(editor, /className="flex w-full max-w-sm flex-col overflow-hidden rounded-lg bg-white shadow-xl"/, 'in a small window, not full screen');
