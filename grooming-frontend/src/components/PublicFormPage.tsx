@@ -3,11 +3,20 @@ import { AlertCircle, CheckCircle2, ExternalLink, ImagePlus, Loader2, Pencil, Re
 import { apiFetch, type ApiError } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import FormDatePicker from './FormDatePicker';
-import FormPeopleEditor, { type DraftPerson, type EditablePhoto, type PhotoPeople } from './FormPeopleEditor';
+import FormPeopleEditor, { PRINTED_NAME, type DraftPerson, type EditablePhoto, type PhotoPeople } from './FormPeopleEditor';
 import PeopleTable from './PeopleTable';
 import ImageLightbox, { type LightboxImage } from './ImageLightbox';
 import { publicFormFromLocation } from '../routes';
-import type { Box } from '../lib/groupLabels';
+import { localDateValue } from '../attendanceFilters';
+import {
+  cachedInstitute,
+  publicFormPath,
+  readCachedForm,
+  rosterPath,
+  takePrefetchedForm,
+  takePrefetchedRoster,
+  writeCachedForm,
+} from '../lib/formPrefetch';
 import {
   deleteFormDraft,
   draftKey,
@@ -86,6 +95,9 @@ function savedPeople(photo: FormPhoto): PhotoPeople {
       preview: person.crop_url,
       instructorId: person.instructor_id ?? '',
       source: person.source,
+      // A name kept as printed (not in the instructor list).
+      labelName: !person.instructor_id && person.name ? person.name : undefined,
+      labelId: !person.instructor_id && person.employee_id ? person.employee_id : undefined,
       box: person.box,
     })),
   };
@@ -135,12 +147,17 @@ function toStoredDraft(draft: Draft, baseUpdatedAt: string | null): StoredDraft 
       .map(([key, state]) => [key, {
         status: state.status as 'ready' | 'failed',
         message: state.message,
+        photoInstructorIds: state.photoInstructorIds,
+        labelsRead: state.labelsRead,
+        labelsFailed: state.labelsFailed,
         people: state.people.map((person) => ({
           id: person.id,
           crop: person.crop,
           instructorId: person.instructorId,
           source: person.source,
           readText: person.readText,
+          labelName: person.labelName,
+          labelId: person.labelId,
           box: person.box,
         })),
       }])),
@@ -167,6 +184,9 @@ function draftFromStored(stored: StoredDraft, response: FormResponse | null): { 
     return {
       status: state.status,
       message: state.message,
+      photoInstructorIds: state.photoInstructorIds,
+      labelsRead: state.labelsRead,
+      labelsFailed: state.labelsFailed,
       people: state.people
         .filter((person) => (person.id ? saved.has(person.id) : Boolean(person.crop)))
         .map((person) => {
@@ -389,7 +409,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   // The institute's instructors, for naming the people in the photos.
   const ensureRoster = (): Promise<FormInstructor[]> => {
     if (!rosterRef.current) {
-      rosterRef.current = apiFetch<FormInstructor[]>(`/api/v2/forms/${encodeURIComponent(token)}/instructors`, { auth: false })
+      rosterRef.current = (takePrefetchedRoster(token) ?? apiFetch<FormInstructor[]>(rosterPath(token), { auth: false }))
         .then((list) => {
           const value = Array.isArray(list) ? list : [];
           setRoster(value);
@@ -440,21 +460,31 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       const people: DraftPerson[] = reading.people.map((person) => {
         const preview = URL.createObjectURL(person.crop);
         cropUrlsRef.current.add(preview);
+        const label = person.label;
         return {
           key: nextPersonKey(),
           crop: person.crop,
           preview,
-          instructorId: person.label?.instructor?.id ?? '',
-          source: person.label?.instructor ? 'label' : 'none',
-          readText: person.label?.text,
+          // The instructor the label names, or else the name and id as printed.
+          instructorId: label?.instructor?.id ?? '',
+          source: label ? 'label' : 'none',
+          readText: label?.text,
+          labelName: label && !label.instructor ? (label.nameText ?? undefined) : undefined,
+          labelId: label && !label.instructor ? (label.idText ?? undefined) : undefined,
           box: person.box,
-        };
+        } satisfies DraftPerson;
       });
       if (!draftRef.current.added.some((item) => item.id === photo.id)) {
         forgetCropUrls(people);
         return;
       }
-      setPhotoPeople(photo.id, () => ({ status: 'ready', people }));
+      setPhotoPeople(photo.id, () => ({
+        status: 'ready',
+        people,
+        photoInstructorIds: [...new Set(reading.labels.map((label) => label.instructor?.id).filter((id): id is string => Boolean(id)))],
+        labelsRead: reading.labels.length,
+        labelsFailed: reading.labelsFailed,
+      }));
     } catch {
       setPhotoPeople(photo.id, (current) => (current ? {
         status: 'failed',
@@ -468,9 +498,14 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     dirtyRef.current = true;
     setPhotoPeople(photoKey, (current) => current && {
       ...current,
-      people: current.people.map((person) => (person.key === personKey
-        ? { ...person, instructorId, source: instructorId ? 'manual' : 'none' }
-        : person)),
+      people: current.people.map((person) => {
+        if (person.key !== personKey) return person;
+        // Back to the name as printed in the photo.
+        if (instructorId === PRINTED_NAME) return { ...person, instructorId: '', source: 'label' };
+        // "Choose a name": no name at all, printed or chosen.
+        if (!instructorId) return { ...person, instructorId: '', source: 'none', labelName: undefined, labelId: undefined };
+        return { ...person, instructorId, source: 'manual' };
+      }),
     });
   };
 
@@ -481,25 +516,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     forgetCropUrls(draft.people[photoKey]?.people.filter((person) => person.key === personKey));
     setPhotoPeople(photoKey, (current) => current && { ...current, people: current.people.filter((person) => person.key !== personKey) });
     setPersonRemoving(null);
-  };
-
-  const markPerson = async (photoKey: string, box: Box) => {
-    const photo = draft.added.find((item) => item.id === photoKey);
-    if (!photo) return;
-    try {
-      const reader = await import('../lib/groupPhotoReader');
-      const crop = await reader.cropPhotoRegion(photo.original, box);
-      const preview = URL.createObjectURL(crop);
-      cropUrlsRef.current.add(preview);
-      const person: DraftPerson = { key: nextPersonKey(), crop, preview, instructorId: '', source: 'none', box };
-      dirtyRef.current = true;
-      setPhotoPeople(photoKey, (current) => ({
-        status: 'ready',
-        people: [...(current?.people ?? []), person].sort((a, b) => ((a.box?.left ?? 0) + (a.box?.width ?? 0) / 2) - ((b.box?.left ?? 0) + (b.box?.width ?? 0) / 2)),
-      }));
-    } catch {
-      setSubmitError('That part of the photo could not be cut out. Please try again.');
-    }
   };
 
   useEffect(() => {
@@ -539,28 +555,59 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     setErrors({});
     setSubmitError('');
     setJustSubmitted(false);
-    const query = date && date !== 'invalid' ? `?date=${encodeURIComponent(date)}` : '';
-    apiFetch<PublicFormData>(`/api/v2/forms/${encodeURIComponent(token)}${query}`, { auth: false, signal: controller.signal })
+    // The institute's name from an earlier visit goes in the header at once.
+    const known = cachedInstitute(token);
+    if (known) setInstitute((current) => current ?? known);
+
+    let shown: PublicFormData | null = null;
+    const show = (result: PublicFormData, fresh: boolean) => {
+      setInstitute(result.institute);
+      setToday(result.today);
+      if (date === 'invalid') {
+        setData(null);
+        setDateError('This address has a date that is not a real calendar date. Pick a date above.');
+        return;
+      }
+      if (fresh) writeCachedForm(token, result);
+      const unchanged = shown !== null
+        && shown.date === result.date
+        && (shown.response?.updated_at ?? null) === (result.response?.updated_at ?? null);
+      setData(result);
+      if (unchanged) {
+        // The copy shown first was right: keep anything already typed, and
+        // otherwise just take the fresh photo links.
+        if (!dirtyRef.current) replaceDraft(draftFrom(result.response));
+        return;
+      }
+      shown = result;
+      replaceDraft(draftFrom(result.response));
+      setMode(result.response ? 'summary' : 'edit');
+      setRestored(false);
+      void restoreKeptDraft(result, () => disposed);
+      // Today's link shows today's date in the address, so it can be shared
+      // or bookmarked for that day.
+      if (!date) window.history.replaceState(window.history.state, '', formPagePath(slug, token, result.date));
+    };
+
+    // The same link opened recently shows at once from this browser...
+    const cached = date === 'invalid' ? null : readCachedForm(token, date, localDateValue());
+    if (cached) {
+      show(cached, false);
+      setLoading(false);
+    }
+    // ...while the fresh data (usually already asked for as the page started)
+    // arrives and takes its place.
+    const request = takePrefetchedForm(token, date)
+      ?? apiFetch<PublicFormData>(publicFormPath(token, date === 'invalid' ? null : date), { auth: false, signal: controller.signal });
+    request
       .then((result) => {
         if (disposed) return;
-        setInstitute(result.institute);
-        setToday(result.today);
-        if (date === 'invalid') {
-          setData(null);
-          setDateError('This address has a date that is not a real calendar date. Pick a date above.');
-          return;
-        }
-        setData(result);
-        replaceDraft(draftFrom(result.response));
-        setMode(result.response ? 'summary' : 'edit');
-        setRestored(false);
-        void restoreKeptDraft(result, () => disposed);
-        // Today's link shows today's date in the address, so it can be shared
-        // or bookmarked for that day.
-        if (!date) window.history.replaceState(window.history.state, '', formPagePath(slug, token, result.date));
+        show(result, true);
       })
       .catch((error: ApiError) => {
         if (disposed || controller.signal.aborted) return;
+        // Offline for a moment with a recent copy on screen: keep showing it.
+        if (shown && !(Number(error?.status) >= 400)) return;
         const details = (error?.details ?? null) as { institute?: PublicFormData['institute']; today?: string } | null;
         if (error?.status === 422 && details?.institute) {
           setInstitute(details.institute);
@@ -733,7 +780,13 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
         // (by its position among the crops sent) and the name chosen.
         const crops: Blob[] = [];
         const personPlan = (person: DraftPerson) => {
-          const common = { instructor_id: person.instructorId || null, source: person.instructorId ? person.source : 'none', box: person.box };
+          const printed = !person.instructorId && person.source === 'label' && Boolean(person.labelName || person.labelId);
+          const common = {
+            instructor_id: person.instructorId || null,
+            source: person.instructorId || printed ? person.source : 'none',
+            ...(printed ? { label_name: person.labelName ?? null, label_id: person.labelId ?? null } : {}),
+            box: person.box,
+          };
           if (person.id) return { id: person.id, ...common };
           crops.push(person.crop as Blob);
           return { crop: crops.length - 1, ...common };
@@ -759,6 +812,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       );
       rememberName(draft.submittedBy.trim());
       forgetKeptDraft(data.date);
+      writeCachedForm(token, { ...data, response: result.response });
       setData({ ...data, response: result.response });
       replaceDraft(draftFrom(result.response));
       setMode('summary');
@@ -782,15 +836,11 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     ...draft.kept.map((photo, index) => ({
       key: photo.id,
       title: `Photo ${index + 1}`,
-      imageUrl: photo.url,
-      canMarkByHand: false,
       people: draft.people[photo.id],
     })),
     ...draft.added.map((photo, index) => ({
       key: photo.id,
       title: `Photo ${draft.kept.length + index + 1}`,
-      imageUrl: photo.preview,
-      canMarkByHand: true,
       people: draft.people[photo.id],
     })),
   ];
@@ -809,17 +859,29 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                 {institute.location ? ` · ${institute.location}` : ''}
               </p>
             )}
+            {!institute && loading && !fatal && (
+              <span className="mt-3 block h-4 w-64 max-w-full animate-pulse rounded bg-slate-100" aria-hidden="true" />
+            )}
           </div>
           <p className="border-t border-[#dadce0] px-5 py-3 text-sm text-rose-600 sm:px-6">* Indicates required question</p>
         </section>
 
-        {loading && !data && !fatal && (
-          <Card>
-            <p className="flex items-center gap-2 text-sm text-slate-500" role="status">
-              <Loader2 size={16} className="animate-spin" aria-hidden="true" />
-              Opening the form…
-            </p>
-          </Card>
+        {/* The questions' outline straight away, filled in when the data arrives. */}
+        {loading && !data && !fatal && !dateError && (
+          <div className="flex flex-col gap-3" aria-busy="true" aria-label="Opening the form">
+            {[
+              { title: 'Date', field: 'h-10 w-52' },
+              { title: 'Photo Submission Status', field: 'h-16 w-32' },
+              { title: 'University Name', field: 'h-12 w-full max-w-md' },
+              { title: 'Appearance Picture', field: 'h-10 w-32' },
+              { title: 'Submitted By', field: 'h-10 w-full max-w-md' },
+            ].map((question) => (
+              <Card key={question.title}>
+                <QuestionTitle required>{question.title}</QuestionTitle>
+                <span className={`mt-4 block animate-pulse rounded bg-slate-100 ${question.field}`} aria-hidden="true" />
+              </Card>
+            ))}
+          </div>
         )}
 
         {fatal && (
@@ -837,6 +899,21 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               Try again
             </button>
           </Card>
+        )}
+
+        {/* Answers brought back after a reload: said at the top, above Date. */}
+        {!fatal && restored && mode === 'edit' && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
+            <span>Your answers that were not sent yet have been brought back. Check them and press Submit.</span>
+            <button
+              type="button"
+              onClick={discardRestored}
+              disabled={submitting}
+              className="h-9 shrink-0 rounded-md border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+            >
+              Start over
+            </button>
+          </div>
         )}
 
         {!fatal && institute && today && (
@@ -951,19 +1028,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
 
         {!fatal && data && mode === 'edit' && (
           <form onSubmit={submit} noValidate className="flex flex-col gap-3">
-            {restored && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status">
-                <span>Your answers that were not sent yet have been brought back. Check them and press Submit.</span>
-                <button
-                  type="button"
-                  onClick={discardRestored}
-                  disabled={submitting}
-                  className="h-9 shrink-0 rounded-md border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
-                >
-                  Start over
-                </button>
-              </div>
-            )}
             {response && (
               <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
                 You are editing the response for {longDate(data.date)}. Press Submit to save your changes.
@@ -1073,7 +1137,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                   disabled={submitting}
                   onChoose={choosePerson}
                   onRemove={(photoKey, personKey) => setPersonRemoving({ photoKey, personKey })}
-                  onMark={(photoKey, box) => { void markPerson(photoKey, box); }}
                 />
               </Card>
             )}
@@ -1171,7 +1234,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       <ConfirmDialog
         open={Boolean(personRemoving)}
         title="Remove this person?"
-        message="This person will not be listed for the photo. You can mark them again with Add a person on a newly added photo."
+        message="This person will not be listed for the photo."
         confirmLabel="Remove"
         destructive
         onConfirm={removePerson}

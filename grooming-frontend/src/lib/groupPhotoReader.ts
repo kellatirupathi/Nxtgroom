@@ -14,7 +14,7 @@
 import type { FaceDetector } from '@tensorflow-models/face-detection';
 import type { Worker as OcrWorker } from 'tesseract.js';
 import { assignLabels, mergeWords, readLabels, type Box, type OcrWord, type ReadLabel, type RosterEntry } from './groupLabels';
-import { bodyCropFromFace, mergeFaces, planTiles, sortLeftToRight, type FaceSpot } from './personCrop';
+import { bodyCropFromFace, dropBadgeFaces, mergeFaces, planTiles, sortLeftToRight, type FaceSpot } from './personCrop';
 
 const FACE_MODEL_PATH = '/models/mediapipe-face-detection-full/model.json';
 const TESSERACT_PATH = '/models/tesseract-7.0.0';
@@ -32,7 +32,10 @@ export interface FoundPerson {
 
 export interface GroupReading {
   people: FoundPerson[];
-  labelsRead: number;
+  // Every name label read in the photo (for the names offered first).
+  labels: ReadLabel[];
+  // The labels could not be read on this device at all.
+  labelsFailed: boolean;
 }
 
 export type ReadingStage = 'loading' | 'people' | 'labels';
@@ -134,7 +137,7 @@ async function findFaces(bitmap: ImageBitmap): Promise<FaceSpot[]> {
     }
   }
   release(work);
-  return sortLeftToRight(mergeFaces(faces));
+  return sortLeftToRight(dropBadgeFaces(mergeFaces(faces)));
 }
 
 // The photo enlarged for reading, in grey and in black and white.
@@ -232,11 +235,14 @@ export async function readGroupPhoto(
     const faces = await findFaces(bitmap);
     onStage('labels');
     let labels: ReadLabel[] = [];
+    let labelsFailed = false;
     try {
       labels = readLabels(await readWords(bitmap), roster, bitmap.width / bitmap.height);
-    } catch {
+    } catch (error) {
       // Without the labels everyone is still cut out, to be named by hand.
+      console.warn('Name labels could not be read', error);
       labels = [];
+      labelsFailed = true;
     }
     const boxes = faces.map((face) => bodyCropFromFace(face));
     const assigned = assignLabels(
@@ -247,17 +253,7 @@ export async function readGroupPhoto(
     for (const [index, box] of boxes.entries()) {
       people.push({ box, crop: await cropBitmap(bitmap, box), label: assigned[index] });
     }
-    return { people, labelsRead: labels.filter((label) => label.instructor).length };
-  } finally {
-    bitmap.close();
-  }
-}
-
-// A person the submitter marked by hand: that part of the photo, cut out.
-export async function cropPhotoRegion(file: Blob, box: Box): Promise<Blob> {
-  const bitmap = await openPhoto(file);
-  try {
-    return await cropBitmap(bitmap, box);
+    return { people, labels, labelsFailed };
   } finally {
     bitmap.close();
   }

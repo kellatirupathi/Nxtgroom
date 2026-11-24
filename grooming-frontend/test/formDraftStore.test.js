@@ -42,7 +42,7 @@ test('the form keeps answers on change and on leaving, brings them back, and for
   assert.match(page, /saveFormDraft\(key, toStoredDraft\(draft, base\)\)/);
   assert.match(page, /window\.addEventListener\('pagehide', keepNow\)/);
   assert.match(page, /void restoreKeptDraft\(result, \(\) => disposed\)/);
-  assert.match(page, /forgetKeptDraft\(data\.date\);\s*setData\(\{ \.\.\.data, response: result\.response \}\)/, 'forgotten once sent');
+  assert.match(page, /forgetKeptDraft\(data\.date\);\s*writeCachedForm\(token, \{ \.\.\.data, response: result\.response \}\);\s*setData\(\{ \.\.\.data, response: result\.response \}\)/, 'forgotten once sent');
   assert.match(page, /const clearForm = \(\) => \{\s*forgetKeptDraft\(\);/);
   assert.match(page, /const cancelEdit = \(\) => \{\s*forgetKeptDraft\(\);/);
   assert.match(page, /Start over/);

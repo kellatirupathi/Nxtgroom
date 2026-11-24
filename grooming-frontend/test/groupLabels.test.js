@@ -9,7 +9,7 @@ import {
   normalizeIdText,
   readLabels,
 } from '../src/lib/groupLabels.ts';
-import { bodyCropFromFace, mergeFaces, planTiles, sortLeftToRight } from '../src/lib/personCrop.ts';
+import { bodyCropFromFace, dropBadgeFaces, mergeFaces, planTiles, sortLeftToRight } from '../src/lib/personCrop.ts';
 
 // The institute's instructors, with near-misses to make sure only the right
 // one is picked.
@@ -89,10 +89,13 @@ test('an extra "person" (a poster, someone at the back) is left without a name',
   assert.equal(names[extra.findIndex((spot) => spot.centerX === 0.56)], null);
 });
 
-test('labels for unknown ids name nobody, and a name beside its id on one row still works', () => {
+test('a label not in the instructor list still names its person as printed; a name beside its id on one row works', () => {
   const unknown = readLabels([word('Sanjay', 0.1, 0.4, 0.1), word('NW9999999', 0.1, 0.42, 0.13, 0.011)], ROSTER, ASPECT);
   assert.equal(unknown[0].instructor, null);
-  assert.deepEqual(assignLabels([{ centerX: 0.16, width: 0.2 }], unknown), [null]);
+  const [given] = assignLabels([{ centerX: 0.16, width: 0.2 }], unknown);
+  assert.deepEqual([given?.nameText, given?.idText], ['Sanjay', 'NW9999999']);
+  const stray = readLabels([word('Welcome', 0.1, 0.1, 0.2)], ROSTER, ASPECT);
+  assert.equal(stray.length, 0, 'a stray word that names no one is not a label');
   const sameRow = readLabels([word('Keerthi', 0.1, 0.4, 0.1), word('NW2000613', 0.215, 0.4, 0.13)], ROSTER, ASPECT);
   assert.equal(sameRow[0].instructor?.id, 'c');
 });
@@ -109,9 +112,8 @@ test('the person is cut out head to feet from the face, kept inside the photo', 
 test('the photo is also looked at in overlapping tiles, and each face is kept once', () => {
   const tiles = planTiles(720, 1280);
   assert.deepEqual(tiles[0], { x: 0, y: 0, width: 720, height: 1280 });
-  assert.ok(tiles.length > 4);
+  assert.deepEqual([...new Set(tiles.slice(1).map((tile) => tile.width))], [360, 240], 'halves and thirds of the shorter side');
   for (const tile of tiles.slice(1)) {
-    assert.equal(tile.width, 360);
     assert.ok(tile.x + tile.width <= 720 && tile.y + tile.height <= 1280);
   }
   assert.deepEqual(planTiles(200, 200), [{ x: 0, y: 0, width: 200, height: 200 }], 'small photos are looked at whole');
@@ -123,4 +125,12 @@ test('the photo is also looked at in overlapping tiles, and each face is kept on
   assert.equal(faces.length, 2);
   assert.equal(faces.find((face) => face.left < 0.2).score, 0.95);
   assert.deepEqual(sortLeftToRight([{ left: 0.5, width: 0.1 }, { left: 0.1, width: 0.1 }]).map((face) => face.left), [0.1, 0.5]);
+});
+
+test('the photo on an ID card below a face is not taken for a person', () => {
+  const face = { left: 0.1, top: 0.2, width: 0.06, height: 0.034 };
+  const badge = { left: 0.115, top: 0.3, width: 0.02, height: 0.011 };
+  const neighbour = { left: 0.3, top: 0.2, width: 0.06, height: 0.034 };
+  const farAwaySmall = { left: 0.6, top: 0.7, width: 0.02, height: 0.011 };
+  assert.deepEqual(dropBadgeFaces([face, badge, neighbour, farAwaySmall]), [face, neighbour, farAwaySmall]);
 });

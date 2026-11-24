@@ -130,6 +130,9 @@ export default function App() {
   }, [handleLogout]);
 
   useEffect(() => {
+    // Public pages (the institute form, shared reports) need no sign-in, so a
+    // signed-in admin opening one does not check the session or load admin data.
+    if (publicForm || publicReport || dailyReport) return undefined;
     if (!session.token || session.validated) return undefined;
     const controller = new AbortController();
     const validateSession = async () => {
@@ -147,7 +150,7 @@ export default function App() {
     };
     validateSession();
     return () => controller.abort();
-  }, [session.token, session.validated, sessionCheckAttempt]);
+  }, [session.token, session.validated, sessionCheckAttempt, publicForm, publicReport, dailyReport]);
 
   const fetchInstructors = useCallback(async ({ signal }: { signal?: AbortSignal } = {}) => {
     if (!session.token || !session.validated) return;
@@ -167,11 +170,12 @@ export default function App() {
   }, [session.token, session.validated]);
 
   useEffect(() => {
+    if (publicForm || publicReport || dailyReport) return undefined;
     if (!session.token || !session.validated) return undefined;
     const controller = new AbortController();
     fetchInstructors({ signal: controller.signal });
     return () => controller.abort();
-  }, [session.token, session.validated, fetchInstructors]);
+  }, [session.token, session.validated, fetchInstructors, publicForm, publicReport, dailyReport]);
 
   const navigate = useCallback((tab: string, { replace = false } = {}) => {
     let target = tab;

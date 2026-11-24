@@ -332,7 +332,11 @@ test("the people the form sends are read strictly", () => {
     { photo: "ph1", people: [{ id: "p1", instructor_id: "i2", source: "manual" }] },
   ]));
   assert.equal(plan.length, 2);
-  assert.deepEqual(plan[0].people[0], { id: null, crop: 0, instructorId: "i1", source: "label", box: { left: 0.1, top: 0.2, width: 0.2, height: 0.6 } });
+  assert.deepEqual(plan[0].people[0], { id: null, crop: 0, instructorId: "i1", labelName: null, labelId: null, source: "label", box: { left: 0.1, top: 0.2, width: 0.2, height: 0.6 } });
+  const printed = readPeoplePlan(JSON.stringify([{ photo: "new:0", people: [{ crop: 0, instructor_id: null, source: "label", label_name: "  Sanjay  Rao ", label_id: "nw9999999" }] }]));
+  assert.deepEqual([printed[0].people[0].labelName, printed[0].people[0].labelId], ["Sanjay Rao", "NW9999999"]);
+  const junk = readPeoplePlan(JSON.stringify([{ photo: "new:0", people: [{ crop: 0, source: "label", label_id: "<script>" }] }]));
+  assert.equal(junk[0].people[0].labelId, null);
   assert.equal(plan[0].people[1].source, "none");
   assert.equal(plan[1].people[0].id, "p1");
   assert.equal(readPeoplePlan("{not json"), null);
@@ -375,6 +379,21 @@ test("saved people can be renamed or removed without new pictures; names come fr
     photoId: "ph1",
   });
   assert.deepEqual([outsider.people[0].instructor_id, outsider.people[0].name, outsider.people[0].source], [null, null, "none"], "only the institute's own instructors can be chosen");
+
+  const printed = await buildPhotoPeople({
+    entry: { photo: "ph1", people: [{ id: "p2", crop: null, instructorId: null, labelName: "Sanjay Rao", labelId: "NW9999999", source: "label", box: null }] },
+    existing,
+    crops: [],
+    roster,
+    collegeId: "c1",
+    date: "2026-11-23",
+    photoId: "ph1",
+  });
+  assert.deepEqual(
+    [printed.people[0].instructor_id, printed.people[0].name, printed.people[0].employee_id, printed.people[0].source],
+    [null, "Sanjay Rao", "NW9999999", "label"],
+    "someone not in the list keeps the name and id printed on their label",
+  );
 });
 
 test("the form lists only its own institute's current instructors", async () => {

@@ -198,7 +198,9 @@ test('people are found in the browser, named from labels, editable, and sent as 
   const editor = source('components/FormPeopleEditor.tsx');
   const headers = [...editor.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
   assert.deepEqual(headers, ['Image', 'Name', 'ID']);
-  assert.match(editor, /Add a person/);
+  assert.ok(!editor.includes('Add a person'), 'no Add a person button');
+  assert.match(editor, /onClick=\{\(\) => setViewing\(\{ photoKey: photo\.key, index \}\)\}/, 'a person picture opens');
+  assert.match(editor, /className="flex w-full max-w-sm flex-col overflow-hidden rounded-lg bg-white shadow-xl"/, 'in a small window, not full screen');
   const reader = source('lib/groupPhotoReader.ts');
   assert.match(reader, /'\/models\/mediapipe-face-detection-full\/model\.json'/);
   assert.match(reader, /'\/models\/tesseract-7\.0\.0'/);

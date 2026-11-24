@@ -40,23 +40,41 @@ export interface Tile {
   height: number;
 }
 
-// The whole photo, then square tiles about half its shorter side, each
+// The whole photo, then square tiles of half and of a third of its shorter
+// side (so both near and far faces are big enough for the detector), each
 // overlapping the next by a third so no face is cut in half everywhere.
 export function planTiles(width: number, height: number): Tile[] {
   const tiles: Tile[] = [{ x: 0, y: 0, width, height }];
-  const side = Math.round(Math.min(width, height) / 2);
-  if (side < 160) return tiles;
-  const stride = Math.round(side * 0.66);
-  const starts = (length: number) => {
-    const values: number[] = [];
-    for (let at = 0; at + side < length; at += stride) values.push(at);
-    values.push(Math.max(0, length - side));
-    return [...new Set(values)];
-  };
-  for (const y of starts(height)) {
-    for (const x of starts(width)) tiles.push({ x, y, width: side, height: side });
+  for (const parts of [2, 3]) {
+    const side = Math.round(Math.min(width, height) / parts);
+    if (side < 160) continue;
+    const stride = Math.round(side * 0.66);
+    const starts = (length: number) => {
+      const values: number[] = [];
+      for (let at = 0; at + side < length; at += stride) values.push(at);
+      values.push(Math.max(0, length - side));
+      return [...new Set(values)];
+    };
+    for (const y of starts(height)) {
+      for (const x of starts(width)) tiles.push({ x, y, width: side, height: side });
+    }
   }
   return tiles;
+}
+
+// The small photo on an ID card hanging below someone's face is found as a
+// face too. A face much smaller than one just above it, in the same column,
+// is that card, not a person.
+export function dropBadgeFaces<T extends Box>(faces: readonly T[]): T[] {
+  return faces.filter((small) => !faces.some((big) => {
+    if (big === small || big.width < small.width * 1.6) return false;
+    const bigCentre = big.left + big.width / 2;
+    const smallCentre = small.left + small.width / 2;
+    const below = small.top - (big.top + big.height);
+    return Math.abs(bigCentre - smallCentre) < big.width * 1.2
+      && below > -small.height * 0.5
+      && below < big.height * 6;
+  }));
 }
 
 function overlapRatio(a: Box, b: Box): number {

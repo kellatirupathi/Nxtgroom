@@ -29,7 +29,10 @@ export interface RosterEntry {
 
 export interface ReadLabel {
   text: string;
+  // The name and id as printed (the id with look-alike letters put right).
+  nameText: string | null;
   idText: string | null;
+  // The institute's instructor this label is, when one matches.
   instructor: RosterEntry | null;
   box: Box;
   centerX: number;
@@ -222,6 +225,7 @@ export function readLabels(words: readonly OcrWord[], roster: readonly RosterEnt
     const box = name ? union([id.box, name.box]) : id.box;
     labels.push({
       text: [name?.text, idText].filter(Boolean).join(' '),
+      nameText: name?.text || null,
       idText,
       instructor,
       box,
@@ -236,6 +240,7 @@ export function readLabels(words: readonly OcrWord[], roster: readonly RosterEnt
     if (!instructor) continue;
     labels.push({
       text: phrase.text,
+      nameText: phrase.text,
       idText: null,
       instructor,
       box: phrase.box,
@@ -258,6 +263,13 @@ export function readLabels(words: readonly OcrWord[], roster: readonly RosterEnt
     .sort((a, b) => a.centerX - b.centerX);
 }
 
+// Whether a label carries something to name a person with: a matched
+// instructor, or a printed id (a name alone that matched nobody may be any
+// word in the photo, so it is not used).
+export function usableLabel(label: ReadLabel): boolean {
+  return Boolean(label.instructor || (label.idText && label.idText.length >= 6));
+}
+
 // The label for each person (by index), the one nearest side to side. A label
 // goes to one person only; one that is about as near to two people, or too
 // far from everyone, is left out rather than guessed.
@@ -265,7 +277,7 @@ export function assignLabels(people: readonly PersonSpot[], labels: readonly Rea
   const result: (ReadLabel | null)[] = people.map(() => null);
   const pairs: { person: number; label: number; distance: number }[] = [];
   labels.forEach((label, labelIndex) => {
-    if (!label.instructor) return;
+    if (!usableLabel(label)) return;
     const distances = people
       .map((person, personIndex) => ({ personIndex, distance: Math.abs(person.centerX - label.centerX), width: person.width }))
       .sort((a, b) => a.distance - b.distance);

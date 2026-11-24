@@ -36,7 +36,8 @@ export default function PeopleTable({ photos, title }: PeopleTableProps) {
               <tr key={row.key} className="border-t border-slate-100 align-middle">
                 <td className="px-3 py-2">
                   <span className={`block font-semibold ${row.matched ? 'text-slate-900' : 'text-slate-500'}`}>{row.label}</span>
-                  {row.matched && row.source === 'label' && <span className="block text-xs text-slate-500">Read from the name label</span>}
+                  {row.matched && row.source === 'label' && row.instructor_id && <span className="block text-xs text-slate-500">Read from the name label</span>}
+                  {row.matched && !row.instructor_id && <span className="block text-xs text-amber-700">As printed in the photo · not in the instructor list</span>}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 tabular-nums text-slate-700">{row.employee_id || '—'}</td>
                 <td className="px-3 py-2">

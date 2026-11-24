@@ -13,6 +13,8 @@ export interface StoredPerson {
   instructorId: string;
   source: 'label' | 'manual' | 'none';
   readText?: string;
+  labelName?: string;
+  labelId?: string;
   box: { left: number; top: number; width: number; height: number } | null;
 }
 
@@ -20,6 +22,9 @@ export interface StoredPhotoPeople {
   status: 'ready' | 'failed';
   people: StoredPerson[];
   message?: string;
+  photoInstructorIds?: string[];
+  labelsRead?: number;
+  labelsFailed?: boolean;
 }
 
 export interface StoredDraft {

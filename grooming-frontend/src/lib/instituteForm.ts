@@ -71,7 +71,8 @@ export function peopleRows(photos: readonly FormPhoto[]): PersonRow[] {
   const others: PersonRow[] = [];
   photos.forEach((photo) => {
     (photo.people ?? []).forEach((person, personIndex) => {
-      const matched = Boolean(person.instructor_id && person.name);
+      // Named from the instructor list, or by the name printed in the photo.
+      const matched = Boolean(person.name);
       const row: PersonRow = {
         ...person,
         key: `${photo.id}-${person.id || personIndex}`,
@@ -82,7 +83,8 @@ export function peopleRows(photos: readonly FormPhoto[]): PersonRow[] {
         others.push(row);
         return;
       }
-      if (!named.has(String(person.instructor_id))) named.set(String(person.instructor_id), row);
+      const identity = person.instructor_id || `printed:${(person.employee_id || person.name || '').toLowerCase()}`;
+      if (!named.has(identity)) named.set(identity, row);
     });
   });
   const sorted = [...named.values()].sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: 'base' }));

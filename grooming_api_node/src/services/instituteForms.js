@@ -312,10 +312,16 @@ export function readPeoplePlan(value) {
       const instructorId = typeof person.instructor_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(person.instructor_id)
         ? person.instructor_id
         : null;
+      // The name and id printed on the person's label, kept as they are when
+      // the person is not in the institute's instructor list.
+      const labelName = cleanText(person.label_name).slice(0, SUBMITTED_BY_MAX) || null;
+      const labelId = /^[A-Za-z0-9-]{3,40}$/.test(cleanText(person.label_id)) ? cleanText(person.label_id).toUpperCase() : null;
       people.push({
         id,
         crop,
         instructorId,
+        labelName,
+        labelId,
         source: PERSON_SOURCES.has(person.source) ? person.source : (instructorId ? "manual" : "none"),
         box: readBox(person.box),
       });
@@ -339,10 +345,13 @@ export async function buildPhotoPeople({ entry, existing = [], crops, roster, co
   const stored = [];
   for (const planned of entry.people) {
     const instructor = planned.instructorId ? roster.get(planned.instructorId) : null;
+    const printed = !instructor && planned.source === "label" && (planned.labelName || planned.labelId);
     const named = instructor
       ? { instructor_id: instructor.id, name: instructor.name, employee_id: instructor.employee_id || null }
-      : { instructor_id: null, name: null, employee_id: null };
-    const source = instructor ? (planned.source === "none" ? "manual" : planned.source) : "none";
+      : printed
+        ? { instructor_id: null, name: planned.labelName || planned.labelId, employee_id: planned.labelId }
+        : { instructor_id: null, name: null, employee_id: null };
+    const source = instructor ? (planned.source === "none" ? "manual" : planned.source) : (printed ? "label" : "none");
     if (planned.id && saved.has(planned.id)) {
       const person = saved.get(planned.id);
       saved.delete(planned.id);
