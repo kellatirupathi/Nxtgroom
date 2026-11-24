@@ -4,7 +4,6 @@ import { apiFetch, type ApiError } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import FormDatePicker from './FormDatePicker';
 import FormPeopleEditor, { type DraftPerson, type EditablePhoto, type PersonField, type PhotoPeople } from './FormPeopleEditor';
-import PeopleTable from './PeopleTable';
 import ImageLightbox, { type LightboxImage } from './ImageLightbox';
 import { publicFormFromLocation } from '../routes';
 import { localDateValue } from '../attendanceFilters';
@@ -931,6 +930,13 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
           </div>
         )}
 
+        {/* Editing a sent response: said at the top, above Date. */}
+        {!fatal && data && response && mode === 'edit' && (
+          <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+            You are editing the response for {longDate(data.date)}. Press Submit to save your changes.
+          </p>
+        )}
+
         {!fatal && institute && today && (
           <Card id="question-date">
             <QuestionTitle required htmlFor="form-date">Date</QuestionTitle>
@@ -1023,13 +1029,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               )}
             </dl>
 
-            {response.status === 'yes' && response.photos.some((photo) => (photo.people ?? []).length > 0) && (
-              <div className="mt-5">
-                <h3 className="mb-2 text-sm font-semibold text-slate-900">People in the photos</h3>
-                <PeopleTable photos={response.photos} title={`${response.college_name || institute?.name || ''} · ${longDate(data.date)}`} />
-              </div>
-            )}
-
             <button
               type="button"
               onClick={startEdit}
@@ -1043,12 +1042,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
 
         {!fatal && data && mode === 'edit' && (
           <form onSubmit={submit} noValidate className="flex flex-col gap-3">
-            {response && (
-              <p className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
-                You are editing the response for {longDate(data.date)}. Press Submit to save your changes.
-              </p>
-            )}
-
             <Card id="question-status" invalid={Boolean(errors.status)}>
               <QuestionTitle required>Photo Submission Status</QuestionTitle>
               <div className="mt-3 flex flex-col" role="radiogroup" aria-label="Photo Submission Status">

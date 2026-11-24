@@ -179,11 +179,11 @@ test('people across the photos: each named person once, A-Z, then the unnamed', 
   assert.deepEqual(peopleCount([{ id: 'c', url: null, thumb_url: null }]), { identified: 0, unknown: 0 });
 });
 
-test('the form summary and the responses page both show the Name | ID | Image table', () => {
+test('the responses page shows the Name | ID | Image table; the submitted form page does not', () => {
   const table = source('components/PeopleTable.tsx');
   const headers = [...table.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
   assert.deepEqual(headers, ['Name', 'ID', 'Image']);
-  assert.match(source('components/PublicFormPage.tsx'), /<PeopleTable photos=\{response\.photos\}/);
+  assert.doesNotMatch(source('components/PublicFormPage.tsx'), /PeopleTable|People in the photos/);
   const responses = source('components/FormResponsesSection.tsx');
   assert.match(responses, /\{ key: 'people', label: 'People' \}/);
   assert.match(responses, /<PeopleTable photos=\{peopleOf\.photos\}/);

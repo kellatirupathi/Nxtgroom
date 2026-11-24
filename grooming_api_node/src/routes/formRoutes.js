@@ -27,6 +27,7 @@ import {
   removePersonCrops,
   resolveFormDate,
   serializeFormResponse,
+  newFormPhotoId,
   storeFormPhoto,
 } from "../services/instituteForms.js";
 
@@ -183,7 +184,12 @@ publicFormRouter.post(
       crops.push({ buffer: file.buffer, mimeType: checked.mimeType });
     }
 
-    const existing = await findFormResponse(db, collegeId, date);
+    // The saved response and (when people are sent) the instructor list,
+    // looked up together.
+    const [existing, instructors] = await Promise.all([
+      findFormResponse(db, collegeId, date),
+      answers.status === "yes" && plan.length ? formInstructors(db, collegeId) : [],
+    ]);
     const existingPhotos = Array.isArray(existing?.photos) ? existing.photos : [];
     const keptPhotos = answers.status === "yes" ? existingPhotos.filter((photo) => kept.includes(photo.id)) : [];
     const photoLinks = answers.status === "yes" && Array.isArray(existing?.photo_links) ? existing.photo_links : [];
@@ -202,53 +208,53 @@ publicFormRouter.post(
       return res.status(503).json({ detail: "Photo storage is not available right now. Please try again later." });
     }
 
-    const added = [];
-    for (const file of files) {
-      const stored = await storeFormPhoto({ buffer: file.buffer, collegeId, date });
-      if (stored.error) {
-        await removeFormPhotos(added);
-        return res.status(stored.status).json({ detail: stored.error });
-      }
-      added.push(stored.photo);
-    }
-
     // Each photo's people: saved photos keep theirs unless the form sent a
     // new list for them; new photos ("new:<n>", in upload order) get theirs.
+    // Every photo, its preview and everyone's picture are sent to storage at
+    // the same time (new photos get their ids first so their people's
+    // pictures need not wait for them).
     const planByPhoto = new Map((answers.status === "yes" ? plan : []).map((entry) => [entry.photo, entry]));
-    const newCrops = [];
-    const removedPeople = [];
-    const photos = [];
-    try {
-      const roster = planByPhoto.size
-        ? new Map((await formInstructors(db, collegeId)).map((instructor) => [instructor.id, instructor]))
-        : new Map();
-      for (const photo of keptPhotos) {
-        const entry = planByPhoto.get(photo.id);
-        if (!entry) {
-          photos.push(photo);
-          continue;
-        }
-        const built = await buildPhotoPeople({ entry, existing: photo.people, crops, roster, collegeId, date, photoId: photo.id });
-        newCrops.push(...built.stored);
-        removedPeople.push(...built.removed);
-        photos.push({ ...photo, people: built.people });
+    const roster = new Map(instructors.map((instructor) => [instructor.id, instructor]));
+    const newIds = files.map(() => newFormPhotoId());
+    const peopleFor = (photoKey, existingPeople, photoId) => {
+      const entry = planByPhoto.get(photoKey);
+      return entry
+        ? buildPhotoPeople({ entry, existing: existingPeople, crops, roster, collegeId, date, photoId })
+        : Promise.resolve(null);
+    };
+    const [storedPhotos, keptBuilt, newBuilt] = await Promise.all([
+      Promise.allSettled(files.map((file, index) => storeFormPhoto({ buffer: file.buffer, collegeId, date, id: newIds[index] }))),
+      Promise.allSettled(keptPhotos.map((photo) => peopleFor(photo.id, photo.people, photo.id))),
+      Promise.allSettled(newIds.map((id, index) => peopleFor(`new:${index}`, [], id))),
+    ]);
+    const added = storedPhotos.filter((item) => item.status === "fulfilled" && item.value.photo).map((item) => item.value.photo);
+    const builds = [...keptBuilt, ...newBuilt];
+    const newCrops = builds.filter((item) => item.status === "fulfilled" && item.value).flatMap((item) => item.value.stored);
+    const photoFailed = storedPhotos.find((item) => item.status === "rejected" || item.value.error);
+    const peopleFailed = builds.find((item) => item.status === "rejected");
+    if (photoFailed || peopleFailed) {
+      await Promise.all([removePersonCrops(newCrops), removeFormPhotos(added)]);
+      if (photoFailed?.status === "fulfilled") {
+        return res.status(photoFailed.value.status).json({ detail: photoFailed.value.error });
       }
-      for (const [index, photo] of added.entries()) {
-        const entry = planByPhoto.get(`new:${index}`);
-        if (!entry) {
-          photos.push({ ...photo, people: [] });
-          continue;
-        }
-        const built = await buildPhotoPeople({ entry, existing: [], crops, roster, collegeId, date, photoId: photo.id });
-        newCrops.push(...built.stored);
-        photos.push({ ...photo, people: built.people });
-      }
-    } catch (error) {
-      await removePersonCrops(newCrops);
-      await removeFormPhotos(added);
+      const error = photoFailed?.reason ?? peopleFailed.reason;
       if (error?.status) return res.status(error.status).json({ detail: error.message });
       throw error;
     }
+    const removedPeople = [];
+    const photos = [];
+    keptPhotos.forEach((photo, index) => {
+      const built = keptBuilt[index].value;
+      if (!built) {
+        photos.push(photo);
+        return;
+      }
+      removedPeople.push(...built.removed);
+      photos.push({ ...photo, people: built.people });
+    });
+    added.forEach((photo, index) => {
+      photos.push({ ...photo, people: newBuilt[index].value?.people ?? [] });
+    });
 
     const now = new Date();
     const fields = {

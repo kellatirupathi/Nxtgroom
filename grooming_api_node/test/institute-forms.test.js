@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import express from "express";
+import sharp from "sharp";
 import { DynamoDocumentDatabase } from "../src/docdb/database.js";
 import { MemoryDynamoDriver } from "../src/docdb/driver.js";
 import { allTableDefinitions, collectionSchema } from "../src/docdb/schema.js";
@@ -10,6 +11,8 @@ import { localDateKey } from "../src/services/instructorReports.js";
 import {
   buildImportedResponse,
   buildPhotoPeople,
+  formPhotoImage,
+  mapWithLimit,
   readPeoplePlan,
   formPath,
   formSlug,
@@ -427,4 +430,38 @@ test("the form lists only its own institute's current instructors", async () => 
 test("form tokens are hidden in request logs and imports are audited", () => {
   assert.equal(loggedPath("/api/v2/forms/abcdefghijklmnopqrstuvwx/2026-11-23"), "/api/v2/forms/<token>/2026-11-23");
   assert.deepEqual(describeRequest("POST", "/api/v2/form-responses/import"), { action: "Created form responses import", category: "edit" });
+});
+
+test("a photo the form's browser already prepared is kept as sent; anything else is re-made here", async () => {
+  const prepared = await sharp({ create: { width: 1200, height: 900, channels: 3, background: "#5070a0" } }).jpeg({ quality: 85 }).toBuffer();
+  const kept = await formPhotoImage(prepared);
+  assert.equal(kept.buffer, prepared, "the same bytes, not re-encoded");
+  assert.deepEqual([kept.width, kept.height], [1200, 900]);
+
+  const png = await sharp({ create: { width: 800, height: 600, channels: 3, background: "#a05070" } }).png().toBuffer();
+  const remade = await formPhotoImage(png);
+  assert.notEqual(remade.buffer, png);
+  assert.equal((await sharp(remade.buffer).metadata()).format, "jpeg");
+
+  const sideways = await sharp({ create: { width: 900, height: 600, channels: 3, background: "#70a050" } })
+    .jpeg().withMetadata({ orientation: 6 }).toBuffer();
+  const upright = await formPhotoImage(sideways);
+  assert.deepEqual([upright.width, upright.height], [600, 900], "a photo with a turn in it is made upright");
+
+  await assert.rejects(formPhotoImage(Buffer.from("not an image")));
+});
+
+test("storage work runs several at a time and keeps the order", async () => {
+  let running = 0;
+  let most = 0;
+  const results = await mapWithLimit([5, 1, 4, 2, 3, 0, 6], 3, async (value) => {
+    running += 1;
+    most = Math.max(most, running);
+    await new Promise((resolve) => setTimeout(resolve, value * 3));
+    running -= 1;
+    return value * 10;
+  });
+  assert.deepEqual(results, [50, 10, 40, 20, 30, 0, 60]);
+  assert.equal(most, 3);
+  assert.deepEqual(await mapWithLimit([], 4, async () => 1), []);
 });

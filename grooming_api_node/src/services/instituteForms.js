@@ -15,7 +15,6 @@
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { createDocument } from "../utils.js";
-import { normalizeInstructorImage } from "../imageProcessor.js";
 import { isValidDateKey } from "./instructorReports.js";
 import { deletePhoto, getPhotoUrl, uploadPhoto } from "./photoStorage.js";
 
@@ -33,6 +32,14 @@ export const FORM_IMPORT_MAX_ROWS = 1000;
 export const SUBMITTED_BY_MAX = 120;
 export const REASON_OTHER_MAX = 300;
 const THUMB_SIZE = 360;
+const FORM_PHOTO_MIN_SIDE = 320;
+// Photos are kept as sent up to this size; others are made this size at most.
+const FORM_PHOTO_KEEP_MAX_SIDE = 3072;
+const FORM_PHOTO_KEEP_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
+const FORM_PHOTO_MAX_SIDE = 2048;
+const FORM_PHOTO_MAX_PIXELS = 80_000_000;
+// Uploads (or deletes) sent to storage at the same time for one photo.
+const STORAGE_CONCURRENCY = 8;
 const LINKS = "institute_form_links";
 const RESPONSES = "form_responses";
 const ACTIVE = { $or: [{ deleted_at: null }, { deleted_at: { $exists: false } }] };
@@ -188,13 +195,67 @@ export function formPhotoKey(collegeId, date, photoId, variant = "full") {
   return `forms/${safeCollege}/${date}/${photoId}${variant === "thumb" ? "-thumb" : ""}.jpg`;
 }
 
-// Saves one uploaded photo (upright, at most 3072 px, JPEG) and its preview.
-export async function storeFormPhoto({ buffer, collegeId, date }) {
+// Runs `work` on each item, at most `limit` at a time; results in order.
+// `work` should not throw (uploads and deletes report failure instead).
+export async function mapWithLimit(items, limit, work) {
+  const results = new Array(items.length);
+  let next = 0;
+  const runner = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await work(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length) }, runner));
+  return results;
+}
+
+export function newFormPhotoId() {
+  return crypto.randomBytes(9).toString("base64url");
+}
+
+// The form's browser already sends each photo upright, at most 2048 px, as a
+// JPEG with nothing else in it: that file is kept as sent (re-encoding it
+// only made it bigger and slower). Anything else (a photo the browser could
+// not prepare, or a small photo it sent as it was) is made upright, sized
+// and re-encoded here, the same way the browser does it, in one quick pass.
+export async function formPhotoImage(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error("The uploaded image is empty");
+  const options = { animated: false, failOn: "warning", limitInputPixels: FORM_PHOTO_MAX_PIXELS };
+  const meta = await sharp(buffer, options).metadata();
+  if (!meta.width || !meta.height) throw new Error("The uploaded image dimensions could not be read");
+  const turned = meta.orientation >= 5;
+  const width = turned ? meta.height : meta.width;
+  const height = turned ? meta.width : meta.height;
+  if (width < FORM_PHOTO_MIN_SIDE || height < FORM_PHOTO_MIN_SIDE) {
+    throw new Error(`The image must be at least ${FORM_PHOTO_MIN_SIDE}x${FORM_PHOTO_MIN_SIDE} pixels`);
+  }
+  const asSent = meta.format === "jpeg"
+    && (!meta.orientation || meta.orientation === 1)
+    && !meta.exif
+    && Math.max(width, height) <= FORM_PHOTO_KEEP_MAX_SIDE
+    && buffer.length <= FORM_PHOTO_KEEP_MAX_BYTES;
+  if (asSent) return { buffer, width, height };
+  const { data, info } = await sharp(buffer, options)
+    .rotate()
+    .resize({ width: FORM_PHOTO_MAX_SIDE, height: FORM_PHOTO_MAX_SIDE, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 85 })
+    .toBuffer({ resolveWithObject: true });
+  return { buffer: data, width: info.width, height: info.height };
+}
+
+// Saves one uploaded photo (upright, at most 3072 px, JPEG) and its preview,
+// both sent to storage at the same time.
+export async function storeFormPhoto({ buffer, collegeId, date, id = newFormPhotoId() }) {
   let normalized;
   let thumb;
   try {
-    normalized = await normalizeInstructorImage(buffer);
-    thumb = await sharp(normalized.buffer)
+    normalized = await formPhotoImage(buffer);
+    // Making the preview reads the whole photo, so a broken file fails here.
+    thumb = await sharp(normalized.buffer, { failOn: "warning" })
+      .rotate()
       .resize({ width: THUMB_SIZE, height: THUMB_SIZE, fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 72 })
       .toBuffer();
@@ -204,17 +265,15 @@ export async function storeFormPhoto({ buffer, collegeId, date }) {
       error: `One of the photos could not be read (${error?.message || "unsupported image"}). Choose a clear JPG or PNG photo.`,
     };
   }
-  const id = crypto.randomBytes(9).toString("base64url");
   const key = formPhotoKey(collegeId, date, id);
   const thumbKey = formPhotoKey(collegeId, date, id, "thumb");
   const metadata = { college_id: collegeId, form_date: date, kind: "form" };
-  const stored = await uploadPhoto({ key, body: normalized.buffer, mimeType: "image/jpeg", metadata });
-  if (!stored.stored) {
-    return { status: 502, error: "The photos could not be saved right now. Please press Submit again." };
-  }
-  const storedThumb = await uploadPhoto({ key: thumbKey, body: thumb, mimeType: "image/jpeg", metadata });
-  if (!storedThumb.stored) {
-    await deletePhoto(key);
+  const [stored, storedThumb] = await Promise.all([
+    uploadPhoto({ key, body: normalized.buffer, mimeType: "image/jpeg", metadata }),
+    uploadPhoto({ key: thumbKey, body: thumb, mimeType: "image/jpeg", metadata }),
+  ]);
+  if (!stored.stored || !storedThumb.stored) {
+    await Promise.all([stored.stored && deletePhoto(key), storedThumb.stored && deletePhoto(thumbKey)]);
     return { status: 502, error: "The photos could not be saved right now. Please press Submit again." };
   }
   return {
@@ -231,11 +290,11 @@ export async function storeFormPhoto({ buffer, collegeId, date }) {
 }
 
 export async function removeFormPhotos(photos = []) {
-  for (const photo of photos) {
-    if (photo?.key) await deletePhoto(photo.key);
-    if (photo?.thumb_key) await deletePhoto(photo.thumb_key);
-    await removePersonCrops(photo?.people);
-  }
+  const keys = photos.flatMap((photo) => [photo?.key, photo?.thumb_key]).filter(Boolean);
+  await Promise.all([
+    mapWithLimit(keys, STORAGE_CONCURRENCY, (key) => deletePhoto(key)),
+    removePersonCrops(photos.flatMap((photo) => (Array.isArray(photo?.people) ? photo.people : []))),
+  ]);
 }
 
 // ---- the people in each photo ---------------------------------------------
@@ -252,9 +311,8 @@ export const FORM_MAX_CROP_BYTES = Math.floor(1.5 * 1024 * 1024);
 const PERSON_SOURCES = new Set(["label", "manual", "none"]);
 
 export async function removePersonCrops(people = []) {
-  for (const person of Array.isArray(people) ? people : []) {
-    if (person?.crop_key) await deletePhoto(person.crop_key);
-  }
+  const keys = (Array.isArray(people) ? people : []).map((person) => person?.crop_key).filter(Boolean);
+  await mapWithLimit(keys, STORAGE_CONCURRENCY, (key) => deletePhoto(key));
 }
 
 // The institute's instructors, for the form's name list.
@@ -342,7 +400,7 @@ function personKey(collegeId, date, photoId, personId) {
 export async function buildPhotoPeople({ entry, existing = [], crops, roster, collegeId, date, photoId }) {
   const saved = new Map((Array.isArray(existing) ? existing : []).map((person) => [person.id, person]));
   const people = [];
-  const stored = [];
+  const uploads = [];
   for (const planned of entry.people) {
     const instructor = planned.instructorId ? roster.get(planned.instructorId) : null;
     // Not in the instructor list: the name and id as printed or typed.
@@ -363,19 +421,21 @@ export async function buildPhotoPeople({ entry, existing = [], crops, roster, co
     if (!file) continue;
     const personId = crypto.randomBytes(6).toString("base64url");
     const key = personKey(collegeId, date, photoId, personId);
-    const upload = await uploadPhoto({
-      key,
-      body: file.buffer,
-      mimeType: file.mimeType,
-      metadata: { college_id: String(collegeId), form_date: date, kind: "form_person" },
-    });
-    if (!upload.stored) {
-      await removePersonCrops(stored);
-      throw Object.assign(new Error("The people's pictures could not be saved right now. Please press Submit again."), { status: 502 });
-    }
     const person = { id: personId, crop_key: key, ...named, source, box: planned.box };
-    stored.push(person);
+    uploads.push({ person, file });
     people.push(person);
+  }
+  // The pictures are sent to storage several at a time, not one by one.
+  const results = await mapWithLimit(uploads, STORAGE_CONCURRENCY, ({ person, file }) => uploadPhoto({
+    key: person.crop_key,
+    body: file.buffer,
+    mimeType: file.mimeType,
+    metadata: { college_id: String(collegeId), form_date: date, kind: "form_person" },
+  }));
+  const stored = uploads.filter((_, index) => results[index]?.stored).map(({ person }) => person);
+  if (stored.length < uploads.length) {
+    await removePersonCrops(stored);
+    throw Object.assign(new Error("The people's pictures could not be saved right now. Please press Submit again."), { status: 502 });
   }
   return { people, stored, removed: [...saved.values()] };
 }
