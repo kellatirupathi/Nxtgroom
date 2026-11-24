@@ -41,7 +41,15 @@ export interface ReadLabel {
 export interface PersonSpot {
   centerX: number;
   width: number;
+  // Where the face is up and down, for names printed above heads.
+  faceTop?: number;
+  faceHeight?: number;
 }
+
+const NAME_ONLY_MIN_CONFIDENCE = 60;
+// How far above the top of a face a name printed over that person can be,
+// in face heights (a little overlap with the hair is allowed too).
+const NAME_ABOVE_HEAD_FACES = 5;
 
 // Letters Tesseract commonly reads in place of digits.
 const DIGIT_LOOKALIKES: Record<string, string> = { O: '0', Q: '0', D: '0', I: '1', L: '1', '|': '1', '!': '1', Z: '2', S: '5', B: '8', G: '6', T: '7' };
@@ -153,6 +161,16 @@ interface Phrase {
   text: string;
   box: Box;
   confidence: number;
+  words: OcrWord[];
+}
+
+function phraseOf(words: OcrWord[]): Phrase {
+  return {
+    text: words.map((word) => word.text.replace(/[^A-Za-z.'-]/g, '')).join(' ').trim(),
+    box: union(words.map((word) => word.box)),
+    confidence: Math.min(...words.map((word) => word.confidence)),
+    words,
+  };
 }
 
 // Name words next to each other on the same row joined into one name
@@ -178,11 +196,7 @@ function namePhrases(words: readonly OcrWord[], aspect: number): Phrase[] {
       phrases.push({ words: [word], box: word.box });
     }
   }
-  return phrases.map((phrase) => ({
-    text: phrase.words.map((word) => word.text.replace(/[^A-Za-z.'-]/g, '')).join(' ').trim(),
-    box: phrase.box,
-    confidence: Math.min(...phrase.words.map((word) => word.confidence)),
-  }));
+  return phrases.map((phrase) => phraseOf(phrase.words));
 }
 
 // The labels in the photo: each id joined with the name printed just above it
@@ -234,10 +248,11 @@ export function readLabels(words: readonly OcrWord[], roster: readonly RosterEnt
     });
   }
 
-  for (const phrase of names) {
-    if (usedNames.has(phrase)) continue;
+  const addName = (phrase: Phrase) => {
     const instructor = instructorByName(phrase.text, roster);
-    if (!instructor) continue;
+    // A name matching no instructor is kept only when read clearly; it then
+    // names a person only if it is printed just above their head.
+    if (!instructor && (phrase.confidence < NAME_ONLY_MIN_CONFIDENCE || phrase.text.replace(/[^A-Za-z]/g, '').length < 3)) return false;
     labels.push({
       text: phrase.text,
       nameText: phrase.text,
@@ -247,6 +262,17 @@ export function readLabels(words: readonly OcrWord[], roster: readonly RosterEnt
       centerX: phrase.box.left + phrase.box.width / 2,
       confidence: phrase.confidence,
     });
+    return Boolean(instructor);
+  };
+  for (const phrase of names) {
+    if (usedNames.has(phrase)) continue;
+    const matched = addName(phrase);
+    // Two people's names printed close together read as one ("Meghana
+    // Sanjana"): each word is offered on its own too, and the one nearest a
+    // person wins (a real two-word name stays nearest its own person whole).
+    if (!matched && phrase.words.length > 1) {
+      for (const word of phrase.words) addName(phraseOf([word]));
+    }
   }
 
   const best = new Map<string, ReadLabel & { confidence: number }>();
@@ -263,11 +289,24 @@ export function readLabels(words: readonly OcrWord[], roster: readonly RosterEnt
     .sort((a, b) => a.centerX - b.centerX);
 }
 
-// Whether a label carries something to name a person with: a matched
-// instructor, or a printed id (a name alone that matched nobody may be any
-// word in the photo, so it is not used).
+// Whether a label carries something to name a person with anywhere near
+// them: a matched instructor, or a printed id.
 export function usableLabel(label: ReadLabel): boolean {
   return Boolean(label.instructor || (label.idText && label.idText.length >= 6));
+}
+
+// A name alone that matched no instructor could be any word in the photo
+// (a sign, the camera's watermark), so it names only a person it is printed
+// just above.
+function nameOnlyLabel(label: ReadLabel): boolean {
+  return !usableLabel(label) && Boolean(label.nameText);
+}
+
+function aboveHead(label: ReadLabel, person: PersonSpot): boolean {
+  if (person.faceTop === undefined || !person.faceHeight) return false;
+  const bottom = label.box.top + label.box.height;
+  return bottom <= person.faceTop + person.faceHeight * 0.3
+    && bottom >= person.faceTop - person.faceHeight * NAME_ABOVE_HEAD_FACES;
 }
 
 // The label for each person (by index), the one nearest side to side. A label
@@ -277,9 +316,11 @@ export function assignLabels(people: readonly PersonSpot[], labels: readonly Rea
   const result: (ReadLabel | null)[] = people.map(() => null);
   const pairs: { person: number; label: number; distance: number }[] = [];
   labels.forEach((label, labelIndex) => {
-    if (!usableLabel(label)) return;
+    const nameOnly = nameOnlyLabel(label);
+    if (!usableLabel(label) && !nameOnly) return;
     const distances = people
-      .map((person, personIndex) => ({ personIndex, distance: Math.abs(person.centerX - label.centerX), width: person.width }))
+      .map((person, personIndex) => ({ person, personIndex, distance: Math.abs(person.centerX - label.centerX), width: person.width }))
+      .filter(({ person }) => !nameOnly || aboveHead(label, person))
       .sort((a, b) => a.distance - b.distance);
     const [nearest, next] = distances;
     if (!nearest) return;

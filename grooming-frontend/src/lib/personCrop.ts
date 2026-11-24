@@ -62,19 +62,67 @@ export function planTiles(width: number, height: number): Tile[] {
   return tiles;
 }
 
-// The small photo on an ID card hanging below someone's face is found as a
-// face too. A face much smaller than one just above it, in the same column,
-// is that card, not a person.
-export function dropBadgeFaces<T extends Box>(faces: readonly T[]): T[] {
+// Things below a person that the face detector takes for a face: the small
+// photo on their ID card, and their hands, shoes or the floor near their
+// feet. A face is dropped when it is in the same column as a face above it
+// and either much smaller and close below (the card), or far down at the
+// legs or feet (no one in a group photo is that low: someone sitting on a
+// chair in front is only about two faces lower, on the floor about four).
+const BADGE_SIZE_RATIO = 1.6;
+const BADGE_MAX_DROP_FACES = 6;
+const LEGS_START_FACES = 5;
+
+export function dropBodyPartFaces<T extends Box>(faces: readonly T[]): T[] {
   return faces.filter((small) => !faces.some((big) => {
-    if (big === small || big.width < small.width * 1.6) return false;
-    const bigCentre = big.left + big.width / 2;
-    const smallCentre = small.left + small.width / 2;
+    if (big === small) return false;
+    const sideways = Math.abs((big.left + big.width / 2) - (small.left + small.width / 2));
     const below = small.top - (big.top + big.height);
-    return Math.abs(bigCentre - smallCentre) < big.width * 1.2
+    const drop = (small.top + small.height / 2) - (big.top + big.height / 2);
+    const badge = big.width >= small.width * BADGE_SIZE_RATIO
+      && sideways < big.width * 1.2
       && below > -small.height * 0.5
-      && below < big.height * 6;
+      && below < big.height * BADGE_MAX_DROP_FACES;
+    const legsOrFeet = small.width < big.width * 1.5
+      && sideways < big.width * 1.8
+      && drop > big.height * LEGS_START_FACES;
+    return badge || legsOrFeet;
   }));
+}
+
+// In a group photo everyone's face is about the same size; something found
+// at under half the usual size (a pattern on the floor or wall, a poster,
+// someone far off in the background) is not one of the group.
+export function dropTinyFaces<T extends Box>(faces: readonly T[]): T[] {
+  if (faces.length < 3) return [...faces];
+  const widths = faces.map((face) => face.width).sort((a, b) => a - b);
+  const middle = Math.floor(widths.length / 2);
+  const median = widths.length % 2 ? widths[middle] : (widths[middle - 1] + widths[middle]) / 2;
+  return faces.filter((face) => face.width >= median * 0.45);
+}
+
+export interface FacePoint {
+  x: number;
+  y: number;
+  name?: string;
+}
+
+// A real, upright face has its eyes side by side above the nose and the
+// mouth below the nose; a shoe, a hand or a floor pattern found as a face
+// usually has these points jumbled. Points and box are in the same pixels.
+export function uprightFace(points: readonly FacePoint[] | undefined, box: { width: number; height: number }): boolean {
+  if (!points || points.length < 4) return true;
+  const point = (name: string, index: number) => points.find((item) => item.name === name) ?? points[index];
+  const rightEye = point('rightEye', 0);
+  const leftEye = point('leftEye', 1);
+  const nose = point('noseTip', 2);
+  const mouth = point('mouthCenter', 3);
+  const eyesY = (rightEye.y + leftEye.y) / 2;
+  const eyeGap = Math.abs(rightEye.x - leftEye.x);
+  return eyeGap >= box.width * 0.18
+    && Math.abs(rightEye.y - leftEye.y) <= eyeGap * 0.6
+    && nose.y > eyesY - box.height * 0.02
+    && mouth.y > nose.y - box.height * 0.02
+    && mouth.y - eyesY >= box.height * 0.12;
 }
 
 function overlapRatio(a: Box, b: Box): number {

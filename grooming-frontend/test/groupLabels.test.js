@@ -9,7 +9,7 @@ import {
   normalizeIdText,
   readLabels,
 } from '../src/lib/groupLabels.ts';
-import { bodyCropFromFace, dropBadgeFaces, mergeFaces, planTiles, sortLeftToRight } from '../src/lib/personCrop.ts';
+import { bodyCropFromFace, dropBodyPartFaces, dropTinyFaces, mergeFaces, planTiles, sortLeftToRight, uprightFace } from '../src/lib/personCrop.ts';
 
 // The institute's instructors, with near-misses to make sure only the right
 // one is picked.
@@ -94,8 +94,8 @@ test('a label not in the instructor list still names its person as printed; a na
   assert.equal(unknown[0].instructor, null);
   const [given] = assignLabels([{ centerX: 0.16, width: 0.2 }], unknown);
   assert.deepEqual([given?.nameText, given?.idText], ['Sanjay', 'NW9999999']);
-  const stray = readLabels([word('Welcome', 0.1, 0.1, 0.2)], ROSTER, ASPECT);
-  assert.equal(stray.length, 0, 'a stray word that names no one is not a label');
+  const stray = assignLabels([{ centerX: 0.2, width: 0.2, faceTop: 0.05, faceHeight: 0.03 }], readLabels([word('Welcome', 0.1, 0.1, 0.2)], ROSTER, ASPECT));
+  assert.equal(stray[0], null, 'a stray word that is not above anyone names no one');
   const sameRow = readLabels([word('Keerthi', 0.1, 0.4, 0.1), word('NW2000613', 0.215, 0.4, 0.13)], ROSTER, ASPECT);
   assert.equal(sameRow[0].instructor?.id, 'c');
 });
@@ -132,5 +132,65 @@ test('the photo on an ID card below a face is not taken for a person', () => {
   const badge = { left: 0.115, top: 0.3, width: 0.02, height: 0.011 };
   const neighbour = { left: 0.3, top: 0.2, width: 0.06, height: 0.034 };
   const farAwaySmall = { left: 0.6, top: 0.7, width: 0.02, height: 0.011 };
-  assert.deepEqual(dropBadgeFaces([face, badge, neighbour, farAwaySmall]), [face, neighbour, farAwaySmall]);
+  assert.deepEqual(dropBodyPartFaces([face, badge, neighbour, farAwaySmall]), [face, neighbour, farAwaySmall]);
+});
+
+// A group photo (1280 x 960) with only first names printed above the heads,
+// none of them in the instructor list, and the phone's watermark at the
+// bottom: five people, faces about 60 px wide.
+const W = 1280;
+const H = 960;
+const px = (left, top, width, height) => ({ left: left / W, top: top / H, width: width / W, height: height / H });
+const GROUP_FACES = [
+  px(165, 365, 60, 70), px(345, 325, 58, 68), px(522, 320, 58, 68), px(735, 275, 56, 70), px(1015, 210, 64, 78),
+];
+const pxWord = (text, left, top, width, height = 40, confidence = 90) => ({ text, confidence, box: px(left, top, width, height) });
+const GROUP_WORDS = [
+  pxWord('Bhumika', 40, 192, 195), pxWord('Meghana', 278, 252, 182), pxWord('Sanjana', 478, 266, 158),
+  pxWord('Yugandhar', 650, 195, 185), pxWord('Shreyansh', 978, 136, 200), pxWord('Galaxy', 62, 866, 90, 28),
+];
+const spots = (faces) => faces.map((face) => {
+  const body = bodyCropFromFace(face);
+  return { centerX: face.left + face.width / 2, width: body.width, faceTop: face.top, faceHeight: face.height };
+});
+
+test('names printed above heads name each person, even when not in the instructor list; the watermark names no one', () => {
+  const labels = readLabels(GROUP_WORDS, ROSTER, W / H);
+  const assigned = assignLabels(spots(GROUP_FACES), labels);
+  assert.deepEqual(assigned.map((label) => label?.nameText ?? null), ['Bhumika', 'Meghana', 'Sanjana', 'Yugandhar', 'Shreyansh']);
+  assert.ok(assigned.every((label) => label.instructor === null && label.idText === null));
+  assert.ok(!assigned.some((label) => label?.nameText === 'Galaxy'));
+});
+
+test('a name read unclearly, or a name below someone, is not used', () => {
+  const blurred = GROUP_WORDS.map((item) => (item.text === 'Sanjana' ? { ...item, confidence: 40 } : item));
+  assert.equal(assignLabels(spots(GROUP_FACES), readLabels(blurred, ROSTER, W / H))[2], null);
+  const belowFeet = [pxWord('Sanjana', 478, 900, 158)];
+  assert.equal(assignLabels(spots(GROUP_FACES), readLabels(belowFeet, ROSTER, W / H))[2], null);
+});
+
+test('a shoe or the floor at someone\'s feet taken for a face is not a person; people sitting in front are kept', () => {
+  const shoe = px(700, 830, 52, 50);
+  assert.deepEqual(sortLeftToRight(dropTinyFaces(dropBodyPartFaces([...GROUP_FACES, shoe]))), GROUP_FACES);
+  const sittingInFront = px(740, 420, 60, 72);
+  assert.ok(dropBodyPartFaces([...GROUP_FACES, sittingInFront]).includes(sittingInFront));
+  const speck = px(300, 700, 20, 22);
+  assert.ok(!dropTinyFaces([...GROUP_FACES, speck]).includes(speck), 'far smaller than everyone else');
+  assert.equal(dropTinyFaces([GROUP_FACES[0], speck]).length, 2, 'too few faces to tell what size is usual');
+});
+
+test('a face must look upright: eyes side by side above the nose, the mouth below', () => {
+  const box = { width: 60, height: 60 };
+  const face = [{ x: 20, y: 22, name: 'rightEye' }, { x: 40, y: 22, name: 'leftEye' }, { x: 30, y: 33, name: 'noseTip' }, { x: 30, y: 44, name: 'mouthCenter' }];
+  assert.ok(uprightFace(face, box));
+  assert.ok(uprightFace(undefined, box), 'no points: kept');
+  const jumbled = [{ x: 29, y: 40, name: 'rightEye' }, { x: 31, y: 20, name: 'leftEye' }, { x: 30, y: 33, name: 'noseTip' }, { x: 30, y: 25, name: 'mouthCenter' }];
+  assert.ok(!uprightFace(jumbled, box));
+});
+
+test('a two-word name over one person stays whole', () => {
+  const words = [pxWord('Sai', 470, 266, 70), pxWord('Kiran', 552, 266, 100)];
+  const assigned = assignLabels(spots(GROUP_FACES), readLabels(words, ROSTER, W / H));
+  assert.equal(assigned[2]?.nameText, 'Sai Kiran');
+  assert.equal(assigned.filter(Boolean).length, 1);
 });

@@ -13,8 +13,8 @@
 // use only; later photos reuse them.
 import type { FaceDetector } from '@tensorflow-models/face-detection';
 import type { Worker as OcrWorker } from 'tesseract.js';
-import { assignLabels, mergeWords, readLabels, type Box, type OcrWord, type ReadLabel, type RosterEntry } from './groupLabels';
-import { bodyCropFromFace, dropBadgeFaces, mergeFaces, planTiles, sortLeftToRight, type FaceSpot } from './personCrop';
+import { assignLabels, mergeWords, readLabels, usableLabel, type Box, type OcrWord, type ReadLabel, type RosterEntry } from './groupLabels';
+import { bodyCropFromFace, dropBodyPartFaces, dropTinyFaces, mergeFaces, planTiles, sortLeftToRight, uprightFace, type FaceSpot } from './personCrop';
 
 const FACE_MODEL_PATH = '/models/mediapipe-face-detection-full/model.json';
 const TESSERACT_PATH = '/models/tesseract-7.0.0';
@@ -127,6 +127,7 @@ async function findFaces(bitmap: ImageBitmap): Promise<FaceSpot[]> {
     release(piece);
     for (const face of found) {
       if (face.box.width < MIN_FACE_PIXELS) continue;
+      if (!uprightFace(face.keypoints, face.box)) continue;
       faces.push({
         left: (tile.x + face.box.xMin) / width,
         top: (tile.y + face.box.yMin) / height,
@@ -137,7 +138,7 @@ async function findFaces(bitmap: ImageBitmap): Promise<FaceSpot[]> {
     }
   }
   release(work);
-  return sortLeftToRight(dropBadgeFaces(mergeFaces(faces)));
+  return sortLeftToRight(dropTinyFaces(dropBodyPartFaces(mergeFaces(faces))));
 }
 
 // The photo enlarged for reading, in grey and in black and white.
@@ -246,14 +247,22 @@ export async function readGroupPhoto(
     }
     const boxes = faces.map((face) => bodyCropFromFace(face));
     const assigned = assignLabels(
-      faces.map((face, index) => ({ centerX: face.left + face.width / 2, width: boxes[index].width })),
+      faces.map((face, index) => ({
+        centerX: face.left + face.width / 2,
+        width: boxes[index].width,
+        faceTop: face.top,
+        faceHeight: face.height,
+      })),
       labels,
     );
     const people: FoundPerson[] = [];
     for (const [index, box] of boxes.entries()) {
       people.push({ box, crop: await cropBitmap(bitmap, box), label: assigned[index] });
     }
-    return { people, labels, labelsFailed };
+    // Names alone count as labels only where they named someone (other words
+    // in the photo are not labels).
+    const named = labels.filter((label) => usableLabel(label) || assigned.includes(label));
+    return { people, labels: named, labelsFailed };
   } finally {
     bitmap.close();
   }
