@@ -3,7 +3,35 @@
 import { parseCsv } from '../csvParse.ts';
 import { csvCell } from '../attendanceExport.ts';
 
-export const FORM_MAX_PHOTOS = 5;
+export const FORM_MAX_PHOTOS = 50;
+// Photos are sent a few at a time: each request stays under the server's
+// 10 MB limit and carries at most 10 photos.
+export const FORM_UPLOAD_BATCH_BYTES = 8 * 1024 * 1024;
+export const FORM_UPLOAD_BATCH_PHOTOS = 10;
+
+// The photos to send, as groups (by position) to send one after another:
+// in order, each group at most `maxBytes` and `maxCount` photos (a single
+// photo larger than `maxBytes` goes on its own).
+export function uploadBatches(
+  sizes: readonly number[],
+  maxBytes: number = FORM_UPLOAD_BATCH_BYTES,
+  maxCount: number = FORM_UPLOAD_BATCH_PHOTOS,
+): number[][] {
+  const batches: number[][] = [];
+  let current: number[] = [];
+  let bytes = 0;
+  sizes.forEach((size, index) => {
+    if (current.length && (bytes + size > maxBytes || current.length >= maxCount)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(index);
+    bytes += size;
+  });
+  if (current.length) batches.push(current);
+  return batches;
+}
 export const FORM_MAX_FILE_MB = 10;
 export const FORM_MAX_FILE_BYTES = FORM_MAX_FILE_MB * 1024 * 1024;
 export const FORM_TITLE = 'Daily Appearance Photo Submission';

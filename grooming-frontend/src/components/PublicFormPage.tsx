@@ -36,6 +36,7 @@ import {
   looksLikePhoto,
   prepareFormPhoto,
   statusLabel,
+  uploadBatches,
   type FormPhoto,
   type FormReason,
   type FormResponse,
@@ -236,6 +237,8 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   const [errors, setErrors] = useState<Errors>({});
   const [submitError, setSubmitError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // How many of the new photos have been sent so far, while sending.
+  const [uploaded, setUploaded] = useState<{ sent: number; total: number } | null>(null);
   const [preparing, setPreparing] = useState(false);
   const [removing, setRemoving] = useState<{ kind: 'kept' | 'added'; id: string } | null>(null);
   const [viewer, setViewer] = useState<{ images: LightboxImage[]; index: number } | null>(null);
@@ -549,37 +552,68 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       return;
     }
     setSubmitting(true);
+    const answers = draft;
+    // Photos only (the people in them are found on the server afterwards),
+    // sent a few at a time so each request stays small. Each batch is saved
+    // as it arrives; its photos then count as already sent, so pressing
+    // Submit again after a failure sends only the rest.
+    const photos = answers.status === 'yes' ? answers.added : [];
+    const batches = photos.length ? uploadBatches(photos.map((photo) => photo.file.size)) : [[]];
+    let keep = answers.status === 'yes' ? answers.kept.map((photo) => photo.id) : [];
+    let remaining = photos;
+    let latest: FormResponse | null = null;
+    setUploaded({ sent: 0, total: photos.length });
     try {
-      const body = new FormData();
-      body.append('status', draft.status);
-      body.append('submitted_by', draft.submittedBy.trim());
-      if (draft.status === 'no') {
-        body.append('reason', draft.reason);
-        if (draft.reason === 'other') body.append('reason_other', draft.reasonOther.trim());
-        body.append('keep', '[]');
-      } else {
-        body.append('keep', JSON.stringify(draft.kept.map((photo) => photo.id)));
-        // Photos only: the people in them are found on the server afterwards.
-        for (const photo of draft.added) body.append('photos', photo.file, photo.file.name);
+      for (const [index, batch] of batches.entries()) {
+        const body = new FormData();
+        body.append('status', answers.status);
+        body.append('submitted_by', answers.submittedBy.trim());
+        if (answers.status === 'no') {
+          body.append('reason', answers.reason);
+          if (answers.reason === 'other') body.append('reason_other', answers.reasonOther.trim());
+        }
+        body.append('keep', JSON.stringify(keep));
+        if (index > 0) body.append('continuing', '1');
+        const sending = batch.map((position) => photos[position]);
+        for (const photo of sending) body.append('photos', photo.file, photo.file.name);
+        const result = await apiFetch<{ response: FormResponse }>(
+          `/api/v2/forms/${encodeURIComponent(token)}/${data.date}`,
+          { method: 'POST', body, auth: false, timeoutMs: 180_000 },
+        );
+        latest = result.response;
+        keep = latest.photos.map((photo) => photo.id);
+        const sent = new Set(sending.map((photo) => photo.id));
+        remaining = remaining.filter((photo) => !sent.has(photo.id));
+        setUploaded({ sent: photos.length - remaining.length, total: photos.length });
       }
-      const result = await apiFetch<{ response: FormResponse }>(
-        `/api/v2/forms/${encodeURIComponent(token)}/${data.date}`,
-        { method: 'POST', body, auth: false, timeoutMs: 180_000 },
-      );
-      rememberName(draft.submittedBy.trim());
+      if (!latest) throw new Error('The form could not be sent. Please try again.');
+      const saved = latest;
+      rememberName(answers.submittedBy.trim());
       forgetKeptDraft(data.date);
-      writeCachedForm(token, { ...data, response: result.response });
-      setData({ ...data, response: result.response });
-      replaceDraft(draftFrom(result.response));
+      writeCachedForm(token, { ...data, response: saved });
+      setData({ ...data, response: saved });
+      replaceDraft(draftFrom(saved));
       setMode('summary');
       setJustSubmitted(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       const details = ((error as ApiError)?.details ?? null) as { errors?: Errors } | null;
       if (details?.errors) setErrors(details.errors);
-      setSubmitError(error instanceof Error ? error.message : 'The form could not be sent. Please try again.');
+      const message = error instanceof Error ? error.message : 'The form could not be sent. Please try again.';
+      if (latest) {
+        // Some photos were saved: show them as sent and keep the rest to send.
+        const saved = latest;
+        setData({ ...data, response: saved });
+        writeCachedForm(token, { ...data, response: saved });
+        replaceDraft({ ...answers, kept: saved.photos, added: remaining });
+        dirtyRef.current = true;
+        setSubmitError(`${photos.length - remaining.length} of ${photos.length} photos were sent. ${message} Press Submit again to send the other ${remaining.length}.`);
+      } else {
+        setSubmitError(message);
+      }
     } finally {
       setSubmitting(false);
+      setUploaded(null);
     }
   };
 
@@ -857,6 +891,9 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                     ))}
                   </div>
                 )}
+                {photoCount > 0 && (
+                  <p className="mt-2 text-xs text-slate-500">{photoCount} of {FORM_MAX_PHOTOS} photos added.</p>
+                )}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -968,7 +1005,11 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                 className="ml-auto inline-flex h-11 min-w-28 items-center justify-center gap-2 rounded-md bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 disabled:opacity-60"
               >
                 {submitting && <Loader2 size={16} className="animate-spin" aria-hidden="true" />}
-                {submitting ? (draft.added.length ? 'Uploading photos…' : 'Submitting…') : 'Submit'}
+                {!submitting
+                  ? 'Submit'
+                  : uploaded && uploaded.total > 0
+                    ? `Uploading photos… ${uploaded.sent} of ${uploaded.total}`
+                    : 'Submitting…'}
               </button>
             </div>
           </form>

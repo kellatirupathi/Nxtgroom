@@ -12,6 +12,7 @@ import {
   formPagePath,
   formResponsesCsv,
   formResponsesFileName,
+  FORM_MAX_PHOTOS,
   FORM_PHOTO_ACCEPT,
   importRowsFromCsv,
   isHeicPhoto,
@@ -19,6 +20,7 @@ import {
   importTemplateCsv,
   keyFromUrlDate,
   longDate,
+  uploadBatches,
   urlDateFromKey,
 } from '../src/lib/instituteForm.ts';
 import { pathForTab, publicFormFromLocation, tabForPath, TABS } from '../src/routes.ts';
@@ -194,7 +196,7 @@ test('the responses page shows the Name | ID | Image table; the submitted form p
 
 test('the form only uploads photos: the people are found on the server afterwards and shown in Form Responses', () => {
   const page = source('components/PublicFormPage.tsx');
-  assert.ok(page.includes("for (const photo of draft.added) body.append('photos', photo.file, photo.file.name);"));
+  assert.ok(page.includes("for (const photo of sending) body.append('photos', photo.file, photo.file.name);"));
   assert.ok(!page.includes("body.append('people'") && !page.includes("body.append('crops'"), 'no people or cut-outs are sent');
   assert.ok(!/groupPhotoReader|FormPeopleEditor|readPeople|roster/i.test(page), 'nothing is read in the browser');
   assert.ok(!page.includes('still being read'), 'Submit never waits for people');
@@ -219,7 +221,8 @@ test('removing a photo on the form asks first', () => {
   const page = source('components/PublicFormPage.tsx');
   assert.match(page, /title="Remove this photo\?"/);
   assert.match(page, /onRemove=\{\(\) => setRemoving\(\{ kind: 'kept', id: photo\.id \}\)\}/);
-  assert.match(page, /body\.append\('keep', JSON\.stringify\(draft\.kept\.map\(\(photo\) => photo\.id\)\)\)/);
+  assert.match(page, /let keep = answers\.status === 'yes' \? answers\.kept\.map\(\(photo\) => photo\.id\) : \[\];/);
+  assert.match(page, /body\.append\('keep', JSON\.stringify\(keep\)\);/);
 });
 
 test('earlier days are view only: no form, no Edit response, no Submit; today works as before', () => {
@@ -250,4 +253,21 @@ test('any photo can be chosen, in any format and size, and is made small before 
   const prepare = readFileSync(new URL('../src/lib/instituteForm.ts', import.meta.url), 'utf8');
   assert.match(prepare, /fillStyle = '#ffffff'/, 'see-through photos come out white, not black');
   assert.doesNotMatch(prepare, /Choose a JPG or PNG photo/);
+});
+
+test('up to 50 photos a day, sent a few at a time so each request stays small', () => {
+  assert.equal(FORM_MAX_PHOTOS, 50);
+  const MB = 1024 * 1024;
+  assert.deepEqual(uploadBatches([]), []);
+  assert.deepEqual(uploadBatches([MB, MB, MB]), [[0, 1, 2]]);
+  assert.deepEqual(uploadBatches([3 * MB, 3 * MB, 3 * MB, 1 * MB]), [[0, 1], [2, 3]], 'at most 8 MB a request');
+  assert.deepEqual(uploadBatches([9.5 * MB, 1 * MB]), [[0], [1]], 'a big photo goes on its own');
+  const fifty = uploadBatches(Array.from({ length: 50 }, () => 0.5 * MB));
+  assert.equal(fifty.length, 5, 'at most 10 photos a request');
+  assert.deepEqual(fifty.flat(), Array.from({ length: 50 }, (_, index) => index), 'every photo once, in order');
+
+  const page = source('components/PublicFormPage.tsx');
+  assert.ok(page.includes("if (index > 0) body.append('continuing', '1');"), 'later batches continue the same Submit');
+  assert.ok(page.includes('Press Submit again to send the other'), 'after a failure only the rest is sent again');
+  assert.ok(page.includes('`Uploading photos… ${uploaded.sent} of ${uploaded.total}`'));
 });

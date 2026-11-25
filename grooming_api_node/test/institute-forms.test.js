@@ -112,6 +112,8 @@ test("the kept photos list is a JSON list of ids", () => {
   assert.deepEqual(readKeptPhotoIds('["ok", "../bad", 5]'), ["ok"]);
   assert.equal(readKeptPhotoIds("{not json"), null);
   assert.equal(readKeptPhotoIds('{"a":1}'), null);
+  const fifty = Array.from({ length: 60 }, (_, index) => `p${index}`);
+  assert.equal(readKeptPhotoIds(JSON.stringify(fifty)).length, 50, "up to 50 photos are kept");
 });
 
 test("sheet dates and timestamps are read day first, as Indian sheets write them", () => {
@@ -203,7 +205,7 @@ test("the public form opens today, saves a No answer once, then edits the same r
     assert.equal(opened.body.date, today);
     assert.equal(opened.body.institute.name, "Aurora University");
     assert.equal(opened.body.response, null);
-    assert.deepEqual(opened.body.limits, { max_photos: 5, max_file_mb: 10 });
+    assert.deepEqual(opened.body.limits, { max_photos: 50, max_file_mb: 10 });
 
     const missing = await server.call(`/forms/${link.token}/${today}`, { method: "POST", body: formBody({ status: "no" }) });
     assert.equal(missing.status, 422);
@@ -232,6 +234,13 @@ test("the public form opens today, saves a No answer once, then edits the same r
     assert.equal(edited.status, 200);
     assert.equal(edited.body.response.reason_label, "Other: Exam duty");
     assert.equal(edited.body.response.edit_count, 1);
+    // The later batches of one Submit (many photos) are not counted as edits.
+    const continued = await server.call(`/forms/${link.token}/${today}`, {
+      method: "POST",
+      body: formBody({ status: "no", submitted_by: "Ravi Kumar", reason: "other", reason_other: "Exam duty", continuing: "1" }),
+    });
+    assert.equal(continued.status, 200);
+    assert.equal(continued.body.response.edit_count, 1);
     assert.equal((await db.collection("form_responses").find({}).toArray()).length, 1, "still one response for the day");
 
     // Earlier days can be opened to view, but not sent or changed.
@@ -294,12 +303,12 @@ test("photos are refused when the answer is No, and non-images are refused", asy
     assert.match(notImage.body.detail, /One of the photos could not be opened/);
 
     const many = formBody({ status: "yes", submitted_by: "R" });
-    for (let index = 0; index < 6; index += 1) {
+    for (let index = 0; index < 11; index += 1) {
       many.append("photos", new Blob([Buffer.from("x")], { type: "image/jpeg" }), `${index}.jpg`);
     }
     const tooMany = await server.call(`/forms/${link.token}/${today}`, { method: "POST", body: many });
     assert.equal(tooMany.status, 422);
-    assert.match(tooMany.body.detail, /up to 5 photos/);
+    assert.match(tooMany.body.detail, /Too many photos were sent at once/, "at most 10 photos come in one request");
   } finally {
     server.close();
   }

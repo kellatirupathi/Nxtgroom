@@ -19,7 +19,13 @@ import { createDocument } from "../utils.js";
 import { isValidDateKey } from "./instructorReports.js";
 import { deletePhoto, getPhotoUrl, uploadPhoto } from "./photoStorage.js";
 
-export const FORM_MAX_PHOTOS = 5;
+// Photos one day's response can hold. The form sends them a few at a time
+// (each request stays under the proxy's 10 MB limit), so at most
+// FORM_UPLOAD_BATCH_PHOTOS arrive in one request.
+export const FORM_MAX_PHOTOS = 50;
+export const FORM_UPLOAD_BATCH_PHOTOS = 10;
+// Picture links an imported sheet row can hold.
+export const FORM_MAX_PHOTO_LINKS = 5;
 export const FORM_MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const FORM_EARLIEST_DATE = "2020-01-01";
 export const FORM_STATUSES = Object.freeze(["yes", "no"]);
@@ -179,7 +185,7 @@ export function readKeptPhotoIds(value) {
     if (!Array.isArray(parsed)) return null;
     return parsed
       .filter((id) => typeof id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(id))
-      .slice(0, 20);
+      .slice(0, FORM_MAX_PHOTOS);
   } catch {
     return null;
   }
@@ -478,7 +484,7 @@ export function importPhotoLinks(value) {
     .split(/[\s,]+/)
     .map((part) => part.trim())
     .filter((part) => /^https?:\/\/[^\s]{3,2000}$/i.test(part)))]
-    .slice(0, FORM_MAX_PHOTOS);
+    .slice(0, FORM_MAX_PHOTO_LINKS);
 }
 
 // One imported sheet row as a "manual" response, or the reason it is skipped.

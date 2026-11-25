@@ -14,8 +14,10 @@ import {
   FORM_IMPORT_MAX_ROWS,
   FORM_MAX_FILE_BYTES,
   FORM_MAX_PHOTOS,
+  FORM_UPLOAD_BATCH_PHOTOS,
   importFormResponses,
   listFormResponses,
+  mapWithLimit,
   pendingPeopleFields,
   readFormAnswers,
   readKeptPhotoIds,
@@ -71,26 +73,29 @@ function uploadGate(_req, res, next) {
   return next();
 }
 
-// Up to five photos.
+// A response holds up to FORM_MAX_PHOTOS photos; the form sends them a few
+// at a time, so one request carries at most FORM_UPLOAD_BATCH_PHOTOS.
 const formUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: FORM_MAX_FILE_BYTES,
-    files: FORM_MAX_PHOTOS,
+    files: FORM_UPLOAD_BATCH_PHOTOS,
     fields: 16,
     fieldSize: 256 * 1024,
-    parts: FORM_MAX_PHOTOS + 16,
+    parts: FORM_UPLOAD_BATCH_PHOTOS + 16,
   },
 });
+// Photos stored (made upright, previewed, sent to storage) at the same time.
+const STORE_AT_ONCE = 4;
 
 function receivePhotos(req, res, next) {
-  formUpload.fields([{ name: "photos", maxCount: FORM_MAX_PHOTOS }])(req, res, (error) => {
+  formUpload.fields([{ name: "photos", maxCount: FORM_UPLOAD_BATCH_PHOTOS }])(req, res, (error) => {
     if (!error) return next();
     if (error.code === "LIMIT_FILE_SIZE") {
       return res.status(413).json({ detail: "Each photo must be 10 MB or smaller." });
     }
     if (error.code === "LIMIT_FILE_COUNT" || error.code === "LIMIT_UNEXPECTED_FILE") {
-      return res.status(422).json({ detail: `You can upload up to ${FORM_MAX_PHOTOS} photos.` });
+      return res.status(422).json({ detail: "Too many photos were sent at once. Please reload the page and press Submit again." });
     }
     return res.status(400).json({ detail: "The form could not be read. Please try again." });
   });
@@ -178,7 +183,13 @@ publicFormRouter.post(
       return res.status(503).json({ detail: "Photo storage is not available right now. Please try again later." });
     }
 
-    const storedPhotos = await Promise.allSettled(files.map((file) => storeFormPhoto({ buffer: file.buffer, collegeId, date })));
+    const storedPhotos = await mapWithLimit(files, STORE_AT_ONCE, async (file) => {
+      try {
+        return { status: "fulfilled", value: await storeFormPhoto({ buffer: file.buffer, collegeId, date }) };
+      } catch (reason) {
+        return { status: "rejected", reason };
+      }
+    });
     const added = storedPhotos.filter((item) => item.status === "fulfilled" && item.value.photo).map((item) => item.value.photo);
     const photoFailed = storedPhotos.find((item) => item.status === "rejected" || item.value.error);
     if (photoFailed) {
@@ -201,14 +212,18 @@ publicFormRouter.post(
       photo_links: photoLinks,
       updated_at: now,
     };
+    // The second and later batches of one Submit (many photos) continue the
+    // same sending; they are not counted as edits.
+    const continuing = Boolean(existing) && req.body?.continuing === "1";
+    const edits = continuing ? 0 : 1;
     let saved;
     try {
       if (existing) {
         await db.collection("form_responses").updateOne(
           { _id: existing._id },
-          { $set: fields, $inc: { edit_count: 1 } }
+          { $set: fields, $inc: { edit_count: edits } }
         );
-        saved = { ...existing, ...fields, edit_count: (Number(existing.edit_count) || 0) + 1 };
+        saved = { ...existing, ...fields, edit_count: (Number(existing.edit_count) || 0) + edits };
       } else {
         saved = createDocument({
           college_id: collegeId,
