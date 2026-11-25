@@ -291,7 +291,7 @@ test("photos are refused when the answer is No, and non-images are refused", asy
     fake.append("photos", new Blob([Buffer.from("not really an image at all")], { type: "image/jpeg" }), "a.jpg");
     const notImage = await server.call(`/forms/${link.token}/${today}`, { method: "POST", body: fake });
     assert.equal(notImage.status, 422);
-    assert.match(notImage.body.detail, /does not match a supported image format/);
+    assert.match(notImage.body.detail, /One of the photos could not be opened/);
 
     const many = formBody({ status: "yes", submitted_by: "R" });
     for (let index = 0; index < 6; index += 1) {
@@ -462,6 +462,25 @@ test("a photo the form's browser already prepared is kept as sent; anything else
   assert.deepEqual([upright.width, upright.height], [600, 900], "a photo with a turn in it is made upright");
 
   await assert.rejects(formPhotoImage(Buffer.from("not an image")));
+});
+
+test("any photo of any size is accepted, in any photo format, and stored as a JPEG", async () => {
+  // A small, narrow photo of one person (the one an institute could not send).
+  const narrow = await sharp({ create: { width: 240, height: 700, channels: 3, background: "#406080" } }).jpeg().toBuffer();
+  const small = await formPhotoImage(narrow);
+  assert.deepEqual([small.width, small.height], [240, 700]);
+  const tiny = await sharp({ create: { width: 90, height: 120, channels: 3, background: "#406080" } }).png().toBuffer();
+  assert.deepEqual([(await formPhotoImage(tiny)).width, (await formPhotoImage(tiny)).height], [90, 120]);
+
+  for (const format of ["gif", "tiff", "webp", "avif"]) {
+    const photo = await sharp({ create: { width: 640, height: 480, channels: 3, background: "#806040" } })[format]().toBuffer();
+    const stored = await formPhotoImage(photo);
+    assert.equal((await sharp(stored.buffer).metadata()).format, "jpeg", `${format} is stored as a JPEG`);
+    assert.deepEqual([stored.width, stored.height], [640, 480]);
+  }
+
+  const drawing = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><rect width="400" height="400"/></svg>');
+  await assert.rejects(formPhotoImage(drawing), /not a photo/);
 });
 
 test("storage work runs several at a time and keeps the order", async () => {

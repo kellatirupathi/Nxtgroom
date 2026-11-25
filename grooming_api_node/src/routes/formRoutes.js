@@ -172,10 +172,11 @@ publicFormRouter.post(
     const answers = readFormAnswers(req.body);
     const kept = readKeptPhotoIds(req.body?.keep);
     if (kept === null) return res.status(400).json({ detail: "The form could not be read. Please reload the page and try again." });
+    // Photos may be in any format (and any size): each is opened, checked and
+    // turned into a JPEG when it is stored, below.
     const files = Array.isArray(req.files?.photos) ? req.files.photos : [];
     for (const file of files) {
-      const checked = validateImageUpload(file);
-      if (!checked.valid) return res.status(422).json({ detail: `${file.originalname || "A file"}: ${checked.detail}` });
+      if (!file?.buffer?.length) return res.status(422).json({ detail: `${file?.originalname || "A file"}: the file is empty. Please choose the photo again.` });
     }
     // The people the submitter's browser found in the photos: their cut-outs
     // and the instructor chosen for each.

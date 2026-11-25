@@ -25,6 +25,11 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
+// When no face can be found (a photo of one person facing away, blurred, or
+// too small to tell), the whole photo is taken as one person, so a photo of
+// one person always works and can be named by hand.
+export const WHOLE_PHOTO: Box = { left: 0, top: 0, width: 1, height: 1 };
+
 // The person, head to feet, from their face (all as fractions of the photo:
 // widths of its width, heights of its height).
 export function bodyCropFromFace(face: Box): Box {

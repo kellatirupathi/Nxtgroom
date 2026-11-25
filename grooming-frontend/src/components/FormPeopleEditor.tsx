@@ -197,7 +197,7 @@ export default function FormPeopleEditor({ photos, roster, rosterError, disabled
               )}
 
               {state?.status === 'ready' && state.people.length === 0 && (
-                <p className="px-3 py-3 text-sm text-slate-500">No people were found in this photo.</p>
+                <p className="px-3 py-3 text-sm text-slate-500">No people were found in this photo. You can still submit the photo.</p>
               )}
 
               {state?.status === 'ready' && state.people.length > 0 && state.labelsFailed && (

@@ -26,14 +26,17 @@ import {
 } from '../lib/formDraftStore';
 import {
   FORM_MAX_FILE_BYTES,
-  FORM_MAX_FILE_MB,
+  FORM_MAX_ORIGINAL_BYTES,
+  FORM_MAX_ORIGINAL_MB,
   FORM_MAX_PHOTOS,
+  FORM_PHOTO_ACCEPT,
   FORM_REASON_OPTIONS,
   FORM_STATUS_OPTIONS,
   FORM_TITLE,
   formatMoment,
   formPagePath,
   longDate,
+  looksLikePhoto,
   prepareFormPhoto,
   statusLabel,
   type FormInstructor,
@@ -477,6 +480,9 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       const reader = await import('../lib/groupPhotoReader');
       const reading = await reader.readGroupPhoto(
         photo.original,
+        // The photo as it will be sent, when this browser cannot open the
+        // original (a HEIC photo in Chrome).
+        photo.file,
         list,
         (stage) => setPhotoPeople(photo.id, (current) => (current?.status === 'reading' ? { ...current, stage } : current)),
       );
@@ -512,7 +518,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       setPhotoPeople(photo.id, (current) => (current ? {
         status: 'failed',
         people: [],
-        message: 'The people in this photo could not be found automatically on this device.',
+        message: 'The people in this photo could not be found automatically on this device. You can still submit the photo.',
       } : current));
     }
   };
@@ -690,16 +696,22 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     setPreparing(true);
     const ready: NewPhoto[] = [];
     for (const file of files.slice(0, Math.max(0, room))) {
-      if (file.type && !file.type.startsWith('image/')) {
-        problems.push(`${file.name} is not an image.`);
+      if (!looksLikePhoto(file)) {
+        problems.push(`${file.name} is not a photo.`);
         continue;
       }
-      if (file.size > FORM_MAX_FILE_BYTES) {
-        problems.push(`${file.name} is larger than ${FORM_MAX_FILE_MB} MB.`);
+      if (file.size > FORM_MAX_ORIGINAL_BYTES) {
+        problems.push(`${file.name} is larger than ${FORM_MAX_ORIGINAL_MB} MB.`);
         continue;
       }
       try {
         const prepared = await prepareFormPhoto(file);
+        // Photos are made smaller before sending; only one that could not be
+        // is held to the upload limit.
+        if (prepared.size > FORM_MAX_FILE_BYTES) {
+          problems.push(`${file.name} could not be made small enough to send. Choose the photo from the phone's camera or gallery.`);
+          continue;
+        }
         photoCounter += 1;
         ready.push({ id: `new-${photoCounter}`, file: prepared, original: file, preview: URL.createObjectURL(prepared) });
       } catch (error) {
@@ -1110,7 +1122,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               <Card id="question-photos" invalid={Boolean(errors.photos)}>
                 <QuestionTitle required>Appearance Picture</QuestionTitle>
                 <p className="mt-2 text-sm text-slate-500">
-                  Upload up to {FORM_MAX_PHOTOS} supported files: image. Max {FORM_MAX_FILE_MB} MB per file.
+                  Upload up to {FORM_MAX_PHOTOS} photos: a group photo or a photo of one person, in any format (JPG, PNG, HEIC and others), up to {FORM_MAX_ORIGINAL_MB} MB each.
                 </p>
                 {photoCount > 0 && (
                   <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
@@ -1137,7 +1149,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={FORM_PHOTO_ACCEPT}
                   multiple
                   className="sr-only"
                   tabIndex={-1}

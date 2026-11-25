@@ -32,7 +32,9 @@ export const FORM_IMPORT_MAX_ROWS = 1000;
 export const SUBMITTED_BY_MAX = 120;
 export const REASON_OTHER_MAX = 300;
 const THUMB_SIZE = 360;
-const FORM_PHOTO_MIN_SIDE = 320;
+// Any photo of any size is accepted, in any format these can open (it is
+// always stored as a JPEG). SVG drawings are not photos and are left out.
+const FORM_PHOTO_FORMATS = new Set(["jpeg", "png", "webp", "gif", "tiff", "heif", "avif"]);
 // Photos are kept as sent up to this size; others are made this size at most.
 const FORM_PHOTO_KEEP_MAX_SIDE = 3072;
 const FORM_PHOTO_KEEP_MAX_BYTES = Math.floor(4.5 * 1024 * 1024);
@@ -224,13 +226,11 @@ export async function formPhotoImage(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) throw new Error("The uploaded image is empty");
   const options = { animated: false, failOn: "warning", limitInputPixels: FORM_PHOTO_MAX_PIXELS };
   const meta = await sharp(buffer, options).metadata();
+  if (!FORM_PHOTO_FORMATS.has(meta.format)) throw new Error("This file is not a photo");
   if (!meta.width || !meta.height) throw new Error("The uploaded image dimensions could not be read");
   const turned = meta.orientation >= 5;
   const width = turned ? meta.height : meta.width;
   const height = turned ? meta.width : meta.height;
-  if (width < FORM_PHOTO_MIN_SIDE || height < FORM_PHOTO_MIN_SIDE) {
-    throw new Error(`The image must be at least ${FORM_PHOTO_MIN_SIDE}x${FORM_PHOTO_MIN_SIDE} pixels`);
-  }
   const asSent = meta.format === "jpeg"
     && (!meta.orientation || meta.orientation === 1)
     && !meta.exif
@@ -262,7 +262,7 @@ export async function storeFormPhoto({ buffer, collegeId, date, id = newFormPhot
   } catch (error) {
     return {
       status: 422,
-      error: `One of the photos could not be read (${error?.message || "unsupported image"}). Choose a clear JPG or PNG photo.`,
+      error: `One of the photos could not be opened (${error?.message || "unsupported image"}). Please remove it and choose the photo again from the phone's camera or gallery.`,
     };
   }
   const key = formPhotoKey(collegeId, date, id);

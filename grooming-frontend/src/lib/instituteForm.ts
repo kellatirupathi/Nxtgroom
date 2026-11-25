@@ -372,31 +372,88 @@ export function formResponsesFileName(from: string, to: string): string {
 const PASS_THROUGH_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const SHRINK_ABOVE_BYTES = 1024 * 1024;
 const MAX_UPLOAD_DIMENSION = 2048;
+// The largest photo that can be chosen: it is made smaller here before it is
+// sent, so it only has to open on the phone.
+export const FORM_MAX_ORIGINAL_MB = 50;
+export const FORM_MAX_ORIGINAL_BYTES = FORM_MAX_ORIGINAL_MB * 1024 * 1024;
+// Everything the photo picker offers (some phones and computers give photos
+// no type, only a name).
+export const FORM_PHOTO_ACCEPT = 'image/*,.jpg,.jpeg,.jfif,.png,.webp,.gif,.bmp,.tif,.tiff,.heic,.heif,.avif';
+const IMAGE_NAME = /\.(jpe?g|jfif|png|webp|gif|bmp|tiff?|heic|heif|avif)$/i;
 
-// Phone photos are shrunk to at most 2048 px (JPEG) before upload, so five of
-// them and their people's cut-outs stay well inside the server's 10 MB limit
-// and send quickly on a mobile connection; this also turns iPhone HEIC photos
-// into JPEG where the browser can open them. Small JPG/PNG/WebP files go as
-// they are. (People are found and cut out from the full-size original.)
-export async function prepareFormPhoto(file: File): Promise<File> {
-  if (PASS_THROUGH_TYPES.has(file.type) && file.size <= SHRINK_ABOVE_BYTES) return file;
+// Whether a chosen file can be a photo: an image type, a photo's name, or no
+// type at all (opening it tells).
+export function looksLikePhoto(file: { name: string; type: string }): boolean {
+  return !file.type || file.type.startsWith('image/') || IMAGE_NAME.test(file.name);
+}
+
+// iPhone and some Android cameras save HEIC photos, which only some browsers
+// (Safari) can open.
+export function isHeicPhoto(file: { name: string; type: string }): boolean {
+  return /^image\/hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+}
+
+function imageElementOf(file: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('The photo could not be opened')); };
+    image.src = url;
+  });
+}
+
+// Opens any photo this browser can show, turned the right way up.
+export async function openAnyPhoto(file: Blob): Promise<ImageBitmap> {
   try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-    const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    return await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch {
+    // Some formats (BMP, GIF, AVIF on older phones) open only as a picture.
+    const image = await imageElementOf(file);
+    return createImageBitmap(image);
+  }
+}
+
+async function jpegOf(bitmap: ImageBitmap, name: string): Promise<File> {
+  const scale = Math.min(1, MAX_UPLOAD_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  try {
     const context = canvas.getContext('2d');
     if (!context) throw new Error('no canvas');
+    // See-through parts (PNG, GIF) come out white, not black.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    if (!blob) throw new Error('no image');
+    return new File([blob], `${name.replace(/\.[^.]+$/, '') || 'photo'}.jpg`, { type: 'image/jpeg' });
+  } finally {
     canvas.width = 0;
     canvas.height = 0;
-    if (!blob) throw new Error('no image');
-    return new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'photo'}.jpg`, { type: 'image/jpeg' });
+  }
+}
+
+// Any photo, of any size, is accepted. Photos are turned into an upright JPEG
+// of at most 2048 px before upload, so five of them and their people's
+// cut-outs stay well inside the server's 10 MB limit and send quickly on a
+// mobile connection. Small JPG/PNG/WebP files go as they are. A format this
+// browser cannot open (TIFF in Chrome) is sent as it is, and the server turns
+// it into a JPEG. (People are found and cut out from the full-size original.)
+export async function prepareFormPhoto(file: File): Promise<File> {
+  if (PASS_THROUGH_TYPES.has(file.type) && file.size <= SHRINK_ABOVE_BYTES) return file;
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await openAnyPhoto(file);
+    return await jpegOf(bitmap, file.name);
   } catch {
-    if (PASS_THROUGH_TYPES.has(file.type)) return file;
-    throw new Error(`${file.name} is not a supported photo. Choose a JPG or PNG photo.`);
+    if (isHeicPhoto(file)) {
+      throw new Error(`${file.name} is a HEIC photo, which this browser cannot open. Open this form in Safari, or choose the photo as JPG (on iPhone: Settings > Camera > Formats > Most Compatible).`);
+    }
+    if (file.size <= FORM_MAX_FILE_BYTES) return file;
+    throw new Error(`${file.name} could not be opened. Choose the photo again from the phone's camera or gallery.`);
+  } finally {
+    bitmap?.close();
   }
 }

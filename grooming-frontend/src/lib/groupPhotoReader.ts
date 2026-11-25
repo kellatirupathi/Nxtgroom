@@ -14,7 +14,8 @@
 import type { FaceDetector } from '@tensorflow-models/face-detection';
 import type { Worker as OcrWorker } from 'tesseract.js';
 import { assignLabels, mergeWords, readLabels, usableLabel, type Box, type OcrWord, type ReadLabel, type RosterEntry } from './groupLabels';
-import { bodyCropFromFace, dropBodyPartFaces, dropTinyFaces, mergeFaces, planTiles, sortLeftToRight, uprightFace, type FaceSpot } from './personCrop';
+import { openAnyPhoto } from './instituteForm';
+import { bodyCropFromFace, dropBodyPartFaces, dropTinyFaces, mergeFaces, planTiles, sortLeftToRight, uprightFace, WHOLE_PHOTO, type FaceSpot } from './personCrop';
 
 const FACE_MODEL_PATH = '/models/mediapipe-face-detection-full/model.json';
 const TESSERACT_PATH = '/models/tesseract-7.0.0';
@@ -218,22 +219,36 @@ async function cropBitmap(bitmap: ImageBitmap, box: Box): Promise<Blob> {
   return blob;
 }
 
-function openPhoto(file: Blob): Promise<ImageBitmap> {
-  return createImageBitmap(file, { imageOrientation: 'from-image' });
+// The full-size original when this browser can open it, or else the photo as
+// it will be sent.
+async function openPhoto(file: Blob, fallback?: Blob): Promise<ImageBitmap> {
+  try {
+    return await openAnyPhoto(file);
+  } catch (error) {
+    if (!fallback || fallback === file) throw error;
+    return openAnyPhoto(fallback);
+  }
 }
 
-// Everyone in a group photo, left to right, each cut out and (when a label
-// next to them could be read and matched) named.
+// Everyone in a group photo (or a photo of one person), left to right, each
+// cut out and (when a label next to them could be read and matched) named.
 export async function readGroupPhoto(
   file: Blob,
+  fallback: Blob | undefined,
   roster: readonly RosterEntry[],
   onStage: (stage: ReadingStage) => void = () => { },
 ): Promise<GroupReading> {
   onStage('loading');
-  const bitmap = await openPhoto(file);
+  const bitmap = await openPhoto(file, fallback);
   try {
     onStage('people');
-    const faces = await findFaces(bitmap);
+    let faces: FaceSpot[] = [];
+    try {
+      faces = await findFaces(bitmap);
+    } catch (error) {
+      // Without the face finder the photo is still taken as one person.
+      console.warn('Faces could not be found', error);
+    }
     onStage('labels');
     let labels: ReadLabel[] = [];
     let labelsFailed = false;
@@ -245,16 +260,18 @@ export async function readGroupPhoto(
       labels = [];
       labelsFailed = true;
     }
-    const boxes = faces.map((face) => bodyCropFromFace(face));
-    const assigned = assignLabels(
-      faces.map((face, index) => ({
+    // No face found: the whole photo is one person (a photo of one person),
+    // named by an instructor label or id anywhere in it, or by hand.
+    const boxes = faces.length ? faces.map((face) => bodyCropFromFace(face)) : [WHOLE_PHOTO];
+    const spots = faces.length
+      ? faces.map((face, index) => ({
         centerX: face.left + face.width / 2,
         width: boxes[index].width,
         faceTop: face.top,
         faceHeight: face.height,
-      })),
-      labels,
-    );
+      }))
+      : [{ centerX: 0.5, width: 1 }];
+    const assigned = assignLabels(spots, labels);
     const people: FoundPerson[] = [];
     for (const [index, box] of boxes.entries()) {
       people.push({ box, crop: await cropBitmap(bitmap, box), label: assigned[index] });

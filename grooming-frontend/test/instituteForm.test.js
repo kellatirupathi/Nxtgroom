@@ -11,7 +11,10 @@ import {
   formPagePath,
   formResponsesCsv,
   formResponsesFileName,
+  FORM_PHOTO_ACCEPT,
   importRowsFromCsv,
+  isHeicPhoto,
+  looksLikePhoto,
   importTemplateCsv,
   keyFromUrlDate,
   longDate,
@@ -227,4 +230,25 @@ test('earlier days are view only: no form, no Edit response, no Submit; today wo
   assert.match(page, /\{viewOnly \? \(/, 'Edit response is replaced by a note on earlier days');
   assert.match(page, /No response was sent for \{longDate\(data\.date\)\}\./);
   assert.match(page, /if \(!data \|\| viewOnly \|\| submitting \|\| preparing\) return;/);
+});
+
+test('any photo can be chosen, in any format and size, and is made small before sending', () => {
+  assert.equal(looksLikePhoto({ name: 'IMG_0001.HEIC', type: '' }), true, 'a HEIC photo with no type');
+  assert.equal(looksLikePhoto({ name: 'scan.tiff', type: 'application/octet-stream' }), true);
+  assert.equal(looksLikePhoto({ name: 'photo', type: '' }), true, 'no type at all: opening it tells');
+  assert.equal(looksLikePhoto({ name: 'group.bmp', type: 'image/bmp' }), true);
+  assert.equal(looksLikePhoto({ name: 'list.pdf', type: 'application/pdf' }), false);
+  assert.equal(isHeicPhoto({ name: 'IMG_0001.heic', type: '' }), true);
+  assert.equal(isHeicPhoto({ name: 'a.jpg', type: 'image/heif' }), true);
+  assert.equal(isHeicPhoto({ name: 'a.jpg', type: 'image/jpeg' }), false);
+  for (const kind of ['image/*', '.heic', '.tiff', '.bmp', '.gif', '.avif']) assert.ok(FORM_PHOTO_ACCEPT.includes(kind), kind);
+
+  const page = readFileSync(new URL('../src/components/PublicFormPage.tsx', import.meta.url), 'utf8');
+  assert.match(page, /accept=\{FORM_PHOTO_ACCEPT\}/);
+  assert.match(page, /file\.size > FORM_MAX_ORIGINAL_BYTES/, 'large originals are allowed: they are made smaller first');
+  assert.match(page, /prepared\.size > FORM_MAX_FILE_BYTES/);
+  assert.match(page, /reader\.readGroupPhoto\(\s*photo\.original,[\s\S]*?photo\.file,\s*list,/, 'the sent photo is read when the original cannot be opened');
+  const prepare = readFileSync(new URL('../src/lib/instituteForm.ts', import.meta.url), 'utf8');
+  assert.match(prepare, /fillStyle = '#ffffff'/, 'see-through photos come out white, not black');
+  assert.doesNotMatch(prepare, /Choose a JPG or PNG photo/);
 });

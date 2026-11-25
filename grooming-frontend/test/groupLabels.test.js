@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   assignLabels,
   instructorById,
@@ -9,7 +10,7 @@ import {
   normalizeIdText,
   readLabels,
 } from '../src/lib/groupLabels.ts';
-import { bodyCropFromFace, dropBodyPartFaces, dropTinyFaces, mergeFaces, planTiles, sortLeftToRight, uprightFace } from '../src/lib/personCrop.ts';
+import { bodyCropFromFace, dropBodyPartFaces, dropTinyFaces, mergeFaces, planTiles, sortLeftToRight, uprightFace, WHOLE_PHOTO } from '../src/lib/personCrop.ts';
 
 // The institute's instructors, with near-misses to make sure only the right
 // one is picked.
@@ -208,4 +209,16 @@ test('the picture runs from above the hair to below the feet, never cutting them
   const [standing] = GROUP_FACES;
   const low = bodyCropFromFace(standing);
   assert.equal(low.top + low.height, 1);
+});
+
+test('a photo of one person with no face found is the whole photo, named from its label', () => {
+  assert.deepEqual(WHOLE_PHOTO, { left: 0, top: 0, width: 1, height: 1 });
+  const instructor = { id: 'i1', name: 'Sushant Bakshi', employee_id: 'NW0001234' };
+  const matched = { text: 'Sushant Bakshi NW0001234', nameText: 'Sushant Bakshi', idText: 'NW0001234', instructor, box: { left: 0.05, top: 0.02, width: 0.4, height: 0.05 }, centerX: 0.25 };
+  const watermark = { text: 'Camera', nameText: 'Camera', idText: null, instructor: null, box: { left: 0.7, top: 0.95, width: 0.2, height: 0.03 }, centerX: 0.8 };
+  assert.deepEqual(assignLabels([{ centerX: 0.5, width: 1 }], [watermark, matched]), [matched]);
+  assert.deepEqual(assignLabels([{ centerX: 0.5, width: 1 }], [watermark]), [null], 'a stray word does not name them');
+
+  const reader = readFileSync(new URL('../src/lib/groupPhotoReader.ts', import.meta.url), 'utf8');
+  assert.match(reader, /faces\.length \? faces\.map\(\(face\) => bodyCropFromFace\(face\)\) : \[WHOLE_PHOTO\]/);
 });
