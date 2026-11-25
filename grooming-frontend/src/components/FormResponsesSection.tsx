@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ChevronLeft, ClipboardList, Download, ExternalLink, FileUp, Search, SlidersHorizontal, Users, X } from 'lucide-react';
+import { ChevronLeft, ClipboardList, Download, ExternalLink, FileUp, Loader2, Search, SlidersHorizontal, Users, X } from 'lucide-react';
 import PeopleTable from './PeopleTable';
 import { apiFetch } from '../api';
 import { goToPath, pathForTab, TABS } from '../routes';
@@ -25,6 +25,7 @@ import {
   formResponsesCsv,
   formResponsesFileName,
   peopleCount,
+  peopleProgress,
   sourceLabel,
   statusLabel,
   type FormReason,
@@ -34,6 +35,8 @@ import {
 } from '../lib/instituteForm';
 
 type PhotosFilter = '' | 'with' | 'without';
+
+const PEOPLE_REFRESH_MS = 15_000;
 
 interface Filters {
   date: string;
@@ -109,11 +112,31 @@ function SourceTag({ source }: { source: string }) {
   );
 }
 
+// Whether the People column has anything to say for a response.
+function hasPeopleInfo(row: FormResponse): boolean {
+  const count = peopleCount(row.photos);
+  const progress = peopleProgress(row.photos);
+  return count.identified + count.unknown + progress.pending + progress.failed > 0;
+}
+
 // The People column: how many were identified in the photos, opening the
-// Name | ID | Image table.
+// Name | ID | Image table. People are found on the server after the form is
+// sent, so a new response shows "Finding people…" for a moment first.
 function PeopleCell({ row, onOpen }: { row: FormResponse; onOpen: () => void }) {
   const count = peopleCount(row.photos);
-  if (!count.identified && !count.unknown) return <span className="text-slate-400">—</span>;
+  const progress = peopleProgress(row.photos);
+  if (!count.identified && !count.unknown) {
+    if (progress.pending) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500" role="status">
+          <Loader2 size={13} className="animate-spin text-indigo-600" aria-hidden="true" />
+          Finding people…
+        </span>
+      );
+    }
+    if (progress.failed) return <span className="text-xs text-amber-700">People could not be read</span>;
+    return <span className="text-slate-400">—</span>;
+  }
   return (
     <button
       type="button"
@@ -123,6 +146,7 @@ function PeopleCell({ row, onOpen }: { row: FormResponse; onOpen: () => void }) 
       <Users size={13} aria-hidden="true" />
       {count.identified} named
       {count.unknown > 0 && <span className="font-medium text-slate-500">· {count.unknown} not named</span>}
+      {progress.pending > 0 && <Loader2 size={12} className="animate-spin text-indigo-600" aria-label="Still finding people in some photos" />}
     </button>
   );
 }
@@ -212,6 +236,23 @@ export default function FormResponsesSection() {
       });
     return () => controller.abort();
   }, [query, range, preset, reloadKey]);
+
+  // While the people in some photos are still being found, look again
+  // quietly every little while until they are all read.
+  const findingPeople = rows.some((row) => peopleProgress(row.photos).pending > 0);
+  useEffect(() => {
+    if (!findingPeople || !isCompleteRange(range, preset)) return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      apiFetch<FormResponse[]>(`/api/v2/form-responses${query}`, { signal: controller.signal })
+        .then((data) => { if (Array.isArray(data)) setRows(data); })
+        .catch(() => { });
+    }, PEOPLE_REFRESH_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [findingPeople, rows, query, range, preset]);
 
   // Keep an open People table in step with reloaded rows.
   useEffect(() => {
@@ -532,7 +573,7 @@ export default function FormResponsesSection() {
             <div className="mt-2.5 text-xs text-slate-600">
               {row.status === 'yes' ? <Pictures row={row} onOpen={openViewer(row)} /> : <span>{row.reason_label || '—'}</span>}
             </div>
-            {row.status === 'yes' && peopleCount(row.photos).identified + peopleCount(row.photos).unknown > 0 && (
+            {row.status === 'yes' && hasPeopleInfo(row) && (
               <div className="mt-2">
                 <PeopleCell row={row} onOpen={() => setPeopleOf(row)} />
               </div>

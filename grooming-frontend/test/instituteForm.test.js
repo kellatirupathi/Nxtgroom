@@ -5,6 +5,7 @@ import {
   calendarDays,
   dayBefore,
   peopleCount,
+  peopleProgress,
   peopleRows,
   shiftMonth,
   displayDate,
@@ -156,8 +157,7 @@ test('the form has no logo or password note, its own calendar, and the picture q
   assert.match(page, /\{draft\.status !== 'no' && \(\s*<Card id="question-photos"/);
   assert.match(page, /<QuestionTitle required>Appearance Picture<\/QuestionTitle>/);
   assert.ok(!page.includes('Grooming'), 'the form says Appearance, not Grooming');
-  const people = page.indexOf('<Card id="question-people">');
-  assert.ok(people > page.indexOf('<Card id="question-photos"') && people < page.indexOf('<Card id="question-submitted_by"'), 'People in the Photos sits between the picture and Submitted By');
+  assert.ok(!page.includes('question-people') && !page.includes('People in the Photos'), 'no People in the Photos section: photos only');
   assert.match(page, /const EMPTY_DRAFT: Draft = \{ status: 'yes',/, 'Yes is chosen when the form opens');
   const order = ['id="question-university"', 'id="question-photos"', 'id="question-reason"', 'id="question-submitted_by"'].map((piece) => page.indexOf(piece));
   assert.ok(order.every((at, index) => at > 0 && (index === 0 || at > order[index - 1])), 'University, Picture or Reason, then Submitted By');
@@ -192,27 +192,27 @@ test('the responses page shows the Name | ID | Image table; the submitted form p
   assert.match(responses, /<PeopleTable photos=\{peopleOf\.photos\}/);
 });
 
-test('people are found in the browser, named from labels, editable, and sent as small cut-outs', () => {
+test('the form only uploads photos: the people are found on the server afterwards and shown in Form Responses', () => {
   const page = source('components/PublicFormPage.tsx');
-  assert.match(page, /reader\.readGroupPhoto\(\s*photo\.original,/);
-  assert.match(page, /body\.append\('people', JSON\.stringify\(plan\)\)/);
-  assert.match(page, /crops\.forEach\(\(crop, index\) => body\.append\('crops', crop,/);
-  assert.match(page, /<FormPeopleEditor/);
-  const editor = source('components/FormPeopleEditor.tsx');
-  const headers = [...editor.matchAll(/<th scope="col"[^>]*>([^<]+)<\/th>/g)].map((match) => match[1]);
-  assert.deepEqual(headers, ['Image', 'Name', 'ID']);
-  assert.match(editor, /onEdit\(photo\.key, person\.key, 'name', event\.target\.value\)/, 'the name is typed in place');
-  assert.match(editor, /onEdit\(photo\.key, person\.key, 'id', event\.target\.value\)/, 'the ID is typed in place');
-  assert.match(editor, /border-0 border-b border-transparent bg-transparent px-0/, 'only a line under the text');
-  assert.ok(!editor.includes('<select'), 'no drop-down list');
-  assert.ok(!editor.includes('Add a person'), 'no Add a person button');
-  assert.match(editor, /onClick=\{\(\) => setViewing\(\{ photoKey: photo\.key, index \}\)\}/, 'a person picture opens');
-  assert.match(editor, /className="flex w-full max-w-sm flex-col overflow-hidden rounded-lg bg-white shadow-xl"/, 'in a small window, not full screen');
-  const reader = source('lib/groupPhotoReader.ts');
-  assert.match(reader, /'\/models\/mediapipe-face-detection-full\/model\.json'/);
-  assert.match(reader, /'\/models\/tesseract-7\.0\.0'/);
-  assert.match(reader, /workerBlobURL: false/, 'the worker is a file from this site, as the security policy requires');
-  assert.ok(!/rekognition|face-api|SearchFaces/i.test(reader), 'no face recognition');
+  assert.ok(page.includes("for (const photo of draft.added) body.append('photos', photo.file, photo.file.name);"));
+  assert.ok(!page.includes("body.append('people'") && !page.includes("body.append('crops'"), 'no people or cut-outs are sent');
+  assert.ok(!/groupPhotoReader|FormPeopleEditor|readPeople|roster/i.test(page), 'nothing is read in the browser');
+  assert.ok(!page.includes('still being read'), 'Submit never waits for people');
+  const responses = source('components/FormResponsesSection.tsx');
+  assert.ok(responses.includes('Finding people…'));
+  assert.match(responses, /setTimeout\([\s\S]*?PEOPLE_REFRESH_MS\)/, 'the page looks again until the people are found');
+  assert.ok(source('components/PeopleTable.tsx').includes('could not be read. The photos are still saved.'));
+});
+
+test('the people state of a response: still being found, or could not be read', () => {
+  const photos = [
+    { id: 'a', url: null, thumb_url: null, people_status: 'pending', people: [] },
+    { id: 'b', url: null, thumb_url: null, people_status: 'failed', people: [] },
+    { id: 'c', url: null, thumb_url: null, people_status: 'done', people: [] },
+    { id: 'd', url: null, thumb_url: null },
+  ];
+  assert.deepEqual(peopleProgress(photos), { pending: 1, failed: 1 });
+  assert.deepEqual(peopleProgress([]), { pending: 0, failed: 0 });
 });
 
 test('removing a photo on the form asks first', () => {
@@ -247,7 +247,6 @@ test('any photo can be chosen, in any format and size, and is made small before 
   assert.match(page, /accept=\{FORM_PHOTO_ACCEPT\}/);
   assert.match(page, /file\.size > FORM_MAX_ORIGINAL_BYTES/, 'large originals are allowed: they are made smaller first');
   assert.match(page, /prepared\.size > FORM_MAX_FILE_BYTES/);
-  assert.match(page, /reader\.readGroupPhoto\(\s*photo\.original,[\s\S]*?photo\.file,\s*list,/, 'the sent photo is read when the original cannot be opened');
   const prepare = readFileSync(new URL('../src/lib/instituteForm.ts', import.meta.url), 'utf8');
   assert.match(prepare, /fillStyle = '#ffffff'/, 'see-through photos come out white, not black');
   assert.doesNotMatch(prepare, /Choose a JPG or PNG photo/);

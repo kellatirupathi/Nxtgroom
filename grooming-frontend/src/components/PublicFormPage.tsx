@@ -3,7 +3,6 @@ import { AlertCircle, CheckCircle2, ExternalLink, ImagePlus, Loader2, Pencil, Re
 import { apiFetch, type ApiError } from '../api';
 import ConfirmDialog from './ConfirmDialog';
 import FormDatePicker from './FormDatePicker';
-import FormPeopleEditor, { type DraftPerson, type EditablePhoto, type PersonField, type PhotoPeople } from './FormPeopleEditor';
 import ImageLightbox, { type LightboxImage } from './ImageLightbox';
 import { publicFormFromLocation } from '../routes';
 import { localDateValue } from '../attendanceFilters';
@@ -11,9 +10,7 @@ import {
   cachedInstitute,
   publicFormPath,
   readCachedForm,
-  rosterPath,
   takePrefetchedForm,
-  takePrefetchedRoster,
   writeCachedForm,
 } from '../lib/formPrefetch';
 import {
@@ -39,7 +36,6 @@ import {
   looksLikePhoto,
   prepareFormPhoto,
   statusLabel,
-  type FormInstructor,
   type FormPhoto,
   type FormReason,
   type FormResponse,
@@ -53,12 +49,12 @@ interface PublicFormPageProps {
   date: string | null;
 }
 
+// The institute only uploads photos: the people in them are found and named
+// on the server after the form is sent, and shown in Form Responses.
 interface NewPhoto {
   id: string;
-  // The photo as uploaded (shrunk for sending).
+  // The photo as uploaded (made upright and smaller for sending).
   file: File;
-  // The photo as chosen, full size: people are found and cut out from it.
-  original: File;
   preview: string;
 }
 
@@ -69,8 +65,6 @@ interface Draft {
   reasonOther: string;
   kept: FormPhoto[];
   added: NewPhoto[];
-  // The people in each photo, by saved photo id or new photo id.
-  people: Record<string, PhotoPeople>;
 }
 
 type Errors = Partial<Record<'status' | 'photos' | 'submitted_by' | 'reason', string>>;
@@ -78,32 +72,7 @@ type Errors = Partial<Record<'status' | 'photos' | 'submitted_by' | 'reason', st
 const REQUIRED = 'This is a required question';
 const NAME_KEY = 'ft_form_submitted_by';
 // A new form starts with Photo Submission Status set to Yes.
-const EMPTY_DRAFT: Draft = { status: 'yes', submittedBy: '', reason: '', reasonOther: '', kept: [], added: [], people: {} };
-
-let personCounter = 0;
-
-function nextPersonKey(): string {
-  personCounter += 1;
-  return `person-${personCounter}`;
-}
-
-// The people already saved on a photo, ready to edit.
-function savedPeople(photo: FormPhoto): PhotoPeople {
-  return {
-    status: 'ready',
-    people: (photo.people ?? []).map((person) => ({
-      key: nextPersonKey(),
-      id: person.id,
-      preview: person.crop_url,
-      instructorId: person.instructor_id ?? '',
-      source: person.source,
-      // A name kept as printed (not in the instructor list).
-      labelName: !person.instructor_id && person.name ? person.name : undefined,
-      labelId: !person.instructor_id && person.employee_id ? person.employee_id : undefined,
-      box: person.box,
-    })),
-  };
-}
+const EMPTY_DRAFT: Draft = { status: 'yes', submittedBy: '', reason: '', reasonOther: '', kept: [], added: [] };
 
 function rememberedName(): string {
   try {
@@ -120,7 +89,7 @@ function rememberName(name: string): void {
 }
 
 function draftFrom(response: FormResponse | null): Draft {
-  if (!response) return { ...EMPTY_DRAFT, people: {}, submittedBy: rememberedName() };
+  if (!response) return { ...EMPTY_DRAFT, submittedBy: rememberedName() };
   return {
     status: response.status,
     submittedBy: response.submitted_by,
@@ -128,30 +97,7 @@ function draftFrom(response: FormResponse | null): Draft {
     reasonOther: response.reason_other || '',
     kept: response.photos,
     added: [],
-    people: Object.fromEntries(response.photos.map((photo) => [photo.id, savedPeople(photo)])),
   };
-}
-
-function sameText(left: string | undefined, right: string | undefined): boolean {
-  return Boolean(left && right && left.trim().toLowerCase() === right.trim().toLowerCase());
-}
-
-// A person after their name or ID is typed in: a name or ID that is one of
-// the institute's instructors links that instructor (filling in the other),
-// anything else is kept as typed, with the other value left as it was.
-function editedPerson(person: DraftPerson, field: PersonField, value: string, roster: readonly FormInstructor[]): DraftPerson {
-  const current = person.instructorId ? roster.find((option) => option.id === person.instructorId) : undefined;
-  const name = current?.name ?? person.labelName;
-  const id = current?.employee_id ?? person.labelId;
-  if (field === 'name') {
-    const match = roster.find((option) => sameText(option.name, value));
-    if (match) return { ...person, instructorId: match.id, source: 'manual', labelName: undefined, labelId: undefined };
-    return { ...person, instructorId: '', source: value.trim() || id ? 'manual' : 'none', labelName: value || undefined, labelId: id || undefined };
-  }
-  const typed = value.toUpperCase();
-  const match = roster.find((option) => sameText(option.employee_id, typed));
-  if (match) return { ...person, instructorId: match.id, source: 'manual', labelName: undefined, labelId: undefined };
-  return { ...person, instructorId: '', source: typed.trim() || name ? 'manual' : 'none', labelName: name || undefined, labelId: typed || undefined };
 }
 
 // What is kept in the browser while the form is being filled in.
@@ -166,83 +112,24 @@ function toStoredDraft(draft: Draft, baseUpdatedAt: string | null): StoredDraft 
     reasonOther: draft.reasonOther,
     keptIds: draft.kept.map((photo) => photo.id),
     added: draft.added.map((photo) => ({ key: photo.id, file: photo.file, name: photo.file.name })),
-    people: Object.fromEntries(Object.entries(draft.people)
-      .filter(([, state]) => state.status !== 'reading')
-      .map(([key, state]) => [key, {
-        status: state.status as 'ready' | 'failed',
-        message: state.message,
-        photoInstructorIds: state.photoInstructorIds,
-        labelsRead: state.labelsRead,
-        labelsFailed: state.labelsFailed,
-        people: state.people.map((person) => ({
-          id: person.id,
-          crop: person.crop,
-          instructorId: person.instructorId,
-          source: person.source,
-          readText: person.readText,
-          labelName: person.labelName,
-          labelId: person.labelId,
-          box: person.box,
-        })),
-      }])),
   };
 }
 
-// A kept draft back as the form's answers. Returns the picture addresses it
-// made for new cut-outs, and the added photos still to be read.
-function draftFromStored(stored: StoredDraft, response: FormResponse | null): { draft: Draft; cropUrls: string[]; unread: NewPhoto[] } {
-  const cropUrls: string[] = [];
+// A kept draft back as the form's answers.
+function draftFromStored(stored: StoredDraft, response: FormResponse | null): Draft {
   const kept = (response?.photos ?? []).filter((photo) => stored.keptIds.includes(photo.id));
-  const renamed = new Map<string, string>();
   const added: NewPhoto[] = stored.added.map((item) => {
     photoCounter += 1;
     const file = item.file instanceof File ? item.file : new File([item.file], item.name || 'photo.jpg', { type: item.file.type || 'image/jpeg' });
-    const id = `new-${photoCounter}`;
-    renamed.set(item.key, id);
-    return { id, file, original: file, preview: URL.createObjectURL(file) };
+    return { id: `new-${photoCounter}`, file, preview: URL.createObjectURL(file) };
   });
-  const people: Record<string, PhotoPeople> = {};
-  const restorePeople = (photoKey: string, saved: Map<string, string | null>) => {
-    const state = stored.people[photoKey];
-    if (!state) return undefined;
-    return {
-      status: state.status,
-      message: state.message,
-      photoInstructorIds: state.photoInstructorIds,
-      labelsRead: state.labelsRead,
-      labelsFailed: state.labelsFailed,
-      people: state.people
-        .filter((person) => (person.id ? saved.has(person.id) : Boolean(person.crop)))
-        .map((person) => {
-          let preview: string | null = person.id ? saved.get(person.id) ?? null : null;
-          if (!person.id && person.crop) {
-            preview = URL.createObjectURL(person.crop);
-            cropUrls.push(preview);
-          }
-          return { ...person, key: nextPersonKey(), preview };
-        }),
-    } satisfies PhotoPeople;
-  };
-  for (const photo of kept) {
-    const saved = new Map((photo.people ?? []).map((person) => [person.id, person.crop_url]));
-    people[photo.id] = restorePeople(photo.id, saved) ?? savedPeople(photo);
-  }
-  for (const [oldKey, id] of renamed) {
-    const state = restorePeople(oldKey, new Map());
-    if (state) people[id] = state;
-  }
   return {
-    draft: {
-      status: stored.status,
-      submittedBy: stored.submittedBy,
-      reason: (stored.reason || '') as FormReason | '',
-      reasonOther: stored.reasonOther,
-      kept,
-      added,
-      people,
-    },
-    cropUrls,
-    unread: added.filter((photo) => !people[photo.id]),
+    status: stored.status,
+    submittedBy: stored.submittedBy,
+    reason: (stored.reason || '') as FormReason | '',
+    reasonOther: stored.reasonOther,
+    kept,
+    added,
   };
 }
 
@@ -353,9 +240,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   const [removing, setRemoving] = useState<{ kind: 'kept' | 'added'; id: string } | null>(null);
   const [viewer, setViewer] = useState<{ images: LightboxImage[]; index: number } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [roster, setRoster] = useState<FormInstructor[] | null>(null);
-  const [rosterError, setRosterError] = useState('');
-  const [personRemoving, setPersonRemoving] = useState<{ photoKey: string; personKey: string } | null>(null);
   const [restored, setRestored] = useState(false);
   // Whether the answers on screen have been changed since they were loaded,
   // and so are worth keeping in the browser.
@@ -365,9 +249,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const addedRef = useRef<NewPhoto[]>([]);
   const draftRef = useRef<Draft>(EMPTY_DRAFT);
-  // Picture addresses made in the browser for new people's cut-outs.
-  const cropUrlsRef = useRef<Set<string>>(new Set());
-  const rosterRef = useRef<Promise<FormInstructor[]> | null>(null);
 
   useEffect(() => {
     addedRef.current = draft.added;
@@ -417,128 +298,15 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       await deleteFormDraft(key);
       return;
     }
-    const { draft: next, cropUrls, unread } = draftFromStored(stored, loaded.response);
-    replaceDraft(next);
-    for (const url of cropUrls) cropUrlsRef.current.add(url);
+    replaceDraft(draftFromStored(stored, loaded.response));
     dirtyRef.current = true;
     setMode('edit');
     setRestored(true);
-    for (const photo of unread) void readPeople(photo);
   };
 
   useEffect(() => () => {
     for (const photo of addedRef.current) URL.revokeObjectURL(photo.preview);
-    for (const url of cropUrlsRef.current) URL.revokeObjectURL(url);
-    void import('../lib/groupPhotoReader').then((reader) => reader.releaseGroupPhotoReader()).catch(() => { });
   }, []);
-
-  // The institute's instructors, for naming the people in the photos.
-  const ensureRoster = (): Promise<FormInstructor[]> => {
-    if (!rosterRef.current) {
-      rosterRef.current = (takePrefetchedRoster(token) ?? apiFetch<FormInstructor[]>(rosterPath(token), { auth: false }))
-        .then((list) => {
-          const value = Array.isArray(list) ? list : [];
-          setRoster(value);
-          setRosterError('');
-          return value;
-        })
-        .catch(() => {
-          rosterRef.current = null;
-          setRoster([]);
-          setRosterError('The list of names could not be loaded, so names cannot be filled in now. Reload the page to try again.');
-          return [];
-        });
-    }
-    return rosterRef.current;
-  };
-
-  const forgetCropUrls = (people: DraftPerson[] = []) => {
-    for (const person of people) {
-      if (person.crop && person.preview && cropUrlsRef.current.has(person.preview)) {
-        URL.revokeObjectURL(person.preview);
-        cropUrlsRef.current.delete(person.preview);
-      }
-    }
-  };
-
-  const setPhotoPeople = (photoKey: string, change: (current: PhotoPeople | undefined) => PhotoPeople | undefined) => {
-    setDraft((current) => {
-      const next = change(current.people[photoKey]);
-      const people = { ...current.people };
-      if (next) people[photoKey] = next;
-      else delete people[photoKey];
-      return { ...current, people };
-    });
-  };
-
-  // Finds the people in a new photo, cuts them out and names them from the
-  // labels printed next to them, all in this browser.
-  const readPeople = async (photo: NewPhoto) => {
-    setPhotoPeople(photo.id, () => ({ status: 'reading', stage: 'loading', people: [] }));
-    try {
-      const list = await ensureRoster();
-      const reader = await import('../lib/groupPhotoReader');
-      const reading = await reader.readGroupPhoto(
-        photo.original,
-        // The photo as it will be sent, when this browser cannot open the
-        // original (a HEIC photo in Chrome).
-        photo.file,
-        list,
-        (stage) => setPhotoPeople(photo.id, (current) => (current?.status === 'reading' ? { ...current, stage } : current)),
-      );
-      const people: DraftPerson[] = reading.people.map((person) => {
-        const preview = URL.createObjectURL(person.crop);
-        cropUrlsRef.current.add(preview);
-        const label = person.label;
-        return {
-          key: nextPersonKey(),
-          crop: person.crop,
-          preview,
-          // The instructor the label names, or else the name and id as printed.
-          instructorId: label?.instructor?.id ?? '',
-          source: label ? 'label' : 'none',
-          readText: label?.text,
-          labelName: label && !label.instructor ? (label.nameText ?? undefined) : undefined,
-          labelId: label && !label.instructor ? (label.idText ?? undefined) : undefined,
-          box: person.box,
-        } satisfies DraftPerson;
-      });
-      if (!draftRef.current.added.some((item) => item.id === photo.id)) {
-        forgetCropUrls(people);
-        return;
-      }
-      setPhotoPeople(photo.id, () => ({
-        status: 'ready',
-        people,
-        photoInstructorIds: [...new Set(reading.labels.map((label) => label.instructor?.id).filter((id): id is string => Boolean(id)))],
-        labelsRead: reading.labels.length,
-        labelsFailed: reading.labelsFailed,
-      }));
-    } catch {
-      setPhotoPeople(photo.id, (current) => (current ? {
-        status: 'failed',
-        people: [],
-        message: 'The people in this photo could not be found automatically on this device. You can still submit the photo.',
-      } : current));
-    }
-  };
-
-  const editPerson = (photoKey: string, personKey: string, field: PersonField, value: string) => {
-    dirtyRef.current = true;
-    setPhotoPeople(photoKey, (current) => current && {
-      ...current,
-      people: current.people.map((person) => (person.key === personKey ? editedPerson(person, field, value, roster ?? []) : person)),
-    });
-  };
-
-  const removePerson = () => {
-    if (!personRemoving) return;
-    const { photoKey, personKey } = personRemoving;
-    dirtyRef.current = true;
-    forgetCropUrls(draft.people[photoKey]?.people.filter((person) => person.key === personKey));
-    setPhotoPeople(photoKey, (current) => current && { ...current, people: current.people.filter((person) => person.key !== personKey) });
-    setPersonRemoving(null);
-  };
 
   useEffect(() => {
     document.title = institute ? `${FORM_TITLE} · ${institute.name}` : FORM_TITLE;
@@ -558,10 +326,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     for (const photo of addedRef.current) {
       if (!keep.has(photo.id)) URL.revokeObjectURL(photo.preview);
     }
-    // A fresh draft shows saved people from their stored pictures, so the
-    // cut-outs made in this browser are no longer needed.
-    for (const url of cropUrlsRef.current) URL.revokeObjectURL(url);
-    cropUrlsRef.current.clear();
     draftRef.current = next;
     addedRef.current = next.added;
     dirtyRef.current = false;
@@ -658,11 +422,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   // Only today's form can be filled in or changed; earlier days are view only.
   const viewOnly = Boolean(data && data.date !== data.today);
 
-  // The names are needed as soon as the form can be edited.
-  useEffect(() => {
-    if (mode === 'edit' && data && data.date === data.today) void ensureRoster();
-  }, [mode, data]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const goToDate = (value: string) => {
     if (!value || value === shownDate) return;
     if (today && value > today) {
@@ -713,7 +472,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
           continue;
         }
         photoCounter += 1;
-        ready.push({ id: `new-${photoCounter}`, file: prepared, original: file, preview: URL.createObjectURL(prepared) });
+        ready.push({ id: `new-${photoCounter}`, file: prepared, preview: URL.createObjectURL(prepared) });
       } catch (error) {
         problems.push(error instanceof Error ? error.message : `${file.name} could not be added.`);
       }
@@ -722,7 +481,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     if (ready.length) dirtyRef.current = true;
     setDraft((current) => ({ ...current, added: [...current.added, ...ready] }));
     draftRef.current = { ...draftRef.current, added: [...draftRef.current.added, ...ready] };
-    for (const photo of ready) void readPeople(photo);
     setErrors((current) => {
       const next = { ...current };
       if (problems.length) next.photos = problems.join(' ');
@@ -734,7 +492,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   const confirmRemove = () => {
     if (!removing) return;
     dirtyRef.current = true;
-    forgetCropUrls(draft.people[removing.id]?.people);
     if (removing.kind === 'added') {
       const photo = draft.added.find((item) => item.id === removing.id);
       if (photo) URL.revokeObjectURL(photo.preview);
@@ -743,7 +500,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
     } else {
       setDraft((current) => ({ ...current, kept: current.kept.filter((item) => item.id !== removing.id) }));
     }
-    setPhotoPeople(removing.id, () => undefined);
     setRemoving(null);
   };
 
@@ -767,7 +523,7 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
 
   const clearForm = () => {
     forgetKeptDraft();
-    replaceDraft({ ...EMPTY_DRAFT, people: {} });
+    replaceDraft({ ...EMPTY_DRAFT });
     setErrors({});
     setSubmitError('');
   };
@@ -792,11 +548,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
       document.getElementById(`question-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return;
     }
-    if (draft.status === 'yes' && [...draft.kept.map((photo) => photo.id), ...draft.added.map((photo) => photo.id)]
-      .some((key) => draft.people[key]?.status === 'reading')) {
-      setSubmitError('The people in the photos are still being read. Please wait a moment and press Submit again.');
-      return;
-    }
     setSubmitting(true);
     try {
       const body = new FormData();
@@ -808,36 +559,8 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
         body.append('keep', '[]');
       } else {
         body.append('keep', JSON.stringify(draft.kept.map((photo) => photo.id)));
+        // Photos only: the people in them are found on the server afterwards.
         for (const photo of draft.added) body.append('photos', photo.file, photo.file.name);
-        // Each photo's people: saved ones by id, new ones with their cut-out
-        // (by its position among the crops sent) and the name chosen.
-        const crops: Blob[] = [];
-        const personPlan = (person: DraftPerson) => {
-          const printed = !person.instructorId && Boolean(person.labelName || person.labelId);
-          const common = {
-            instructor_id: person.instructorId || null,
-            source: person.instructorId || printed ? person.source : 'none',
-            ...(printed ? { label_name: person.labelName ?? null, label_id: person.labelId ?? null } : {}),
-            box: person.box,
-          };
-          if (person.id) return { id: person.id, ...common };
-          crops.push(person.crop as Blob);
-          return { crop: crops.length - 1, ...common };
-        };
-        const plan = [
-          ...draft.kept
-            .filter((photo) => draft.people[photo.id]?.status === 'ready')
-            .map((photo) => ({ photo: photo.id, people: draft.people[photo.id].people.map(personPlan) })),
-          ...draft.added
-            .map((photo, index) => ({ photo, index }))
-            .filter(({ photo }) => draft.people[photo.id] && draft.people[photo.id].status !== 'reading')
-            .map(({ photo, index }) => ({
-              photo: `new:${index}`,
-              people: draft.people[photo.id].people.filter((person) => person.id || person.crop).map(personPlan),
-            })),
-        ];
-        body.append('people', JSON.stringify(plan));
-        crops.forEach((crop, index) => body.append('crops', crop, `person-${index + 1}.jpg`));
       }
       const result = await apiFetch<{ response: FormResponse }>(
         `/api/v2/forms/${encodeURIComponent(token)}/${data.date}`,
@@ -865,18 +588,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
   const addedImages = draft.added.map((photo, index) => ({ url: photo.preview, label: `New photo ${index + 1}` }));
   const allImages = [...keptImages, ...addedImages];
   const photoCount = draft.kept.length + draft.added.length;
-  const editablePhotos: EditablePhoto[] = [
-    ...draft.kept.map((photo, index) => ({
-      key: photo.id,
-      title: `Photo ${index + 1}`,
-      people: draft.people[photo.id],
-    })),
-    ...draft.added.map((photo, index) => ({
-      key: photo.id,
-      title: `Photo ${draft.kept.length + index + 1}`,
-      people: draft.people[photo.id],
-    })),
-  ];
   const photosWillGo = draft.status === 'no' && (draft.added.length > 0 || Boolean(response?.photos.length));
 
   return (
@@ -1176,21 +887,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
               </Card>
             )}
 
-            {/* Its own section once a photo is added: who is in the photos. */}
-            {draft.status !== 'no' && editablePhotos.length > 0 && (
-              <Card id="question-people">
-                <QuestionTitle>People in the Photos</QuestionTitle>
-                <FormPeopleEditor
-                  photos={editablePhotos}
-                  roster={roster}
-                  rosterError={rosterError}
-                  disabled={submitting}
-                  onEdit={editPerson}
-                  onRemove={(photoKey, personKey) => setPersonRemoving({ photoKey, personKey })}
-                />
-              </Card>
-            )}
-
             {/* With No, the reason comes right after University Name. */}
             {draft.status === 'no' && (
               <Card id="question-reason" invalid={Boolean(errors.reason)}>
@@ -1280,16 +976,6 @@ export default function PublicFormPage({ slug, token, date: initialDate }: Publi
 
         <div className="pb-4" aria-hidden="true" />
       </div>
-
-      <ConfirmDialog
-        open={Boolean(personRemoving)}
-        title="Remove this person?"
-        message="This person will not be listed for the photo."
-        confirmLabel="Remove"
-        destructive
-        onConfirm={removePerson}
-        onCancel={() => setPersonRemoving(null)}
-      />
 
       <ConfirmDialog
         open={Boolean(removing)}

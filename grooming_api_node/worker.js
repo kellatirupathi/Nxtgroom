@@ -5,6 +5,7 @@ import { startEvaluationWorker } from "./src/services/evaluationWorker.js";
 import { startNotificationWorker } from "./src/services/notificationWorker.js";
 import { startStorageCleanupWorker } from "./src/services/storageCleanupWorker.js";
 import { startMailWorker } from "./src/services/mailWorker.js";
+import { startFormPeopleWorker } from "./src/services/formPeopleWorker.js";
 
 async function startWorkers() {
   const config = validateEnvironment();
@@ -18,6 +19,7 @@ async function startWorkers() {
     startNotificationWorker(db),
     startStorageCleanupWorker(db),
     startMailWorker(db),
+    startFormPeopleWorker(db),
   ];
   console.log("FacultyTrack workers started.");
 

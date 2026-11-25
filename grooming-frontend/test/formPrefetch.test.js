@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { cachedInstitute, publicFormPath, readCachedForm, rosterPath, writeCachedForm } from '../src/lib/formPrefetch.ts';
+import { cachedInstitute, publicFormPath, readCachedForm, writeCachedForm } from '../src/lib/formPrefetch.ts';
 
 function withStorage(run) {
   const values = new Map();
@@ -30,10 +30,10 @@ const data = (date, today = date) => ({
   response: null,
 });
 
-test('the form data and the names are asked for at their own addresses', () => {
+test('the form data is asked for at its own address (no names list: people are found on the server)', () => {
   assert.equal(publicFormPath('abcdefghijklmnopqrstuvwx', null), '/api/v2/forms/abcdefghijklmnopqrstuvwx');
   assert.equal(publicFormPath('abcdefghijklmnopqrstuvwx', '2026-11-24'), '/api/v2/forms/abcdefghijklmnopqrstuvwx?date=2026-11-24');
-  assert.equal(rosterPath('abcdefghijklmnopqrstuvwx'), '/api/v2/forms/abcdefghijklmnopqrstuvwx/instructors');
+  assert.ok(!readFileSync(new URL('../src/lib/formPrefetch.ts', import.meta.url), 'utf8').includes('/instructors'));
 });
 
 test("a recent copy is shown at once for today's link or the same date, never for another day", () => {
@@ -67,5 +67,4 @@ test('the form starts loading before the app draws, and public pages skip admin 
   assert.match(page, /takePrefetchedForm\(token, date\)/);
   assert.match(page, /readCachedForm\(token, date, localDateValue\(\)\)/);
   assert.match(page, /aria-label="Opening the form"/, 'the questions show while loading');
-  assert.ok(!readFileSync(new URL('../src/components/FormPeopleEditor.tsx', import.meta.url), 'utf8').includes('Names are filled in from the name labels'));
 });

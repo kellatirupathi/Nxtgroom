@@ -10,10 +10,10 @@ import { describeRequest } from "../src/services/auditLog.js";
 import { localDateKey } from "../src/services/instructorReports.js";
 import {
   buildImportedResponse,
-  buildPhotoPeople,
+  formInstructors,
   formPhotoImage,
   mapWithLimit,
-  readPeoplePlan,
+  pendingPeopleFields,
   formPath,
   formSlug,
   importPhotoLinks,
@@ -341,103 +341,17 @@ test("import adds manual rows, skips bad ones and never overwrites an existing d
   }
 });
 
-test("the people the form sends are read strictly", () => {
-  assert.deepEqual(readPeoplePlan(undefined), []);
-  const plan = readPeoplePlan(JSON.stringify([
-    { photo: "new:0", people: [{ crop: 0, instructor_id: "i1", source: "label", box: { left: 0.1, top: 0.2, width: 0.2, height: 0.6 } }, { crop: 1, instructor_id: null, source: "none" }] },
-    { photo: "ph1", people: [{ id: "p1", instructor_id: "i2", source: "manual" }] },
-  ]));
-  assert.equal(plan.length, 2);
-  assert.deepEqual(plan[0].people[0], { id: null, crop: 0, instructorId: "i1", labelName: null, labelId: null, source: "label", box: { left: 0.1, top: 0.2, width: 0.2, height: 0.6 } });
-  const printed = readPeoplePlan(JSON.stringify([{ photo: "new:0", people: [{ crop: 0, instructor_id: null, source: "label", label_name: "  Sanjay  Rao ", label_id: "nw9999999" }] }]));
-  assert.deepEqual([printed[0].people[0].labelName, printed[0].people[0].labelId], ["Sanjay Rao", "NW9999999"]);
-  const junk = readPeoplePlan(JSON.stringify([{ photo: "new:0", people: [{ crop: 0, source: "label", label_id: "<script>" }] }]));
-  assert.equal(junk[0].people[0].labelId, null);
-  assert.equal(plan[0].people[1].source, "none");
-  assert.equal(plan[1].people[0].id, "p1");
-  assert.equal(readPeoplePlan("{not json"), null);
-  assert.equal(readPeoplePlan(JSON.stringify([{ photo: "../x", people: [] }])), null);
-  assert.equal(readPeoplePlan(JSON.stringify([{ photo: "new:0", people: [{ instructor_id: "i1" }] }])), null, "a person needs a cut-out or a saved id");
-  assert.equal(readPeoplePlan(JSON.stringify([{ photo: "new:0", people: Array.from({ length: 61 }, (_, crop) => ({ crop })) }])), null);
-});
-
-test("saved people can be renamed or removed without new pictures; names come from the institute's list", async () => {
-  const roster = new Map([
-    ["i1", { id: "i1", name: "Ravi Kumar", employee_id: "NW1023" }],
-    ["i2", { id: "i2", name: "Sita Devi", employee_id: "NW2044" }],
-  ]);
-  const existing = [
-    { id: "p1", crop_key: "forms/c1/2026-11-23/ph1-p1.jpg", instructor_id: "i1", name: "Ravi Kumar", employee_id: "NW1023", source: "label" },
-    { id: "p2", crop_key: "forms/c1/2026-11-23/ph1-p2.jpg", instructor_id: null, name: null, employee_id: null, source: "none" },
-  ];
-  const built = await buildPhotoPeople({
-    entry: { photo: "ph1", people: [{ id: "p2", crop: null, instructorId: "i2", source: "manual", box: null }] },
-    existing,
-    crops: [],
-    roster,
-    collegeId: "c1",
-    date: "2026-11-23",
-    photoId: "ph1",
-  });
-  assert.deepEqual(built.people.map((person) => [person.id, person.name, person.employee_id, person.source, person.crop_key]), [
-    ["p2", "Sita Devi", "NW2044", "manual", "forms/c1/2026-11-23/ph1-p2.jpg"],
-  ]);
-  assert.deepEqual(built.removed.map((person) => person.id), ["p1"], "the person left out is removed");
-  assert.equal(built.stored.length, 0);
-
-  const outsider = await buildPhotoPeople({
-    entry: { photo: "ph1", people: [{ id: "p1", crop: null, instructorId: "someone-else", source: "manual", box: null }] },
-    existing,
-    crops: [],
-    roster,
-    collegeId: "c1",
-    date: "2026-11-23",
-    photoId: "ph1",
-  });
-  assert.deepEqual([outsider.people[0].instructor_id, outsider.people[0].name, outsider.people[0].source], [null, null, "none"], "only the institute's own instructors can be chosen");
-
-  const printed = await buildPhotoPeople({
-    entry: { photo: "ph1", people: [{ id: "p2", crop: null, instructorId: null, labelName: "Sanjay Rao", labelId: "NW9999999", source: "label", box: null }] },
-    existing,
-    crops: [],
-    roster,
-    collegeId: "c1",
-    date: "2026-11-23",
-    photoId: "ph1",
-  });
-  assert.deepEqual(
-    [printed.people[0].instructor_id, printed.people[0].name, printed.people[0].employee_id, printed.people[0].source],
-    [null, "Sanjay Rao", "NW9999999", "label"],
-    "someone not in the list keeps the name and id printed on their label",
-  );
-});
-
-test("the form lists only its own institute's current instructors", async () => {
+test("the people are read on the server: new photos wait to be read, and only the institute's own instructors name them", async () => {
+  assert.deepEqual(pendingPeopleFields(), { people: [], people_status: "pending", people_attempts: 0 });
   const db = await seededDatabase();
   await db.collection("instructors").insertOne({ _id: "i1", name: "Ravi Kumar", employee_id: "NW1023", college_id: "c1", deleted_at: null });
   await db.collection("instructors").insertOne({ _id: "i2", name: "Asha Rao", employee_id: "NW1024", college_id: "c1" });
   await db.collection("instructors").insertOne({ _id: "i3", name: "Gone Person", employee_id: "NW1025", college_id: "c1", deleted_at: new Date() });
   await db.collection("instructors").insertOne({ _id: "i4", name: "Other Campus", employee_id: "NW2000", college_id: "c2" });
-  const server = await serve(db);
-  try {
-    const [link] = (await server.call("/form-links")).body;
-    const listed = await server.call(`/forms/${link.token}/instructors`);
-    assert.equal(listed.status, 200);
-    assert.deepEqual(listed.body, [
-      { id: "i2", name: "Asha Rao", employee_id: "NW1024" },
-      { id: "i1", name: "Ravi Kumar", employee_id: "NW1023" },
-    ]);
-    assert.equal((await server.call("/forms/abcdefghijklmnopqrstuvwx/instructors")).status, 404);
-
-    const today = localDateKey(new Date());
-    const bad = await server.call(`/forms/${link.token}/${today}`, {
-      method: "POST",
-      body: formBody({ status: "no", submitted_by: "R", reason: "wfh", people: "{broken" }),
-    });
-    assert.equal(bad.status, 400);
-  } finally {
-    server.close();
-  }
+  assert.deepEqual(await formInstructors(db, "c1"), [
+    { id: "i2", name: "Asha Rao", employee_id: "NW1024" },
+    { id: "i1", name: "Ravi Kumar", employee_id: "NW1023" },
+  ]);
 });
 
 test("form tokens are hidden in request logs and imports are audited", () => {

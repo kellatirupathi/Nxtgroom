@@ -6,11 +6,12 @@
 //   renaming an institute does not break links already shared.
 // - One response per institute per day ("form_date", YYYY-MM-DD in the app
 //   time zone). Opening the link shows that day's form, or the saved answers
-//   with an "Edit response" button once it is submitted. Any earlier date can
-//   be opened and edited too; future dates cannot.
+//   with an "Edit response" button once it is submitted. Only today's form
+//   can be sent or changed; earlier dates are view only.
 // - Photos go to Cloudflare R2 under forms/, with a small preview copy for the
-//   thumbnails. Responses sent through the link are "automatic"; rows an admin
-//   imports from an existing sheet are "manual".
+//   thumbnails. The people in them are found and named afterwards, in the
+//   background (services/formPeopleWorker.js). Responses sent through the
+//   link are "automatic"; rows an admin imports from a sheet are "manual".
 
 import crypto from "node:crypto";
 import sharp from "sharp";
@@ -299,23 +300,36 @@ export async function removeFormPhotos(photos = []) {
 
 // ---- the people in each photo ---------------------------------------------
 //
-// The submitter's browser finds each person in a group photo, cuts them out
-// and reads the printed name labels (no face recognition, no work here). The
-// form sends the small cut-outs with the instructor chosen for each, and they
-// are kept on the photo as `people: [{ id, crop_key, instructor_id, name,
-// employee_id, source, box }]`.
+// The institute only uploads photos. After the form is sent, the server finds
+// each person in every new photo, cuts them out head to feet and names them
+// from the name labels printed in the photo (services/formPeopleWorker.js;
+// no face recognition). Each photo carries
+//   people: [{ id, crop_key, instructor_id, name, employee_id, source, box }]
+//   people_status: "pending" (waiting or being read) | "done" | "failed"
+// A photo saved before this has no people_status: its people are final.
 
-export const FORM_MAX_PEOPLE_PER_PHOTO = 60;
-export const FORM_MAX_CROPS = 150;
-export const FORM_MAX_CROP_BYTES = Math.floor(1.5 * 1024 * 1024);
+export const PEOPLE_STATUS = Object.freeze({ PENDING: "pending", PROCESSING: "processing", DONE: "done", FAILED: "failed" });
 const PERSON_SOURCES = new Set(["label", "manual", "none"]);
+
+// What a newly uploaded photo starts with: its people still to be read.
+export function pendingPeopleFields() {
+  return { people: [], people_status: PEOPLE_STATUS.PENDING, people_attempts: 0 };
+}
+
+// The people's state as shown: still being read, read, or not readable.
+export function peopleStatusView(photo) {
+  const status = photo?.people_status;
+  if (status === PEOPLE_STATUS.PENDING || status === PEOPLE_STATUS.PROCESSING) return "pending";
+  if (status === PEOPLE_STATUS.FAILED) return "failed";
+  return "done";
+}
 
 export async function removePersonCrops(people = []) {
   const keys = (Array.isArray(people) ? people : []).map((person) => person?.crop_key).filter(Boolean);
   await mapWithLimit(keys, STORAGE_CONCURRENCY, (key) => deletePhoto(key));
 }
 
-// The institute's instructors, for the form's name list.
+// The institute's instructors, to name the people in its photos.
 export async function formInstructors(db, collegeId) {
   const rows = await db.collection("instructors")
     .find({ $and: [{ college_id: String(collegeId) }, ACTIVE] })
@@ -327,117 +341,9 @@ export async function formInstructors(db, collegeId) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function clampFraction(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.min(1, Math.max(0, number)) : 0;
-}
-
-function readBox(value) {
-  if (!value || typeof value !== "object") return null;
-  const box = {
-    left: clampFraction(value.left),
-    top: clampFraction(value.top),
-    width: clampFraction(value.width),
-    height: clampFraction(value.height),
-  };
-  return box.width > 0 && box.height > 0 ? box : null;
-}
-
-// The people the form sent, as a JSON list of
-//   { photo: "new:<n>" | "<saved photo id>", people: [{ id?, crop?, instructor_id, source, box }] }
-// where `crop` is the position of that person's cut-out among the uploaded
-// crops and `id` keeps a person already saved. Returns null when malformed.
-export function readPeoplePlan(value) {
-  if (value === undefined || value === null || value === "") return [];
-  let parsed;
-  try {
-    parsed = JSON.parse(String(value));
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(parsed) || parsed.length > FORM_MAX_PHOTOS * 2) return null;
-  const plan = [];
-  for (const entry of parsed) {
-    if (!entry || typeof entry !== "object" || typeof entry.photo !== "string" || !Array.isArray(entry.people)) return null;
-    if (!/^(new:\d{1,2}|[A-Za-z0-9_-]{1,64})$/.test(entry.photo)) return null;
-    if (entry.people.length > FORM_MAX_PEOPLE_PER_PHOTO) return null;
-    const people = [];
-    for (const person of entry.people) {
-      if (!person || typeof person !== "object") return null;
-      const id = typeof person.id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(person.id) ? person.id : null;
-      const crop = Number.isSafeInteger(person.crop) && person.crop >= 0 && person.crop < FORM_MAX_CROPS ? person.crop : null;
-      if (!id && crop === null) return null;
-      const instructorId = typeof person.instructor_id === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(person.instructor_id)
-        ? person.instructor_id
-        : null;
-      // The name and id printed on the person's label, kept as they are when
-      // the person is not in the institute's instructor list.
-      const labelName = cleanText(person.label_name).slice(0, SUBMITTED_BY_MAX) || null;
-      const labelId = /^[A-Za-z0-9-]{3,40}$/.test(cleanText(person.label_id)) ? cleanText(person.label_id).toUpperCase() : null;
-      people.push({
-        id,
-        crop,
-        instructorId,
-        labelName,
-        labelId,
-        source: PERSON_SOURCES.has(person.source) ? person.source : (instructorId ? "manual" : "none"),
-        box: readBox(person.box),
-      });
-    }
-    plan.push({ photo: entry.photo, people });
-  }
-  return plan;
-}
-
-function personKey(collegeId, date, photoId, personId) {
+// Where one person's cut-out from a photo is stored.
+export function formPersonKey(collegeId, date, photoId, personId) {
   return formPhotoKey(collegeId, date, `${photoId}-${personId}`);
-}
-
-// The people for one photo after an edit: saved people kept (with any new
-// name), new cut-outs stored, and those no longer listed returned as removed.
-// `crops` are the uploaded cut-out files; `roster` maps instructor id to the
-// institute's instructor. Throws { status, message } when a crop is unusable.
-export async function buildPhotoPeople({ entry, existing = [], crops, roster, collegeId, date, photoId }) {
-  const saved = new Map((Array.isArray(existing) ? existing : []).map((person) => [person.id, person]));
-  const people = [];
-  const uploads = [];
-  for (const planned of entry.people) {
-    const instructor = planned.instructorId ? roster.get(planned.instructorId) : null;
-    // Not in the instructor list: the name and id as printed or typed.
-    const printed = !instructor && (planned.labelName || planned.labelId);
-    const named = instructor
-      ? { instructor_id: instructor.id, name: instructor.name, employee_id: instructor.employee_id || null }
-      : printed
-        ? { instructor_id: null, name: planned.labelName || planned.labelId, employee_id: planned.labelId }
-        : { instructor_id: null, name: null, employee_id: null };
-    const source = instructor || printed ? (planned.source === "none" ? "manual" : planned.source) : "none";
-    if (planned.id && saved.has(planned.id)) {
-      const person = saved.get(planned.id);
-      saved.delete(planned.id);
-      people.push({ ...person, ...named, source, box: planned.box ?? person.box ?? null });
-      continue;
-    }
-    const file = planned.crop === null ? null : crops[planned.crop];
-    if (!file) continue;
-    const personId = crypto.randomBytes(6).toString("base64url");
-    const key = personKey(collegeId, date, photoId, personId);
-    const person = { id: personId, crop_key: key, ...named, source, box: planned.box };
-    uploads.push({ person, file });
-    people.push(person);
-  }
-  // The pictures are sent to storage several at a time, not one by one.
-  const results = await mapWithLimit(uploads, STORAGE_CONCURRENCY, ({ person, file }) => uploadPhoto({
-    key: person.crop_key,
-    body: file.buffer,
-    mimeType: file.mimeType,
-    metadata: { college_id: String(collegeId), form_date: date, kind: "form_person" },
-  }));
-  const stored = uploads.filter((_, index) => results[index]?.stored).map(({ person }) => person);
-  if (stored.length < uploads.length) {
-    await removePersonCrops(stored);
-    throw Object.assign(new Error("The people's pictures could not be saved right now. Please press Submit again."), { status: 502 });
-  }
-  return { people, stored, removed: [...saved.values()] };
 }
 
 // ---- reading responses -----------------------------------------------------
@@ -447,6 +353,7 @@ export async function serializeFormResponse(doc, { collegeName, expiresIn = 3600
     id: photo.id,
     url: await getPhotoUrl(photo.key, { expiresIn }),
     thumb_url: photo.thumb_key ? await getPhotoUrl(photo.thumb_key, { expiresIn }) : null,
+    people_status: peopleStatusView(photo),
     people: await Promise.all((Array.isArray(photo.people) ? photo.people : []).map(async (person) => ({
       id: person.id,
       instructor_id: person.instructor_id || null,

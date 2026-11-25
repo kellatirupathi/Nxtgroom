@@ -1,6 +1,6 @@
 const workerStates = new Map();
 const EXPECTED_WORKERS = ["evaluation", "notification"];
-const KNOWN_WORKERS = [...EXPECTED_WORKERS, "storage_cleanup", "mail"];
+const KNOWN_WORKERS = [...EXPECTED_WORKERS, "storage_cleanup", "mail", "form_people"];
 const DEFAULT_STALE_AFTER_MS = 60000;
 const DEFAULT_BUSY_STALE_AFTER_MS = 15 * 60 * 1000;
 const DEFAULT_QUEUE_WARNING_AGE_MS = 15 * 60 * 1000;

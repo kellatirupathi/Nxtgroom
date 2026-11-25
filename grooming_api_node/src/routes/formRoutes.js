@@ -3,31 +3,25 @@ import multer from "multer";
 import { rateLimit } from "express-rate-limit";
 import { asyncRoute, createDocument } from "../utils.js";
 import { requireSuperAdmin } from "../middleware/auth.js";
-import { validateImageUpload } from "../imageValidation.js";
 import { isPhotoStorageConfigured } from "../services/photoStorage.js";
 import { isValidDateKey, localDateKey } from "../services/instructorReports.js";
+import { wakeFormPeopleWorker } from "../services/formPeopleWorker.js";
 import {
   activeCollegeNames,
-  buildPhotoPeople,
   ensureFormLinks,
   findFormLink,
   findFormResponse,
-  formInstructors,
   FORM_IMPORT_MAX_ROWS,
-  FORM_MAX_CROP_BYTES,
-  FORM_MAX_CROPS,
   FORM_MAX_FILE_BYTES,
   FORM_MAX_PHOTOS,
   importFormResponses,
   listFormResponses,
+  pendingPeopleFields,
   readFormAnswers,
   readKeptPhotoIds,
-  readPeoplePlan,
   removeFormPhotos,
-  removePersonCrops,
   resolveFormDate,
   serializeFormResponse,
-  newFormPhotoId,
   storeFormPhoto,
 } from "../services/instituteForms.js";
 
@@ -77,23 +71,20 @@ function uploadGate(_req, res, next) {
   return next();
 }
 
-// Up to five photos plus the small cut-outs of the people in them.
+// Up to five photos.
 const formUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: FORM_MAX_FILE_BYTES,
-    files: FORM_MAX_PHOTOS + FORM_MAX_CROPS,
+    files: FORM_MAX_PHOTOS,
     fields: 16,
     fieldSize: 256 * 1024,
-    parts: FORM_MAX_PHOTOS + FORM_MAX_CROPS + 16,
+    parts: FORM_MAX_PHOTOS + 16,
   },
 });
 
 function receivePhotos(req, res, next) {
-  formUpload.fields([
-    { name: "photos", maxCount: FORM_MAX_PHOTOS },
-    { name: "crops", maxCount: FORM_MAX_CROPS },
-  ])(req, res, (error) => {
+  formUpload.fields([{ name: "photos", maxCount: FORM_MAX_PHOTOS }])(req, res, (error) => {
     if (!error) return next();
     if (error.code === "LIMIT_FILE_SIZE") {
       return res.status(413).json({ detail: "Each photo must be 10 MB or smaller." });
@@ -137,18 +128,6 @@ publicFormRouter.get(
   })
 );
 
-// The institute's instructors, to name the people in a group photo.
-publicFormRouter.get(
-  "/:token/instructors",
-  readLimiter,
-  asyncRoute(async (req, res) => {
-    const db = req.app.locals.db;
-    const found = await findFormLink(db, req.params.token);
-    if (!found) return res.status(404).json({ detail: FORM_NOT_FOUND });
-    return res.json(await formInstructors(db, found.college._id));
-  })
-);
-
 publicFormRouter.post(
   "/:token/:date",
   submitLimiter,
@@ -178,24 +157,9 @@ publicFormRouter.post(
     for (const file of files) {
       if (!file?.buffer?.length) return res.status(422).json({ detail: `${file?.originalname || "A file"}: the file is empty. Please choose the photo again.` });
     }
-    // The people the submitter's browser found in the photos: their cut-outs
-    // and the instructor chosen for each.
-    const plan = readPeoplePlan(req.body?.people);
-    if (plan === null) return res.status(400).json({ detail: "The people in the photos could not be read. Please reload the page and try again." });
-    const crops = [];
-    for (const file of Array.isArray(req.files?.crops) ? req.files.crops : []) {
-      const checked = validateImageUpload(file);
-      if (!checked.valid) return res.status(422).json({ detail: "One of the people's pictures could not be read. Please add the photo again." });
-      if (file.size > FORM_MAX_CROP_BYTES) return res.status(413).json({ detail: "One of the people's pictures is too large. Please add the photo again." });
-      crops.push({ buffer: file.buffer, mimeType: checked.mimeType });
-    }
-
-    // The saved response and (when people are sent) the instructor list,
-    // looked up together.
-    const [existing, instructors] = await Promise.all([
-      findFormResponse(db, collegeId, date),
-      answers.status === "yes" && plan.length ? formInstructors(db, collegeId) : [],
-    ]);
+    // Every new photo (and its preview) is sent to storage at the same time.
+    // The people in them are found and named afterwards, in the background.
+    const existing = await findFormResponse(db, collegeId, date);
     const existingPhotos = Array.isArray(existing?.photos) ? existing.photos : [];
     const keptPhotos = answers.status === "yes" ? existingPhotos.filter((photo) => kept.includes(photo.id)) : [];
     const photoLinks = answers.status === "yes" && Array.isArray(existing?.photo_links) ? existing.photo_links : [];
@@ -210,57 +174,21 @@ publicFormRouter.post(
     if (Object.keys(errors).length) {
       return res.status(422).json({ detail: "Please answer the questions marked in red.", errors });
     }
-    if ((files.length || crops.length) && !isPhotoStorageConfigured()) {
+    if (files.length && !isPhotoStorageConfigured()) {
       return res.status(503).json({ detail: "Photo storage is not available right now. Please try again later." });
     }
 
-    // Each photo's people: saved photos keep theirs unless the form sent a
-    // new list for them; new photos ("new:<n>", in upload order) get theirs.
-    // Every photo, its preview and everyone's picture are sent to storage at
-    // the same time (new photos get their ids first so their people's
-    // pictures need not wait for them).
-    const planByPhoto = new Map((answers.status === "yes" ? plan : []).map((entry) => [entry.photo, entry]));
-    const roster = new Map(instructors.map((instructor) => [instructor.id, instructor]));
-    const newIds = files.map(() => newFormPhotoId());
-    const peopleFor = (photoKey, existingPeople, photoId) => {
-      const entry = planByPhoto.get(photoKey);
-      return entry
-        ? buildPhotoPeople({ entry, existing: existingPeople, crops, roster, collegeId, date, photoId })
-        : Promise.resolve(null);
-    };
-    const [storedPhotos, keptBuilt, newBuilt] = await Promise.all([
-      Promise.allSettled(files.map((file, index) => storeFormPhoto({ buffer: file.buffer, collegeId, date, id: newIds[index] }))),
-      Promise.allSettled(keptPhotos.map((photo) => peopleFor(photo.id, photo.people, photo.id))),
-      Promise.allSettled(newIds.map((id, index) => peopleFor(`new:${index}`, [], id))),
-    ]);
+    const storedPhotos = await Promise.allSettled(files.map((file) => storeFormPhoto({ buffer: file.buffer, collegeId, date })));
     const added = storedPhotos.filter((item) => item.status === "fulfilled" && item.value.photo).map((item) => item.value.photo);
-    const builds = [...keptBuilt, ...newBuilt];
-    const newCrops = builds.filter((item) => item.status === "fulfilled" && item.value).flatMap((item) => item.value.stored);
     const photoFailed = storedPhotos.find((item) => item.status === "rejected" || item.value.error);
-    const peopleFailed = builds.find((item) => item.status === "rejected");
-    if (photoFailed || peopleFailed) {
-      await Promise.all([removePersonCrops(newCrops), removeFormPhotos(added)]);
-      if (photoFailed?.status === "fulfilled") {
+    if (photoFailed) {
+      await removeFormPhotos(added);
+      if (photoFailed.status === "fulfilled") {
         return res.status(photoFailed.value.status).json({ detail: photoFailed.value.error });
       }
-      const error = photoFailed?.reason ?? peopleFailed.reason;
-      if (error?.status) return res.status(error.status).json({ detail: error.message });
-      throw error;
+      throw photoFailed.reason;
     }
-    const removedPeople = [];
-    const photos = [];
-    keptPhotos.forEach((photo, index) => {
-      const built = keptBuilt[index].value;
-      if (!built) {
-        photos.push(photo);
-        return;
-      }
-      removedPeople.push(...built.removed);
-      photos.push({ ...photo, people: built.people });
-    });
-    added.forEach((photo, index) => {
-      photos.push({ ...photo, people: newBuilt[index].value?.people ?? [] });
-    });
+    const photos = [...keptPhotos, ...added.map((photo) => ({ ...photo, ...pendingPeopleFields() }))];
 
     const now = new Date();
     const fields = {
@@ -293,7 +221,6 @@ publicFormRouter.post(
         await db.collection("form_responses").insertOne(saved);
       }
     } catch (error) {
-      await removePersonCrops(newCrops);
       await removeFormPhotos(added);
       if (error?.code === 11000) {
         return res.status(409).json({ detail: "A response for this date was just sent from another device. Reload the page to see it and edit it." });
@@ -306,9 +233,8 @@ publicFormRouter.post(
     if (removed.length) {
       void removeFormPhotos(removed).catch(() => {});
     }
-    if (removedPeople.length) {
-      void removePersonCrops(removedPeople).catch(() => {});
-    }
+    // The people in the new photos are found now, in the background.
+    if (added.length) wakeFormPeopleWorker();
     return res.status(existing ? 200 : 201).json({
       response: await serializeFormResponse(saved, { collegeName: found.college.name }),
     });

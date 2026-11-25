@@ -1,6 +1,7 @@
 import {
   DeleteFacesCommand,
   DetectFacesCommand,
+  DetectTextCommand,
   IndexFacesCommand,
   RekognitionClient,
   SearchFacesByImageCommand,
@@ -309,4 +310,38 @@ export async function detectFacesForGroup(imageBuffer, { maxFaces = 0 } = {}) {
 
   incrementMetric("rekognition_group_detect_total");
   return { ok: true, faces, detected: details.length };
+}
+
+// The words printed in a photo (name labels), each with where it is as
+// fractions of the photo. Only reads text: no face is searched for or kept.
+// Rekognition reads at most 100 words a photo, plenty for name labels.
+export async function detectTextWords(imageBuffer) {
+  if (!isFaceRecognitionConfigured()) return failure(FACE_REASONS.NOT_CONFIGURED);
+  if (!Buffer.isBuffer(imageBuffer) || imageBuffer.length === 0) return { ok: true, words: [] };
+  const { response, error } = await send(
+    "DetectText",
+    new DetectTextCommand({
+      Image: { Bytes: imageBuffer },
+      Filters: { WordFilter: { MinConfidence: 50 } },
+    })
+  );
+  if (error) return providerFailure("DetectText", error);
+  const words = (response?.TextDetections || [])
+    .filter((detection) => detection?.Type === "WORD" && String(detection.DetectedText || "").trim())
+    .map((detection) => {
+      const box = detection.Geometry?.BoundingBox || {};
+      return {
+        text: String(detection.DetectedText).trim(),
+        confidence: Number(detection.Confidence ?? 0),
+        box: {
+          left: Number(box.Left ?? 0),
+          top: Number(box.Top ?? 0),
+          width: Number(box.Width ?? 0),
+          height: Number(box.Height ?? 0),
+        },
+      };
+    })
+    .filter((word) => word.box.width > 0 && word.box.height > 0);
+  incrementMetric("rekognition_detect_text_total");
+  return { ok: true, words };
 }

@@ -7,26 +7,6 @@ const DB_NAME = 'facultytrack-form-drafts';
 const STORE = 'drafts';
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-export interface StoredPerson {
-  id?: string;
-  crop?: Blob;
-  instructorId: string;
-  source: 'label' | 'manual' | 'none';
-  readText?: string;
-  labelName?: string;
-  labelId?: string;
-  box: { left: number; top: number; width: number; height: number } | null;
-}
-
-export interface StoredPhotoPeople {
-  status: 'ready' | 'failed';
-  people: StoredPerson[];
-  message?: string;
-  photoInstructorIds?: string[];
-  labelsRead?: number;
-  labelsFailed?: boolean;
-}
-
 export interface StoredDraft {
   version: 1;
   savedAt: number;
@@ -38,8 +18,6 @@ export interface StoredDraft {
   reasonOther: string;
   keptIds: string[];
   added: { key: string; file: Blob; name: string }[];
-  // By saved photo id, or by the `key` of an added photo.
-  people: Record<string, StoredPhotoPeople>;
 }
 
 export function draftKey(token: string, date: string): string {
@@ -81,7 +59,7 @@ export function usableDraft(value: unknown, now: number = Date.now()): StoredDra
   const draft = value as StoredDraft | null;
   if (!draft || typeof draft !== 'object' || draft.version !== 1) return null;
   if (typeof draft.savedAt !== 'number' || now - draft.savedAt > MAX_AGE_MS) return null;
-  if (!Array.isArray(draft.keptIds) || !Array.isArray(draft.added) || typeof draft.people !== 'object' || !draft.people) return null;
+  if (!Array.isArray(draft.keptIds) || !Array.isArray(draft.added)) return null;
   return draft;
 }
 

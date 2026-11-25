@@ -4,10 +4,9 @@
 // last data is also kept in the browser, so the same link opens at once next
 // time and refreshes quietly.
 import { apiFetch } from '../api.ts';
-import type { FormInstructor, PublicFormData } from './instituteForm.ts';
+import type { PublicFormData } from './instituteForm.ts';
 
 const forms = new Map<string, Promise<PublicFormData>>();
-const rosters = new Map<string, Promise<FormInstructor[]>>();
 const CACHE_PREFIX = 'ft_form:';
 // Photo links in a kept copy are signed for an hour; use it well inside that.
 const CACHE_MAX_AGE_MS = 45 * 60 * 1000;
@@ -17,15 +16,11 @@ export function publicFormPath(token: string, date: string | null): string {
   return `/api/v2/forms/${encodeURIComponent(token)}${query}`;
 }
 
-export function rosterPath(token: string): string {
-  return `/api/v2/forms/${encodeURIComponent(token)}/instructors`;
-}
-
 function formKey(token: string, date: string | null): string {
   return `${token}|${date ?? ''}`;
 }
 
-// Starts both requests for a form link, once.
+// Starts the request for a form link, once.
 export function prefetchPublicForm(token: string, date: string | null): void {
   if (date === 'invalid') return;
   const key = formKey(token, date);
@@ -34,11 +29,6 @@ export function prefetchPublicForm(token: string, date: string | null): void {
     request.catch(() => { });
     forms.set(key, request);
   }
-  if (!rosters.has(token)) {
-    const request = apiFetch<FormInstructor[]>(rosterPath(token), { auth: false });
-    request.catch(() => { });
-    rosters.set(token, request);
-  }
 }
 
 // The form data request already on its way, if any (used once).
@@ -46,12 +36,6 @@ export function takePrefetchedForm(token: string, date: string | null): Promise<
   const key = formKey(token, date);
   const request = forms.get(key) ?? null;
   forms.delete(key);
-  return request;
-}
-
-export function takePrefetchedRoster(token: string): Promise<FormInstructor[]> | null {
-  const request = rosters.get(token) ?? null;
-  rosters.delete(token);
   return request;
 }
 

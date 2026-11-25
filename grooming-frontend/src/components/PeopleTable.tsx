@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { UserRound } from 'lucide-react';
 import ImageLightbox from './ImageLightbox';
-import { peopleCount, peopleRows, type FormPhoto } from '../lib/instituteForm';
+import { peopleCount, peopleProgress, peopleRows, type FormPhoto } from '../lib/instituteForm';
 
 interface PeopleTableProps {
   photos: readonly FormPhoto[];
@@ -9,16 +9,40 @@ interface PeopleTableProps {
 }
 
 // Name | ID | Image for everyone cut out of a response's photos. Named people
-// come first; people left without a name follow.
+// come first; people left without a name follow. The people are found on the
+// server after the form is sent, so some photos may still be being read.
 export default function PeopleTable({ photos, title }: PeopleTableProps) {
   const [viewing, setViewing] = useState<number | null>(null);
   const rows = peopleRows(photos);
-  if (!rows.length) return <p className="text-sm text-slate-500">No people were marked in the photos.</p>;
+  const progress = peopleProgress(photos);
+  const notes = (
+    <>
+      {progress.pending > 0 && (
+        <p className="mb-2 text-xs text-slate-500" role="status">
+          Still finding the people in {progress.pending} photo{progress.pending === 1 ? '' : 's'}. This updates on its own in a moment.
+        </p>
+      )}
+      {progress.failed > 0 && (
+        <p className="mb-2 text-xs text-amber-700">
+          The people in {progress.failed} photo{progress.failed === 1 ? '' : 's'} could not be read. The photos are still saved.
+        </p>
+      )}
+    </>
+  );
+  if (!rows.length) {
+    return (
+      <div>
+        {notes}
+        {!progress.pending && <p className="text-sm text-slate-500">No people were found in the photos.</p>}
+      </div>
+    );
+  }
   const count = peopleCount(photos);
   const images = rows.map((row) => ({ url: row.crop_url, label: row.employee_id ? `${row.label} (${row.employee_id})` : row.label }));
 
   return (
     <div>
+      {notes}
       <p className="mb-2 text-xs text-slate-500">
         {count.identified} named{count.unknown ? ` · ${count.unknown} not named` : ''}
       </p>

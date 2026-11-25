@@ -32,7 +32,7 @@ export const FORM_SOURCE_OPTIONS: ReadonlyArray<{ value: FormSource; label: stri
 // them, chosen by the submitter, or not named.
 export type PersonSource = 'label' | 'manual' | 'none';
 
-// One person cut out of a form photo by the submitter's browser.
+// One person cut out of a form photo (by the server, after the form is sent).
 export interface FormPerson {
   id: string;
   instructor_id: string | null;
@@ -43,18 +43,29 @@ export interface FormPerson {
   crop_url: string | null;
 }
 
+// The people in a photo are found in the background after the form is sent:
+// "pending" until then, "failed" when the photo could not be read.
+export type PeopleStatus = 'pending' | 'done' | 'failed';
+
 export interface FormPhoto {
   id: string;
   url: string | null;
   thumb_url: string | null;
+  people_status?: PeopleStatus;
   people?: FormPerson[];
 }
 
-// An instructor of the institute, for the name list.
-export interface FormInstructor {
-  id: string;
-  name: string;
-  employee_id: string;
+export interface PeopleProgress {
+  // Photos whose people are still being found, or could not be read.
+  pending: number;
+  failed: number;
+}
+
+export function peopleProgress(photos: readonly FormPhoto[]): PeopleProgress {
+  return {
+    pending: photos.filter((photo) => photo.people_status === 'pending').length,
+    failed: photos.filter((photo) => photo.people_status === 'failed').length,
+  };
 }
 
 export interface PersonRow extends FormPerson {
